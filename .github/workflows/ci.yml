@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet build GridInfluence.slnx -c Release -m:1
+      - run: dotnet test GridInfluence.slnx -c Release --no-build
+      - run: dotnet run --project samples/scene -c Release --no-build -- --scene samples/scene/assets/scene.json --out /tmp/frames
+      - run: dotnet run --project benchmarks -c Release --no-build -- --verify
+      - run: dotnet pack src/GridInfluence -c Release --no-build -o artifacts/packages
+      - run: dotnet pack src/GridInfluence.Io -c Release --no-build -o artifacts/packages

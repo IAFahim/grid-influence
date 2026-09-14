@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>GridInfluence</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Version>$(GridInfluenceVersion)</Version>
+    <PackageId>GridInfluence</PackageId>
+    <Authors>IAFahim</Authors>
+    <Description>Chunked sparse integer influence fields with difference-array rasterization, prefix-sum resolve, and deterministic decay. Derived from BovineLabs Timeline Grid Influence (MIT).</Description>
+    <PackageProjectUrl>https://github.com/IAFahim/grid-influence</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/IAFahim/grid-influence</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="pack-readme.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>GridInfluence.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+</Project>

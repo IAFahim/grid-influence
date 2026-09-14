@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Version>$(GridInfluenceVersion)</Version>
+    <PackageId>GridInfluence.Io</PackageId>
+    <Authors>IAFahim</Authors>
+    <Description>PNM/PPM weight-map codec and JSON scene runner for GridInfluence. Import, export, and file-driven simulation separate from the engine.</Description>
+    <PackageProjectUrl>https://github.com/IAFahim/grid-influence</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/IAFahim/grid-influence</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="pack-readme.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GridInfluence\GridInfluence.csproj" />
+  </ItemGroup>
+
+</Project>

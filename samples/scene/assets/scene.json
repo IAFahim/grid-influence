@@ -1,0 +1,34 @@
+{
+  "frames": 120,
+  "fields": [
+    { "key": "threat", "chunkPower": 4, "retentionFrames": 256, "decayPerMille": 300, "spreadDenominator": 4 },
+    { "key": "terrain", "chunkPower": 3, "retentionFrames": 256, "decayPerMille": 0, "spreadDenominator": 1 }
+  ],
+  "images": [
+    { "field": "terrain", "path": "bases.pgm", "origin": [-32, -32], "everyFrame": true }
+  ],
+  "clips": [
+    {
+      "field": "threat", "fromFrame": 0, "toFrame": 119, "weight": 220,
+      "shape": { "kind": "disc", "radius": 6 },
+      "motion": { "kind": "line", "from": [-20, -20], "to": [24, 20] }
+    },
+    {
+      "field": "threat", "fromFrame": 0, "toFrame": 119, "weight": 150,
+      "shape": { "kind": "disc", "radius": 4 },
+      "motion": { "kind": "circle", "center": [12, -6], "radius": 14, "periodFrames": 120 }
+    },
+    {
+      "field": "threat", "fromFrame": 10, "toFrame": 119, "weight": -90,
+      "shape": { "kind": "annulus", "radius": 11, "innerRadius": 4 },
+      "motion": { "kind": "static", "from": [20, 22] }
+    }
+  ],
+  "captures": [
+    { "frame": 0,   "field": "threat", "origin": [-32, -32], "size": [64, 64], "path": "threat-0000.ppm", "color": true },
+    { "frame": 40,  "field": "threat", "origin": [-32, -32], "size": [64, 64], "path": "threat-0040.ppm", "color": true },
+    { "frame": 80,  "field": "threat", "origin": [-32, -32], "size": [64, 64], "path": "threat-0080.ppm", "color": true },
+    { "frame": 119, "field": "threat", "origin": [-32, -32], "size": [64, 64], "path": "threat-0119.ppm", "color": true },
+    { "frame": 119, "field": "terrain", "origin": [-32, -32], "size": [64, 64], "path": "terrain-0119.pgm", "color": false }
+  ]
+}
