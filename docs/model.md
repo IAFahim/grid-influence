@@ -76,9 +76,20 @@ same-machine, same-fixture, one-variable comparisons only.
   `WriteRegion`.
 - **Alignment**: every unmanaged block is 64-byte aligned; `ElementsPerChunk` strides are aligned
   to at least 8 ints, which satisfies `Vector128`/`Vector256` loads in the resolve pass.
-- **Concurrency**: the warm path is single-threaded and deterministic. CoordMap and buffers are
-  single-writer. A defensive-copy bug on a readonly struct field (map table filled while its count
+- **Concurrency**: the serial warm path is single-threaded and deterministic. CoordMap and buffers
+  are single-writer. A defensive-copy bug on a readonly struct field (map table filled while its count
   stayed 0) was found by stress and fixed; buffer growth on a readonly struct field is forbidden by
   the same rule — all growable buffers live in non-readonly fields.
+  With `parallelism > 1` the field owns a fixed worker set created in the constructor and joined in
+  `Dispose`; no thread or event state is created on the tick path. Work items are claimed through one
+  packed `(generation << 32 | index)` counter via `Interlocked.Add`, so an item is never claimed twice
+  and a stale worker can only observe the current generation's published buffers — generation,
+  phase, count, stencil, and buffer pointers are written before the counter release and read after a
+  full fence on the claim. Each item writes disjoint storage: resolve/clear items touch only their
+  own chunk, rasterize items touch only their own span slice, and scatter items use `Interlocked.Add`
+  on diff-array corners — integer adds commute, so output is bit-identical regardless of claim order.
+  Reads of the stencil source field are safe because the source is quiescent during the tick; a
+  self-referencing stencil forces the serial path. Warm parallel ticks allocate 0 B; the receipt is
+  `warm-parallel-tick-allocates-0-bytes`, and bit-exactness is `pipeline-parallel-matches-naive-*`.
 - **Total reads**: every reader returns 0 for missing or stale chunks; no input can cause an
   out-of-bounds access. Budget-oversized stamps drop whole, deterministically.

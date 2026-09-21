@@ -17,9 +17,12 @@ internal static class Verification
 
         Check("pipeline-matches-naive-decay", MatchesNaive(decay: true));
         Check("pipeline-matches-naive-nodecay", MatchesNaive(decay: false));
+        Check("pipeline-parallel-matches-naive-decay", MatchesNaive(decay: true, parallelism: Environment.ProcessorCount));
+        Check("pipeline-parallel-matches-naive-nodecay", MatchesNaive(decay: false, parallelism: Environment.ProcessorCount));
         Check("pnm-signed-roundtrip", PnmRoundTrip());
         Check("region-write-read-roundtrip", RegionRoundTrip());
         Check("warm-tick-allocates-0-bytes", TickAllocationFree());
+        Check("warm-parallel-tick-allocates-0-bytes", ParallelTickAllocationFree());
         Check("warm-query-allocates-0-bytes", QueryAllocationFree());
         Check("budget-drops-deterministic", BudgetDrops());
 
@@ -27,11 +30,11 @@ internal static class Verification
         return failures == 0 ? 0 : 1;
     }
 
-    private static bool MatchesNaive(bool decay)
+    private static bool MatchesNaive(bool decay, int parallelism = 0)
     {
-        const int extent = 128;
-        var stamps = Fixtures.BuildStamps(64, extent);
-        using var pipeline = new PipelineField(4);
+        const int extent = 512;
+        var stamps = Fixtures.BuildStamps(512, extent);
+        using var pipeline = new PipelineField(5, parallelism: parallelism);
         var naive = new NaiveField(extent, decay ? Fixtures.DecayPerMille : 0, Fixtures.SpreadDenominator);
 
         for (var tick = 0; tick < 30; tick++)
@@ -106,6 +109,24 @@ internal static class Verification
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
         Console.WriteLine($"  warm tick allocation over 64 ticks: {allocated} B");
+        return allocated == 0;
+    }
+
+    private static bool ParallelTickAllocationFree()
+    {
+        const int extent = 1024;
+        var stamps = Fixtures.BuildStamps(512, extent);
+        using var pipeline = new PipelineField(5, parallelism: Environment.ProcessorCount);
+        for (var tick = 0; tick < 8; tick++) pipeline.Tick(stamps);
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var tick = 0; tick < 64; tick++) pipeline.Tick(stamps);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Console.WriteLine($"  warm parallel tick allocation over 64 ticks: {allocated} B");
         return allocated == 0;
     }
 

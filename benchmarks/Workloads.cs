@@ -122,11 +122,11 @@ internal sealed class PipelineField : IDisposable
     private InfluenceField _back;
     private uint _tick;
 
-    public PipelineField(int chunkPower, uint retention = uint.MaxValue)
+    public PipelineField(int chunkPower, uint retention = uint.MaxValue, int parallelism = 0)
     {
         var spec = GridSpec.FromPowerOfTwo(chunkPower, retention);
-        _front = new InfluenceField(spec);
-        _back = new InfluenceField(spec);
+        _front = new InfluenceField(spec, parallelism);
+        _back = new InfluenceField(spec, parallelism);
     }
 
     public InfluenceField Front => _front;

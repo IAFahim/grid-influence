@@ -14,6 +14,8 @@ public unsafe ref struct FieldReader
     private int _memoSlot;
     private bool _memoValid;
 
+    internal GridSpec Spec => _spec;
+
     internal FieldReader(CoordMap slotByCoord, uint* lastWritten, int lastWrittenLength, int* data, GridSpec spec, uint frameId)
     {
         _slotByCoord = slotByCoord;
@@ -112,6 +114,12 @@ public unsafe ref struct ChunkView
     }
 
     public Int2 Base => _base;
+
+    internal int* Data => _field;
+
+    internal int Stride => _stride;
+
+    internal int Size => _chunkSize;
 
     public int ReadLocal(Int2 local)
     {
