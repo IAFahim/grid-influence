@@ -47,13 +47,18 @@ public static class Capture
                 var row = data + (long)ly * stride + lx0;
                 var width = lx1 - lx0;
                 var x = 0;
-                if (Vector.IsHardwareAccelerated && width >= Vector<int>.Count)
+                if (Vector.IsHardwareAccelerated && width >= Vector<short>.Count)
                 {
-                    var lanes = Vector<int>.Count;
-                    var acc = Vector<int>.Zero;
+                    var lanes = Vector<short>.Count;
+                    var accLo = Vector<int>.Zero;
+                    var accHi = Vector<int>.Zero;
                     for (; x <= width - lanes; x += lanes)
-                        acc += new Vector<int>(new ReadOnlySpan<int>(row + x, lanes));
-                    for (var lane = 0; lane < lanes; lane++) total += acc[lane];
+                    {
+                        Vector.Widen(new Vector<short>(new ReadOnlySpan<short>(row + x, lanes)), out var lo, out var hi);
+                        accLo += lo;
+                        accHi += hi;
+                    }
+                    for (var lane = 0; lane < Vector<int>.Count; lane++) total += accLo[lane] + accHi[lane];
                 }
                 for (; x < width; x++) total += row[x];
             }

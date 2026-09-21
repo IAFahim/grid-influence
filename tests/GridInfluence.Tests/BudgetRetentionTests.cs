@@ -4,10 +4,10 @@ namespace GridInfluence.Tests;
 
 public sealed class BudgetRetentionTests
 {
-    private static Stamp Disc(int radius, int weight, Int2 origin = default)
+    private static Stamp Disc(int radius, sbyte weight, Int2 origin = default)
         => new(InfluenceShape.Disc(Int2.Zero, radius, weight), origin);
 
-    private static Stamp Cell(int weight, Int2 origin = default)
+    private static Stamp Cell(sbyte weight, Int2 origin = default)
         => new(InfluenceShape.SolidRect(Int2.Zero, new Int2(1, 1), weight), origin);
 
     [Fact]

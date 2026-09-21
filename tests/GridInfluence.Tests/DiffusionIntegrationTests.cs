@@ -100,7 +100,7 @@ public sealed class DiffusionIntegrationTests
         try
         {
 
-        var stamps = new[] { new Stamp(InfluenceShape.SolidRect(Int2.Zero, new Int2(2, 2), 1000), new Int2(15, 15)) };
+        var stamps = new[] { new Stamp(InfluenceShape.SolidRect(Int2.Zero, new Int2(2, 2), 127), new Int2(15, 15)) };
         var boxMin = new Int2(-16, -16);
         var boxSize = new Int2(64, 64);
 
@@ -181,17 +181,17 @@ public sealed class DiffusionIntegrationTests
         var pair = new FieldPair(new FieldConfig(3, 2, uint.MaxValue, decayPerMille: 1, spreadDenominator: 4));
         try
         {
-            pair.Step([new Stamp(InfluenceShape.SolidRect(Int2.Zero, new Int2(1, 1), 1000), new Int2(3, 3))]);
-            Assert.Equal(1000, pair.Front.AsReader().ReadCell(new Int2(3, 3)));
+            pair.Step([new Stamp(InfluenceShape.SolidRect(Int2.Zero, new Int2(1, 1), 127), new Int2(3, 3))]);
+            Assert.Equal(127, pair.Front.AsReader().ReadCell(new Int2(3, 3)));
 
             pair.Step([]);
 
             var reader = pair.Front.AsReader();
-            Assert.Equal(3, reader.ReadCell(new Int2(3, 3)));
-            Assert.Equal(249, reader.ReadCell(new Int2(4, 3)));
-            Assert.Equal(249, reader.ReadCell(new Int2(2, 3)));
-            Assert.Equal(249, reader.ReadCell(new Int2(3, 4)));
-            Assert.Equal(249, reader.ReadCell(new Int2(3, 2)));
+            Assert.Equal(2, reader.ReadCell(new Int2(3, 3)));
+            Assert.Equal(31, reader.ReadCell(new Int2(4, 3)));
+            Assert.Equal(31, reader.ReadCell(new Int2(2, 3)));
+            Assert.Equal(31, reader.ReadCell(new Int2(3, 4)));
+            Assert.Equal(31, reader.ReadCell(new Int2(3, 2)));
             Assert.Equal(0, reader.ReadCell(new Int2(4, 4)));
 
             var total = reader.ReadCell(new Int2(3, 3))
@@ -199,7 +199,7 @@ public sealed class DiffusionIntegrationTests
                         + reader.ReadCell(new Int2(2, 3))
                         + reader.ReadCell(new Int2(3, 4))
                         + reader.ReadCell(new Int2(3, 2));
-            Assert.Equal(999, total);
+            Assert.Equal(126, total);
         }
         finally
         {

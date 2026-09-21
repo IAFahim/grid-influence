@@ -7,7 +7,7 @@ public unsafe ref struct FieldReader
     private readonly CoordMap _slotByCoord;
     private readonly uint* _lastWritten;
     private readonly int _lastWrittenLength;
-    private readonly int* _data;
+    private readonly short* _data;
     private readonly GridSpec _spec;
     private readonly uint _frameId;
     private Int2 _memoCoord;
@@ -16,7 +16,7 @@ public unsafe ref struct FieldReader
 
     internal GridSpec Spec => _spec;
 
-    internal FieldReader(CoordMap slotByCoord, uint* lastWritten, int lastWrittenLength, int* data, GridSpec spec, uint frameId)
+    internal FieldReader(CoordMap slotByCoord, uint* lastWritten, int lastWrittenLength, short* data, GridSpec spec, uint frameId)
     {
         _slotByCoord = slotByCoord;
         _lastWritten = lastWritten;
@@ -100,12 +100,12 @@ public unsafe ref struct FieldReader
 
 public unsafe ref struct ChunkView
 {
-    private readonly int* _field;
+    private readonly short* _field;
     private readonly Int2 _base;
     private readonly int _stride;
     private readonly int _chunkSize;
 
-    internal ChunkView(int* field, Int2 chunkBase, GridSpec spec)
+    internal ChunkView(short* field, Int2 chunkBase, GridSpec spec)
     {
         _field = field;
         _base = chunkBase;
@@ -115,7 +115,7 @@ public unsafe ref struct ChunkView
 
     public Int2 Base => _base;
 
-    internal int* Data => _field;
+    internal short* Data => _field;
 
     internal int Stride => _stride;
 

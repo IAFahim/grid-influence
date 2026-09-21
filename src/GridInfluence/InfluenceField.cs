@@ -65,12 +65,13 @@ public sealed unsafe class InfluenceField : IDisposable
     private NativeBuffer<uint> _prepared;
     private NativeBuffer<int> _freeSlots;
     private NativeBuffer<int> _activeSlots;
-    private NativeBuffer<int> _data;
+    private NativeBuffer<short> _data;
     private NativeBuffer<Stamp> _sortedStamps;
     private NativeBuffer<int> _offsets;
     private NativeBuffer<WeightedRect> _spans;
-    private NativeBuffer<int> _halo;
+    private NativeBuffer<short> _halo;
     private int _slotCount;
+    private int _liveSlots;
     private int _activeCount;
     private int _stampCount;
     private int _chunksActivated;
@@ -129,6 +130,18 @@ public sealed unsafe class InfluenceField : IDisposable
 
         var reset = AdvanceFrame(tick);
         _scheduleVersion = _scheduleVersion == uint.MaxValue ? 1u : _scheduleVersion + 1;
+        if (stamps.IsEmpty
+            && _activeCount == 0
+            && (stencil.Source == null || stencil.Source._activeCount == 0))
+        {
+            var idleEvicted = reset ? EvictAllSlots() : EvictStaleSlots();
+            if (_frameId % CompactionInterval == 0 && _freeSlots.Length > 0) CompactSlots();
+            _spanDrops = 0;
+            _chunkDrops = 0;
+            _chunksActivated = 0;
+            _stampCount = 0;
+            return new FieldStats(0, 0, 0, 0, idleEvicted, 0);
+        }
         var evicted = Prepare(stamps, stencil, reset);
         ClearActive();
         RasterizeAll();
@@ -164,15 +177,16 @@ public sealed unsafe class InfluenceField : IDisposable
             var cellY = min.Y + row;
             var coordY = cellY >> _spec.Log2;
             var localY = cellY & (chunkSize - 1);
-            var source = row * size.X;
             for (var cx = min.X >> _spec.Log2; cx <= (min.X + size.X - 1) >> _spec.Log2; cx++)
             {
                 var lo = Math.Max(min.X, cx << _spec.Log2);
                 var hi = Math.Min(min.X + size.X, (cx + 1) << _spec.Log2);
                 var slot = EnsureSlot(new Int2(cx, coordY));
                 var chunk = _data.Pointer + (long)slot * elements;
-                weights.Slice(source + lo - min.X, hi - lo)
-                    .CopyTo(new Span<int>(chunk + (long)localY * stride + (lo & (chunkSize - 1)), hi - lo));
+                var target = chunk + (long)localY * stride + (lo & (chunkSize - 1));
+                var weightsRow = weights.Slice(row * size.X + lo - min.X, hi - lo);
+                for (var x = 0; x < weightsRow.Length; x++)
+                    target[x] = Saturate(weightsRow[x]);
             }
         }
 
@@ -210,7 +224,8 @@ public sealed unsafe class InfluenceField : IDisposable
             var data = view.Data + (long)(lo.Y - chunkBase.Y) * stride + (lo.X - chunkBase.X);
             for (var y = lo.Y; y < hi.Y; y++)
             {
-                new ReadOnlySpan<int>(data, width).CopyTo(destination.Slice((y - min.Y) * size.X + lo.X - min.X, width));
+                var dst = destination.Slice((y - min.Y) * size.X + lo.X - min.X, width);
+                for (var x = 0; x < width; x++) dst[x] = data[x];
                 data += stride;
             }
         }
@@ -228,6 +243,7 @@ public sealed unsafe class InfluenceField : IDisposable
 
             var chunk = _data.Pointer + (long)slot * _spec.ElementsPerChunk;
             _nonZero.Span[slot] = AnyNonZero(chunk);
+            if (_lastWritten.Span[slot] == 0) _liveSlots++;
             _lastWritten.Span[slot] = _frameId;
         }
     }
@@ -300,6 +316,7 @@ public sealed unsafe class InfluenceField : IDisposable
 
     private int EvictAllSlots()
     {
+        if (_liveSlots == 0) return 0;
         var evicted = 0;
         for (var slot = 0; slot < _slotCount; slot++)
         {
@@ -314,7 +331,7 @@ public sealed unsafe class InfluenceField : IDisposable
 
     private int EvictStaleSlots()
     {
-        if (_spec.RetentionFrames == uint.MaxValue) return 0;
+        if (_spec.RetentionFrames == uint.MaxValue || _liveSlots == 0) return 0;
 
         var minValidFrame = _frameId > _spec.RetentionFrames ? _frameId - _spec.RetentionFrames : 0;
         var evicted = 0;
@@ -332,6 +349,7 @@ public sealed unsafe class InfluenceField : IDisposable
 
     private void EvictSlot(int slot)
     {
+        if (_lastWritten.Span[slot] != 0) _liveSlots--;
         _lastWritten.Span[slot] = 0;
         PushFreeSlot(slot);
         _slotByCoord.Remove(_coordBySlot.Span[slot]);
@@ -379,8 +397,8 @@ public sealed unsafe class InfluenceField : IDisposable
         Buffer.MemoryCopy(
             _data.Pointer + (long)from * elements,
             _data.Pointer + (long)to * elements,
-            (long)elements * sizeof(int),
-            (long)elements * sizeof(int));
+            (long)elements * sizeof(short),
+            (long)elements * sizeof(short));
 
         _coordBySlot.Span[to] = _coordBySlot.Span[from];
         _lastWritten.Span[to] = _lastWritten.Span[from];
@@ -521,6 +539,7 @@ public sealed unsafe class InfluenceField : IDisposable
         if (_prepared.Span[slot] == _scheduleVersion) return;
 
         _prepared.Span[slot] = _scheduleVersion;
+        if (_lastWritten.Span[slot] == 0) _liveSlots++;
         _lastWritten.Span[slot] = _frameId;
         _activeSlots.Span[_activeCount++] = slot;
         _chunksActivated++;
@@ -542,7 +561,7 @@ public sealed unsafe class InfluenceField : IDisposable
         _lastWritten.Span[slot] = 0;
         _nonZero.Span[slot] = 0;
         _prepared.Span[slot] = 0;
-        new Span<int>(_data.Pointer + (long)slot * _spec.ElementsPerChunk, _spec.ElementsPerChunk).Clear();
+        new Span<short>(_data.Pointer + (long)slot * _spec.ElementsPerChunk, _spec.ElementsPerChunk).Clear();
         return slot;
     }
 
@@ -555,7 +574,7 @@ public sealed unsafe class InfluenceField : IDisposable
         _nonZero.Span[slot] = 0;
         _prepared.Span[slot] = 0;
         _data.Resize(_slotCount * _spec.ElementsPerChunk);
-        new Span<int>(_data.Pointer + (long)slot * _spec.ElementsPerChunk, _spec.ElementsPerChunk).Clear();
+        new Span<short>(_data.Pointer + (long)slot * _spec.ElementsPerChunk, _spec.ElementsPerChunk).Clear();
         return slot;
     }
 
@@ -579,7 +598,7 @@ public sealed unsafe class InfluenceField : IDisposable
             return;
         }
         for (var i = 0; i < _activeCount; i++)
-            new Span<int>(data + (long)active[i] * elements, elements).Clear();
+            new Span<short>(data + (long)active[i] * elements, elements).Clear();
     }
 
     private void RasterizeAll()
@@ -639,21 +658,44 @@ public sealed unsafe class InfluenceField : IDisposable
         AddCorners(_data.Pointer + (long)slot * _spec.ElementsPerChunk, lo, hi, weight, atomic);
     }
 
-    private void AddCorners(int* field, Int2 lo, Int2 hi, int weight, bool atomic)
+    private void AddCorners(short* field, Int2 lo, Int2 hi, int weight, bool atomic)
     {
         var stride = _spec.Stride;
         if (atomic)
         {
-            Interlocked.Add(ref field[(long)lo.Y * stride + lo.X], weight);
-            Interlocked.Add(ref field[(long)lo.Y * stride + hi.X], -weight);
-            Interlocked.Add(ref field[(long)hi.Y * stride + lo.X], -weight);
-            Interlocked.Add(ref field[(long)hi.Y * stride + hi.X], weight);
+            AddSaturatedAtomic(field + (long)lo.Y * stride + lo.X, weight);
+            AddSaturatedAtomic(field + (long)lo.Y * stride + hi.X, -weight);
+            AddSaturatedAtomic(field + (long)hi.Y * stride + lo.X, -weight);
+            AddSaturatedAtomic(field + (long)hi.Y * stride + hi.X, weight);
             return;
         }
-        field[(long)lo.Y * stride + lo.X] += weight;
-        field[(long)lo.Y * stride + hi.X] -= weight;
-        field[(long)hi.Y * stride + lo.X] -= weight;
-        field[(long)hi.Y * stride + hi.X] += weight;
+        var cell = field + (long)lo.Y * stride + lo.X;
+        *cell = Saturate(*cell + weight);
+        cell = field + (long)lo.Y * stride + hi.X;
+        *cell = Saturate(*cell - weight);
+        cell = field + (long)hi.Y * stride + lo.X;
+        *cell = Saturate(*cell - weight);
+        cell = field + (long)hi.Y * stride + hi.X;
+        *cell = Saturate(*cell + weight);
+    }
+
+    private static short Saturate(int value) => (short)Math.Clamp(value, short.MinValue, short.MaxValue);
+
+    private static void AddSaturatedAtomic(short* cell, int weight)
+    {
+        var pair = (int*)((long)cell & ~3L);
+        var high = ((long)cell & 2) != 0;
+        int observed;
+        while (true)
+        {
+            observed = *pair;
+            var current = high ? (short)(observed >> 16) : (short)observed;
+            var next = Math.Clamp(current + weight, short.MinValue, short.MaxValue);
+            var updated = high
+                ? (observed & 0x0000FFFF) | (next << 16)
+                : (observed & unchecked((int)0xFFFF0000)) | (next & 0xFFFF);
+            if (Interlocked.CompareExchange(ref *pair, updated, observed) == observed) return;
+        }
     }
 
     private void RunParallel(int phase, int count)
@@ -723,7 +765,7 @@ public sealed unsafe class InfluenceField : IDisposable
                         for (var s = _offsets.Pointer[i]; s < _offsets.Pointer[i + 1]; s++) ScatterSpan(_spans.Pointer[s], true);
                         break;
                     default:
-                        new Span<int>(_data.Pointer + (long)active[i] * _spec.ElementsPerChunk, _spec.ElementsPerChunk).Clear();
+                        new Span<short>(_data.Pointer + (long)active[i] * _spec.ElementsPerChunk, _spec.ElementsPerChunk).Clear();
                         break;
                 }
                 done++;
@@ -748,14 +790,22 @@ public sealed unsafe class InfluenceField : IDisposable
     private void ResolveSlot(int slot, Stencil stencil, bool hasStencil, int worker)
     {
         var field = _data.Pointer + (long)slot * _spec.ElementsPerChunk;
-        PrefixSumRun(field);
-
-        if (hasStencil) ApplyStencil(stencil, _coordBySlot.Span[slot], field, worker);
-
-        _nonZero.Span[slot] = AnyNonZero(field);
+        _nonZero.Span[slot] = hasStencil
+            ? PrefixSumRunStenciled(field, stencil, _coordBySlot.Span[slot], worker)
+            : PrefixSumRun(field);
     }
 
-    private void PrefixSumRun(int* field)
+    private byte PrefixSumRun(short* field)
+        => PrefixSumPass(field);
+
+    private byte PrefixSumRunStenciled(short* field, Stencil stencil, Int2 coord, int worker)
+    {
+        PrefixSumPass(field);
+        ApplyStencil(stencil, coord, field, worker);
+        return AnyNonZero(field);
+    }
+
+    private byte PrefixSumPass(short* field)
     {
         var stride = _spec.Stride;
         var dimension = _spec.Dimension;
@@ -772,10 +822,10 @@ public sealed unsafe class InfluenceField : IDisposable
             var d = 0;
             for (var x = 0; x < dimension; x++)
             {
-                a += row0[x]; row0[x] = a;
-                b += row1[x]; row1[x] = b;
-                c += row2[x]; row2[x] = c;
-                d += row3[x]; row3[x] = d;
+                a += row0[x]; row0[x] = Saturate(a);
+                b += row1[x]; row1[x] = Saturate(b);
+                c += row2[x]; row2[x] = Saturate(c);
+                d += row3[x]; row3[x] = Saturate(d);
             }
         }
         for (; y < dimension; y++)
@@ -785,21 +835,29 @@ public sealed unsafe class InfluenceField : IDisposable
             for (var x = 0; x < dimension; x++)
             {
                 running += row[x];
-                row[x] = running;
+                row[x] = Saturate(running);
             }
         }
 
-        if (Vector.IsHardwareAccelerated && stride >= Vector<int>.Count)
+        var acc = 0;
+        if (Vector.IsHardwareAccelerated && stride >= Vector<short>.Count)
         {
-            var lanes = Vector<int>.Count;
+            var lanes = Vector<short>.Count;
+            var vacc = Vector<short>.Zero;
             for (var ry = 1; ry < dimension; ry++)
             {
                 var above = field + (long)(ry - 1) * stride;
                 var current = field + (long)ry * stride;
                 for (var x = 0; x <= stride - lanes; x += lanes)
-                    (new Vector<int>(new ReadOnlySpan<int>(current + x, lanes)) + new Vector<int>(new ReadOnlySpan<int>(above + x, lanes)))
-                        .CopyTo(new Span<int>(current + x, lanes));
+                {
+                    var v = Vector.AddSaturate(
+                        new Vector<short>(new ReadOnlySpan<short>(current + x, lanes)),
+                        new Vector<short>(new ReadOnlySpan<short>(above + x, lanes)));
+                    v.CopyTo(new Span<short>(current + x, lanes));
+                    vacc |= v;
+                }
             }
+            for (var i = 0; i < lanes; i++) acc |= (ushort)vacc[i];
         }
         else
         {
@@ -807,52 +865,60 @@ public sealed unsafe class InfluenceField : IDisposable
             {
                 var above = field + (long)(ry - 1) * stride;
                 var current = field + (long)ry * stride;
-                for (var x = 0; x < stride; x++) current[x] += above[x];
+                for (var x = 0; x < stride; x++)
+                {
+                    current[x] = Saturate(current[x] + above[x]);
+                    acc |= (ushort)current[x];
+                }
             }
         }
+        var row0acc = 0;
+        var first = field;
+        for (var x = 0; x < stride; x++) row0acc |= (ushort)first[x];
+        return (acc | row0acc) != 0 ? (byte)1 : (byte)0;
     }
 
-    private byte AnyNonZero(int* field)
+    private byte AnyNonZero(short* field)
     {
         var chunkSize = _spec.ChunkSize;
         var stride = _spec.Stride;
         var acc = 0;
         var y = 0;
-        if (Vector.IsHardwareAccelerated && chunkSize >= Vector<int>.Count)
+        if (Vector.IsHardwareAccelerated && chunkSize >= Vector<short>.Count)
         {
-            var lanes = Vector<int>.Count;
-            var vacc = Vector<int>.Zero;
+            var lanes = Vector<short>.Count;
+            var vacc = Vector<short>.Zero;
             for (; y < chunkSize; y++)
             {
                 var row = field + (long)y * stride;
                 for (var x = 0; x <= chunkSize - lanes; x += lanes)
-                    vacc |= new Vector<int>(new ReadOnlySpan<int>(row + x, lanes));
-                for (var x = chunkSize - chunkSize % lanes; x < chunkSize; x++) acc |= row[x];
+                    vacc |= new Vector<short>(new ReadOnlySpan<short>(row + x, lanes));
+                for (var x = chunkSize - chunkSize % lanes; x < chunkSize; x++) acc |= (ushort)row[x];
             }
-            for (var i = 0; i < lanes; i++) acc |= vacc[i];
+            for (var i = 0; i < lanes; i++) acc |= (ushort)vacc[i];
             return acc != 0 ? (byte)1 : (byte)0;
         }
         for (; y < chunkSize; y++)
         {
             var row = field + (long)y * stride;
-            for (var x = 0; x < chunkSize; x++) acc |= row[x];
+            for (var x = 0; x < chunkSize; x++) acc |= (ushort)row[x];
         }
 
         return acc != 0 ? (byte)1 : (byte)0;
     }
 
-    private void ApplyStencil(Stencil stencil, Int2 coord, int* field, int worker = 0)
+    private void ApplyStencil(Stencil stencil, Int2 coord, short* field, int worker = 0)
     {
         var source = stencil.Source;
         var haloStride = _spec.ChunkSize + 2;
         var halo = _halo.Pointer + (long)worker * _haloSlice;
-        new Span<int>(halo, haloStride * haloStride).Clear();
-        DecaySelf(source, stencil, coord, field, halo, haloStride);
+        new Span<short>(halo, haloStride * haloStride).Clear();
         FillHalo(source, stencil, coord, halo, haloStride);
+        DecaySelf(source, stencil, coord, field, halo, haloStride);
         AddInflow(field, halo, haloStride);
     }
 
-    private void DecaySelf(InfluenceField source, Stencil stencil, Int2 coord, int* field, int* halo, int haloStride)
+    private void DecaySelf(InfluenceField source, Stencil stencil, Int2 coord, short* field, short* halo, int haloStride)
     {
         if (!source._slotByCoord.TryGetValue(coord, out var slot) || !IsStencilSlotLive(source, slot)) return;
 
@@ -906,47 +972,45 @@ public sealed unsafe class InfluenceField : IDisposable
 
     private static Vector<int> DivideExact(Vector<int> values, MagicDivisor divisor) => divisor.Divide(values);
 
-    private static Vector<int> DecayKeepExact(Vector<int> values, long keepFactor)
-    {
-        Vector.Widen(values, out var lo, out var hi);
-        var thousand = new Vector<double>(1000.0);
-        return Vector.Narrow(
-            Vector.ConvertToInt64(Vector.ConvertToDouble(lo * keepFactor) / thousand),
-            Vector.ConvertToInt64(Vector.ConvertToDouble(hi * keepFactor) / thousand));
-    }
-
-    private void DecayRow(int* source, int* haloRow, int* target, Stencil stencil)
+    private void DecayRow(short* source, short* haloRow, short* target, Stencil stencil)
     {
         var decay = stencil.DecayPerMille;
         var spread = stencil.SpreadDenominator;
         var chunkSize = _spec.ChunkSize;
         var divisor = MagicDivisor.Of(spread);
+        var thousand = MagicDivisor.Of(1000);
         var x = 0;
-        if (Vector.IsHardwareAccelerated && divisor.IsVectorizable && chunkSize >= Vector<int>.Count)
+        if (Vector.IsHardwareAccelerated && divisor.IsVectorizable && thousand.IsVectorizable && chunkSize >= Vector<short>.Count)
         {
-            var lanes = Vector<int>.Count;
-            var keepFactor = (long)(1000 - decay);
-            var four = new Vector<int>(4);
+            var lanes = Vector<short>.Count;
+            var keepFactor = new Vector<int>(1000 - decay);
+            var min = new Vector<int>(short.MinValue);
+            var max = new Vector<int>(short.MaxValue);
             for (; x <= chunkSize - lanes; x += lanes)
             {
-                var v = new Vector<int>(new ReadOnlySpan<int>(source + x, lanes));
-                var kept = DecayKeepExact(v, keepFactor);
-                var outflow = DivideExact(kept, divisor);
-                outflow.CopyTo(new Span<int>(haloRow + x, lanes));
-                (new Vector<int>(new ReadOnlySpan<int>(target + x, lanes)) + kept - four * outflow)
-                    .CopyTo(new Span<int>(target + x, lanes));
+                Vector.Widen(new Vector<short>(new ReadOnlySpan<short>(source + x, lanes)), out var vlo, out var vhi);
+                var keptLo = thousand.Divide(vlo * keepFactor);
+                var keptHi = thousand.Divide(vhi * keepFactor);
+                var outflowLo = divisor.Divide(keptLo);
+                var outflowHi = divisor.Divide(keptHi);
+                Vector.Narrow(outflowLo, outflowHi).CopyTo(new Span<short>(haloRow + x, lanes));
+                Vector.Widen(new Vector<short>(new ReadOnlySpan<short>(target + x, lanes)), out var tlo, out var thi);
+                Vector.Narrow(
+                    Vector.Min(Vector.Max(tlo + keptLo - (outflowLo << 2), min), max),
+                    Vector.Min(Vector.Max(thi + keptHi - (outflowHi << 2), min), max))
+                    .CopyTo(new Span<short>(target + x, lanes));
             }
         }
         for (; x < chunkSize; x++)
         {
             var kept = IntegerMath.DecayKeep(source[x], decay);
             var outflow = kept / spread;
-            haloRow[x] = outflow;
-            target[x] += kept - 4 * outflow;
+            haloRow[x] = (short)outflow;
+            target[x] = Saturate(target[x] + kept - 4 * outflow);
         }
     }
 
-    private void FillHalo(InfluenceField source, Stencil stencil, Int2 coord, int* halo, int haloStride)
+    private void FillHalo(InfluenceField source, Stencil stencil, Int2 coord, short* halo, int haloStride)
     {
         var chunkSize = _spec.ChunkSize;
         FillHaloColumn(source, stencil, coord + new Int2(-1, 0), chunkSize - 1, 0, halo, haloStride);
@@ -961,7 +1025,7 @@ public sealed unsafe class InfluenceField : IDisposable
         Int2 coord,
         int sourceX,
         int haloX,
-        int* halo,
+        short* halo,
         int haloStride)
     {
         if (!source._slotByCoord.TryGetValue(coord, out var slot) || !IsStencilSlotLive(source, slot)) return;
@@ -972,23 +1036,27 @@ public sealed unsafe class InfluenceField : IDisposable
         var decay = stencil.DecayPerMille;
         var spread = stencil.SpreadDenominator;
         var divisor = MagicDivisor.Of(spread);
+        var thousand = MagicDivisor.Of(1000);
         var y = 0;
-        if (Vector.IsHardwareAccelerated && divisor.IsVectorizable && chunkSize >= Vector<int>.Count)
+        if (Vector.IsHardwareAccelerated && divisor.IsVectorizable && thousand.IsVectorizable && chunkSize >= Vector<short>.Count)
         {
-            var lanes = Vector<int>.Count;
-            Span<int> gathered = stackalloc int[Vector<int>.Count];
-            var keepFactor = (long)(1000 - decay);
+            var lanes = Vector<short>.Count;
+            Span<short> gathered = stackalloc short[Vector<short>.Count];
+            var keepFactor = new Vector<int>(1000 - decay);
             for (; y <= chunkSize - lanes; y += lanes)
             {
                 for (var j = 0; j < lanes; j++) gathered[j] = start[(long)(y + j) * stride];
-                var outflow = DivideExact(DecayKeepExact(new Vector<int>(gathered), keepFactor), divisor);
+                Vector.Widen(new Vector<short>(gathered), out var vlo, out var vhi);
+                var outflow = Vector.Narrow(
+                    divisor.Divide(thousand.Divide(vlo * keepFactor)),
+                    divisor.Divide(thousand.Divide(vhi * keepFactor)));
                 for (var j = 0; j < lanes; j++)
                     halo[(long)(y + j + 1) * haloStride + haloX] = outflow[j];
             }
         }
         for (; y < chunkSize; y++)
             halo[(long)(y + 1) * haloStride + haloX] =
-                IntegerMath.Outflow(start[(long)y * stride], decay, spread);
+                (short)IntegerMath.Outflow(start[(long)y * stride], decay, spread);
     }
 
     private void FillHaloRow(
@@ -997,7 +1065,7 @@ public sealed unsafe class InfluenceField : IDisposable
         Int2 coord,
         int sourceY,
         int haloY,
-        int* halo,
+        short* halo,
         int haloStride)
     {
         if (!source._slotByCoord.TryGetValue(coord, out var slot) || !IsStencilSlotLive(source, slot)) return;
@@ -1007,49 +1075,55 @@ public sealed unsafe class InfluenceField : IDisposable
         var decay = stencil.DecayPerMille;
         var spread = stencil.SpreadDenominator;
         var divisor = MagicDivisor.Of(spread);
+        var thousand = MagicDivisor.Of(1000);
         var x = 0;
-        if (Vector.IsHardwareAccelerated && divisor.IsVectorizable && chunkSize >= Vector<int>.Count)
+        if (Vector.IsHardwareAccelerated && divisor.IsVectorizable && thousand.IsVectorizable && chunkSize >= Vector<short>.Count)
         {
-            var lanes = Vector<int>.Count;
-            var keepFactor = (long)(1000 - decay);
+            var lanes = Vector<short>.Count;
+            var keepFactor = new Vector<int>(1000 - decay);
             for (; x <= chunkSize - lanes; x += lanes)
             {
-                var outflow = DivideExact(
-                    DecayKeepExact(new Vector<int>(new ReadOnlySpan<int>(start + x, lanes)), keepFactor), divisor);
-                outflow.CopyTo(new Span<int>(halo + (long)haloY * haloStride + x + 1, lanes));
+                Vector.Widen(new Vector<short>(new ReadOnlySpan<short>(start + x, lanes)), out var vlo, out var vhi);
+                var outflow = Vector.Narrow(
+                    divisor.Divide(thousand.Divide(vlo * keepFactor)),
+                    divisor.Divide(thousand.Divide(vhi * keepFactor)));
+                outflow.CopyTo(new Span<short>(halo + (long)haloY * haloStride + x + 1, lanes));
             }
         }
         for (; x < chunkSize; x++)
             halo[(long)haloY * haloStride + x + 1] =
-                IntegerMath.Outflow(start[x], decay, spread);
+                (short)IntegerMath.Outflow(start[x], decay, spread);
     }
 
-    private void AddInflow(int* field, int* halo, int haloStride)
+    private void AddInflow(short* field, short* halo, int haloStride)
     {
         for (var y = 0; y < _spec.ChunkSize; y++)
             AddInflowRow(field + (long)y * _spec.Stride, halo + (long)(y + 1) * haloStride + 1, haloStride);
     }
 
-    private void AddInflowRow(int* target, int* center, int haloStride)
+    private void AddInflowRow(short* target, short* center, int haloStride)
     {
         var below = center - haloStride;
         var above = center + haloStride;
         var chunkSize = _spec.ChunkSize;
         var x = 0;
-        if (Vector.IsHardwareAccelerated && chunkSize >= Vector<int>.Count)
+        if (Vector.IsHardwareAccelerated && chunkSize >= Vector<short>.Count)
         {
-            var lanes = Vector<int>.Count;
+            var lanes = Vector<short>.Count;
             for (; x <= chunkSize - lanes; x += lanes)
             {
-                var sum = new Vector<int>(new ReadOnlySpan<int>(center + x - 1, lanes))
-                    + new Vector<int>(new ReadOnlySpan<int>(center + x + 1, lanes))
-                    + new Vector<int>(new ReadOnlySpan<int>(below + x, lanes))
-                    + new Vector<int>(new ReadOnlySpan<int>(above + x, lanes));
-                (new Vector<int>(new ReadOnlySpan<int>(target + x, lanes)) + sum)
-                    .CopyTo(new Span<int>(target + x, lanes));
+                var sum = Vector.AddSaturate(
+                    Vector.AddSaturate(
+                        new Vector<short>(new ReadOnlySpan<short>(center + x - 1, lanes)),
+                        new Vector<short>(new ReadOnlySpan<short>(center + x + 1, lanes))),
+                    Vector.AddSaturate(
+                        new Vector<short>(new ReadOnlySpan<short>(below + x, lanes)),
+                        new Vector<short>(new ReadOnlySpan<short>(above + x, lanes))));
+                Vector.AddSaturate(new Vector<short>(new ReadOnlySpan<short>(target + x, lanes)), sum)
+                    .CopyTo(new Span<short>(target + x, lanes));
             }
         }
         for (; x < chunkSize; x++)
-            target[x] += center[x - 1] + center[x + 1] + below[x] + above[x];
+            target[x] = Saturate(target[x] + center[x - 1] + center[x + 1] + below[x] + above[x]);
     }
 }

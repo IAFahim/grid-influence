@@ -217,18 +217,19 @@ public static class ShapeFactory
 {
     public static InfluenceShape Build(ShapeSpec spec, int weight)
     {
+        var bounded = (sbyte)Math.Clamp(weight, sbyte.MinValue, sbyte.MaxValue);
         var kind = spec.Kind.ToLowerInvariant();
         return kind switch
         {
-            "solidrect" => InfluenceShape.SolidRect(List2(spec.Min), List2(spec.Size), weight),
-            "rectshell" => InfluenceShape.RectShell(List2(spec.Min), List2(spec.Size), spec.Thickness, weight),
-            "disc" => InfluenceShape.Disc(Int2.Zero, spec.Radius, weight),
-            "annulus" => InfluenceShape.Annulus(Int2.Zero, spec.Radius, spec.InnerRadius, weight),
-            "capsule" => InfluenceShape.Capsule(List2(spec.Start), List2(spec.End), spec.Radius, weight),
-            "ellipse" => InfluenceShape.Ellipse(Int2.Zero, List2(spec.Radii), weight),
-            "roundedrect" => InfluenceShape.RoundedRect(List2(spec.Min), List2(spec.Size), spec.Radius, weight),
-            "thickline" => InfluenceShape.ThickLine(List2(spec.Start), List2(spec.End), spec.Radius, weight),
-            "sector" => InfluenceShape.Sector(Int2.Zero, spec.Radius, List2(spec.Dir0), List2(spec.Dir1), weight),
+            "solidrect" => InfluenceShape.SolidRect(List2(spec.Min), List2(spec.Size), bounded),
+            "rectshell" => InfluenceShape.RectShell(List2(spec.Min), List2(spec.Size), spec.Thickness, bounded),
+            "disc" => InfluenceShape.Disc(Int2.Zero, spec.Radius, bounded),
+            "annulus" => InfluenceShape.Annulus(Int2.Zero, spec.Radius, spec.InnerRadius, bounded),
+            "capsule" => InfluenceShape.Capsule(List2(spec.Start), List2(spec.End), spec.Radius, bounded),
+            "ellipse" => InfluenceShape.Ellipse(Int2.Zero, List2(spec.Radii), bounded),
+            "roundedrect" => InfluenceShape.RoundedRect(List2(spec.Min), List2(spec.Size), spec.Radius, bounded),
+            "thickline" => InfluenceShape.ThickLine(List2(spec.Start), List2(spec.End), spec.Radius, bounded),
+            "sector" => InfluenceShape.Sector(Int2.Zero, spec.Radius, List2(spec.Dir0), List2(spec.Dir1), bounded),
             _ => throw new InvalidDataException($"Unknown shape kind: {spec.Kind}")
         };
     }

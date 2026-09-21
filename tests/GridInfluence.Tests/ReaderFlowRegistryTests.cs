@@ -26,11 +26,11 @@ public sealed class ReaderFlowRegistryTests
         field.Tick(
         [
             new Stamp(InfluenceShape.SolidRect(new Int2(0, 0), new Int2(1, 1), 100), Int2.Zero),
-            new Stamp(InfluenceShape.SolidRect(new Int2(2, 0), new Int2(1, 1), 300), Int2.Zero)
+            new Stamp(InfluenceShape.SolidRect(new Int2(2, 0), new Int2(1, 1), 127), Int2.Zero)
         ], 1);
 
         var gradient = field.AsReader().Gradient(new Int2(1, 0));
-        Assert.Equal(200, gradient.X);
+        Assert.Equal(27, gradient.X);
         Assert.Equal(0, gradient.Y);
     }
 

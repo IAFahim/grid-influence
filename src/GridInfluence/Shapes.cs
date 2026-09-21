@@ -17,9 +17,9 @@ public enum ShapeKind : byte
 public readonly struct InfluenceShape
 {
     public readonly ShapeKind Kind;
-    public readonly int Weight;
+    public readonly sbyte Weight;
 
-    private InfluenceShape(ShapeKind kind, int weight, Int2 a, Int2 b, int p, int q, Int2 aux)
+    private InfluenceShape(ShapeKind kind, sbyte weight, Int2 a, Int2 b, int p, int q, Int2 aux)
     {
         Kind = kind;
         Weight = weight;
@@ -65,7 +65,7 @@ public readonly struct InfluenceShape
     public int SectorRadius => ShellThickness;
     public Int2 SectorDir1 { get; }
 
-    public InfluenceShape WithWeight(int weight)
+    public InfluenceShape WithWeight(sbyte weight)
         => new(Kind, weight, RectMin, RectSize, ShellThickness, AnnulusInnerRadius, SectorDir1);
 
     public bool TryScaleWeight(float clipWeight, out InfluenceShape scaled)
@@ -77,11 +77,11 @@ public readonly struct InfluenceShape
             return false;
         }
 
-        scaled = WithWeight(scaledWeight);
+        scaled = WithWeight((sbyte)Math.Clamp(scaledWeight, sbyte.MinValue, sbyte.MaxValue));
         return true;
     }
 
-    public InfluenceShape Negated() => WithWeight(-Weight);
+    public InfluenceShape Negated() => WithWeight((sbyte)-Weight);
 
     public InfluenceShape Rotated(Quarter quarter)
     {
@@ -186,31 +186,31 @@ public readonly struct InfluenceShape
         };
     }
 
-    public static InfluenceShape SolidRect(Int2 min, Int2 size, int weight)
+    public static InfluenceShape SolidRect(Int2 min, Int2 size, sbyte weight)
         => new(ShapeKind.SolidRect, weight, min, size, 0, 0, Int2.Zero);
 
-    public static InfluenceShape RectShell(Int2 min, Int2 size, int thickness, int weight)
+    public static InfluenceShape RectShell(Int2 min, Int2 size, int thickness, sbyte weight)
         => new(ShapeKind.RectShell, weight, min, size, thickness, 0, Int2.Zero);
 
-    public static InfluenceShape Disc(Int2 center, int radius, int weight)
+    public static InfluenceShape Disc(Int2 center, int radius, sbyte weight)
         => new(ShapeKind.Disc, weight, center, Int2.Zero, radius, 0, Int2.Zero);
 
-    public static InfluenceShape Annulus(Int2 center, int outerRadius, int innerRadius, int weight)
+    public static InfluenceShape Annulus(Int2 center, int outerRadius, int innerRadius, sbyte weight)
         => new(ShapeKind.Annulus, weight, center, Int2.Zero, outerRadius, innerRadius, Int2.Zero);
 
-    public static InfluenceShape Capsule(Int2 start, Int2 end, int radius, int weight)
+    public static InfluenceShape Capsule(Int2 start, Int2 end, int radius, sbyte weight)
         => new(ShapeKind.Capsule, weight, start, end, radius, 0, Int2.Zero);
 
-    public static InfluenceShape Ellipse(Int2 center, Int2 radii, int weight)
+    public static InfluenceShape Ellipse(Int2 center, Int2 radii, sbyte weight)
         => new(ShapeKind.Ellipse, weight, center, radii, 0, 0, Int2.Zero);
 
-    public static InfluenceShape RoundedRect(Int2 min, Int2 size, int radius, int weight)
+    public static InfluenceShape RoundedRect(Int2 min, Int2 size, int radius, sbyte weight)
         => new(ShapeKind.RoundedRect, weight, min, size, radius, 0, Int2.Zero);
 
-    public static InfluenceShape ThickLine(Int2 start, Int2 end, int radius, int weight)
+    public static InfluenceShape ThickLine(Int2 start, Int2 end, int radius, sbyte weight)
         => new(ShapeKind.ThickLine, weight, start, end, radius, 0, Int2.Zero);
 
-    public static InfluenceShape Sector(Int2 center, int radius, Int2 dir0, Int2 dir1, int weight)
+    public static InfluenceShape Sector(Int2 center, int radius, Int2 dir0, Int2 dir1, sbyte weight)
         => new(ShapeKind.Sector, weight, center, dir0, radius, 0, dir1);
 }
 
@@ -225,7 +225,7 @@ public readonly struct Stamp
         Origin = origin;
     }
 
-    public Stamp Negated() => new(Shape.WithWeight(-Shape.Weight), Origin);
+    public Stamp Negated() => new(Shape.WithWeight((sbyte)-Shape.Weight), Origin);
 }
 
 public enum Quarter : byte

@@ -4,7 +4,7 @@ namespace GridInfluence.Tests;
 
 public sealed class FieldAlgebraTests
 {
-    private static Stamp Rect(int x, int y, int w, int h, int weight)
+    private static Stamp Rect(int x, int y, int w, int h, sbyte weight)
         => new(InfluenceShape.SolidRect(new Int2(x, y), new Int2(w, h), weight), Int2.Zero);
 
     [Fact]
