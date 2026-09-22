@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -13,6 +14,7 @@ internal unsafe struct PageMap : IDisposable
     private byte** _blocks;
     private byte* _used;
     private int _mask;
+    private int _shift;
     private int _count;
     private int _tombstones;
 
@@ -27,16 +29,7 @@ internal unsafe struct PageMap : IDisposable
     public readonly byte** Blocks => _blocks;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int HashOf(int key)
-    {
-        var k = (ulong)(uint)key;
-        k ^= k >> 33;
-        k *= 0xFF51AFD7ED558CCDul;
-        k ^= k >> 33;
-        k *= 0xC4CEB9FE1A85EC53ul;
-        k ^= k >> 33;
-        return (int)k;
-    }
+    private readonly int SlotOf(int key) => (int)((uint)key * 2654435761u >> _shift);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public readonly bool TryGet(int tile, out byte* block)
@@ -57,7 +50,7 @@ internal unsafe struct PageMap : IDisposable
         if (_mask == 0 || (_count + _tombstones + 1) * 4 >= (_mask + 1) * 3)
             GrowTo(Math.Max(16, (_count + _tombstones + 1) * 2));
 
-        var index = HashOf(tile) & _mask;
+        var index = SlotOf(tile);
         var tombstone = -1;
         while (_used[index] != Empty)
         {
@@ -104,7 +97,7 @@ internal unsafe struct PageMap : IDisposable
     {
         if (_mask == 0) return -1;
 
-        var index = HashOf(tile) & _mask;
+        var index = SlotOf(tile);
         while (_used[index] != Empty)
         {
             if (_used[index] == Live && _keys[index] == tile) return index;
@@ -144,6 +137,7 @@ internal unsafe struct PageMap : IDisposable
         _blocks = (byte**)NativeMemory.AlignedAlloc((nuint)capacity * (nuint)sizeof(byte*), 64);
         _used = (byte*)NativeMemory.AlignedAlloc((nuint)capacity, 64);
         _mask = capacity - 1;
+        _shift = 32 - BitOperations.TrailingZeroCount(capacity);
         _count = 0;
         _tombstones = 0;
         new Span<byte>(_used, capacity).Clear();
@@ -164,7 +158,7 @@ internal unsafe struct PageMap : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void AddUnchecked(int key, byte* block)
     {
-        var index = HashOf(key) & _mask;
+        var index = SlotOf(key);
         while (_used[index] == Live) index = (index + 1) & _mask;
 
         _keys[index] = key;

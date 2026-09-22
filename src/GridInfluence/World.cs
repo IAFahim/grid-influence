@@ -28,6 +28,7 @@ internal unsafe struct GridCtx
     public float OriginY;
     public float WorldSize;
     public float Scale;
+    public float ScaleQ8;
     public int TilesPerSide;
     public int TileCount;
     public LayerData* Layers;
@@ -89,6 +90,7 @@ public static unsafe class World
         g->OriginY = y;
         g->WorldSize = size;
         g->Scale = g->Size / size;
+        g->ScaleQ8 = g->Scale * 256f;
         g->TilesPerSide = g->Size >> TileBake.TileBits;
         g->TileCount = g->TilesPerSide * g->TilesPerSide;
         g->Layers = (LayerData*)NativeMemory.AllocZeroed((nuint)(MaxLayers * sizeof(LayerData)));
@@ -111,13 +113,14 @@ public static unsafe class World
         if (s->Count == s->X.Length) GrowSources(s);
 
         var i = s->Count++;
-        s->X.Span[i] = x;
-        s->Y.Span[i] = y;
-        s->Stamp.Span[i] = stamp;
-        s->Layer.Span[i] = layer;
-        s->Gain.Span[i] = (byte)Math.Clamp(gain, 0, MaxGain);
-        s->Alive.Span[i] = 1;
-        Deposit(w, x, y, stamp, layer, s->Gain.Span[i]);
+        var g = (byte)Math.Clamp(gain, 0, MaxGain);
+        s->X.Pointer[i] = x;
+        s->Y.Pointer[i] = y;
+        s->Stamp.Pointer[i] = stamp;
+        s->Layer.Pointer[i] = layer;
+        s->Gain.Pointer[i] = g;
+        s->Alive.Pointer[i] = 1;
+        Deposit(w, x, y, stamp, layer, g);
         return i;
     }
 
@@ -125,40 +128,43 @@ public static unsafe class World
     {
         var w = Worlds + world;
         var s = &w->Sources;
-        if ((uint)source >= (uint)s->Count || s->Alive.Span[source] == 0) return;
+        if ((uint)source >= (uint)s->Count || s->Alive.Pointer[source] == 0) return;
 
-        Deposit(w, s->X.Span[source], s->Y.Span[source],
-            s->Stamp.Span[source], s->Layer.Span[source], -s->Gain.Span[source]);
-        s->X.Span[source] = x;
-        s->Y.Span[source] = y;
-        Deposit(w, x, y, s->Stamp.Span[source], s->Layer.Span[source], s->Gain.Span[source]);
+        var stamp = s->Stamp.Pointer[source];
+        var layer = s->Layer.Pointer[source];
+        var gain = s->Gain.Pointer[source];
+        var oldX = s->X.Pointer[source];
+        var oldY = s->Y.Pointer[source];
+        s->X.Pointer[source] = x;
+        s->Y.Pointer[source] = y;
+        Deposit(w, oldX, oldY, stamp, layer, -gain);
+        Deposit(w, x, y, stamp, layer, gain);
     }
 
     public static void SetGain(byte world, int source, int gain)
     {
         var w = Worlds + world;
         var s = &w->Sources;
-        if ((uint)source >= (uint)s->Count || s->Alive.Span[source] == 0) return;
+        if ((uint)source >= (uint)s->Count || s->Alive.Pointer[source] == 0) return;
 
         var next = (byte)Math.Clamp(gain, 0, MaxGain);
-        if (next == s->Gain.Span[source]) return;
+        var current = s->Gain.Pointer[source];
+        if (next == current) return;
 
-        Deposit(w, s->X.Span[source], s->Y.Span[source],
-            s->Stamp.Span[source], s->Layer.Span[source], -s->Gain.Span[source]);
-        s->Gain.Span[source] = next;
-        Deposit(w, s->X.Span[source], s->Y.Span[source],
-            s->Stamp.Span[source], s->Layer.Span[source], next);
+        s->Gain.Pointer[source] = next;
+        Deposit(w, s->X.Pointer[source], s->Y.Pointer[source],
+            s->Stamp.Pointer[source], s->Layer.Pointer[source], next - current);
     }
 
     public static void Remove(byte world, int source)
     {
         var w = Worlds + world;
         var s = &w->Sources;
-        if ((uint)source >= (uint)s->Count || s->Alive.Span[source] == 0) return;
+        if ((uint)source >= (uint)s->Count || s->Alive.Pointer[source] == 0) return;
 
-        Deposit(w, s->X.Span[source], s->Y.Span[source],
-            s->Stamp.Span[source], s->Layer.Span[source], -s->Gain.Span[source]);
-        s->Alive.Span[source] = 0;
+        Deposit(w, s->X.Pointer[source], s->Y.Pointer[source],
+            s->Stamp.Pointer[source], s->Layer.Pointer[source], -s->Gain.Pointer[source]);
+        s->Alive.Pointer[source] = 0;
     }
 
     public static void Clear(byte world)
@@ -191,11 +197,13 @@ public static unsafe class World
 
     private static void Deposit(WorldCtx* w, float x, float y, byte stampId, byte layer, int gain)
     {
+        if (gain == 0) return;
+
         var v = StampCatalog.Get(stampId);
         for (var gi = 0; gi < w->GridCount; gi++)
         {
             var g = w->Grids + gi;
-            TileBake.Footprint(x, y, g->OriginX, g->OriginY, g->Scale, v,
+            TileBake.Footprint(x, y, g->OriginX, g->OriginY, g->ScaleQ8, v,
                 out var px, out var py, out var fx, out var fy,
                 out var x0, out var y0, out var x1, out var y1);
 
@@ -205,10 +213,7 @@ public static unsafe class World
             var cy1 = Math.Min(y1, g->Size);
             if (cx1 <= cx0 || cy1 <= cy0) continue;
 
-            var ld = g->Layers + layer;
-            if (ld->InDirty == null)
-                ld->InDirty = (byte*)NativeMemory.AllocZeroed((nuint)g->TileCount);
-
+            var ld = EnsureDirty(g, layer);
             var tps = g->TilesPerSide;
             var tx0 = cx0 >> TileBake.TileBits;
             var tx1 = (cx1 - 1) >> TileBake.TileBits;
@@ -218,13 +223,7 @@ public static unsafe class World
             for (var tx = tx0; tx <= tx1; tx++)
             {
                 var tile = ty * tps + tx;
-                var pages = &ld->Pages;
-                if (!pages->TryGet(tile, out var block))
-                {
-                    block = (byte*)NativeMemory.AlignedAlloc((nuint)BlockBytes, 64);
-                    new Span<byte>(block, BlockBytes).Clear();
-                    pages->Put(tile, block);
-                }
+                var block = TileBlock(ld, tile);
 
                 var tileX0 = tx * TileBake.TileSize;
                 var tileY0 = ty * TileBake.TileSize;
@@ -233,15 +232,38 @@ public static unsafe class World
                 else
                     TileBake.EmitRaster((int*)(block + DiffBytes), tileX0, tileY0, px, py, fx, fy, v, gain);
 
-                if (ld->InDirty[tile] == 0)
-                {
-                    ld->InDirty[tile] = 1;
-                    var n = ld->Dirty.Length;
-                    ld->Dirty.Resize(n + 1);
-                    ld->Dirty.Span[n] = tile;
-                }
+                MarkDirty(ld, tile);
             }
         }
+    }
+
+    private static LayerData* EnsureDirty(GridCtx* g, byte layer)
+    {
+        var ld = g->Layers + layer;
+        if (ld->InDirty == null)
+            ld->InDirty = (byte*)NativeMemory.AllocZeroed((nuint)g->TileCount);
+        return ld;
+    }
+
+    private static byte* TileBlock(LayerData* ld, int tile)
+    {
+        var pages = &ld->Pages;
+        if (pages->TryGet(tile, out var block)) return block;
+
+        block = (byte*)NativeMemory.AlignedAlloc((nuint)BlockBytes, 64);
+        new Span<byte>(block, BlockBytes).Clear();
+        pages->Put(tile, block);
+        return block;
+    }
+
+    private static void MarkDirty(LayerData* ld, int tile)
+    {
+        if (ld->InDirty[tile] != 0) return;
+
+        ld->InDirty[tile] = 1;
+        var n = ld->Dirty.Length;
+        ld->Dirty.Resize(n + 1);
+        ld->Dirty.Pointer[n] = tile;
     }
 
     public static void Process(byte world)

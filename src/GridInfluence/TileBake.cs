@@ -6,13 +6,6 @@ using System.Runtime.Intrinsics.X86;
 
 namespace GridInfluence;
 
-internal struct AxisBand
-{
-    public int Start;
-    public int End;
-    public int WeightQ8;
-}
-
 internal static unsafe class TileBake
 {
     internal const int TileBits = 5;
@@ -22,16 +15,17 @@ internal static unsafe class TileBake
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static int RoundQ16(int value)
-        => value < 0 ? -((-value + 32768) >> 16) : (value + 32768) >> 16;
+        => (value + 32768 + (value >> 31)) >> 16;
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static void Footprint(
-        float wx, float wy, float originX, float originY, float scale,
+        float wx, float wy, float originX, float originY, float scaleQ8,
         StampVariant* v,
         out int px, out int py, out int fx, out int fy,
         out int x0, out int y0, out int x1, out int y1)
     {
-        var qx = (int)MathF.Floor((wx - originX) * scale * 256f) + v->OriginQ8X;
-        var qy = (int)MathF.Floor((wy - originY) * scale * 256f) + v->OriginQ8Y;
+        var qx = (int)MathF.Floor((wx - originX) * scaleQ8) + v->OriginQ8X;
+        var qy = (int)MathF.Floor((wy - originY) * scaleQ8) + v->OriginQ8Y;
         px = qx >> 8;
         py = qy >> 8;
         fx = qx & 255;
@@ -42,57 +36,131 @@ internal static unsafe class TileBake
         y1 = py + v->Height + (fy != 0 ? 1 : 0);
     }
 
-    internal static int WriteBands(int length, int phase, AxisBand* bands)
-    {
-        if (phase == 0)
-        {
-            bands[0] = new AxisBand { Start = 0, End = length, WeightQ8 = 256 };
-            return 1;
-        }
-
-        bands[0] = new AxisBand { Start = 0, End = 1, WeightQ8 = 256 - phase };
-        if (length == 1)
-        {
-            bands[1] = new AxisBand { Start = 1, End = 2, WeightQ8 = phase };
-            return 2;
-        }
-
-        bands[1] = new AxisBand { Start = 1, End = length, WeightQ8 = 256 };
-        bands[2] = new AxisBand { Start = length, End = length + 1, WeightQ8 = phase };
-        return 3;
-    }
-
     internal static void EmitBox(
         int* difference, int tileX0, int tileY0,
         int px, int py, int fx, int fy, StampVariant* v, int gain)
     {
-        AxisBand* xs = stackalloc AxisBand[3];
-        AxisBand* ys = stackalloc AxisBand[3];
-        var nx = WriteBands(v->Width, fx, xs);
-        var ny = WriteBands(v->Height, fy, ys);
+        if (gain == 0) return;
+
+        var width = v->Width;
+        var height = v->Height;
         var tx1 = tileX0 + TileSize;
         var ty1 = tileY0 + TileSize;
 
-        for (var y = 0; y < ny; y++)
-        for (var x = 0; x < nx; x++)
+        var bxLo = stackalloc int[3];
+        var bxHi = stackalloc int[3];
+        var bxWeight = stackalloc int[3];
+        int liveX;
+        if (fx == 0)
         {
-            var value = RoundQ16(v->Constant * xs[x].WeightQ8 * ys[y].WeightQ8) * gain;
-            if (value == 0) continue;
+            bxLo[0] = Math.Max(px, tileX0) - tileX0;
+            bxHi[0] = Math.Min(px + width, tx1) - tileX0;
+            bxWeight[0] = 256;
+            liveX = bxHi[0] > bxLo[0] ? 1 : 0;
+        }
+        else
+        {
+            liveX = 0;
+            var lo = Math.Max(px, tileX0) - tileX0;
+            var hi = Math.Min(px + 1, tx1) - tileX0;
+            if (hi > lo)
+            {
+                bxLo[liveX] = lo;
+                bxHi[liveX] = hi;
+                bxWeight[liveX] = 256 - fx;
+                liveX++;
+            }
 
-            var bx0 = Math.Max(px + xs[x].Start, tileX0);
-            var by0 = Math.Max(py + ys[y].Start, tileY0);
-            var bx1 = Math.Min(px + xs[x].End, tx1);
-            var by1 = Math.Min(py + ys[y].End, ty1);
-            if (bx1 <= bx0 || by1 <= by0) continue;
+            lo = Math.Max(px + 1, tileX0) - tileX0;
+            hi = Math.Min(px + (width == 1 ? 2 : width), tx1) - tileX0;
+            if (hi > lo)
+            {
+                bxLo[liveX] = lo;
+                bxHi[liveX] = hi;
+                bxWeight[liveX] = width == 1 ? fx : 256;
+                liveX++;
+            }
 
-            var lx0 = bx0 - tileX0;
-            var ly0 = by0 - tileY0;
-            var lx1 = bx1 - tileX0;
-            var ly1 = by1 - tileY0;
-            difference[ly0 * DiffPitch + lx0] += value;
-            difference[ly0 * DiffPitch + lx1] -= value;
-            difference[ly1 * DiffPitch + lx0] -= value;
-            difference[ly1 * DiffPitch + lx1] += value;
+            if (width > 1)
+            {
+                lo = Math.Max(px + width, tileX0) - tileX0;
+                hi = Math.Min(px + width + 1, tx1) - tileX0;
+                if (hi > lo)
+                {
+                    bxLo[liveX] = lo;
+                    bxHi[liveX] = hi;
+                    bxWeight[liveX] = fx;
+                    liveX++;
+                }
+            }
+        }
+
+        var byLo = stackalloc int[3];
+        var byHi = stackalloc int[3];
+        var byWeight = stackalloc int[3];
+        int liveY;
+        if (fy == 0)
+        {
+            byLo[0] = Math.Max(py, tileY0) - tileY0;
+            byHi[0] = Math.Min(py + height, ty1) - tileY0;
+            byWeight[0] = 256;
+            liveY = byHi[0] > byLo[0] ? 1 : 0;
+        }
+        else
+        {
+            liveY = 0;
+            var lo = Math.Max(py, tileY0) - tileY0;
+            var hi = Math.Min(py + 1, ty1) - tileY0;
+            if (hi > lo)
+            {
+                byLo[liveY] = lo;
+                byHi[liveY] = hi;
+                byWeight[liveY] = 256 - fy;
+                liveY++;
+            }
+
+            lo = Math.Max(py + 1, tileY0) - tileY0;
+            hi = Math.Min(py + (height == 1 ? 2 : height), ty1) - tileY0;
+            if (hi > lo)
+            {
+                byLo[liveY] = lo;
+                byHi[liveY] = hi;
+                byWeight[liveY] = height == 1 ? fy : 256;
+                liveY++;
+            }
+
+            if (height > 1)
+            {
+                lo = Math.Max(py + height, tileY0) - tileY0;
+                hi = Math.Min(py + height + 1, ty1) - tileY0;
+                if (hi > lo)
+                {
+                    byLo[liveY] = lo;
+                    byHi[liveY] = hi;
+                    byWeight[liveY] = fy;
+                    liveY++;
+                }
+            }
+        }
+
+        var constant = v->Constant;
+        for (var y = 0; y < liveY; y++)
+        {
+            var rowTop = byLo[y] * DiffPitch;
+            var rowBottom = byHi[y] * DiffPitch;
+            var wy = byWeight[y];
+            for (var x = 0; x < liveX; x++)
+            {
+                var value = RoundQ16(constant * bxWeight[x] * wy) * gain;
+                if (value == 0) continue;
+
+                var lx0 = bxLo[x];
+                var lx1 = bxHi[x];
+                difference[rowTop + lx0] += value;
+                difference[rowTop + lx1] -= value;
+                difference[rowBottom + lx0] -= value;
+                difference[rowBottom + lx1] += value;
+            }
         }
     }
 
@@ -114,29 +182,58 @@ internal static unsafe class TileBake
         var w10 = fx * (256 - fy);
         var w01 = (256 - fx) * fy;
         var w11 = fx * fy;
+        var pitch = v->Pitch;
 
         var sx = gx0 - px;
         var sy = gy0 - py;
-        var source = v->Data + sy * v->Pitch + sx;
+        var source = v->Data + sy * pitch + sx;
         var destination = dense + (gy0 - tileY0) * TileSize + (gx0 - tileX0);
         var width = gx1 - gx0;
         var height = gy1 - gy0;
 
+        var vector = Sse2.IsSupported || AdvSimd.IsSupported;
+        var vw00 = Vector128.Create(w00);
+        var vw10 = Vector128.Create(w10);
+        var vw01 = Vector128.Create(w01);
+        var vw11 = Vector128.Create(w11);
+        var vhalf = Vector128.Create(32768);
+        var vgain = Vector128.Create(gain);
         for (var y = 0; y < height; y++)
         {
-            var src = source + y * v->Pitch;
+            var src = source + y * pitch;
+            var upper = src - pitch;
             var dst = destination + y * TileSize;
-            for (var x = 0; x < width; x++)
+            var x = 0;
+            if (vector)
+            {
+                for (; x + 4 <= width; x += 4)
+                {
+                    var numerator =
+                        Tap4(src + x) * vw00 +
+                        Tap4(src + x - 1) * vw10 +
+                        Tap4(upper + x) * vw01 +
+                        Tap4(upper + x - 1) * vw11;
+                    var rounded = Vector128.ShiftRightArithmetic(
+                        numerator + Vector128.ShiftRightArithmetic(numerator, 31) + vhalf, 16);
+                    Store128(dst + x, Load128(dst + x) + rounded * vgain);
+                }
+            }
+
+            for (; x < width; x++)
             {
                 var numerator =
                     src[x] * w00 +
                     src[x - 1] * w10 +
-                    src[x - v->Pitch] * w01 +
-                    src[x - v->Pitch - 1] * w11;
+                    upper[x] * w01 +
+                    upper[x - 1] * w11;
                 dst[x] += RoundQ16(numerator) * gain;
             }
         }
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector128<int> Tap4(sbyte* p)
+        => Vector128.Widen(Vector128.Widen(Vector128.CreateScalarUnsafe(*(int*)p).AsSByte()).Item1).Item1;
 
     internal static bool Resolve(int* difference, int* dense, int* previousRow, short* output)
     {

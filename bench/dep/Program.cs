@@ -38,3 +38,22 @@ var tAll = Best(() => {
     World.Process(w);
 }, 8);
 Console.WriteLine($"all-move + process (<=64 dirty): {tAll / 1e3:F1} us");
+
+var tPart = Best(() => {
+    for (var i = 0; i < 200; i++) World.Move(w, src[i], (float)(rng.NextDouble() * 1024), (float)(rng.NextDouble() * 1024));
+    World.Process(w);
+}, 10);
+Console.WriteLine($"200-move + process: {tPart / 1e3:F1} us");
+
+var tFresh = Best(() => {
+    World.Clear(w);
+    for (var i = 0; i < 4000; i++) src[i] = World.Place(w, l, (float)(rng.NextDouble() * 1024), (float)(rng.NextDouble() * 1024), stamp, 8);
+    World.Process(w);
+}, 5);
+Console.WriteLine($"clear + place all + process: {tFresh / 1e3:F1} us");
+
+var qx = new int[100_000]; var qy = new int[100_000];
+for (var i = 0; i < qx.Length; i++) { qx[i] = rng.Next(256); qy[i] = rng.Next(256); }
+long sink = 0;
+var tQuery = Best(() => { for (var i = 0; i < qx.Length; i++) sink += World.Query(w, g, l, qx[i], qy[i]); }, 10);
+Console.WriteLine($"query: {tQuery / qx.Length:F1} ns/cell (sink {sink})");

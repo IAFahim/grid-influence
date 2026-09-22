@@ -20,8 +20,9 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   integer part is the cell, the low byte is the sub-cell phase.
 - **Deposits are incremental**: each live tile owns a 12,480 B block — a 33×48 `int32` difference
   array, a 32×32 `int32` dense buffer, and a 32×32 `int16` page. `Place` deposits the stamp's
-  contribution into every touched tile immediately; `Move`/`SetGain`/`Remove` deposit the exact
-  negation at the stored position (integer adds invert perfectly — no rebuild, no source scan).
+  contribution into every touched tile immediately; `Move`/`Remove` deposit the exact negation at
+  the stored position and `SetGain` the gain delta (integer adds invert perfectly — no rebuild,
+  no source scan).
 - **Process** drains the per-(grid,layer) dirty list: each dirty tile resolves its difference
   array through a 2D prefix sum (horizontal inclusive prefix + previous-row carry), adds dense,
   saturates to `short` **after** summation so cancellation is preserved. A tile that resolves to
@@ -68,7 +69,8 @@ world rect at its own cell density; a source deposits into every grid it overlap
 - `warm-query-allocates-0-bytes` — 200k cell reads, 0 B.
 - `saturated-sum-clamps` — saturation sticks at ±32767 after summation.
 
-Timing numbers are deliberately absent until PMU receipts exist for this engine.
+Timing numbers live in `bench/RESULTS.md` (scratch harnesses, min over reps); the perf pass
+behind them was `perf`-profile guided, receipts first.
 
 ## Unsafe proof
 
@@ -83,8 +85,9 @@ Timing numbers are deliberately absent until PMU receipts exist for this engine.
   scratch used by exactly one tile resolve at a time; sources are read-only during deposits of
   other sources. `PageMap` mutation happens only through its owning `LayerData` pointer.
 - **Alignment**: every unmanaged block is 64-byte aligned; `Vector128<int>` loads/stores in
-  `Resolve`/`PackDense` use unaligned semantics (`LoadVector128`/`PackSignedSaturate` results
-  stored through scalar 8-byte writes on 8-byte-aligned short offsets).
+  `Resolve`/`PackDense`/`EmitRaster` use unaligned semantics (`LoadVector128`, widened unaligned
+  4-byte stamp reads, `PackSignedSaturate` results stored through scalar 8-byte writes on
+  8-byte-aligned short offsets).
 - **Concurrency**: `Place`/`Move`/`SetGain`/`Remove`/`Process` are serial; there is no shared
   mutable state between worlds, so different worlds may run on different threads. Within one
   world all access is single-threaded; no locks or interlocked ops exist.
