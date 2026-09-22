@@ -10,6 +10,7 @@ internal unsafe struct SourceColumns
     public NativeBuffer<byte> Layer;
     public NativeBuffer<byte> Gain;
     public NativeBuffer<byte> Alive;
+    public NativeBuffer<uint> ChangeGen;
     public int Count;
 }
 
@@ -17,7 +18,13 @@ internal unsafe struct LayerData
 {
     public PageMap Pages;
     public uint* Mark;
+    public uint* Rebuild;
+    public int* Head;
     public NativeBuffer<int> Dirty;
+    public NativeBuffer<int> RebuildList;
+    public NativeBuffer<int> PairNext;
+    public NativeBuffer<int> PairSrc;
+    public int PairCount;
 }
 
 internal unsafe struct GridCtx
@@ -119,8 +126,9 @@ public static unsafe class World
         s->Layer.Span[i] = layer;
         s->Gain.Span[i] = (byte)Math.Clamp(gain, 0, MaxGain);
         s->Alive.Span[i] = 1;
-        w->LayerLive[layer]++;
         w->SourceGen++;
+        s->ChangeGen.Span[i] = w->SourceGen;
+        w->LayerLive[layer]++;
         return i;
     }
 
@@ -131,8 +139,9 @@ public static unsafe class World
         if ((uint)source >= (uint)s->Count || s->Alive.Span[source] == 0) return;
 
         s->Alive.Span[source] = 0;
-        w->LayerLive[s->Layer.Span[source]]--;
         w->SourceGen++;
+        s->ChangeGen.Span[source] = w->SourceGen;
+        w->LayerLive[s->Layer.Span[source]]--;
     }
 
     public static void Clear(byte world)
@@ -169,10 +178,16 @@ public static unsafe class World
         }
 
         if (ld->Mark == null)
-            ld->Mark = (uint*)NativeMemory.AllocZeroed((nuint)(g->TileCount * sizeof(uint)));
+        {
+            var tiles = (nuint)(g->TileCount * sizeof(uint));
+            ld->Mark = (uint*)NativeMemory.AllocZeroed(tiles);
+            ld->Rebuild = (uint*)NativeMemory.AllocZeroed(tiles);
+            ld->Head = (int*)NativeMemory.AlignedAlloc((nuint)(g->TileCount * sizeof(int)), 64);
+        }
 
-        var dirty = &ld->Dirty;
-        dirty->Resize(0);
+        var rebuildList = &ld->RebuildList;
+        rebuildList->Resize(0);
+        ld->PairCount = 0;
 
         var s = &w->Sources;
         var alive = s->Alive.Pointer;
@@ -180,12 +195,20 @@ public static unsafe class World
         var stamps = s->Stamp.Pointer;
         var xs = s->X.Pointer;
         var ys = s->Y.Pointer;
+        var changes = s->ChangeGen.Pointer;
         var mark = ld->Mark;
+        var rebuild = ld->Rebuild;
+        var head = ld->Head;
         var tps = g->TilesPerSide;
+        var builtGen = g->BuiltGen;
 
         for (var i = 0; i < s->Count; i++)
         {
-            if (alive[i] == 0 || layers[i] != layer) continue;
+            if (layers[i] != layer) continue;
+
+            var isLive = alive[i] != 0;
+            var changed = changes[i] > builtGen;
+            if (!isLive && !changed) continue;
 
             var v = StampCatalog.Get(stamps[i]);
             TileBake.Footprint(xs[i], ys[i], g->OriginX, g->OriginY, g->Scale, v,
@@ -205,12 +228,34 @@ public static unsafe class World
             for (var tx = tx0; tx <= tx1; tx++)
             {
                 var tile = ty * tps + tx;
-                if (mark[tile] == gen) continue;
+                if (isLive)
+                {
+                    if (mark[tile] != gen)
+                    {
+                        mark[tile] = gen;
+                        head[tile] = -1;
+                    }
 
-                mark[tile] = gen;
-                var n = dirty->Length;
-                dirty->Resize(n + 1);
-                dirty->Span[n] = tile;
+                    var p = ld->PairCount++;
+                    if (ld->PairNext.Length < ld->PairCount)
+                    {
+                        var cap = Math.Max(64, ld->PairNext.Length * 2);
+                        ld->PairNext.Resize(cap);
+                        ld->PairSrc.Resize(cap);
+                    }
+
+                    ld->PairNext.Span[p] = head[tile];
+                    ld->PairSrc.Span[p] = i;
+                    head[tile] = p;
+                }
+
+                if (changed && rebuild[tile] != gen)
+                {
+                    rebuild[tile] = gen;
+                    var n = rebuildList->Length;
+                    rebuildList->Resize(n + 1);
+                    rebuildList->Span[n] = tile;
+                }
             }
         }
 
@@ -227,11 +272,11 @@ public static unsafe class World
             pages->TombstoneAt(i);
         }
 
-        var span = dirty->Span;
-        for (var i = 0; i < span.Length; i++) BuildTile(w, g, layer, span[i]);
+        var rspan = rebuildList->Span;
+        for (var i = 0; i < rspan.Length; i++) BuildTile(w, g, layer, rspan[i], gen);
     }
 
-    private static void BuildTile(WorldCtx* w, GridCtx* g, int layer, int tile)
+    private static void BuildTile(WorldCtx* w, GridCtx* g, int layer, int tile, uint gen)
     {
         var tps = g->TilesPerSide;
         var tileX0 = (tile % tps) * TileBake.TileSize;
@@ -245,17 +290,18 @@ public static unsafe class World
         new Span<int>(prev, TileBake.TileSize).Clear();
 
         var s = &w->Sources;
-        var alive = s->Alive.Pointer;
-        var layers = s->Layer.Pointer;
         var stamps = s->Stamp.Pointer;
         var gains = s->Gain.Pointer;
         var xs = s->X.Pointer;
         var ys = s->Y.Pointer;
 
-        for (var i = 0; i < s->Count; i++)
+        var ld = g->Layers + layer;
+        var pairNext = ld->PairNext.Pointer;
+        var pairSrc = ld->PairSrc.Pointer;
+        var p = ld->Mark[tile] == gen ? ld->Head[tile] : -1;
+        for (; p >= 0; p = pairNext[p])
         {
-            if (alive[i] == 0 || layers[i] != layer) continue;
-
+            var i = pairSrc[p];
             var v = StampCatalog.Get(stamps[i]);
             TileBake.Footprint(xs[i], ys[i], g->OriginX, g->OriginY, g->Scale, v,
                 out var px, out var py, out var fx, out var fy,
@@ -316,6 +362,7 @@ public static unsafe class World
         s->Layer.Resize(capacity);
         s->Gain.Resize(capacity);
         s->Alive.Resize(capacity);
+        s->ChangeGen.Resize(capacity);
     }
 
     public static short Query(byte world, byte grid, byte layer, int x, int y)
