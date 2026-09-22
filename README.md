@@ -50,6 +50,9 @@ dotnet run --project benchmarks -c Release --no-build -- --verify
 - `tests/` — oracle-based engine tests (box + raster, multi-resolution, saturation, removal).
 - `benchmarks/` — `--verify` receipts and `--timing` spot numbers.
 - `samples/world` — aggro range, multi-resolution traffic, baked raster stamp.
+- `viz/` — 3D field visualizer: `dotnet run --project viz -c Release` writes a self-contained
+  `viz/index.html` (WebGL heightfield per layer + source markers, no dependencies).
+- `bench/` — scratch cross-engine comparison harnesses + measured results (not in the solution).
 - `docs/model.md` — model, receipts, unsafe lifetime/aliasing/alignment/concurrency proof.
 
 ## License
