@@ -8,9 +8,9 @@ public sealed unsafe class FlowField : IDisposable
 
     public bool IsCreated => _direction.Length > 0;
 
-    public void Resolve(InfluenceField source)
+    public void Resolve(Field source)
     {
-        ArgumentNullException.ThrowIfNull(source);
+        if (!source.IsCreated) throw new ArgumentNullException(nameof(source));
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         _spec = source.Spec;
@@ -38,10 +38,10 @@ public sealed unsafe class FlowField : IDisposable
         }
     }
 
-    public FlowReader AsReader(InfluenceField source)
+    public FlowReader AsReader(Field source)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        ArgumentNullException.ThrowIfNull(source);
+        if (!source.IsCreated) throw new ArgumentNullException(nameof(source));
         return new FlowReader(
             source.SlotMap,
             source.LastWrittenPointer,

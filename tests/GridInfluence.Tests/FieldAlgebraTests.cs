@@ -4,13 +4,13 @@ namespace GridInfluence.Tests;
 
 public sealed class FieldAlgebraTests
 {
-    private static Stamp Rect(int x, int y, int w, int h, int weight)
+    private static Stamp Rect(int x, int y, int w, int h, sbyte weight)
         => new(InfluenceShape.SolidRect(new Int2(x, y), new Int2(w, h), weight), Int2.Zero);
 
     [Fact]
     public void Stamp_IsVisibleAfterTick()
     {
-        using var field = new InfluenceField(GridSpec.FromPowerOfTwo(3, 60));
+        using var field = new Field(GridSpec.FromPowerOfTwo(3, 60));
         var stats = field.Tick([Rect(0, 0, 1, 1, 10)], 1);
 
         Assert.Equal(10, field.AsReader().ReadCell(new Int2(0, 0)));
@@ -22,7 +22,7 @@ public sealed class FieldAlgebraTests
     [Fact]
     public void Reader_SeesPreviousTickOnly()
     {
-        using var field = new InfluenceField(GridSpec.FromPowerOfTwo(3, uint.MaxValue));
+        using var field = new Field(GridSpec.FromPowerOfTwo(3, uint.MaxValue));
         field.Tick([Rect(0, 0, 2, 2, 5)], 1);
         field.Tick([], 2);
 
@@ -32,7 +32,7 @@ public sealed class FieldAlgebraTests
     [Fact]
     public void IdleField_KeepsLastResolvedValues()
     {
-        using var field = new InfluenceField(GridSpec.FromPowerOfTwo(3, uint.MaxValue));
+        using var field = new Field(GridSpec.FromPowerOfTwo(3, uint.MaxValue));
         field.Tick([Rect(0, 0, 2, 2, 5)], 1);
 
         Assert.Equal(5, field.AsReader().ReadCell(new Int2(0, 0)));
@@ -41,7 +41,7 @@ public sealed class FieldAlgebraTests
     [Fact]
     public void OverlappingStamps_AddWeights()
     {
-        using var field = new InfluenceField(GridSpec.FromPowerOfTwo(3, 60));
+        using var field = new Field(GridSpec.FromPowerOfTwo(3, 60));
         field.Tick([Rect(0, 0, 3, 3, 4), Rect(2, 2, 3, 3, 6)], 1);
 
         var reader = field.AsReader();
@@ -53,7 +53,7 @@ public sealed class FieldAlgebraTests
     [Fact]
     public void NegativeStamps_CancelPositive()
     {
-        using var field = new InfluenceField(GridSpec.FromPowerOfTwo(3, 60));
+        using var field = new Field(GridSpec.FromPowerOfTwo(3, 60));
         field.Tick([Rect(0, 0, 2, 2, 7), Rect(1, 1, 2, 2, -7)], 1);
 
         var reader = field.AsReader();
@@ -74,8 +74,8 @@ public sealed class FieldAlgebraTests
         };
         Array.Reverse(stampsA);
 
-        using var fieldA = new InfluenceField(GridSpec.FromPowerOfTwo(3, 60));
-        using var fieldB = new InfluenceField(GridSpec.FromPowerOfTwo(3, 60));
+        using var fieldA = new Field(GridSpec.FromPowerOfTwo(3, 60));
+        using var fieldB = new Field(GridSpec.FromPowerOfTwo(3, 60));
         fieldA.Tick(stampsA, 1);
         fieldB.Tick(stampsA.Reverse().ToArray(), 1);
 
@@ -97,7 +97,7 @@ public sealed class FieldAlgebraTests
     [Fact]
     public void CellsOutsideAnyChunk_ReadZero()
     {
-        using var field = new InfluenceField(GridSpec.FromPowerOfTwo(3, 60));
+        using var field = new Field(GridSpec.FromPowerOfTwo(3, 60));
         field.Tick([Rect(0, 0, 4, 4, 2)], 1);
 
         var reader = field.AsReader();
@@ -108,7 +108,7 @@ public sealed class FieldAlgebraTests
     [Fact]
     public void ResetTick_EvictsAllChunks()
     {
-        using var field = new InfluenceField(GridSpec.FromPowerOfTwo(3, uint.MaxValue));
+        using var field = new Field(GridSpec.FromPowerOfTwo(3, uint.MaxValue));
         field.Tick([Rect(0, 0, 4, 4, 2)], 10);
         Assert.Equal(1, field.ActiveSlotCount);
 
@@ -120,7 +120,7 @@ public sealed class FieldAlgebraTests
     [Fact]
     public void TryGetChunk_MissingChunkReturnsFalse()
     {
-        using var field = new InfluenceField(GridSpec.FromPowerOfTwo(3, 60));
+        using var field = new Field(GridSpec.FromPowerOfTwo(3, 60));
         field.Tick([Rect(0, 0, 2, 2, 1)], 1);
 
         Assert.False(field.AsReader().TryGetChunk(new Int2(5, 5), out _));

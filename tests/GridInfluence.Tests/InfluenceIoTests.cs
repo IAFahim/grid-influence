@@ -70,7 +70,7 @@ public sealed class InfluenceIoTests : IDisposable
         Pnm.SaveGraySigned(path, weights, 8, 8, 65535);
         using var map = Pnm.LoadWeights(path);
 
-        using var field = new InfluenceField(GridSpec.FromPowerOfTwo(3, uint.MaxValue));
+        using var field = new Field(GridSpec.FromPowerOfTwo(3, uint.MaxValue));
         field.WriteRegion(new Int2(-3, 5), new Int2(map.Width, map.Height), map.Samples);
 
         var exported = new int[8 * 8];
