@@ -123,7 +123,14 @@ stays a record and influence is evaluated at query time.
 - **Queries**: `Cell` lazily builds a CSR tile index per (grid, layer) on first read after an
   apply (`BuiltGen` vs `ApplyGen`), then scans only that tile's marks. `Total` sums `Cell`.
 - **Determinism**: marks append in queue order; bucket order is stable within a tile.
-- **Concurrency**: single-threaded serial; no internal workers. Worlds are independent — callers
-  may apply different worlds on different threads.
+- **Concurrency**: `World.Apply` is serial. For external parallelism the caller runs
+  `World.BeginApply(w)` once (grid/layer fade decay, per-layer cursor reset — must be
+  single-threaded), then `World.ApplySlice(w, entry, start, count)` on disjoint item ranges from
+  any number of threads: mark slots are claimed by an `Interlocked` cursor so concurrent appends
+  never collide; each slice owns its items' `Mul`/`GridHint` bytes; item-level `Fade.Stamp` decay
+  happens inside `ApplySlice` after the weight is read, so a slice decays exactly its own items
+  once. Mark order within a layer is nondeterministic under slicing but cell sums are commutative,
+  so `Cell`/`Total` results are bit-identical to serial. Queries must run after all slices join.
+  Worlds are independent — different worlds on different threads never share state.
 - **Ownership**: all engine state is `NativeMemory`/`AlignedAlloc`; `ClearQueue` frees `Mul`/
   `GridHint`. No managed state on any warm path; `Queue`/`Apply`/`Cell`/`Total` allocate 0 B.

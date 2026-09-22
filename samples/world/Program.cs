@@ -110,10 +110,22 @@ unsafe class Scenarios
         }
 
         World.Queue(w, traffic, pos, bounds, stamps, fades, cars);
-        var t = Stopwatch.GetTimestamp();
-        World.Apply(w);
-        var applyNs = Stopwatch.GetElapsedTime(t).TotalNanoseconds;
-        Console.WriteLine($"{cars} cars over 2 grids — apply {applyNs:F0}ns ({applyNs / cars:F1}ns/car)");
+        for (var i = 0; i < 50; i++) World.Apply(w);
+        var bestSerial = double.MaxValue; var bestSliced = double.MaxValue;
+        for (var r = 0; r < 100; r++)
+        {
+            var t = Stopwatch.GetTimestamp();
+            World.Apply(w);
+            var el = Stopwatch.GetElapsedTime(t).TotalNanoseconds;
+            if (el < bestSerial) bestSerial = el;
+            t = Stopwatch.GetTimestamp();
+            World.BeginApply(w);
+            var slice = cars / 4;
+            Parallel.For(0, 4, sidx => World.ApplySlice(w, 0, sidx * slice, slice));
+            el = Stopwatch.GetElapsedTime(t).TotalNanoseconds;
+            if (el < bestSliced) bestSliced = el;
+        }
+        Console.WriteLine($"{cars} cars over 2 grids — serial {bestSerial:F0}ns ({bestSerial / cars:F1}ns/car), 4-way sliced {bestSliced:F0}ns");
 
         var junction = new Float2(512f, 512f);
         var jc = ToCell(0f, 1024f, 512, junction.X, junction.Y);

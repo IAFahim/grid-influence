@@ -1,4 +1,4 @@
-using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace GridInfluence;
@@ -12,13 +12,13 @@ public readonly struct Float2
 internal struct MarkRec
 {
     public int X, Y, R, W;
-    public int Shape;
 }
 
 internal unsafe struct LayerState
 {
     public MarkRec* Marks;
     public int MarksCount;
+    public int MarksCursor;
     public int MarksCapacity;
     public int* TileOffset;
     public int* TileCount;
@@ -37,6 +37,9 @@ internal unsafe struct GridCtx
     public byte GridFade;
     public byte* LayerFade;
     public int* LayerMul;
+    public uint* LayerGen;
+    public int* Gain;
+    public int HasLayerFade;
     public uint ApplyGen;
 }
 
@@ -51,6 +54,7 @@ internal unsafe struct QueueEntry
     public int Count;
     public int MulCapacity;
     public int HintCapacity;
+    public int HasFade;
     public byte Layer;
 }
 
@@ -77,6 +81,7 @@ public static unsafe class World
 
     internal static readonly byte* StampShape = (byte*)NativeMemory.AllocZeroed(256);
     internal static readonly sbyte* StampStrength = (sbyte*)NativeMemory.AllocZeroed(256);
+    internal static readonly ushort* StampData = (ushort*)NativeMemory.AllocZeroed(512);
     private static int _stampCount = 1;
 
     internal static readonly int* FadeRate = (int*)NativeMemory.AllocZeroed((nuint)(256 * sizeof(int)));
@@ -121,8 +126,10 @@ public static unsafe class World
         }
         g->LayerMul = (int*)NativeMemory.AlignedAlloc((nuint)(MaxLayers * sizeof(int)), 64);
         g->LayerFade = (byte*)NativeMemory.AllocZeroed((nuint)MaxLayers);
+        g->LayerGen = (uint*)NativeMemory.AllocZeroed((nuint)(MaxLayers * sizeof(uint)), 64);
+        g->Gain = (int*)NativeMemory.AlignedAlloc((nuint)(MaxLayers * sizeof(int)), 64);
         g->GridMul = 1000;
-        for (var i = 0; i < MaxLayers; i++) g->LayerMul[i] = 1000;
+        for (var i = 0; i < MaxLayers; i++) { g->LayerMul[i] = 1000; g->Gain[i] = 1000; }
         return id;
     }
 
@@ -163,6 +170,8 @@ public static unsafe class World
             q->GridHint = (sbyte*)NativeMemory.Alloc((nuint)q->HintCapacity);
             for (var i = 0; i < q->HintCapacity; i++) q->GridHint[i] = -1;
         }
+        q->HasFade = 0;
+        for (var i = 0; i < count; i++) if (fades[i] != 0) { q->HasFade = 1; break; }
     }
 
     public static void ClearQueue(byte world)
@@ -179,7 +188,11 @@ public static unsafe class World
     }
 
     public static void FadeLayer(byte world, byte grid, byte layer, byte fade)
-        => (Worlds + world)->Grids[grid].LayerFade[layer] = fade;
+    {
+        var g = (Worlds + world)->Grids + grid;
+        g->LayerFade[layer] = fade;
+        g->HasLayerFade = 1;
+    }
 
     public static void FadeGrid(byte world, byte grid, byte fade)
         => (Worlds + world)->Grids[grid].GridFade = fade;
@@ -195,66 +208,84 @@ public static unsafe class World
         w->QueueCapacity = cap;
     }
 
-    public static void Apply(byte world)
+    public static void BeginApply(byte world)
     {
         var w = Worlds + world;
         for (var gi = 0; gi < w->GridCount; gi++)
         {
             var g = w->Grids + gi;
             if (g->GridFade != 0) g->GridMul = g->GridMul * FadeRate[g->GridFade] / 1000;
+            if (g->HasLayerFade != 0)
+                for (var l = 0; l < w->LayerCount; l++)
+                    if (g->LayerFade[l] != 0) g->LayerMul[l] = g->LayerMul[l] * FadeRate[g->LayerFade[l]] / 1000;
             for (var l = 0; l < w->LayerCount; l++)
-                if (g->LayerFade[l] != 0) g->LayerMul[l] = g->LayerMul[l] * FadeRate[g->LayerFade[l]] / 1000;
-            for (var l = 0; l < MaxLayers; l++) g->Layers[l].MarksCount = 0;
+            {
+                g->Gain[l] = g->GridMul * g->LayerMul[l] / 1000;
+                g->Layers[l].MarksCursor = 0;
+            }
             g->ApplyGen++;
         }
+    }
 
-        for (var e = 0; e < w->QueueCount; e++)
+    public static void Apply(byte world)
+    {
+        BeginApply(world);
+        var w = Worlds + world;
+        for (var e = 0; e < w->QueueCount; e++) ApplySlice(world, e, 0, (w->Queue + e)->Count);
+    }
+
+    public static void ApplySlice(byte world, int queueEntry, int start, int count)
+    {
+        var w = Worlds + world;
+        var q = w->Queue + queueEntry;
+        var pos = q->Pos;
+        var bounds = q->Bounds;
+        var stamps = q->Stamps;
+        var fades = q->Fades;
+        var mul = q->Mul;
+        var hints = q->GridHint;
+        var hasFade = q->HasFade;
+        var end = Math.Min(start + count, q->Count);
+        var layer = q->Layer;
+        for (var i = start; i < end; i++)
         {
-            var q = w->Queue + e;
-            var pos = q->Pos;
-            var bounds = q->Bounds;
-            var stamps = q->Stamps;
-            var fades = q->Fades;
-            var mul = q->Mul;
-            var hints = q->GridHint;
-            var count = q->Count;
-            var layer = q->Layer;
-            for (var i = 0; i < count; i++)
+            var data = StampData[stamps[i]];
+            var wgt = hasFade != 0
+                ? (sbyte)(data & 0xFF) * mul[i] / 1000
+                : (sbyte)(data & 0xFF);
+            var fade = fades[i];
+            if (fade != 0) mul[i] = (short)(mul[i] * FadeRate[fade] / 1000);
+            if (wgt == 0) continue;
+            var shape = data >> 8;
+            var px = pos[i].X;
+            var py = pos[i].Y;
+            var bd = bounds[i];
+            var wx0 = px - bd; var wx1 = px + bd;
+            var wy0 = py - bd; var wy1 = py + bd;
+            var hint = hints[i];
+            if (hint >= 0 && hint < w->GridCount)
             {
-                var wgt = StampStrength[stamps[i]] * mul[i] / 1000;
-                var fade = fades[i];
-                if (fade != 0) mul[i] = (short)(mul[i] * FadeRate[fade] / 1000);
-                if (wgt == 0) continue;
-                var shape = StampShape[stamps[i]];
-                var px = pos[i].X;
-                var py = pos[i].Y;
-                var bd = bounds[i];
-                var wx0 = px - bd; var wx1 = px + bd;
-                var wy0 = py - bd; var wy1 = py + bd;
-                var hint = hints[i];
-                if (hint >= 0 && hint < w->GridCount)
+                var g = w->Grids + hint;
+                if (wx0 >= g->OriginX && wx1 <= g->OriginX + g->WorldSize &&
+                    wy0 >= g->OriginY && wy1 <= g->OriginY + g->WorldSize)
                 {
-                    var g = w->Grids + hint;
-                    if (wx0 >= g->OriginX && wx1 <= g->OriginX + g->WorldSize &&
-                        wy0 >= g->OriginY && wy1 <= g->OriginY + g->WorldSize)
-                    {
-                        EmitMark(w, g, layer, px, py, bd, wgt, shape);
-                        continue;
-                    }
-                }
-                var hit = false;
-                for (var gi = 0; gi < w->GridCount; gi++)
-                {
-                    var g = w->Grids + gi;
-                    if (wx1 < g->OriginX || wx0 > g->OriginX + g->WorldSize ||
-                        wy1 < g->OriginY || wy0 > g->OriginY + g->WorldSize) continue;
                     EmitMark(w, g, layer, px, py, bd, wgt, shape);
-                    if (!hit) { hints[i] = (sbyte)gi; hit = true; }
+                    continue;
                 }
+            }
+            var hit = false;
+            for (var gi = 0; gi < w->GridCount; gi++)
+            {
+                var g = w->Grids + gi;
+                if (wx1 < g->OriginX || wx0 > g->OriginX + g->WorldSize ||
+                    wy1 < g->OriginY || wy0 > g->OriginY + g->WorldSize) continue;
+                EmitMark(w, g, layer, px, py, bd, wgt, shape);
+                if (!hit) { hints[i] = (sbyte)gi; hit = true; }
             }
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void EmitMark(WorldCtx* w, GridCtx* g, int layer, float px, float py, float bd, int wgt, int shape)
     {
         var fx = (px - g->OriginX) * g->InvSize;
@@ -263,12 +294,13 @@ public static unsafe class World
         var cy = (int)(fy * g->Size);
         var r = (int)(bd * g->Scale);
         if (r < 0) r = 0;
-        var wfinal = wgt * g->GridMul / 1000 * g->LayerMul[layer] / 1000;
+        var wfinal = wgt * g->Gain[layer] / 1000;
         if (wfinal == 0) return;
         var ls = g->Layers + layer;
-        if (ls->MarksCount >= ls->MarksCapacity) GrowMarks(ls);
-        var m = ls->Marks + ls->MarksCount++;
-        m->X = cx; m->Y = cy; m->R = r; m->W = wfinal; m->Shape = shape;
+        var slot = Interlocked.Increment(ref ls->MarksCursor) - 1;
+        if (slot >= ls->MarksCapacity) return;
+        var m = ls->Marks + slot;
+        m->X = cx; m->Y = cy; m->R = r; m->W = wfinal | (shape << 24);
     }
 
     private static void GrowMarks(LayerState* ls)
@@ -337,8 +369,11 @@ public static unsafe class World
     public static short Cell(byte world, byte grid, byte layer, int x, int y)
     {
         var w = Worlds + world;
+        if (grid >= w->GridCount || layer >= w->LayerCount) return 0;
         var g = w->Grids + grid;
         var ls = g->Layers + layer;
+        if (ls->MarksCursor <= 0) return 0;
+        ls->MarksCount = Math.Min(ls->MarksCursor, ls->MarksCapacity);
         if (ls->BuiltGen != g->ApplyGen) BuildBuckets(g, layer);
         var ts = g->TilesPerSide;
         var tile = (y >> g->TileShift) * ts + (x >> g->TileShift);
@@ -351,10 +386,10 @@ public static unsafe class World
             var m = marks + ls->TileMarks[i];
             var dx = x - m->X; if (dx < 0) dx = -dx;
             var dy = y - m->Y; if (dy < 0) dy = -dy;
-            var covered = m->Shape == 0
+            var covered = (m->W >> 24) == 0
                 ? dx * dx + dy * dy <= (long)m->R * m->R
                 : dx <= m->R && dy <= m->R;
-            if (covered) sum += m->W;
+            if (covered) sum += m->W & 0xFFFFFF;
         }
         return (short)Math.Clamp(sum, short.MinValue, short.MaxValue);
     }
@@ -387,6 +422,7 @@ public static unsafe class Stamps
         var id = World.StampNext();
         World.StampShape[id] = shape;
         World.StampStrength[id] = strength;
+        World.StampData[id] = (ushort)((byte)strength | (shape << 8));
         return id;
     }
 }

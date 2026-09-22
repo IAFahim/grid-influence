@@ -164,3 +164,48 @@ public sealed unsafe class WorldTests
         Assert.Equal(100, World.Cell(w, g, l, 200, 200));
     }
 }
+
+public sealed unsafe class WorldParallelTests
+{
+    [Fact]
+    public void SlicedApply_MatchesSerialApply()
+    {
+        const int n = 3000;
+        var pos = (Float2*)NativeMemory.AlignedAlloc((nuint)(n * sizeof(Float2)), 64);
+        var bounds = (float*)NativeMemory.AlignedAlloc((nuint)(n * sizeof(float)), 64);
+        var stamps = (byte*)NativeMemory.Alloc((nuint)n);
+        var fades = (byte*)NativeMemory.Alloc((nuint)n);
+        uint rng = 13;
+        var stamp = Stamps.Box(100);
+        for (var i = 0; i < n; i++)
+        {
+            rng = rng * 1664525u + 1013904223u;
+            pos[i] = new Float2(rng % 2000u + 8f, (rng >> 8) % 220u + 8f);
+            bounds[i] = 8f; stamps[i] = stamp; fades[i] = 0;
+        }
+
+        var w1 = World.New();
+        var g1 = World.Grid(w1, 8, 0f, 0f, 256f);
+        for (var i = 1; i < 8; i++) World.Grid(w1, 8, i * 256f, 0f, 256f);
+        var l1 = World.Layer(w1);
+        World.Queue(w1, l1, pos, bounds, stamps, fades, n);
+        World.Apply(w1);
+
+        var w2 = World.New();
+        var g2 = World.Grid(w2, 8, 0f, 0f, 256f);
+        for (var i = 1; i < 8; i++) World.Grid(w2, 8, i * 256f, 0f, 256f);
+        var l2 = World.Layer(w2);
+        World.Queue(w2, l2, pos, bounds, stamps, fades, n);
+        World.BeginApply(w2);
+        var slice = n / 8;
+        Parallel.For(0, 8, s => World.ApplySlice(w2, 0, s * slice, slice));
+
+        for (var i = 0; i < 40; i++)
+        {
+            var gi = (int)(pos[i].X / 256f);
+            if (gi >= 8) continue;
+            var cx = (int)(pos[i].X - gi * 256f); var cy = (int)pos[i].Y;
+            Assert.Equal(World.Cell(w1, (byte)gi, l1, cx, cy), World.Cell(w2, (byte)gi, l2, cx, cy));
+        }
+    }
+}
