@@ -12,6 +12,7 @@ public readonly struct Float2
 internal struct MarkRec
 {
     public int X, Y, R, W;
+    public int Shape;
 }
 
 internal unsafe struct LayerState
@@ -224,6 +225,7 @@ public static unsafe class World
                 var fade = fades[i];
                 if (fade != 0) mul[i] = (short)(mul[i] * FadeRate[fade] / 1000);
                 if (wgt == 0) continue;
+                var shape = StampShape[stamps[i]];
                 var px = pos[i].X;
                 var py = pos[i].Y;
                 var bd = bounds[i];
@@ -236,7 +238,7 @@ public static unsafe class World
                     if (wx0 >= g->OriginX && wx1 <= g->OriginX + g->WorldSize &&
                         wy0 >= g->OriginY && wy1 <= g->OriginY + g->WorldSize)
                     {
-                        EmitMark(w, g, layer, px, py, bd, wgt);
+                        EmitMark(w, g, layer, px, py, bd, wgt, shape);
                         continue;
                     }
                 }
@@ -246,14 +248,14 @@ public static unsafe class World
                     var g = w->Grids + gi;
                     if (wx1 < g->OriginX || wx0 > g->OriginX + g->WorldSize ||
                         wy1 < g->OriginY || wy0 > g->OriginY + g->WorldSize) continue;
-                    EmitMark(w, g, layer, px, py, bd, wgt);
+                    EmitMark(w, g, layer, px, py, bd, wgt, shape);
                     if (!hit) { hints[i] = (sbyte)gi; hit = true; }
                 }
             }
         }
     }
 
-    private static void EmitMark(WorldCtx* w, GridCtx* g, int layer, float px, float py, float bd, int wgt)
+    private static void EmitMark(WorldCtx* w, GridCtx* g, int layer, float px, float py, float bd, int wgt, int shape)
     {
         var fx = (px - g->OriginX) * g->InvSize;
         var fy = (py - g->OriginY) * g->InvSize;
@@ -266,7 +268,7 @@ public static unsafe class World
         var ls = g->Layers + layer;
         if (ls->MarksCount >= ls->MarksCapacity) GrowMarks(ls);
         var m = ls->Marks + ls->MarksCount++;
-        m->X = cx; m->Y = cy; m->R = r; m->W = wfinal;
+        m->X = cx; m->Y = cy; m->R = r; m->W = wfinal; m->Shape = shape;
     }
 
     private static void GrowMarks(LayerState* ls)
@@ -349,7 +351,10 @@ public static unsafe class World
             var m = marks + ls->TileMarks[i];
             var dx = x - m->X; if (dx < 0) dx = -dx;
             var dy = y - m->Y; if (dy < 0) dy = -dy;
-            if (dx <= m->R && dy <= m->R) sum += m->W;
+            var covered = m->Shape == 0
+                ? dx * dx + dy * dy <= (long)m->R * m->R
+                : dx <= m->R && dy <= m->R;
+            if (covered) sum += m->W;
         }
         return (short)Math.Clamp(sum, short.MinValue, short.MaxValue);
     }
