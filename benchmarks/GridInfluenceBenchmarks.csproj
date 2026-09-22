@@ -9,8 +9,6 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="BenchmarkDotNet" Version="0.15.8" />
     <ProjectReference Include="../src/GridInfluence/GridInfluence.csproj" />
-    <ProjectReference Include="../src/GridInfluence.Io/GridInfluence.Io.csproj" />
   </ItemGroup>
 </Project>

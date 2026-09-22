@@ -20,7 +20,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\GridInfluence\GridInfluence.csproj" />
-    <ProjectReference Include="..\..\src\GridInfluence.Io\GridInfluence.Io.csproj" />
   </ItemGroup>
 
 </Project>

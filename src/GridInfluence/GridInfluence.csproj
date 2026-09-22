@@ -10,7 +10,7 @@
     <Version>$(GridInfluenceVersion)</Version>
     <PackageId>GridInfluence</PackageId>
     <Authors>IAFahim</Authors>
-    <Description>Chunked sparse integer influence fields with difference-array rasterization, prefix-sum resolve, and deterministic decay. Derived from BovineLabs Timeline Grid Influence (MIT).</Description>
+    <Description>Sparse tiled integer influence fields: difference-array boxes, bilinear raster stamps with sub-cell placement, per-tile prefix-sum resolve, multi-resolution grids, byte-handle API.</Description>
     <PackageProjectUrl>https://github.com/IAFahim/grid-influence</PackageProjectUrl>
     <RepositoryUrl>https://github.com/IAFahim/grid-influence</RepositoryUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

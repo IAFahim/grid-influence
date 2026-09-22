@@ -1,61 +1,37 @@
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace GridInfluence;
 
-public readonly struct Float2
+internal unsafe struct SourceColumns
 {
-    public readonly float X, Y;
-    public Float2(float x, float y) { X = x; Y = y; }
+    public NativeBuffer<float> X;
+    public NativeBuffer<float> Y;
+    public NativeBuffer<byte> Stamp;
+    public NativeBuffer<byte> Layer;
+    public NativeBuffer<byte> Gain;
+    public NativeBuffer<byte> Alive;
+    public int Count;
 }
 
-internal struct MarkRec
+internal unsafe struct LayerData
 {
-    public int X, Y, R, W;
-}
-
-internal unsafe struct LayerState
-{
-    public MarkRec* Marks;
-    public int MarksCount;
-    public int MarksCursor;
-    public int MarksCapacity;
-    public int* TileOffset;
-    public int* TileCount;
-    public int* TileMarks;
-    public int TileMarksCapacity;
-    public uint BuiltGen;
+    public PageMap Pages;
+    public uint* Mark;
+    public NativeBuffer<int> Dirty;
 }
 
 internal unsafe struct GridCtx
 {
-    public int Log2, Size, Mask;
-    public float OriginX, OriginY, WorldSize, Scale, InvSize;
-    public int TileShift, TilesPerSide, TileCountPerLayer;
-    public LayerState* Layers;
-    public int GridMul;
-    public byte GridFade;
-    public byte* LayerFade;
-    public int* LayerMul;
-    public uint* LayerGen;
-    public int* Gain;
-    public int HasLayerFade;
-    public uint ApplyGen;
-}
-
-internal unsafe struct QueueEntry
-{
-    public Float2* Pos;
-    public float* Bounds;
-    public byte* Stamps;
-    public byte* Fades;
-    public short* Mul;
-    public sbyte* GridHint;
-    public int Count;
-    public int MulCapacity;
-    public int HintCapacity;
-    public int HasFade;
-    public byte Layer;
+    public int Log2;
+    public int Size;
+    public float OriginX;
+    public float OriginY;
+    public float WorldSize;
+    public float Scale;
+    public int TilesPerSide;
+    public int TileCount;
+    public LayerData* Layers;
+    public uint BuiltGen;
 }
 
 internal unsafe struct WorldCtx
@@ -63,9 +39,12 @@ internal unsafe struct WorldCtx
     public GridCtx* Grids;
     public int GridCount;
     public int LayerCount;
-    public QueueEntry* Queue;
-    public int QueueCount;
-    public int QueueCapacity;
+    public SourceColumns Sources;
+    public int* LayerLive;
+    public uint SourceGen;
+    public int* Dense;
+    public int* Diff;
+    public int* Prev;
 }
 
 public static unsafe class World
@@ -73,356 +52,329 @@ public static unsafe class World
     private const int MaxWorlds = 32;
     private const int MaxGrids = 32;
     private const int MaxLayers = 32;
-    private const int TileBits = 5;
+    private const int MinPower = 5;
+    private const int MaxPower = 14;
+    private const int MaxGain = 16;
 
     private static readonly WorldCtx* Worlds =
         (WorldCtx*)NativeMemory.AllocZeroed((nuint)(MaxWorlds * sizeof(WorldCtx)));
     private static int _worldCount;
 
-    internal static readonly byte* StampShape = (byte*)NativeMemory.AllocZeroed(256);
-    internal static readonly sbyte* StampStrength = (sbyte*)NativeMemory.AllocZeroed(256);
-    internal static readonly ushort* StampData = (ushort*)NativeMemory.AllocZeroed(512);
-    private static int _stampCount = 1;
-
-    internal static readonly int* FadeRate = (int*)NativeMemory.AllocZeroed((nuint)(256 * sizeof(int)));
-    private static int _fadeCount = 1;
-
     public static byte New()
     {
+        if (_worldCount >= MaxWorlds) throw new InvalidOperationException("World limit reached.");
+
         var id = (byte)_worldCount++;
         var w = Worlds + id;
         w->Grids = (GridCtx*)NativeMemory.AllocZeroed((nuint)(MaxGrids * sizeof(GridCtx)));
-        w->QueueCapacity = 64;
-        w->Queue = (QueueEntry*)NativeMemory.AllocZeroed((nuint)(w->QueueCapacity * sizeof(QueueEntry)));
+        w->LayerLive = (int*)NativeMemory.AllocZeroed((nuint)(MaxLayers * sizeof(int)));
+        w->Dense = (int*)NativeMemory.AlignedAlloc((nuint)(TileBake.TileSize * TileBake.TileSize * sizeof(int)), 64);
+        w->Diff = (int*)NativeMemory.AlignedAlloc((nuint)(TileBake.DiffRows * TileBake.DiffPitch * sizeof(int)), 64);
+        w->Prev = (int*)NativeMemory.AlignedAlloc((nuint)(TileBake.TileSize * sizeof(int)), 64);
         return id;
     }
 
-    public static byte Grid(byte world, int power, float x, float y, float size)
+    internal static byte AddGrid(byte world, int power, float x, float y, float size)
     {
+        ArgumentOutOfRangeException.ThrowIfLessThan(power, MinPower);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(power, MaxPower);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(size, 0f);
+
         var w = Worlds + world;
+        if (w->GridCount >= MaxGrids) throw new InvalidOperationException("Grid limit reached.");
+
         var id = (byte)w->GridCount++;
         var g = w->Grids + id;
         g->Log2 = power;
         g->Size = 1 << power;
-        g->Mask = g->Size - 1;
         g->OriginX = x;
         g->OriginY = y;
         g->WorldSize = size;
         g->Scale = g->Size / size;
-        g->InvSize = 1f / size;
-        g->TileShift = Math.Min(TileBits, power);
-        g->TilesPerSide = g->Size >> g->TileShift;
-        g->TileCountPerLayer = g->TilesPerSide * g->TilesPerSide;
-        g->Layers = (LayerState*)NativeMemory.AllocZeroed((nuint)(MaxLayers * sizeof(LayerState)));
-        for (var l = 0; l < MaxLayers; l++)
-        {
-            var ls = g->Layers + l;
-            ls->MarksCapacity = 4096;
-            ls->Marks = (MarkRec*)NativeMemory.AlignedAlloc((nuint)(ls->MarksCapacity * sizeof(MarkRec)), 64);
-            ls->TileOffset = (int*)NativeMemory.AlignedAlloc((nuint)(g->TileCountPerLayer * sizeof(int)), 64);
-            ls->TileCount = (int*)NativeMemory.AlignedAlloc((nuint)(g->TileCountPerLayer * sizeof(int)), 64);
-            ls->TileMarksCapacity = 1 << 14;
-            ls->TileMarks = (int*)NativeMemory.AlignedAlloc((nuint)(ls->TileMarksCapacity * sizeof(int)), 64);
-        }
-        g->LayerMul = (int*)NativeMemory.AlignedAlloc((nuint)(MaxLayers * sizeof(int)), 64);
-        g->LayerFade = (byte*)NativeMemory.AllocZeroed((nuint)MaxLayers);
-        g->LayerGen = (uint*)NativeMemory.AllocZeroed((nuint)(MaxLayers * sizeof(uint)), 64);
-        g->Gain = (int*)NativeMemory.AlignedAlloc((nuint)(MaxLayers * sizeof(int)), 64);
-        g->GridMul = 1000;
-        for (var i = 0; i < MaxLayers; i++) { g->LayerMul[i] = 1000; g->Gain[i] = 1000; }
+        g->TilesPerSide = g->Size >> TileBake.TileBits;
+        g->TileCount = g->TilesPerSide * g->TilesPerSide;
+        g->Layers = (LayerData*)NativeMemory.AllocZeroed((nuint)(MaxLayers * sizeof(LayerData)));
         return id;
     }
 
-    public static byte Layer(byte world) => (byte)(Worlds + world)->LayerCount++;
-
-    internal static byte StampNext() => (byte)_stampCount++;
-    internal static byte FadeNext(int percent)
-    {
-        var id = (byte)_fadeCount++;
-        FadeRate[id] = 1000 - Math.Clamp(percent, 0, 100) * 10;
-        return id;
-    }
-
-    public static void Queue(
-        byte world, byte layer,
-        Float2* positions, float* bounds, byte* stamps, byte* fades, int count)
+    internal static byte AddLayer(byte world)
     {
         var w = Worlds + world;
-        if (w->QueueCount >= w->QueueCapacity) GrowQueue(w);
-        var q = w->Queue + w->QueueCount++;
-        q->Pos = positions;
-        q->Bounds = bounds;
-        q->Stamps = stamps;
-        q->Fades = fades;
-        q->Count = count;
-        q->Layer = layer;
-        if (q->MulCapacity < count)
-        {
-            if (q->Mul != null) NativeMemory.Free(q->Mul);
-            q->MulCapacity = Math.Max(count, 64);
-            q->Mul = (short*)NativeMemory.AlignedAlloc((nuint)(q->MulCapacity * sizeof(short)), 64);
-            for (var i = 0; i < q->MulCapacity; i++) q->Mul[i] = 1000;
-        }
-        if (q->HintCapacity < count)
-        {
-            if (q->GridHint != null) NativeMemory.Free(q->GridHint);
-            q->HintCapacity = Math.Max(count, 64);
-            q->GridHint = (sbyte*)NativeMemory.Alloc((nuint)q->HintCapacity);
-            for (var i = 0; i < q->HintCapacity; i++) q->GridHint[i] = -1;
-        }
-        q->HasFade = 0;
-        for (var i = 0; i < count; i++) if (fades[i] != 0) { q->HasFade = 1; break; }
+        if (w->LayerCount >= MaxLayers) throw new InvalidOperationException("Layer limit reached.");
+        return (byte)w->LayerCount++;
     }
 
-    public static void ClearQueue(byte world)
+    public static int Place(byte world, byte layer, float x, float y, byte stamp, int gain)
     {
         var w = Worlds + world;
-        for (var e = 0; e < w->QueueCount; e++)
-        {
-            var q = w->Queue + e;
-            if (q->Mul != null) { NativeMemory.Free(q->Mul); q->Mul = null; }
-            if (q->GridHint != null) { NativeMemory.Free(q->GridHint); q->GridHint = null; }
-            q->MulCapacity = 0; q->HintCapacity = 0;
-        }
-        w->QueueCount = 0;
+        if (layer >= w->LayerCount || stamp == 0 || stamp >= StampCatalog.Count) return -1;
+
+        var s = &w->Sources;
+        if (s->Count == s->X.Length) GrowSources(s);
+
+        var i = s->Count++;
+        s->X.Span[i] = x;
+        s->Y.Span[i] = y;
+        s->Stamp.Span[i] = stamp;
+        s->Layer.Span[i] = layer;
+        s->Gain.Span[i] = (byte)Math.Clamp(gain, 0, MaxGain);
+        s->Alive.Span[i] = 1;
+        w->LayerLive[layer]++;
+        w->SourceGen++;
+        return i;
     }
 
-    public static void FadeLayer(byte world, byte grid, byte layer, byte fade)
-    {
-        var g = (Worlds + world)->Grids + grid;
-        g->LayerFade[layer] = fade;
-        g->HasLayerFade = 1;
-    }
-
-    public static void FadeGrid(byte world, byte grid, byte fade)
-        => (Worlds + world)->Grids[grid].GridFade = fade;
-
-    private static void GrowQueue(WorldCtx* w)
-    {
-        var cap = w->QueueCapacity * 2;
-        var next = (QueueEntry*)NativeMemory.AllocZeroed((nuint)(cap * sizeof(QueueEntry)));
-        Buffer.MemoryCopy(w->Queue, next, (long)cap * sizeof(QueueEntry),
-            (long)w->QueueCapacity * sizeof(QueueEntry));
-        NativeMemory.Free(w->Queue);
-        w->Queue = next;
-        w->QueueCapacity = cap;
-    }
-
-    public static void BeginApply(byte world)
+    public static void Remove(byte world, int source)
     {
         var w = Worlds + world;
+        var s = &w->Sources;
+        if ((uint)source >= (uint)s->Count || s->Alive.Span[source] == 0) return;
+
+        s->Alive.Span[source] = 0;
+        w->LayerLive[s->Layer.Span[source]]--;
+        w->SourceGen++;
+    }
+
+    public static void Clear(byte world)
+    {
+        var w = Worlds + world;
+        var s = &w->Sources;
+        new Span<byte>(s->Alive.Pointer, s->Count).Clear();
+        s->Count = 0;
+        new Span<int>(w->LayerLive, MaxLayers).Clear();
+        w->SourceGen++;
+    }
+
+    public static void Process(byte world)
+    {
+        var w = Worlds + world;
+        var gen = w->SourceGen;
         for (var gi = 0; gi < w->GridCount; gi++)
         {
             var g = w->Grids + gi;
-            if (g->GridFade != 0) g->GridMul = g->GridMul * FadeRate[g->GridFade] / 1000;
-            if (g->HasLayerFade != 0)
-                for (var l = 0; l < w->LayerCount; l++)
-                    if (g->LayerFade[l] != 0) g->LayerMul[l] = g->LayerMul[l] * FadeRate[g->LayerFade[l]] / 1000;
-            for (var l = 0; l < w->LayerCount; l++)
-            {
-                g->Gain[l] = g->GridMul * g->LayerMul[l] / 1000;
-                g->Layers[l].MarksCursor = 0;
-            }
-            g->ApplyGen++;
+            if (g->BuiltGen == gen) continue;
+
+            for (var l = 0; l < w->LayerCount; l++) ProcessLayer(w, g, l, gen);
+            g->BuiltGen = gen;
         }
     }
 
-    public static void Apply(byte world)
+    private static void ProcessLayer(WorldCtx* w, GridCtx* g, int layer, uint gen)
     {
-        BeginApply(world);
-        var w = Worlds + world;
-        for (var e = 0; e < w->QueueCount; e++) ApplySlice(world, e, 0, (w->Queue + e)->Count);
-    }
-
-    public static void ApplySlice(byte world, int queueEntry, int start, int count)
-    {
-        var w = Worlds + world;
-        var q = w->Queue + queueEntry;
-        var pos = q->Pos;
-        var bounds = q->Bounds;
-        var stamps = q->Stamps;
-        var fades = q->Fades;
-        var mul = q->Mul;
-        var hints = q->GridHint;
-        var hasFade = q->HasFade;
-        var end = Math.Min(start + count, q->Count);
-        var layer = q->Layer;
-        for (var i = start; i < end; i++)
+        var ld = g->Layers + layer;
+        if (w->LayerLive[layer] == 0)
         {
-            var data = StampData[stamps[i]];
-            var wgt = hasFade != 0
-                ? (sbyte)(data & 0xFF) * mul[i] / 1000
-                : (sbyte)(data & 0xFF);
-            var fade = fades[i];
-            if (fade != 0) mul[i] = (short)(mul[i] * FadeRate[fade] / 1000);
-            if (wgt == 0) continue;
-            var shape = data >> 8;
-            var px = pos[i].X;
-            var py = pos[i].Y;
-            var bd = bounds[i];
-            var wx0 = px - bd; var wx1 = px + bd;
-            var wy0 = py - bd; var wy1 = py + bd;
-            var hint = hints[i];
-            if (hint >= 0 && hint < w->GridCount)
-            {
-                var g = w->Grids + hint;
-                if (wx0 >= g->OriginX && wx1 <= g->OriginX + g->WorldSize &&
-                    wy0 >= g->OriginY && wy1 <= g->OriginY + g->WorldSize)
-                {
-                    EmitMark(w, g, layer, px, py, bd, wgt, shape);
-                    continue;
-                }
-            }
-            var hit = false;
-            for (var gi = 0; gi < w->GridCount; gi++)
-            {
-                var g = w->Grids + gi;
-                if (wx1 < g->OriginX || wx0 > g->OriginX + g->WorldSize ||
-                    wy1 < g->OriginY || wy0 > g->OriginY + g->WorldSize) continue;
-                EmitMark(w, g, layer, px, py, bd, wgt, shape);
-                if (!hit) { hints[i] = (sbyte)gi; hit = true; }
-            }
+            RetireAll(&ld->Pages);
+            return;
         }
-    }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void EmitMark(WorldCtx* w, GridCtx* g, int layer, float px, float py, float bd, int wgt, int shape)
-    {
-        var fx = (px - g->OriginX) * g->InvSize;
-        var fy = (py - g->OriginY) * g->InvSize;
-        var cx = (int)(fx * g->Size);
-        var cy = (int)(fy * g->Size);
-        var r = (int)(bd * g->Scale);
-        if (r < 0) r = 0;
-        var wfinal = wgt * g->Gain[layer] / 1000;
-        if (wfinal == 0) return;
-        var ls = g->Layers + layer;
-        var slot = Interlocked.Increment(ref ls->MarksCursor) - 1;
-        if (slot >= ls->MarksCapacity) return;
-        var m = ls->Marks + slot;
-        m->X = cx; m->Y = cy; m->R = r; m->W = wfinal | (shape << 24);
-    }
+        if (ld->Mark == null)
+            ld->Mark = (uint*)NativeMemory.AllocZeroed((nuint)(g->TileCount * sizeof(uint)));
 
-    private static void GrowMarks(LayerState* ls)
-    {
-        var cap = ls->MarksCapacity * 2;
-        var next = (MarkRec*)NativeMemory.AlignedAlloc((nuint)(cap * sizeof(MarkRec)), 64);
-        Buffer.MemoryCopy(ls->Marks, next, (long)cap * sizeof(MarkRec), (long)ls->MarksCount * sizeof(MarkRec));
-        NativeMemory.AlignedFree(ls->Marks);
-        ls->Marks = next;
-        ls->MarksCapacity = cap;
-    }
+        var dirty = &ld->Dirty;
+        dirty->Resize(0);
 
-    private static void BuildBuckets(GridCtx* g, int layer)
-    {
-        var ls = g->Layers + layer;
-        var tiles = g->TileCountPerLayer;
-        new Span<int>(ls->TileCount, tiles).Clear();
-        var t = g->TileShift;
-        var ts = g->TilesPerSide;
-        var n = ls->MarksCount;
-        var marks = ls->Marks;
-        for (var i = 0; i < n; i++)
+        var s = &w->Sources;
+        var alive = s->Alive.Pointer;
+        var layers = s->Layer.Pointer;
+        var stamps = s->Stamp.Pointer;
+        var xs = s->X.Pointer;
+        var ys = s->Y.Pointer;
+        var mark = ld->Mark;
+        var tps = g->TilesPerSide;
+
+        for (var i = 0; i < s->Count; i++)
         {
-            var m = marks + i;
-            var tx0 = Math.Max(0, (m->X - m->R) >> t); var tx1 = Math.Min(ts - 1, (m->X + m->R) >> t);
-            var ty0 = Math.Max(0, (m->Y - m->R) >> t); var ty1 = Math.Min(ts - 1, (m->Y + m->R) >> t);
-            for (var ty = ty0; ty <= ty1; ty++)
-            for (var tx = tx0; tx <= tx1; tx++)
-                ls->TileCount[ty * ts + tx]++;
-        }
-        var run = 0;
-        for (var i = 0; i < tiles; i++) { ls->TileOffset[i] = run; run += ls->TileCount[i]; }
-        if (run > ls->TileMarksCapacity)
-        {
-            var cap = Math.Max(run, ls->TileMarksCapacity * 2);
-            var next = (int*)NativeMemory.AlignedAlloc((nuint)(cap * sizeof(int)), 64);
-            NativeMemory.AlignedFree(ls->TileMarks);
-            ls->TileMarks = next;
-            ls->TileMarksCapacity = cap;
-        }
-        var cursor = stackalloc int[4096];
-        for (var i = 0; i < tiles && i < 4096; i++) cursor[i] = ls->TileOffset[i];
-        int* curHeap = null;
-        if (tiles > 4096)
-        {
-            curHeap = (int*)NativeMemory.AlignedAlloc((nuint)(tiles * sizeof(int)), 64);
-            for (var i = 0; i < tiles; i++) curHeap[i] = ls->TileOffset[i];
-            cursor = curHeap;
-        }
-        for (var i = 0; i < n; i++)
-        {
-            var m = marks + i;
-            var tx0 = Math.Max(0, (m->X - m->R) >> t); var tx1 = Math.Min(ts - 1, (m->X + m->R) >> t);
-            var ty0 = Math.Max(0, (m->Y - m->R) >> t); var ty1 = Math.Min(ts - 1, (m->Y + m->R) >> t);
+            if (alive[i] == 0 || layers[i] != layer) continue;
+
+            var v = StampCatalog.Get(stamps[i]);
+            TileBake.Footprint(xs[i], ys[i], g->OriginX, g->OriginY, g->Scale, v,
+                out _, out _, out _, out _, out var x0, out var y0, out var x1, out var y1);
+
+            var cx0 = Math.Max(x0, 0);
+            var cy0 = Math.Max(y0, 0);
+            var cx1 = Math.Min(x1, g->Size);
+            var cy1 = Math.Min(y1, g->Size);
+            if (cx1 <= cx0 || cy1 <= cy0) continue;
+
+            var tx0 = cx0 >> TileBake.TileBits;
+            var tx1 = (cx1 - 1) >> TileBake.TileBits;
+            var ty0 = cy0 >> TileBake.TileBits;
+            var ty1 = (cy1 - 1) >> TileBake.TileBits;
             for (var ty = ty0; ty <= ty1; ty++)
             for (var tx = tx0; tx <= tx1; tx++)
             {
-                var at = ty * ts + tx;
-                ls->TileMarks[cursor[at]++] = i;
+                var tile = ty * tps + tx;
+                if (mark[tile] == gen) continue;
+
+                mark[tile] = gen;
+                var n = dirty->Length;
+                dirty->Resize(n + 1);
+                dirty->Span[n] = tile;
             }
         }
-        if (curHeap != null) NativeMemory.Free(curHeap);
-        ls->BuiltGen = g->ApplyGen;
+
+        var pages = &ld->Pages;
+        var used = pages->Used;
+        var keys = pages->Keys;
+        var pagePtrs = pages->Pages;
+        var slots = pages->SlotCount;
+        for (var i = 0; i < slots; i++)
+        {
+            if (used[i] != PageMap.Live || mark[keys[i]] == gen) continue;
+
+            NativeMemory.AlignedFree(pagePtrs[i]);
+            pages->TombstoneAt(i);
+        }
+
+        var span = dirty->Span;
+        for (var i = 0; i < span.Length; i++) BuildTile(w, g, layer, span[i]);
     }
 
-    public static short Cell(byte world, byte grid, byte layer, int x, int y)
+    private static void BuildTile(WorldCtx* w, GridCtx* g, int layer, int tile)
+    {
+        var tps = g->TilesPerSide;
+        var tileX0 = (tile % tps) * TileBake.TileSize;
+        var tileY0 = (tile / tps) * TileBake.TileSize;
+        var dense = w->Dense;
+        var diff = w->Diff;
+        var prev = w->Prev;
+
+        new Span<int>(dense, TileBake.TileSize * TileBake.TileSize).Clear();
+        new Span<int>(diff, TileBake.DiffRows * TileBake.DiffPitch).Clear();
+        new Span<int>(prev, TileBake.TileSize).Clear();
+
+        var s = &w->Sources;
+        var alive = s->Alive.Pointer;
+        var layers = s->Layer.Pointer;
+        var stamps = s->Stamp.Pointer;
+        var gains = s->Gain.Pointer;
+        var xs = s->X.Pointer;
+        var ys = s->Y.Pointer;
+
+        for (var i = 0; i < s->Count; i++)
+        {
+            if (alive[i] == 0 || layers[i] != layer) continue;
+
+            var v = StampCatalog.Get(stamps[i]);
+            TileBake.Footprint(xs[i], ys[i], g->OriginX, g->OriginY, g->Scale, v,
+                out var px, out var py, out var fx, out var fy,
+                out var x0, out var y0, out var x1, out var y1);
+            if (x1 <= tileX0 || x0 >= tileX0 + TileBake.TileSize ||
+                y1 <= tileY0 || y0 >= tileY0 + TileBake.TileSize) continue;
+
+            if (v->Kind == StampKind.ConstantRectangle)
+                TileBake.EmitBox(diff, tileX0, tileY0, px, py, fx, fy, v, gains[i]);
+            else
+                TileBake.EmitRaster(dense, tileX0, tileY0, px, py, fx, fy, v, gains[i]);
+        }
+
+        var pages = &g->Layers[layer].Pages;
+        var exists = pages->TryGet(tile, out var page);
+        var temp = stackalloc short[TileBake.TileSize * TileBake.TileSize];
+        var any = TileBake.Resolve(diff, dense, prev, exists ? page : temp);
+
+        if (any)
+        {
+            if (!exists)
+            {
+                page = (short*)NativeMemory.AlignedAlloc(
+                    (nuint)(TileBake.TileSize * TileBake.TileSize * sizeof(short)), 64);
+                Buffer.MemoryCopy(temp, page,
+                    TileBake.TileSize * TileBake.TileSize * sizeof(short),
+                    TileBake.TileSize * TileBake.TileSize * sizeof(short));
+                pages->Put(tile, page);
+            }
+        }
+        else if (exists)
+        {
+            pages->Remove(tile);
+            NativeMemory.AlignedFree(page);
+        }
+    }
+
+    private static void RetireAll(PageMap* pages)
+    {
+        var used = pages->Used;
+        var pagePtrs = pages->Pages;
+        var slots = pages->SlotCount;
+        for (var i = 0; i < slots; i++)
+        {
+            if (used[i] != PageMap.Live) continue;
+
+            NativeMemory.AlignedFree(pagePtrs[i]);
+            pages->TombstoneAt(i);
+        }
+    }
+
+    private static void GrowSources(SourceColumns* s)
+    {
+        var capacity = Math.Max(64, s->X.Length * 2);
+        s->X.Resize(capacity);
+        s->Y.Resize(capacity);
+        s->Stamp.Resize(capacity);
+        s->Layer.Resize(capacity);
+        s->Gain.Resize(capacity);
+        s->Alive.Resize(capacity);
+    }
+
+    public static short Query(byte world, byte grid, byte layer, int x, int y)
     {
         var w = Worlds + world;
         if (grid >= w->GridCount || layer >= w->LayerCount) return 0;
+
         var g = w->Grids + grid;
-        var ls = g->Layers + layer;
-        if (ls->MarksCursor <= 0) return 0;
-        ls->MarksCount = Math.Min(ls->MarksCursor, ls->MarksCapacity);
-        if (ls->BuiltGen != g->ApplyGen) BuildBuckets(g, layer);
-        var ts = g->TilesPerSide;
-        var tile = (y >> g->TileShift) * ts + (x >> g->TileShift);
-        var start = ls->TileOffset[tile];
-        var count = ls->TileCount[tile];
-        var marks = ls->Marks;
-        var sum = 0;
-        for (var i = start; i < start + count; i++)
-        {
-            var m = marks + ls->TileMarks[i];
-            var dx = x - m->X; if (dx < 0) dx = -dx;
-            var dy = y - m->Y; if (dy < 0) dy = -dy;
-            var covered = (m->W >> 24) == 0
-                ? dx * dx + dy * dy <= (long)m->R * m->R
-                : dx <= m->R && dy <= m->R;
-            if (covered) sum += m->W & 0xFFFFFF;
-        }
-        return (short)Math.Clamp(sum, short.MinValue, short.MaxValue);
+        if ((uint)x >= (uint)g->Size || (uint)y >= (uint)g->Size) return 0;
+
+        var pages = &g->Layers[layer].Pages;
+        if (!pages->TryGet((y >> TileBake.TileBits) * g->TilesPerSide + (x >> TileBake.TileBits), out var page))
+            return 0;
+
+        return page[(y & (TileBake.TileSize - 1)) * TileBake.TileSize + (x & (TileBake.TileSize - 1))];
     }
 
-    public static long Total(byte world, byte grid, byte layer, int x, int y, int wdt, int hgt)
+    public static long Query(byte world, byte grid, byte layer, int x, int y, int width, int height)
     {
+        var w = Worlds + world;
+        if (grid >= w->GridCount || layer >= w->LayerCount || width <= 0 || height <= 0) return 0;
+
+        var g = w->Grids + grid;
+        var x1 = Math.Min(x + width, g->Size);
+        var y1 = Math.Min(y + height, g->Size);
+        var x0 = Math.Max(x, 0);
+        var y0 = Math.Max(y, 0);
+        if (x1 <= x0 || y1 <= y0) return 0;
+
+        var pages = &g->Layers[layer].Pages;
+        var tps = g->TilesPerSide;
         var sum = 0L;
-        for (var cy = y; cy < y + hgt; cy++)
-        for (var cx = x; cx < x + wdt; cx++)
-            sum += Cell(world, grid, layer, cx, cy);
+        for (var ty = y0 >> TileBake.TileBits; ty <= (y1 - 1) >> TileBake.TileBits; ty++)
+        for (var tx = x0 >> TileBake.TileBits; tx <= (x1 - 1) >> TileBake.TileBits; tx++)
+        {
+            if (!pages->TryGet(ty * tps + tx, out var page)) continue;
+
+            var lx0 = Math.Max(x0 - tx * TileBake.TileSize, 0);
+            var ly0 = Math.Max(y0 - ty * TileBake.TileSize, 0);
+            var lx1 = Math.Min(x1 - tx * TileBake.TileSize, TileBake.TileSize);
+            var ly1 = Math.Min(y1 - ty * TileBake.TileSize, TileBake.TileSize);
+            for (var ly = ly0; ly < ly1; ly++)
+            {
+                var row = page + ly * TileBake.TileSize;
+                for (var lx = lx0; lx < lx1; lx++) sum += row[lx];
+            }
+        }
+
         return sum;
     }
-}
 
-public static unsafe class Fade
-{
-    public static byte Stamp(int percent) => World.FadeNext(percent);
-    public static byte Layer(int percent) => World.FadeNext(percent);
-    public static byte Grid(int percent) => World.FadeNext(percent);
-}
-
-public static unsafe class Stamps
-{
-    public static byte Circle(sbyte strength) => Register(0, strength);
-    public static byte Box(sbyte strength) => Register(1, strength);
-    public static byte Ring(sbyte strength) => Register(2, strength);
-
-    private static byte Register(byte shape, sbyte strength)
+    public static short QueryAt(byte world, byte grid, byte layer, float x, float y)
     {
-        var id = World.StampNext();
-        World.StampShape[id] = shape;
-        World.StampStrength[id] = strength;
-        World.StampData[id] = (ushort)((byte)strength | (shape << 8));
-        return id;
+        var w = Worlds + world;
+        if (grid >= w->GridCount || layer >= w->LayerCount) return 0;
+
+        var g = w->Grids + grid;
+        var cx = (int)MathF.Floor((x - g->OriginX) * g->Scale);
+        var cy = (int)MathF.Floor((y - g->OriginY) * g->Scale);
+        return Query(world, grid, layer, cx, cy);
     }
 }

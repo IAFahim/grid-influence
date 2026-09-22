@@ -1,136 +1,97 @@
 # GridInfluence
 
-Chunked, sparse, **integer** influence fields for .NET — a faithful port of the core of
-[BovineLabs Timeline Grid Influence](https://github.com/vex-studio/com.bovinelabs.timeline.grid.influence)
-(MIT, © 2026 BovineLabs) with the Unity/DOTS plumbing replaced by plain .NET. Derived code is used
-under the MIT license; the engine carries no Unity dependencies.
+Sparse tiled integer influence fields for .NET. One library, no dependencies.
 
 ## Model
 
-- The world is an unbounded cell grid. Stamps (solid rect, rect shell, disc, annulus, capsule,
-  ellipse, rounded rect, thick line, sector — all exact integer geometry) carry an `sbyte` weight
-  (−128…127; the type enforces the bound) and are rasterized into horizontal `WeightedRect` spans.
-- Cells are signed 16-bit integers. All accumulation saturates — cells stick at ±32767 instead of
-  wrapping. Exact while a cell's per-tick stamp accumulation stays inside int16 range (~258
-  coincident max-weight stamps); beyond that the bound-stick applies.
-- Each tick: prepare slots (budgets, retention eviction, compaction every 60 ticks, stencil
-  frontier — edge scans run in parallel, activation inserts stay serial and ordered) → rasterize
-  stamps → clear active chunk difference arrays → scatter ±weight at span corners → resolve
-  (inclusive prefix sum per chunk, then decay/spread stencil against the previous buffer). The
-  difference-array trick makes a tick cost O(spans + touched chunks), independent of stamped area.
-- An idle tick — no stamps, nothing live, no live stencil source — skips the pipeline entirely:
-  frame bookkeeping plus retention/compaction only (~12–45 ns).
-- Decay/spread are per tick: `kept = v·(1000−decay)/1000`, each 4-neighbour receives
-  `kept/spread`. Cross-chunk flow uses edge halos. Chunks deactivate only at exact zero.
-- Stamps sorted before budget accounting, so budget drops are insertion-order independent; pure
-  integer math makes results bit-identical across machines.
-- Stamps are per-tick emissions: a field rescheduled with no stamps shows no cells unless decay
-  keeps the frontier alive. `WriteRegion`/`ReadRegion` inject/snapshot bulk cells as unmanaged
-  spans.
+- A **world** (`World.New`, up to 32) owns **grids** and **layers**. A grid
+  (`Grid.New(world, power, x, y, size)`, up to 32 per world) is a power-of-two cell grid,
+  `2^power` cells per side (power 5–14), laid over a world-space rect `x,y,size`. A layer
+  (`Layer.New(world)`, up to 32 per world) is an independent field channel present on every grid.
+- **Stamps** (`Stamp.New(sbyte* data, w, h)` / `Stamp.Box(w, h, value)`, up to 255) are baked
+  cell-space content: `w×h` `sbyte` samples, centered on the placement position (origin offset
+  `−w/2` cells in Q8). Uniform rasters classify as `ConstantRectangle` and take the
+  difference-array path; the rest are `Raster` and deposit with sub-cell bilinear weights.
+  Raster storage keeps a one-sample zero border (pitch `w+2`, `(w+2)×(h+2)`) so the deposit loop
+  reads `x−1`/`y−pitch` unconditionally.
+- **Sources** are persistent placements: `World.Place(world, layer, x, y, stamp, gain)` returns an
+  int id; `World.Remove(world, id)`/`World.Clear(world)` retract. `gain` is an integer 0–16.
+  Positions are float world units, converted to cell space per grid as `floor((x−ox)·scale·256)`
+  in Q8 — the integer part is the cell, the low byte is the sub-cell phase.
+- **Process** rebuilds tiles, not cells-in-place: per (grid, layer), the union of live source
+  footprints (stamp `w+1×h+1` cells including sub-cell spill, clipped to the grid) marks dirty
+  tiles; pages under tiles no longer touched are retired; each dirty tile is rebuilt from every
+  overlapping source in placement order into a 32×32 `int16` page. Tiles with no live footprint
+  keep nothing — a missing page reads as 0.
+- **Tile bake**: constant rectangles split into ≤3×3 axis bands weighted by the Q8 sub-cell phase
+  and emit `±value` corners into a 33×48 `int32` difference array; raster fragments deposit into a
+  32×32 `int32` dense buffer as `RoundQ16(s·W00 + s[x−1]·W10 + s[y−1]·W01 + s[x−1,y−1]·W11)·gain`.
+  Resolve runs the horizontal inclusive prefix sum plus previous-row carry — a 2D prefix sum that
+  turns the difference array back into box coverage — adds dense, and saturates to `short`
+  **after** summation, so cancellation is preserved (int32 accumulators bound the worst case:
+  4·128·16 corner adds per cell per source × 100k sources stays inside int32).
+- **Query**: `World.Query(world, grid, layer, x, y)` is one hash lookup + page read;
+  `(x, y, w, h)` sums a rect tile-wise; `QueryAt` takes world-space floats. Invalid handles,
+  out-of-range cells, and missing pages all read 0 — no exceptions on the warm path.
+- **Determinism**: field contents are integer-only; the only float math is the world→cell
+  conversion (`multiply + floor`, correctly rounded IEEE ops). Deposits are commutative integer
+  adds applied in placement order, so pages are bit-identical across runs and machines.
+- **Idle process**: `SourceGen`/`BuiltGen` per grid skips untouched grids; an unchanged world
+  returns immediately — 0 B warm.
 
 ## Usage
 
 ```csharp
-var spec = GridSpec.FromPowerOfTwo(chunkPower: 5, retentionFrames: 256);
-using var front = new Field(spec);
-using var back = new Field(spec, parallelism: 8);   // optional persistent worker pool
+byte world = World.New();
+byte grid  = Grid.New(world, power: 8, x: 0f, y: 0f, size: 256f);   // 256×256 cells
+byte layer = Layer.New(world);
+byte stamp = Stamp.New(samples, 16, 16);   // or Stamp.Box(8, 8, 100)
 
-Stamp[] stamps = [new Stamp(InfluenceShape.Disc(Int2.Zero, 8, 100), new Int2(x, y))];
-back.Tick(stamps, Stencil.Create(front, decayPerMille: 300, spreadDenominator: 4));
-(front, back) = (back, front);   // front now holds the new frame
+int source = World.Place(world, layer, x: 128.5f, y: 64f, stamp, gain: 8);
+World.Process(world);
 
-var reader = front.AsReader();   // ref-struct borrow, zero allocation
-int value = reader.ReadCell(new Int2(12, -6));
-Int2 gradient = reader.Gradient(cell);          // un-normalized central difference
-float smooth = reader.SampleBilinear(4.5f, 7.5f);
+short v = World.Query(world, grid, layer, 64, 32);      // cell read
+long  t = World.Query(world, grid, layer, 0, 0, 32, 32); // region sum
+short p = World.QueryAt(world, grid, layer, 128f, 64f);  // world-space point
+World.Remove(world, source);
 ```
 
-Or drive everything from a JSON scene with PPM weight layers via
-[`GridInfluence.Io`](../src/GridInfluence.Io/pack-readme.md) and see
-[`samples/scene`](../samples/scene/README.md).
+A world can mix resolutions freely — `Grid 256x / 1024x / 32x` — each grid covering its own
+world rect at its own cell density; a source deposits into every grid it overlaps.
 
 ## Receipts
 
-Measured on the validation machine (i9-14900K, .NET 10, `benchmarks`), 256 stamps,
-4 ticks per invocation, median:
+`dotnet run --project benchmarks -c Release -- --verify` asserts:
 
-| World   | Naive per-cell scatter + full-grid decay | GridInfluence serial | GridInfluence par=32 | Speedup |
-|---------|------------------------------------------|----------------------|----------------------|---------|
-| 256²    | 1 755 µs                                 | ~230 µs              | ~230 µs              | ~7.6×   |
-| 1024²   | 26 781 µs                                | ~1 500 µs            | ~390 µs              | ~69×    |
-| 2048²   | 113 464 µs                               | ~1 470 µs            | ~240–380 µs          | ~300–470× |
+- `process-matches-oracle` — 300 randomly placed boxes vs a per-cell band oracle.
+- `process-deterministic` — identical worlds produce identical pages.
+- `remove-restores-baseline` — remove rebuilds tiles without the source.
+- `warm-process-allocates-0-bytes` — unchanged and place/remove churn, 0 B.
+- `warm-query-allocates-0-bytes` — 200k cell reads, 0 B.
+- `saturated-sum-clamps` — saturation sticks at ±32767 after summation.
 
-Queries: ReadCell ~3 ns, 32×32 capture ~0.1 µs (chunk-run SIMD). Idle tick 12.5 ns (nodecay) /
-45 ns (decay source) — 32 idle layers fit in ~0.4–1.5 µs. Warm ticks allocate 0 B serial and
-parallel (`--verify` receipts). Parallel resolve is bit-identical to serial and to the naive
-oracle (`pipeline-parallel-matches-naive-*`).
-
-The baseline is the cost model the difference-array design exists to replace: paint every covered
-cell of every stamp every tick plus a full-grid decay pass. Burst/Unity numbers are not compared —
-same-machine, same-fixture, one-variable comparisons only.
+Timing numbers are deliberately absent until PMU receipts exist for this engine.
 
 ## Unsafe proof
 
-- **Lifetime**: `Field` is a value-type handle to a `FieldContext` block allocated once via
-  `NativeMemory.AllocZeroed`; all field state lives in that block or in `NativeBuffer<T>` blocks it
-  owns. `Dispose` joins the worker pool, frees every buffer, frees the context block, and nulls the
-  handle — copies of the handle share the context and see `_disposed`. `FieldReader`/`ChunkView`/
-  `FlowReader` are `ref struct`s; they cannot escape the owning field's scope. The worker pool is the
-  only managed state: created once at construction, referenced by the context through a `GCHandle`,
-  freed at `Dispose`. No borrowed span, pointer, or reader is retained beyond its call.
-- **Aliasing**: a field's data pointer is only captured inside one pipeline phase at a time; the
-  stencil reads the previous buffer while writing the current one (disjoint objects enforced by
-  the pipeline). Chunk acquisition zeroes fresh and reused chunks, so no stale data leaks through
-  `WriteRegion`.
-- **Alignment**: every unmanaged block is 64-byte aligned; `ElementsPerChunk` strides are aligned
-  to at least 8 cells, which satisfies `Vector128`/`Vector256` `Vector<short>` loads in the resolve
-  pass. Vector adds use saturating `Vector.AddSaturate` semantics identical to the scalar clamp.
-- **Concurrency**: the serial warm path is single-threaded and deterministic. CoordMap and buffers
-  are single-writer. A defensive-copy bug on a readonly struct field (map table filled while its count
-  stayed 0) was found by stress and fixed; buffer growth on a readonly struct field is forbidden by
-  the same rule — all growable buffers live in non-readonly fields.
-  With `parallelism > 1` the field owns a fixed worker set created in the constructor and joined in
-  `Dispose`; no thread or event state is created on the tick path. Work items are claimed through one
-  packed `(generation << 32 | index)` counter via `Interlocked.Add`, so an item is never claimed twice
-  and a stale worker can only observe the current generation's published buffers — generation,
-  phase, count, stencil, and buffer pointers are written before the counter release and read after a
-  full fence on the claim. Each item writes disjoint storage: resolve/clear items touch only their
-  own chunk, frontier-scan items are read-only (activation inserts stay serial and ordered),
-  rasterize items touch only their own span slice, and scatter items update int16 corners through a
-  CAS on the containing int32 pair — saturating adds commute while inside range, so output is
-  bit-identical regardless of claim order.
-  Reads of the stencil source field are safe because the source is quiescent during the tick; a
-  self-referencing stencil forces the serial path. Warm parallel ticks allocate 0 B; the receipt is
-  `warm-parallel-tick-allocates-0-bytes`, and bit-exactness is `pipeline-parallel-matches-naive-*`.
-- **Total reads**: every reader returns 0 for missing or stale chunks; no input can cause an
-  out-of-bounds access. Budget-oversized stamps drop whole, deterministically.
-
-## World engine (`World`, `Stamps`, `Fade`)
-
-A second, virtual-field engine alongside `Field`: grids never rasterize to a cell buffer — a mark
-stays a record and influence is evaluated at query time.
-
-- **Shape**: `World` holds up to 32 `GridCtx` (power-of-two `Size`, world-space rect
-  `Origin/WorldSize`) and 32 layers. `Queue` stores caller-owned pointers (`Float2*`, `float*`,
-  `byte*`) — caller must keep the memory alive and stable between `Queue` and `ClearQueue`;
-  engine never copies or mutates caller arrays except `Mul`/`GridHint` (engine-owned scratch
-  parallel to each queue entry).
-- **Apply**: per queued item — decay `Mul` (fade id 0 skips), weight = `strength×mul/1000`,
-  route by mark-rect ∩ grid-rect (float world space; a mark straddling a seam emits into every
-  grid it overlaps → no clipping, no edge jitter), convert to cell ints, append a 16-byte
-  `MarkRec` to that grid-layer's contiguous mark table. `sbyte` strengths, int weights; cells
-  saturate to `short` at read.
-- **Queries**: `Cell` lazily builds a CSR tile index per (grid, layer) on first read after an
-  apply (`BuiltGen` vs `ApplyGen`), then scans only that tile's marks. `Total` sums `Cell`.
-- **Determinism**: marks append in queue order; bucket order is stable within a tile.
-- **Concurrency**: `World.Apply` is serial. For external parallelism the caller runs
-  `World.BeginApply(w)` once (grid/layer fade decay, per-layer cursor reset — must be
-  single-threaded), then `World.ApplySlice(w, entry, start, count)` on disjoint item ranges from
-  any number of threads: mark slots are claimed by an `Interlocked` cursor so concurrent appends
-  never collide; each slice owns its items' `Mul`/`GridHint` bytes; item-level `Fade.Stamp` decay
-  happens inside `ApplySlice` after the weight is read, so a slice decays exactly its own items
-  once. Mark order within a layer is nondeterministic under slicing but cell sums are commutative,
-  so `Cell`/`Total` results are bit-identical to serial. Queries must run after all slices join.
-  Worlds are independent — different worlds on different threads never share state.
-- **Ownership**: all engine state is `NativeMemory`/`AlignedAlloc`; `ClearQueue` frees `Mul`/
-  `GridHint`. No managed state on any warm path; `Queue`/`Apply`/`Cell`/`Total` allocate 0 B.
+- **Lifetime**: `Worlds` is a static arena of 32 `WorldCtx` allocated once; world contents are
+  `NativeMemory`/`AlignedAlloc` blocks owned by the context (grid array, `LayerData` array,
+  `Mark`/`Dirty` per layer, `Dense`/`Diff`/`Prev` scratch, `SourceColumns` buffers) or by a
+  `PageMap` (each `short*` page is owned by its slot and freed exactly when the page is removed,
+  retired, or the map is disposed). `Stamp` variants are catalog-owned for process lifetime.
+  No `World.Free` exists: worlds are process-lifetime singletons, so no pointer escapes an owner.
+- **Aliasing**: `Dense`/`Diff`/`Prev` are per-world scratch used by exactly one `BuildTile` at a
+  time; a page is written by exactly one tile build; sources are read-only during `Process`.
+  `stackalloc` temp in `BuildTile` never escapes. `PageMap` mutation happens only through its
+  owning `LayerData` pointer.
+- **Alignment**: every unmanaged block is 64-byte aligned; `Vector128<int>` loads/stores in
+  `Resolve`/`PackDense` use unaligned semantics (`LoadVector128`/`PackSignedSaturate` results
+  stored through scalar 8-byte writes on 8-byte-aligned short offsets). `stackalloc` temp is
+  16-byte aligned by the runtime.
+- **Concurrency**: `Process` and `Place` are serial; there is no shared mutable state between
+  worlds, so different worlds may be processed on different threads. Within one world all access
+  is single-threaded; no locks or interlocked ops exist.
+- **Bounds**: stamps clip to grid rects before marking; tile-local box corners land in
+  `[0,32]×[0,32]` of the difference array (rows 0–32 exist for the exclusive far edge; column 32
+  is written but never read, by design of the half-open prefix form). Raster fragments clip to
+  the tile and read only inside the padded stamp allocation.

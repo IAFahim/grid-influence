@@ -1,10 +1,8 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/GridInfluence/GridInfluence.csproj" />
-    <Project Path="src/GridInfluence.Io/GridInfluence.Io.csproj" />
   </Folder>
   <Folder Name="/samples/">
-    <Project Path="samples/scene/GridInfluence.Sample.csproj" />
     <Project Path="samples/world/GridInfluence.WorldSample.csproj" />
   </Folder>
   <Folder Name="/tests/">
