@@ -161,7 +161,7 @@ public class IoBenchmarks
 
     private byte[] _encoded = [];
     private WeightMap _map = null!;
-    private InfluenceField _field = null!;
+    private Field _field;
     private int[] _region = new int[Size * Size];
     private MemoryStream _stream = new(Size * Size * 2 + 64);
 
@@ -182,7 +182,7 @@ public class IoBenchmarks
         _encoded = File.ReadAllBytes(path);
         File.Delete(path);
 
-        _field = new InfluenceField(GridSpec.FromPowerOfTwo(5, uint.MaxValue));
+        _field = new Field(GridSpec.FromPowerOfTwo(5, uint.MaxValue));
     }
 
     [GlobalCleanup]
@@ -222,5 +222,60 @@ public class IoBenchmarks
     {
         _field.ReadRegion(Int2.Zero, new Int2(Size, Size), _region);
         return _region[0];
+    }
+}
+
+[Config(typeof(InfluenceConfig))]
+public unsafe class WorldBenchmarks
+{
+    [Params(1_000, 100_000)]
+    public int Items { get; set; }
+
+    [Params(1, 8, 32)]
+    public int Grids { get; set; }
+
+    private byte _world;
+    private byte _grid;
+    private byte _layer;
+    private Float2* _pos;
+    private float* _bounds;
+    private byte* _stamps;
+    private byte* _fades;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        _world = World.New();
+        _grid = World.Grid(_world, 8, 0f, 0f, 256f);
+        for (var i = 1; i < Grids; i++) World.Grid(_world, 8, i * 256f, 0f, 256f);
+        _layer = World.Layer(_world);
+        var s = Stamps.Box(100);
+        var rng = 7;
+        _pos = (Float2*)System.Runtime.InteropServices.NativeMemory.AlignedAlloc((nuint)(Items * sizeof(Float2)), 64);
+        _bounds = (float*)System.Runtime.InteropServices.NativeMemory.AlignedAlloc((nuint)(Items * sizeof(float)), 64);
+        _stamps = (byte*)System.Runtime.InteropServices.NativeMemory.Alloc((nuint)Items);
+        _fades = (byte*)System.Runtime.InteropServices.NativeMemory.Alloc((nuint)Items);
+        for (var i = 0; i < Items; i++)
+        {
+            rng = rng * 1664525 + 1013904223;
+            _pos[i] = new Float2(rng % (uint)(220 * Grids) + 18f, (rng >> 8) % 220 + 18f);
+            _bounds[i] = 8f;
+            _stamps[i] = s;
+            _fades[i] = 0;
+        }
+        World.Queue(_world, _layer, _pos, _bounds, _stamps, _fades, Items);
+        World.Apply(_world);
+    }
+
+    [Benchmark]
+    public void Apply() => World.Apply(_world);
+
+    [Benchmark]
+    public long CellQuery()
+    {
+        var sum = 0L;
+        for (var i = 0; i < 64; i++)
+            sum += World.Cell(_world, _grid, _layer, (int)_pos[i].X % 256, (int)_pos[i].Y % 256);
+        return sum;
     }
 }

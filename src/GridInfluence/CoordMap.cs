@@ -156,6 +156,28 @@ internal unsafe struct CoordMap : IDisposable
         _count++;
     }
 
+    public void Rehash()
+    {
+        if (_tombstones * 8 < _mask + 1) return;
+        var oldKeys = _keys;
+        var oldValues = _values;
+        var oldUsed = _used;
+        var oldMask = _mask;
+        _keys = (ulong*)NativeMemory.AlignedAlloc((nuint)(oldMask + 1) * sizeof(ulong), 64);
+        _values = (int*)NativeMemory.AlignedAlloc((nuint)(oldMask + 1) * sizeof(int), 64);
+        _used = (byte*)NativeMemory.AlignedAlloc((nuint)(oldMask + 1), 64);
+        _count = 0;
+        _tombstones = 0;
+        new Span<byte>(_used, oldMask + 1).Clear();
+        for (var i = 0; i <= oldMask; i++)
+        {
+            if (oldUsed != null && oldUsed[i] == Live) AddUnchecked(oldKeys[i], oldValues[i]);
+        }
+        NativeMemory.AlignedFree(oldKeys);
+        NativeMemory.AlignedFree(oldValues);
+        NativeMemory.AlignedFree(oldUsed);
+    }
+
     public void Dispose()
     {
         if (_keys == null) return;

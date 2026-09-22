@@ -118,18 +118,18 @@ internal sealed class NaiveField
 
 internal sealed class PipelineField : IDisposable
 {
-    private InfluenceField _front;
-    private InfluenceField _back;
+    private Field _front;
+    private Field _back;
     private uint _tick;
 
-    public PipelineField(int chunkPower, uint retention = uint.MaxValue)
+    public PipelineField(int chunkPower, uint retention = uint.MaxValue, int parallelism = 0)
     {
         var spec = GridSpec.FromPowerOfTwo(chunkPower, retention);
-        _front = new InfluenceField(spec);
-        _back = new InfluenceField(spec);
+        _front = new Field(spec, parallelism);
+        _back = new Field(spec, parallelism);
     }
 
-    public InfluenceField Front => _front;
+    public Field Front => _front;
 
     public FieldStats Tick(ReadOnlySpan<Stamp> stamps)
     {

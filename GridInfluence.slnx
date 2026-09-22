@@ -5,6 +5,7 @@
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/scene/GridInfluence.Sample.csproj" />
+    <Project Path="samples/world/GridInfluence.WorldSample.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/GridInfluence.Tests/GridInfluence.Tests.csproj" />

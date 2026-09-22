@@ -48,7 +48,7 @@ public static class PaintedCanvas
             }
 
             stamps.Add(new Stamp(
-                InfluenceShape.SolidRect(new Int2(x0, y), new Int2(x1 - x0 + 1, 1), weight),
+                InfluenceShape.SolidRect(new Int2(x0, y), new Int2(x1 - x0 + 1, 1), (sbyte)Math.Clamp(weight, sbyte.MinValue, sbyte.MaxValue)),
                 origin));
             index++;
         }

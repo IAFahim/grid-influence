@@ -28,6 +28,10 @@ jobs:
       - run: dotnet build GridInfluence.slnx -c Release -m:1
       - run: dotnet test GridInfluence.slnx -c Release --no-build
       - run: dotnet run --project samples/scene -c Release --no-build -- --scene samples/scene/assets/scene.json --out /tmp/frames
+      - run: dotnet run --project samples/world -c Release --no-build
       - run: dotnet run --project benchmarks -c Release --no-build -- --verify
+      - run: dotnet run --project benchmarks -c Release --no-build -- --verify
+        env:
+          DOTNET_EnableHWIntrinsic: "0"
       - run: dotnet pack src/GridInfluence -c Release --no-build -o artifacts/packages
       - run: dotnet pack src/GridInfluence.Io -c Release --no-build -o artifacts/packages
