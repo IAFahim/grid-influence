@@ -250,6 +250,43 @@ public sealed unsafe class EngineTests
     }
 
     [Fact]
+    public void Move_RelocatesContributionExactly()
+    {
+        var w = World.New();
+        var g = Grid.New(w, power: 6, x: 0f, y: 0f, size: 64f);
+        var l = Layer.New(w);
+        var stamp = Stamp.Box(8, 8, 100);
+        var s = World.Place(w, l, 32f, 32f, stamp, 8);
+        World.Process(w);
+        Assert.Equal(800, World.Query(w, g, l, 32, 32));
+
+        World.Move(w, s, 50f, 50f);
+        World.Process(w);
+        Assert.Equal(0, World.Query(w, g, l, 32, 32));
+        Assert.Equal(800, World.Query(w, g, l, 50, 50));
+    }
+
+    [Fact]
+    public void SetGain_AdjustsContributionExactly()
+    {
+        var w = World.New();
+        var g = Grid.New(w, power: 6, x: 0f, y: 0f, size: 64f);
+        var l = Layer.New(w);
+        var stamp = Stamp.Box(8, 8, 100);
+        var s = World.Place(w, l, 32f, 32f, stamp, 8);
+        World.Process(w);
+        Assert.Equal(800, World.Query(w, g, l, 32, 32));
+
+        World.SetGain(w, s, 4);
+        World.Process(w);
+        Assert.Equal(400, World.Query(w, g, l, 32, 32));
+
+        World.SetGain(w, s, 0);
+        World.Process(w);
+        Assert.Equal(0, World.Query(w, g, l, 32, 32));
+    }
+
+    [Fact]
     public void SubCellPlacement_SpreadsEdgeWeights()
     {
         var w = World.New();

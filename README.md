@@ -1,9 +1,10 @@
 # GridInfluence
 
-Sparse, tiled, **integer** influence fields for .NET. Constant-rectangle stamps deposit as four
-difference-array corners and rasters deposit with sub-cell bilinear weights; a per-tile 2D
-prefix-sum resolve rebuilds 32×32 `int16` pages, so processing costs `O(sources + dirty tiles)` —
-independent of stamped area. All state is unmanaged: warm `Process`/`Query` allocate **0 B**.
+Sparse, tiled, **integer** influence fields for .NET. Each live tile keeps a persistent
+accumulator — constant-rectangle stamps deposit as four difference-array corners, rasters with
+sub-cell bilinear weights — so `Place`/`Move`/`Remove` cost `O(footprint)`, never a source
+rescan. `Process` resolves each dirty tile once into a 32×32 `int16` page; `Query` is one hash
+lookup + read. All state is unmanaged: warm `Process`/`Query` allocate **0 B**.
 
 ## Quick start
 
@@ -28,8 +29,8 @@ World.Remove(world, source);                              // sources are persist
   power-of-two cell grid over its own world rect; a source deposits into every grid it overlaps.
 - **Sub-cell placement**: positions convert to Q8 cell space; constant rectangles split into
   weighted edge bands and rasters shift by bilinear weights — no cell snapping.
-- **Sparse pages**: tiles exist only where sources touch; a missing page reads as 0. Removing a
-  source rebuilds its old tiles without it.
+- **Sparse pages**: tiles exist only where sources touch; a missing page reads as 0. `Move` and
+  `Remove` deposit exact negations — contributions cancel bit-perfectly, no rebuild.
 - **Deterministic**: integer field math, placement-order deposits — bit-identical across runs.
 
 Full semantics and the unsafe proof: [`docs/model.md`](docs/model.md).

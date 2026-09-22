@@ -10,7 +10,7 @@ internal unsafe struct PageMap : IDisposable
     private const byte Tombstone = 2;
 
     private int* _keys;
-    private short** _pages;
+    private byte** _blocks;
     private byte* _used;
     private int _mask;
     private int _count;
@@ -24,7 +24,7 @@ internal unsafe struct PageMap : IDisposable
 
     public readonly int* Keys => _keys;
 
-    public readonly short** Pages => _pages;
+    public readonly byte** Blocks => _blocks;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int HashOf(int key)
@@ -39,20 +39,20 @@ internal unsafe struct PageMap : IDisposable
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public readonly bool TryGet(int tile, out short* page)
+    public readonly bool TryGet(int tile, out byte* block)
     {
         var index = IndexOf(tile);
         if (index >= 0)
         {
-            page = _pages[index];
+            block = _blocks[index];
             return true;
         }
 
-        page = null;
+        block = null;
         return false;
     }
 
-    public void Put(int tile, short* page)
+    public void Put(int tile, byte* block)
     {
         if (_mask == 0 || (_count + _tombstones + 1) * 4 >= (_mask + 1) * 3)
             GrowTo(Math.Max(16, (_count + _tombstones + 1) * 2));
@@ -63,7 +63,7 @@ internal unsafe struct PageMap : IDisposable
         {
             if (_used[index] == Live && _keys[index] == tile)
             {
-                _pages[index] = page;
+                _blocks[index] = block;
                 return;
             }
 
@@ -79,7 +79,7 @@ internal unsafe struct PageMap : IDisposable
         }
 
         _keys[index] = tile;
-        _pages[index] = page;
+        _blocks[index] = block;
         _used[index] = Live;
         _count++;
     }
@@ -115,18 +115,33 @@ internal unsafe struct PageMap : IDisposable
         return -1;
     }
 
+    public void Reset()
+    {
+        if (_used == null) return;
+
+        NativeMemory.AlignedFree(_keys);
+        NativeMemory.AlignedFree(_blocks);
+        NativeMemory.AlignedFree(_used);
+        _keys = null;
+        _blocks = null;
+        _used = null;
+        _mask = 0;
+        _count = 0;
+        _tombstones = 0;
+    }
+
     private void GrowTo(int minCapacity)
     {
         var capacity = 16;
         while (capacity * 4 < minCapacity * 3) capacity <<= 1;
 
         var oldKeys = _keys;
-        var oldPages = _pages;
+        var oldBlocks = _blocks;
         var oldUsed = _used;
         var oldMask = _mask;
 
         _keys = (int*)NativeMemory.AlignedAlloc((nuint)capacity * sizeof(int), 64);
-        _pages = (short**)NativeMemory.AlignedAlloc((nuint)capacity * (nuint)sizeof(short*), 64);
+        _blocks = (byte**)NativeMemory.AlignedAlloc((nuint)capacity * (nuint)sizeof(byte*), 64);
         _used = (byte*)NativeMemory.AlignedAlloc((nuint)capacity, 64);
         _mask = capacity - 1;
         _count = 0;
@@ -135,25 +150,25 @@ internal unsafe struct PageMap : IDisposable
 
         for (var i = 0; i <= oldMask; i++)
         {
-            if (oldUsed != null && oldUsed[i] == Live) AddUnchecked(oldKeys[i], oldPages[i]);
+            if (oldUsed != null && oldUsed[i] == Live) AddUnchecked(oldKeys[i], oldBlocks[i]);
         }
 
         if (oldKeys != null)
         {
             NativeMemory.AlignedFree(oldKeys);
-            NativeMemory.AlignedFree(oldPages);
+            NativeMemory.AlignedFree(oldBlocks);
             NativeMemory.AlignedFree(oldUsed);
         }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void AddUnchecked(int key, short* page)
+    private void AddUnchecked(int key, byte* block)
     {
         var index = HashOf(key) & _mask;
         while (_used[index] == Live) index = (index + 1) & _mask;
 
         _keys[index] = key;
-        _pages[index] = page;
+        _blocks[index] = block;
         _used[index] = Live;
         _count++;
     }
@@ -164,17 +179,9 @@ internal unsafe struct PageMap : IDisposable
 
         for (var i = 0; i <= _mask; i++)
         {
-            if (_used[i] == Live) NativeMemory.AlignedFree(_pages[i]);
+            if (_used[i] == Live) NativeMemory.AlignedFree(_blocks[i]);
         }
 
-        NativeMemory.AlignedFree(_keys);
-        NativeMemory.AlignedFree(_pages);
-        NativeMemory.AlignedFree(_used);
-        _keys = null;
-        _pages = null;
-        _used = null;
-        _mask = 0;
-        _count = 0;
-        _tombstones = 0;
+        Reset();
     }
 }
