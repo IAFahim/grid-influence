@@ -1,211 +1,204 @@
-using System.Runtime.InteropServices;
 using Xunit;
 
 namespace GridInfluence.Tests;
 
-public sealed unsafe class WorldTests
+public sealed class WorldTests
 {
-    private struct Data
+    private static (float x, float y)[] Scatter(int n, float worldSize, Random rng)
     {
-        public Float2* Pos; public float* Bounds; public byte* Stamps; public byte* Fades;
-    }
-
-    private static Data Make(int n, float worldSize, Random rng)
-    {
-        var d = new Data
-        {
-            Pos = (Float2*)NativeMemory.AlignedAlloc((nuint)(n * sizeof(Float2)), 64),
-            Bounds = (float*)NativeMemory.AlignedAlloc((nuint)(n * sizeof(float)), 64),
-            Stamps = (byte*)NativeMemory.Alloc((nuint)n),
-            Fades = (byte*)NativeMemory.Alloc((nuint)n),
-        };
+        var p = new (float, float)[n];
         for (var i = 0; i < n; i++)
-        {
-            d.Pos[i] = new Float2((float)(rng.NextDouble() * (worldSize - 36) + 18),
-                                  (float)(rng.NextDouble() * (worldSize - 36) + 18));
-            d.Bounds[i] = 8f;
-            d.Stamps[i] = 1;
-            d.Fades[i] = 0;
-        }
-        return d;
+            p[i] = ((float)(rng.NextDouble() * (worldSize - 36) + 18),
+                    (float)(rng.NextDouble() * (worldSize - 36) + 18));
+        return p;
     }
 
     [Fact]
-    public void Cell_MatchesWorldSpaceOracle()
+    public void Query_MatchesWorldSpaceOracle()
     {
         var w = World.New();
-        var g = World.Grid(w, power: 8, x: 0f, y: 0f, size: 256f);
-        var l = World.Layer(w);
-        var s = Stamps.Box(100);
+        var g = Grid.New(w, power: 8, x: 0f, y: 0f, size: 256f);
+        var l = Layer.New(w);
+        var s = Stamp.Box(100);
         var rng = new Random(42);
-        var d = Make(200, 256f, rng);
-        for (var i = 0; i < 200; i++) d.Stamps[i] = s;
-        World.Queue(w, l, d.Pos, d.Bounds, d.Stamps, d.Fades, 200);
-        World.Apply(w);
+        var pos = Scatter(200, 256f, rng);
+        foreach (var (x, y) in pos) World.Place(w, l, x, y, 8f, s);
+        World.Process(w);
         for (var i = 0; i < 30; i++)
         {
-            var px = (int)d.Pos[i].X; var py = (int)d.Pos[i].Y;
+            var px = (int)pos[i].x; var py = (int)pos[i].y;
             var expected = 0L;
-            for (var j = 0; j < 200; j++)
+            for (var j = 0; j < pos.Length; j++)
             {
-                var mx = (int)d.Pos[j].X; var my = (int)d.Pos[j].Y;
-                var mr = (int)d.Bounds[j];
-                var dx = Math.Abs(px - mx); var dy = Math.Abs(py - my);
-                if (dx <= mr && dy <= mr) expected += 100;
+                var mx = (int)pos[j].x; var my = (int)pos[j].y;
+                if (Math.Abs(px - mx) <= 8 && Math.Abs(py - my) <= 8) expected += 100;
             }
             Assert.Equal((short)Math.Clamp(expected, short.MinValue, short.MaxValue),
-                World.Cell(w, g, l, px, py));
+                World.Query(w, g, l, px, py));
         }
     }
 
     [Fact]
-    public void EdgeMarks_BleedIntoNeighbourGrid()
+    public void EdgeSources_BleedIntoNeighbourGrid()
     {
         var w = World.New();
-        var g0 = World.Grid(w, power: 8, x: 0f, y: 0f, size: 256f);
-        var g1 = World.Grid(w, power: 8, x: 256f, y: 0f, size: 256f);
-        var l = World.Layer(w);
-        var s = Stamps.Box(100);
-        var pos = (Float2*)NativeMemory.AlignedAlloc((nuint)sizeof(Float2), 64);
-        var bounds = (float*)NativeMemory.AlignedAlloc((nuint)sizeof(float), 64);
-        var stamps = (byte*)NativeMemory.Alloc(1);
-        var fades = (byte*)NativeMemory.Alloc(1);
-        pos[0] = new Float2(252f, 100f);
-        bounds[0] = 8f; stamps[0] = s; fades[0] = 0;
-        World.Queue(w, l, pos, bounds, stamps, fades, 1);
-        World.Apply(w);
-        Assert.Equal(100, World.Cell(w, g0, l, 252, 100));
-        Assert.Equal(100, World.Cell(w, g1, l, 0, 100));
-        Assert.Equal(100, World.Cell(w, g1, l, 4, 100));
-        Assert.Equal(0, World.Cell(w, g1, l, 20, 100));
+        var g0 = Grid.New(w, power: 8, x: 0f, y: 0f, size: 256f);
+        var g1 = Grid.New(w, power: 8, x: 256f, y: 0f, size: 256f);
+        var l = Layer.New(w);
+        var s = Stamp.Box(100);
+        World.Place(w, l, 252f, 100f, 8f, s);
+        World.Process(w);
+        Assert.Equal(100, World.Query(w, g0, l, 252, 100));
+        Assert.Equal(100, World.Query(w, g1, l, 0, 100));
+        Assert.Equal(100, World.Query(w, g1, l, 4, 100));
+        Assert.Equal(0, World.Query(w, g1, l, 20, 100));
     }
 
     [Fact]
     public void DifferentResolutions_ScaleBoundsIndependently()
     {
         var w = World.New();
-        var g0 = World.Grid(w, power: 8, x: 0f, y: 0f, size: 256f);
-        var g1 = World.Grid(w, power: 6, x: 256f, y: 0f, size: 256f);
-        var l = World.Layer(w);
-        var s = Stamps.Box(100);
-        var pos = (Float2*)NativeMemory.AlignedAlloc((nuint)(2 * sizeof(Float2)), 64);
-        var bounds = (float*)NativeMemory.AlignedAlloc((nuint)(2 * sizeof(float)), 64);
-        var stamps = (byte*)NativeMemory.Alloc(2);
-        var fades = (byte*)NativeMemory.Alloc(2);
-        pos[0] = new Float2(128f, 128f); bounds[0] = 8f;
-        pos[1] = new Float2(300f, 128f); bounds[1] = 8f;
-        stamps[0] = s; stamps[1] = s; fades[0] = 0; fades[1] = 0;
-        World.Queue(w, l, pos, bounds, stamps, fades, 2);
-        World.Apply(w);
-        Assert.Equal(100, World.Cell(w, g0, l, 128, 128));
-        Assert.Equal(0, World.Cell(w, g0, l, 128 + 20, 128));
-        Assert.Equal(100, World.Cell(w, g1, l, 11, 32));
-        Assert.Equal(0, World.Cell(w, g1, l, 11 + 8, 32));
+        var g0 = Grid.New(w, power: 8, x: 0f, y: 0f, size: 256f);
+        var g1 = Grid.New(w, power: 6, x: 256f, y: 0f, size: 256f);
+        var l = Layer.New(w);
+        var s = Stamp.Box(100);
+        World.Place(w, l, 128f, 128f, 8f, s);
+        World.Place(w, l, 300f, 128f, 8f, s);
+        World.Process(w);
+        Assert.Equal(100, World.Query(w, g0, l, 128, 128));
+        Assert.Equal(0, World.Query(w, g0, l, 128 + 20, 128));
+        Assert.Equal(100, World.Query(w, g1, l, 11, 32));
+        Assert.Equal(0, World.Query(w, g1, l, 11 + 8, 32));
     }
 
     [Fact]
     public void NegativeWorldPositions_RouteAndConvert()
     {
         var w = World.New();
-        var g = World.Grid(w, power: 8, x: -512f, y: -512f, size: 512f);
-        var l = World.Layer(w);
-        var s = Stamps.Box(100);
-        var pos = (Float2*)NativeMemory.AlignedAlloc((nuint)sizeof(Float2), 64);
-        var bounds = (float*)NativeMemory.AlignedAlloc((nuint)sizeof(float), 64);
-        var stamps = (byte*)NativeMemory.Alloc(1);
-        var fades = (byte*)NativeMemory.Alloc(1);
-        pos[0] = new Float2(-256f, -256f);
-        bounds[0] = 8f; stamps[0] = s; fades[0] = 0;
-        World.Queue(w, l, pos, bounds, stamps, fades, 1);
-        World.Apply(w);
-        Assert.Equal(100, World.Cell(w, g, l, 128, 128));
+        var g = Grid.New(w, power: 8, x: -512f, y: -512f, size: 512f);
+        var l = Layer.New(w);
+        var s = Stamp.Box(100);
+        World.Place(w, l, -256f, -256f, 8f, s);
+        World.Process(w);
+        Assert.Equal(100, World.Query(w, g, l, 128, 128));
     }
 
     [Fact]
-    public void FadeStamp_DecaysContributionEachApply()
+    public void FadeStamp_DecaysContributionEachProcess()
     {
         var w = World.New();
-        var g = World.Grid(w, power: 8, x: 0f, y: 0f, size: 256f);
-        var l = World.Layer(w);
-        var s = Stamps.Box(100);
+        var g = Grid.New(w, power: 8, x: 0f, y: 0f, size: 256f);
+        var l = Layer.New(w);
+        var s = Stamp.Box(100);
         var f = Fade.Stamp(50);
-        var pos = (Float2*)NativeMemory.AlignedAlloc((nuint)sizeof(Float2), 64);
-        var bounds = (float*)NativeMemory.AlignedAlloc((nuint)sizeof(float), 64);
-        var stamps = (byte*)NativeMemory.Alloc(1);
-        var fades = (byte*)NativeMemory.Alloc(1);
-        pos[0] = new Float2(128f, 128f); bounds[0] = 8f; stamps[0] = s; fades[0] = f;
-        World.Queue(w, l, pos, bounds, stamps, fades, 1);
-        World.Apply(w);
-        var first = World.Cell(w, g, l, 128, 128);
-        World.Apply(w);
-        var second = World.Cell(w, g, l, 128, 128);
+        World.Place(w, l, 128f, 128f, 8f, s, f);
+        World.Process(w);
+        var first = World.Query(w, g, l, 128, 128);
+        World.Process(w);
+        var second = World.Query(w, g, l, 128, 128);
         Assert.Equal(100, first);
         Assert.True(second < first);
     }
 
     [Fact]
-    public void QueuedEntity_MovingPosition_MovesInfluence()
+    public void Move_RepositionsInfluence()
     {
         var w = World.New();
-        var g = World.Grid(w, power: 8, x: 0f, y: 0f, size: 256f);
-        var l = World.Layer(w);
-        var s = Stamps.Box(100);
-        var pos = (Float2*)NativeMemory.AlignedAlloc((nuint)sizeof(Float2), 64);
-        var bounds = (float*)NativeMemory.AlignedAlloc((nuint)sizeof(float), 64);
-        var stamps = (byte*)NativeMemory.Alloc(1);
-        var fades = (byte*)NativeMemory.Alloc(1);
-        pos[0] = new Float2(50f, 50f); bounds[0] = 8f; stamps[0] = s; fades[0] = 0;
-        World.Queue(w, l, pos, bounds, stamps, fades, 1);
-        World.Apply(w);
-        Assert.Equal(100, World.Cell(w, g, l, 50, 50));
-        pos[0] = new Float2(200f, 200f);
-        World.Apply(w);
-        Assert.Equal(0, World.Cell(w, g, l, 50, 50));
-        Assert.Equal(100, World.Cell(w, g, l, 200, 200));
+        var g = Grid.New(w, power: 8, x: 0f, y: 0f, size: 256f);
+        var l = Layer.New(w);
+        var s = Stamp.Box(100);
+        var src = World.Place(w, l, 50f, 50f, 8f, s);
+        World.Process(w);
+        Assert.Equal(100, World.Query(w, g, l, 50, 50));
+        World.Move(w, src, 200f, 200f);
+        World.Process(w);
+        Assert.Equal(0, World.Query(w, g, l, 50, 50));
+        Assert.Equal(100, World.Query(w, g, l, 200, 200));
+    }
+
+    [Fact]
+    public void Remove_RetractsInfluence()
+    {
+        var w = World.New();
+        var g = Grid.New(w, power: 8, x: 0f, y: 0f, size: 256f);
+        var l = Layer.New(w);
+        var s = Stamp.Box(100);
+        var src = World.Place(w, l, 50f, 50f, 8f, s);
+        World.Process(w);
+        Assert.Equal(100, World.Query(w, g, l, 50, 50));
+        World.Remove(w, src);
+        World.Process(w);
+        Assert.Equal(0, World.Query(w, g, l, 50, 50));
+    }
+
+    [Fact]
+    public void QueryAt_MapsWorldToCell()
+    {
+        var w = World.New();
+        var g = Grid.New(w, power: 7, x: 0f, y: 0f, size: 256f);
+        var l = Layer.New(w);
+        var s = Stamp.Circle(40);
+        World.Place(w, l, 128f, 128f, 8f, s);
+        World.Process(w);
+        Assert.Equal(40, World.QueryAt(w, g, l, 128f, 128f));
+        Assert.Equal(0, World.QueryAt(w, g, l, -10f, 128f));
+        Assert.Equal(0, World.QueryAt(w, g, l, 999f, 128f));
+    }
+
+    [Fact]
+    public void RegionQuery_SumsCells()
+    {
+        var w = World.New();
+        var g = Grid.New(w, power: 7, x: 0f, y: 0f, size: 128f);
+        var l = Layer.New(w);
+        var s = Stamp.Box(25);
+        World.Place(w, l, 40f, 40f, 8f, s);
+        World.Process(w);
+        var cell = (int)(40f * 128 / 128);
+        var total = 0L;
+        for (var cy = cell - 9; cy <= cell + 9; cy++)
+        for (var cx = cell - 9; cx <= cell + 9; cx++)
+            total += World.Query(w, g, l, cx, cy);
+        Assert.Equal(total, World.Query(w, g, l, cell - 9, cell - 9, 19, 19));
     }
 }
 
-public sealed unsafe class WorldParallelTests
+public sealed class WorldParallelTests
 {
     [Fact]
-    public void SlicedApply_MatchesSerialApply()
+    public void SlicedProcess_MatchesSerialProcess()
     {
         const int n = 3000;
-        var pos = (Float2*)NativeMemory.AlignedAlloc((nuint)(n * sizeof(Float2)), 64);
-        var bounds = (float*)NativeMemory.AlignedAlloc((nuint)(n * sizeof(float)), 64);
-        var stamps = (byte*)NativeMemory.Alloc((nuint)n);
-        var fades = (byte*)NativeMemory.Alloc((nuint)n);
+        var w1 = World.New();
+        var g1 = Grid.New(w1, 8, 0f, 0f, 256f);
+        for (var i = 1; i < 8; i++) Grid.New(w1, 8, i * 256f, 0f, 256f);
+        var l1 = Layer.New(w1);
+        var w2 = World.New();
+        var g2 = Grid.New(w2, 8, 0f, 0f, 256f);
+        for (var i = 1; i < 8; i++) Grid.New(w2, 8, i * 256f, 0f, 256f);
+        var l2 = Layer.New(w2);
+        var stamp = Stamp.Box(100);
         uint rng = 13;
-        var stamp = Stamps.Box(100);
+        var pos = new (float, float)[n];
         for (var i = 0; i < n; i++)
         {
             rng = rng * 1664525u + 1013904223u;
-            pos[i] = new Float2(rng % 2000u + 8f, (rng >> 8) % 220u + 8f);
-            bounds[i] = 8f; stamps[i] = stamp; fades[i] = 0;
+            pos[i] = (rng % 2000u + 8f, (rng >> 8) % 220u + 8f);
+            World.Place(w1, l1, pos[i].Item1, pos[i].Item2, 8f, stamp);
+            World.Place(w2, l2, pos[i].Item1, pos[i].Item2, 8f, stamp);
         }
 
-        var w1 = World.New();
-        var g1 = World.Grid(w1, 8, 0f, 0f, 256f);
-        for (var i = 1; i < 8; i++) World.Grid(w1, 8, i * 256f, 0f, 256f);
-        var l1 = World.Layer(w1);
-        World.Queue(w1, l1, pos, bounds, stamps, fades, n);
-        World.Apply(w1);
-
-        var w2 = World.New();
-        var g2 = World.Grid(w2, 8, 0f, 0f, 256f);
-        for (var i = 1; i < 8; i++) World.Grid(w2, 8, i * 256f, 0f, 256f);
-        var l2 = World.Layer(w2);
-        World.Queue(w2, l2, pos, bounds, stamps, fades, n);
-        World.BeginApply(w2);
+        World.Process(w1);
+        World.BeginProcess(w2);
         var slice = n / 8;
-        Parallel.For(0, 8, s => World.ApplySlice(w2, 0, s * slice, slice));
+        Parallel.For(0, 8, s => World.ProcessSlice(w2, s * slice, slice));
 
         for (var i = 0; i < 40; i++)
         {
-            var gi = (int)(pos[i].X / 256f);
+            var gi = (int)(pos[i].Item1 / 256f);
             if (gi >= 8) continue;
-            var cx = (int)(pos[i].X - gi * 256f); var cy = (int)pos[i].Y;
-            Assert.Equal(World.Cell(w1, (byte)gi, l1, cx, cy), World.Cell(w2, (byte)gi, l2, cx, cy));
+            var cx = (int)(pos[i].Item1 - gi * 256f); var cy = (int)pos[i].Item2;
+            Assert.Equal(World.Query(w1, (byte)gi, l1, cx, cy), World.Query(w2, (byte)gi, l2, cx, cy));
         }
     }
 }

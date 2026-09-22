@@ -6,7 +6,7 @@ public static class StampOrder
 {
     private const int InsertionThreshold = 16;
 
-    public static int Compare(in Stamp a, in Stamp b)
+    public static int Compare(in FieldStamp a, in FieldStamp b)
     {
         var c = CompareOrigin(in a, in b);
         if (c != 0) return c;
@@ -15,7 +15,7 @@ public static class StampOrder
         return c != 0 ? c : CompareShapeExtents(in a, in b);
     }
 
-    public static void Sort(Span<Stamp> stamps)
+    public static void Sort(Span<FieldStamp> stamps)
     {
         if (stamps.Length < 2) return;
 
@@ -23,7 +23,7 @@ public static class StampOrder
         Introsort(stamps, depth);
     }
 
-    private static void Introsort(Span<Stamp> stamps, int depth)
+    private static void Introsort(Span<FieldStamp> stamps, int depth)
     {
         while (stamps.Length > InsertionThreshold)
         {
@@ -42,7 +42,7 @@ public static class StampOrder
         Insertion(stamps);
     }
 
-    private static int Partition(Span<Stamp> stamps)
+    private static int Partition(Span<FieldStamp> stamps)
     {
         var length = stamps.Length;
         var mid = length >> 1;
@@ -70,7 +70,7 @@ public static class StampOrder
         return hi;
     }
 
-    private static void Insertion(Span<Stamp> stamps)
+    private static void Insertion(Span<FieldStamp> stamps)
     {
         for (var i = 1; i < stamps.Length; i++)
         {
@@ -86,7 +86,7 @@ public static class StampOrder
         }
     }
 
-    private static void Heapsort(Span<Stamp> stamps)
+    private static void Heapsort(Span<FieldStamp> stamps)
     {
         var length = stamps.Length;
         for (var i = length / 2 - 1; i >= 0; i--) SiftDown(stamps, i, length);
@@ -98,7 +98,7 @@ public static class StampOrder
         }
     }
 
-    private static void SiftDown(Span<Stamp> stamps, int root, int end)
+    private static void SiftDown(Span<FieldStamp> stamps, int root, int end)
     {
         while (true)
         {
@@ -114,13 +114,13 @@ public static class StampOrder
         }
     }
 
-    private static int CompareOrigin(in Stamp a, in Stamp b)
+    private static int CompareOrigin(in FieldStamp a, in FieldStamp b)
     {
         var c = a.Origin.X.CompareTo(b.Origin.X);
         return c != 0 ? c : a.Origin.Y.CompareTo(b.Origin.Y);
     }
 
-    private static int CompareShapeIdentity(in Stamp a, in Stamp b)
+    private static int CompareShapeIdentity(in FieldStamp a, in FieldStamp b)
     {
         var c = ((byte)a.Shape.Kind).CompareTo((byte)b.Shape.Kind);
         if (c != 0) return c;
@@ -132,7 +132,7 @@ public static class StampOrder
         return c != 0 ? c : a.Shape.RectMin.Y.CompareTo(b.Shape.RectMin.Y);
     }
 
-    private static int CompareShapeExtents(in Stamp a, in Stamp b)
+    private static int CompareShapeExtents(in FieldStamp a, in FieldStamp b)
     {
         var c = a.Shape.RectSize.X.CompareTo(b.Shape.RectSize.X);
         if (c != 0) return c;
@@ -144,7 +144,7 @@ public static class StampOrder
         return c != 0 ? c : CompareShapeAngles(in a, in b);
     }
 
-    private static int CompareShapeAngles(in Stamp a, in Stamp b)
+    private static int CompareShapeAngles(in FieldStamp a, in FieldStamp b)
     {
         var c = a.Shape.AnnulusInnerRadius.CompareTo(b.Shape.AnnulusInnerRadius);
         if (c != 0) return c;

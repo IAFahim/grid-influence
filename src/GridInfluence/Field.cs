@@ -74,7 +74,7 @@ internal unsafe struct FieldContext
     private NativeBuffer<byte> _frontierMasks;
     private NativeBuffer<int> _activeSlots;
     private NativeBuffer<short> _data;
-    private NativeBuffer<Stamp> _sortedStamps;
+    private NativeBuffer<FieldStamp> _sortedStamps;
     private NativeBuffer<int> _offsets;
     private NativeBuffer<WeightedRect> _spans;
     private NativeBuffer<short> _halo;
@@ -117,7 +117,7 @@ internal unsafe struct FieldContext
         _halo.Resize(_haloSlice * (_workerCount + 1));
     }
 
-    internal FieldStats Tick(ReadOnlySpan<Stamp> stamps, uint tick, StencilCore stencil)
+    internal FieldStats Tick(ReadOnlySpan<FieldStamp> stamps, uint tick, StencilCore stencil)
     {
         var reset = AdvanceFrame(tick);
         _scheduleVersion = _scheduleVersion == uint.MaxValue ? 1u : _scheduleVersion + 1;
@@ -279,7 +279,7 @@ internal unsafe struct FieldContext
         return reset;
     }
 
-    private int Prepare(ReadOnlySpan<Stamp> stamps, StencilCore stencil, bool reset)
+    private int Prepare(ReadOnlySpan<FieldStamp> stamps, StencilCore stencil, bool reset)
     {
         var evicted = reset ? EvictAllSlots() : EvictStaleSlots();
         if (_frameId % CompactionInterval == 0 && _freeSlots.Length > 0) CompactSlots();
@@ -497,7 +497,7 @@ internal unsafe struct FieldContext
         return false;
     }
 
-    private void PrepareStamps(ReadOnlySpan<Stamp> stamps)
+    private void PrepareStamps(ReadOnlySpan<FieldStamp> stamps)
     {
         var stampCount = stamps.Length;
         _stampCount = stampCount;
@@ -1219,13 +1219,13 @@ public unsafe struct Field : IDisposable, IEquatable<Field>
     public readonly int ActiveSlotCount => _ctx->ActiveSlotCount;
     public readonly int SlotCount => _ctx->SlotCount;
 
-    public readonly FieldStats Tick(ReadOnlySpan<Stamp> stamps)
+    public readonly FieldStats Tick(ReadOnlySpan<FieldStamp> stamps)
         => Tick(stamps, _ctx->FrameId + 1, default);
 
-    public readonly FieldStats Tick(ReadOnlySpan<Stamp> stamps, Stencil stencil)
+    public readonly FieldStats Tick(ReadOnlySpan<FieldStamp> stamps, Stencil stencil)
         => Tick(stamps, _ctx->FrameId + 1, stencil);
 
-    public readonly FieldStats Tick(ReadOnlySpan<Stamp> stamps, uint tick, Stencil stencil = default)
+    public readonly FieldStats Tick(ReadOnlySpan<FieldStamp> stamps, uint tick, Stencil stencil = default)
     {
         if (_ctx == null || _ctx->_disposed) throw new ObjectDisposedException(nameof(Field));
         var source = stencil.Source._ctx;

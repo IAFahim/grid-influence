@@ -4,7 +4,7 @@ namespace GridInfluence.Tests;
 
 public sealed class RasterizerOracleTests
 {
-    private static int[,] Paint(Stamp stamp, Int2 boxMin, Int2 boxSize)
+    private static int[,] Paint(FieldStamp stamp, Int2 boxMin, Int2 boxSize)
     {
         var estimate = Rasterizer.EstimateSpanCount(stamp.Shape);
         var buffer = new WeightedRect[Math.Max(estimate, 1)];
@@ -79,7 +79,7 @@ public sealed class RasterizerOracleTests
     public void SolidRect_CoversExactRectangle()
     {
         var shape = InfluenceShape.SolidRect(new Int2(-2, -1), new Int2(4, 3), 7);
-        var grid = Paint(new Stamp(shape, new Int2(10, 10)), new Int2(6, 7), new Int2(12, 8));
+        var grid = Paint(new FieldStamp(shape, new Int2(10, 10)), new Int2(6, 7), new Int2(12, 8));
 
         for (var y = 0; y < grid.GetLength(1); y++)
         for (var x = 0; x < grid.GetLength(0); x++)
@@ -93,7 +93,7 @@ public sealed class RasterizerOracleTests
     public void RectShell_CoversOutlineOnly()
     {
         var shape = InfluenceShape.RectShell(Int2.Zero, new Int2(6, 6), 2, 3);
-        var grid = Paint(new Stamp(shape, Int2.Zero), Int2.Zero, new Int2(8, 8));
+        var grid = Paint(new FieldStamp(shape, Int2.Zero), Int2.Zero, new Int2(8, 8));
 
         for (var y = 0; y < grid.GetLength(1); y++)
         for (var x = 0; x < grid.GetLength(0); x++)
@@ -110,7 +110,7 @@ public sealed class RasterizerOracleTests
     {
         const int radius = 7;
         var shape = InfluenceShape.Disc(new Int2(20, 20), radius, 5);
-        var grid = Paint(new Stamp(shape, Int2.Zero), Int2.Zero, new Int2(30, 30));
+        var grid = Paint(new FieldStamp(shape, Int2.Zero), Int2.Zero, new Int2(30, 30));
 
         for (var y = 0; y < grid.GetLength(1); y++)
         for (var x = 0; x < grid.GetLength(0); x++)
@@ -124,7 +124,7 @@ public sealed class RasterizerOracleTests
     public void Annulus_CoversRingOnly()
     {
         var shape = InfluenceShape.Annulus(new Int2(12, 12), 6, 3, 9);
-        var grid = Paint(new Stamp(shape, Int2.Zero), Int2.Zero, new Int2(20, 20));
+        var grid = Paint(new FieldStamp(shape, Int2.Zero), Int2.Zero, new Int2(20, 20));
 
         for (var y = 0; y < grid.GetLength(1); y++)
         for (var x = 0; x < grid.GetLength(0); x++)
@@ -145,7 +145,7 @@ public sealed class RasterizerOracleTests
         var a = new Int2(10, 10);
         var b = a + new Int2(axisX, axisY);
         var shape = InfluenceShape.Capsule(a, b, radius, 4);
-        var grid = Paint(new Stamp(shape, Int2.Zero), Int2.Zero, new Int2(24, 24));
+        var grid = Paint(new FieldStamp(shape, Int2.Zero), Int2.Zero, new Int2(24, 24));
 
         for (var y = 0; y < grid.GetLength(1); y++)
         for (var x = 0; x < grid.GetLength(0); x++)
@@ -160,8 +160,8 @@ public sealed class RasterizerOracleTests
     {
         var a = new Int2(4, 4);
         var b = new Int2(7, 14);
-        var line = Paint(new Stamp(InfluenceShape.ThickLine(a, b, 3, 6), Int2.Zero), Int2.Zero, new Int2(16, 20));
-        var capsule = Paint(new Stamp(InfluenceShape.Capsule(a, b, 3, 6), Int2.Zero), Int2.Zero, new Int2(16, 20));
+        var line = Paint(new FieldStamp(InfluenceShape.ThickLine(a, b, 3, 6), Int2.Zero), Int2.Zero, new Int2(16, 20));
+        var capsule = Paint(new FieldStamp(InfluenceShape.Capsule(a, b, 3, 6), Int2.Zero), Int2.Zero, new Int2(16, 20));
 
         Assert.Equal(capsule, line);
     }
@@ -172,7 +172,7 @@ public sealed class RasterizerOracleTests
         var radii = new Int2(8, 4);
         var center = new Int2(10, 8);
         var shape = InfluenceShape.Ellipse(center, radii, 2);
-        var grid = Paint(new Stamp(shape, Int2.Zero), Int2.Zero, new Int2(22, 18));
+        var grid = Paint(new FieldStamp(shape, Int2.Zero), Int2.Zero, new Int2(22, 18));
 
         for (var y = 0; y < grid.GetLength(1); y++)
         for (var x = 0; x < grid.GetLength(0); x++)
@@ -191,7 +191,7 @@ public sealed class RasterizerOracleTests
         var min = new Int2(2, 2);
         var size = new Int2(14, 10);
         var shape = InfluenceShape.RoundedRect(min, size, radius, 8);
-        var grid = Paint(new Stamp(shape, Int2.Zero), Int2.Zero, new Int2(20, 18));
+        var grid = Paint(new FieldStamp(shape, Int2.Zero), Int2.Zero, new Int2(20, 18));
 
         for (var y = 0; y < grid.GetLength(1); y++)
         for (var x = 0; x < grid.GetLength(0); x++)
@@ -217,7 +217,7 @@ public sealed class RasterizerOracleTests
         const int radius = 9;
         var center = new Int2(4, 4);
         var shape = InfluenceShape.Sector(center, radius, new Int2(1, -1), new Int2(1, 1), 11);
-        var grid = Paint(new Stamp(shape, Int2.Zero), Int2.Zero, new Int2(16, 16));
+        var grid = Paint(new FieldStamp(shape, Int2.Zero), Int2.Zero, new Int2(16, 16));
 
         for (var y = 0; y < grid.GetLength(1); y++)
         for (var x = 0; x < grid.GetLength(0); x++)
@@ -231,8 +231,8 @@ public sealed class RasterizerOracleTests
     public void RotatedDisc_KeepsMembership()
     {
         var shape = InfluenceShape.Disc(new Int2(8, 8), 5, 3);
-        var original = Paint(new Stamp(shape, Int2.Zero), Int2.Zero, new Int2(16, 16));
-        var rotated = Paint(new Stamp(shape.Rotated(Quarter.R180), new Int2(15, 15)), Int2.Zero, new Int2(16, 16));
+        var original = Paint(new FieldStamp(shape, Int2.Zero), Int2.Zero, new Int2(16, 16));
+        var rotated = Paint(new FieldStamp(shape.Rotated(Quarter.R180), new Int2(15, 15)), Int2.Zero, new Int2(16, 16));
 
         for (var y = 0; y < 16; y++)
         for (var x = 0; x < 16; x++)
@@ -288,7 +288,7 @@ public sealed class RasterizerOracleTests
     public void Annulus_WithInnerZero_HollowCenter()
     {
         var shape = InfluenceShape.Annulus(new Int2(6, 6), 4, 0, 5);
-        var grid = Paint(new Stamp(shape, Int2.Zero), Int2.Zero, new Int2(14, 14));
+        var grid = Paint(new FieldStamp(shape, Int2.Zero), Int2.Zero, new Int2(14, 14));
 
         for (var y = 0; y < grid.GetLength(1); y++)
         for (var x = 0; x < grid.GetLength(0); x++)

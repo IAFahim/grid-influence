@@ -11,7 +11,7 @@ using GridInfluence;
 
 using var front = new InfluenceField(GridSpec.FromPowerOfTwo(5, 256));
 using var back = new InfluenceField(GridSpec.FromPowerOfTwo(5, 256));
-back.Tick([new Stamp(InfluenceShape.Disc(Int2.Zero, 8, 100), new Int2(10, 10))], tick: 1,
+back.Tick([new FieldStamp(InfluenceShape.Disc(Int2.Zero, 8, 100), new Int2(10, 10))], tick: 1,
     Stencil.Create(front, decayPerMille: 300, spreadDenominator: 4));
 (front, back) = (back, front);
 int value = front.AsReader().ReadCell(new Int2(10, 10));

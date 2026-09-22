@@ -4,7 +4,7 @@ namespace GridInfluence.Tests;
 
 public sealed class DiffusionIntegrationTests
 {
-    private static int[,] StepOracle(int[,] front, Stamp[] stamps, Int2 boxMin, int decay, int spreadDenom)
+    private static int[,] StepOracle(int[,] front, FieldStamp[] stamps, Int2 boxMin, int decay, int spreadDenom)
     {
         var w = front.GetLength(0);
         var h = front.GetLength(1);
@@ -44,7 +44,7 @@ public sealed class DiffusionIntegrationTests
         return IntegerMath.Outflow(grid[x, y], decay, denom);
     }
 
-    private static int[,] RasterOraclePaint(Stamp stamp, Int2 boxMin, Int2 boxSize)
+    private static int[,] RasterOraclePaint(FieldStamp stamp, Int2 boxMin, Int2 boxSize)
     {
         var estimate = Rasterizer.EstimateSpanCount(stamp.Shape);
         var buffer = new WeightedRect[Math.Max(estimate, 1)];
@@ -100,7 +100,7 @@ public sealed class DiffusionIntegrationTests
         try
         {
 
-        var stamps = new[] { new Stamp(InfluenceShape.SolidRect(Int2.Zero, new Int2(2, 2), 127), new Int2(15, 15)) };
+        var stamps = new[] { new FieldStamp(InfluenceShape.SolidRect(Int2.Zero, new Int2(2, 2), 127), new Int2(15, 15)) };
         var boxMin = new Int2(-16, -16);
         var boxSize = new Int2(64, 64);
 
@@ -133,7 +133,7 @@ public sealed class DiffusionIntegrationTests
         var pair = new FieldPair(new FieldConfig(7, 4, uint.MaxValue, decayPerMille: 300, spreadDenominator: 4));
         try
         {
-            var stamp = new Stamp(InfluenceShape.Disc(Int2.Zero, 6, 100), new Int2(8, 8));
+            var stamp = new FieldStamp(InfluenceShape.Disc(Int2.Zero, 6, 100), new Int2(8, 8));
             for (var frame = 0; frame < 12; frame++) pair.Step([stamp]);
 
             var reader = pair.Front.AsReader();
@@ -156,7 +156,7 @@ public sealed class DiffusionIntegrationTests
         var pair = new FieldPair(new FieldConfig(9, 3, uint.MaxValue, decayPerMille: 500, spreadDenominator: 100));
         try
         {
-            pair.Step([new Stamp(InfluenceShape.Disc(Int2.Zero, 5, 64), new Int2(4, 4))]);
+            pair.Step([new FieldStamp(InfluenceShape.Disc(Int2.Zero, 5, 64), new Int2(4, 4))]);
             var previous = 0L;
             for (var frame = 0; frame < 400; frame++)
             {
@@ -181,7 +181,7 @@ public sealed class DiffusionIntegrationTests
         var pair = new FieldPair(new FieldConfig(3, 2, uint.MaxValue, decayPerMille: 1, spreadDenominator: 4));
         try
         {
-            pair.Step([new Stamp(InfluenceShape.SolidRect(Int2.Zero, new Int2(1, 1), 127), new Int2(3, 3))]);
+            pair.Step([new FieldStamp(InfluenceShape.SolidRect(Int2.Zero, new Int2(1, 1), 127), new Int2(3, 3))]);
             Assert.Equal(127, pair.Front.AsReader().ReadCell(new Int2(3, 3)));
 
             pair.Step([]);

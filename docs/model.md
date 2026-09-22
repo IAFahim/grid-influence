@@ -35,7 +35,7 @@ var spec = GridSpec.FromPowerOfTwo(chunkPower: 5, retentionFrames: 256);
 using var front = new Field(spec);
 using var back = new Field(spec, parallelism: 8);   // optional persistent worker pool
 
-Stamp[] stamps = [new Stamp(InfluenceShape.Disc(Int2.Zero, 8, 100), new Int2(x, y))];
+FieldStamp[] stamps = [new FieldStamp(InfluenceShape.Disc(Int2.Zero, 8, 100), new Int2(x, y))];
 back.Tick(stamps, Stencil.Create(front, decayPerMille: 300, spreadDenominator: 4));
 (front, back) = (back, front);   // front now holds the new frame
 
@@ -105,32 +105,33 @@ same-machine, same-fixture, one-variable comparisons only.
 - **Total reads**: every reader returns 0 for missing or stale chunks; no input can cause an
   out-of-bounds access. Budget-oversized stamps drop whole, deterministically.
 
-## World engine (`World`, `Stamps`, `Fade`)
+## World engine (`World`, `Grid`, `Layer`, `Stamp`, `Fade`)
 
 A second, virtual-field engine alongside `Field`: grids never rasterize to a cell buffer — a mark
 stays a record and influence is evaluated at query time.
 
 - **Shape**: `World` holds up to 32 `GridCtx` (power-of-two `Size`, world-space rect
-  `Origin/WorldSize`) and 32 layers. `Queue` stores caller-owned pointers (`Float2*`, `float*`,
-  `byte*`) — caller must keep the memory alive and stable between `Queue` and `ClearQueue`;
-  engine never copies or mutates caller arrays except `Mul`/`GridHint` (engine-owned scratch
-  parallel to each queue entry).
-- **Apply**: per queued item — decay `Mul` (fade id 0 skips), weight = `strength×mul/1000`,
-  route by mark-rect ∩ grid-rect (float world space; a mark straddling a seam emits into every
+  `Origin/WorldSize`) and 32 layers. Sources are engine-owned persistent columns
+  (`X`/`Y`/`Bound`/`Stamp`/`Fade`/`Mul`/`Hint`/`Alive`): `Place` appends and returns an int id,
+  `Move`/`SetBound`/`SetFade`/`Remove` mutate by id — the engine never borrows caller memory.
+- **Process**: per live source — decay `Mul` (fade id 0 skips), weight = `strength×mul/1000`,
+  route by mark-rect ∩ grid-rect (float world space; a source straddling a seam emits into every
   grid it overlaps → no clipping, no edge jitter), convert to cell ints, append a 16-byte
   `MarkRec` to that grid-layer's contiguous mark table. `sbyte` strengths, int weights; cells
   saturate to `short` at read.
-- **Queries**: `Cell` lazily builds a CSR tile index per (grid, layer) on first read after an
-  apply (`BuiltGen` vs `ApplyGen`), then scans only that tile's marks. `Total` sums `Cell`.
-- **Determinism**: marks append in queue order; bucket order is stable within a tile.
-- **Concurrency**: `World.Apply` is serial. For external parallelism the caller runs
-  `World.BeginApply(w)` once (grid/layer fade decay, per-layer cursor reset — must be
-  single-threaded), then `World.ApplySlice(w, entry, start, count)` on disjoint item ranges from
+- **Queries**: `Query` lazily builds a CSR tile index per (grid, layer) on first read after a
+  process (`BuiltGen` vs `ApplyGen`), then scans only that tile's marks. `Query(x,y,w,h)` sums a
+  rect; `QueryAt` takes world-space floats.
+- **Determinism**: marks append in source order; bucket order is stable within a tile.
+- **Concurrency**: `World.Process` is serial. For external parallelism the caller runs
+  `World.BeginProcess(w)` once (grid/layer fade decay, per-layer cursor reset — must be
+  single-threaded), then `World.ProcessSlice(w, start, count)` on disjoint source ranges from
   any number of threads: mark slots are claimed by an `Interlocked` cursor so concurrent appends
-  never collide; each slice owns its items' `Mul`/`GridHint` bytes; item-level `Fade.Stamp` decay
-  happens inside `ApplySlice` after the weight is read, so a slice decays exactly its own items
-  once. Mark order within a layer is nondeterministic under slicing but cell sums are commutative,
-  so `Cell`/`Total` results are bit-identical to serial. Queries must run after all slices join.
-  Worlds are independent — different worlds on different threads never share state.
-- **Ownership**: all engine state is `NativeMemory`/`AlignedAlloc`; `ClearQueue` frees `Mul`/
-  `GridHint`. No managed state on any warm path; `Queue`/`Apply`/`Cell`/`Total` allocate 0 B.
+  never collide; each slice owns its sources' `Mul`/`Hint` bytes; per-source `Fade.Stamp` decay
+  happens inside `ProcessSlice` after the weight is read, so a slice decays exactly its own
+  sources once. Mark order within a layer is nondeterministic under slicing but cell sums are
+  commutative, so `Query` results are bit-identical to serial. Queries must run after all slices
+  join. Worlds are independent — different worlds on different threads never share state.
+- **Ownership**: all engine state is `NativeMemory`/`AlignedAlloc`; source columns grow by
+  doubling and live for the world's lifetime. No managed state on any warm path;
+  `Process`/`Query`/`Move`/`Remove` allocate 0 B once columns reach steady capacity.

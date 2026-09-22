@@ -93,9 +93,9 @@ public sealed class SceneRunner : IDisposable
         }
     }
 
-    private Stamp[] BuildStamps(string fieldKey, int frame)
+    private FieldStamp[] BuildStamps(string fieldKey, int frame)
     {
-        var stamps = new List<Stamp>();
+        var stamps = new List<FieldStamp>();
         foreach (var clip in _document.Clips)
         {
             if (clip.Field != fieldKey) continue;
@@ -103,7 +103,7 @@ public sealed class SceneRunner : IDisposable
 
             var origin = MotionFactory.Evaluate(clip.Motion, frame, clip.FromFrame, clip.ToFrame);
             var shape = ShapeFactory.Build(clip.Shape, clip.Weight);
-            if (shape.TryScaleWeight(1f, out var scaled)) stamps.Add(new Stamp(scaled, origin));
+            if (shape.TryScaleWeight(1f, out var scaled)) stamps.Add(new FieldStamp(scaled, origin));
         }
 
         return stamps.ToArray();

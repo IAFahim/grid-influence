@@ -69,7 +69,7 @@ public sealed class FieldPair : IDisposable
         Back = DoubleBuffered ? new Field(spec) : default;
     }
 
-    public FieldStats Step(ReadOnlySpan<Stamp> stamps)
+    public FieldStats Step(ReadOnlySpan<FieldStamp> stamps)
     {
         Tick++;
         var hasPending = stamps.Length > 0;

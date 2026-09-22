@@ -214,18 +214,18 @@ public readonly struct InfluenceShape
         => new(ShapeKind.Sector, weight, center, dir0, radius, 0, dir1);
 }
 
-public readonly struct Stamp
+public readonly struct FieldStamp
 {
     public readonly InfluenceShape Shape;
     public readonly Int2 Origin;
 
-    public Stamp(InfluenceShape shape, Int2 origin)
+    public FieldStamp(InfluenceShape shape, Int2 origin)
     {
         Shape = shape;
         Origin = origin;
     }
 
-    public Stamp Negated() => new(Shape.WithWeight((sbyte)-Shape.Weight), Origin);
+    public FieldStamp Negated() => new(Shape.WithWeight((sbyte)-Shape.Weight), Origin);
 }
 
 public enum Quarter : byte

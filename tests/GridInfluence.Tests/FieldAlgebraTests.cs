@@ -4,7 +4,7 @@ namespace GridInfluence.Tests;
 
 public sealed class FieldAlgebraTests
 {
-    private static Stamp Rect(int x, int y, int w, int h, sbyte weight)
+    private static FieldStamp Rect(int x, int y, int w, int h, sbyte weight)
         => new(InfluenceShape.SolidRect(new Int2(x, y), new Int2(w, h), weight), Int2.Zero);
 
     [Fact]
@@ -68,9 +68,9 @@ public sealed class FieldAlgebraTests
         var stampsA = new[]
         {
             Rect(0, 0, 5, 5, 3),
-            new Stamp(InfluenceShape.Disc(new Int2(8, 8), 6, -2), Int2.Zero),
+            new FieldStamp(InfluenceShape.Disc(new Int2(8, 8), 6, -2), Int2.Zero),
             Rect(4, 4, 6, 6, 5),
-            new Stamp(InfluenceShape.Capsule(new Int2(1, 1), new Int2(9, 3), 3, 4), Int2.Zero)
+            new FieldStamp(InfluenceShape.Capsule(new Int2(1, 1), new Int2(9, 3), 3, 4), Int2.Zero)
         };
         Array.Reverse(stampsA);
 

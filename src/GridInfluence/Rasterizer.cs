@@ -44,7 +44,7 @@ public static class Rasterizer
     public static int EstimateSpanCount(in InfluenceShape shape)
         => shape.Kind.IsBox() ? EstimateBox(in shape) : EstimateRound(in shape);
 
-    public static void Emit(in Stamp stamp, ref SpanSink sink)
+    public static void Emit(in FieldStamp stamp, ref SpanSink sink)
     {
         var shape = stamp.Shape;
         var origin = stamp.Origin;

@@ -10,7 +10,7 @@ public sealed class ReaderFlowRegistryTests
     public void SampleBilinear_InterpolatesCellCenters()
     {
         using var field = new Field(GridSpec.FromPowerOfTwo(3, uint.MaxValue));
-        field.Tick([new Stamp(InfluenceShape.SolidRect(Int2.Zero, new Int2(1, 1), 100), Int2.Zero)], 1);
+        field.Tick([new FieldStamp(InfluenceShape.SolidRect(Int2.Zero, new Int2(1, 1), 100), Int2.Zero)], 1);
 
         var reader = field.AsReader();
         Assert.Equal(100, reader.SampleBilinear(0.5f, 0.5f));
@@ -25,8 +25,8 @@ public sealed class ReaderFlowRegistryTests
         using var field = new Field(GridSpec.FromPowerOfTwo(3, uint.MaxValue));
         field.Tick(
         [
-            new Stamp(InfluenceShape.SolidRect(new Int2(0, 0), new Int2(1, 1), 100), Int2.Zero),
-            new Stamp(InfluenceShape.SolidRect(new Int2(2, 0), new Int2(1, 1), 127), Int2.Zero)
+            new FieldStamp(InfluenceShape.SolidRect(new Int2(0, 0), new Int2(1, 1), 100), Int2.Zero),
+            new FieldStamp(InfluenceShape.SolidRect(new Int2(2, 0), new Int2(1, 1), 127), Int2.Zero)
         ], 1);
 
         var gradient = field.AsReader().Gradient(new Int2(1, 0));
@@ -38,7 +38,7 @@ public sealed class ReaderFlowRegistryTests
     public void FlowField_ResolvesDescentDirections()
     {
         using var field = new Field(GridSpec.FromPowerOfTwo(3, uint.MaxValue));
-        field.Tick([new Stamp(InfluenceShape.SolidRect(new Int2(4, 0), new Int2(2, 2), 50), Int2.Zero)], 1);
+        field.Tick([new FieldStamp(InfluenceShape.SolidRect(new Int2(4, 0), new Int2(2, 2), 50), Int2.Zero)], 1);
 
         using var flow = new FlowField();
         flow.Resolve(field);
@@ -56,7 +56,7 @@ public sealed class ReaderFlowRegistryTests
     public void FlowReader_MissingChunksReturnZero()
     {
         using var field = new Field(GridSpec.FromPowerOfTwo(3, uint.MaxValue));
-        field.Tick([new Stamp(InfluenceShape.SolidRect(Int2.Zero, new Int2(1, 1), 10), Int2.Zero)], 1);
+        field.Tick([new FieldStamp(InfluenceShape.SolidRect(Int2.Zero, new Int2(1, 1), 10), Int2.Zero)], 1);
 
         using var flow = new FlowField();
         flow.Resolve(field);
@@ -70,8 +70,8 @@ public sealed class ReaderFlowRegistryTests
         using var field = new Field(GridSpec.FromPowerOfTwo(3, uint.MaxValue));
         field.Tick(
         [
-            new Stamp(InfluenceShape.SolidRect(Int2.Zero, new Int2(2, 2), 40), Int2.Zero),
-            new Stamp(InfluenceShape.SolidRect(new Int2(4, 0), new Int2(2, 2), -40), Int2.Zero)
+            new FieldStamp(InfluenceShape.SolidRect(Int2.Zero, new Int2(2, 2), 40), Int2.Zero),
+            new FieldStamp(InfluenceShape.SolidRect(new Int2(4, 0), new Int2(2, 2), -40), Int2.Zero)
         ], 1);
 
         var reader = field.AsReader();
@@ -90,7 +90,7 @@ public sealed class ReaderFlowRegistryTests
     public void Registry_DoubleBufferedSwap_ExposesWrittenBufferAsFront()
     {
         using var pair = new FieldPair(new FieldConfig(5, 3, uint.MaxValue, doubleBuffered: true));
-        pair.Step([new Stamp(InfluenceShape.SolidRect(Int2.Zero, new Int2(1, 1), 5), Int2.Zero)]);
+        pair.Step([new FieldStamp(InfluenceShape.SolidRect(Int2.Zero, new Int2(1, 1), 5), Int2.Zero)]);
 
         Assert.Equal(5, pair.Front.AsReader().ReadCell(new Int2(0, 0)));
         Assert.Equal(1u, pair.Tick);

@@ -1,8 +1,7 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using GridInfluence;
 
-unsafe class Scenarios
+class Scenarios
 {
     static int Main()
     {
@@ -12,76 +11,51 @@ unsafe class Scenarios
         return 0;
     }
 
-    static Float2* Arena(Random rng, int n, float size)
-    {
-        var pos = (Float2*)NativeMemory.AlignedAlloc((nuint)(n * sizeof(Float2)), 64);
-        for (var i = 0; i < n; i++)
-            pos[i] = new Float2((float)(rng.NextDouble() * size), (float)(rng.NextDouble() * size));
-        return pos;
-    }
-
     static void AggroRange()
     {
         Console.WriteLine("== enemy in range ==");
         var w = World.New();
-        var g = World.Grid(w, power: 8, x: 0f, y: 0f, size: 512f);
-        var threat = World.Layer(w);
-        var aggro = Stamps.Circle(1);
+        var g = Grid.New(w, power: 8, x: 0f, y: 0f, size: 512f);
+        var threat = Layer.New(w);
+        var aggro = Stamp.Circle(1);
         var rng = new Random(7);
 
-        var enemies = 300;
-        var pos = Arena(rng, enemies, 512f);
-        var bounds = (float*)NativeMemory.AlignedAlloc((nuint)(enemies * sizeof(float)), 64);
-        var stamps = (byte*)NativeMemory.Alloc((nuint)enemies);
-        var fades = (byte*)NativeMemory.Alloc((nuint)enemies);
-        for (var i = 0; i < enemies; i++) { bounds[i] = 40f; stamps[i] = aggro; fades[i] = 0; }
+        var sources = new int[300];
+        for (var i = 0; i < sources.Length; i++)
+            sources[i] = World.Place(w, threat, (float)(rng.NextDouble() * 512), (float)(rng.NextDouble() * 512), 40f, aggro);
+        World.Process(w);
 
-        World.Queue(w, threat, pos, bounds, stamps, fades, enemies);
-        World.Apply(w);
+        Console.WriteLine($"player at center — enemies in range: {World.QueryAt(w, g, threat, 256f, 256f)}");
 
-        var player = new Float2(256f, 256f);
-        var cell = ToCell(0f, 512f, 256, player.X, player.Y);
-        var heat = World.Cell(w, g, threat, cell.x, cell.y);
-        Console.WriteLine($"player at ({player.X},{player.Y}) — enemies in range: {heat}");
-
-        pos[0] = new Float2(260f, 250f);
-        World.Apply(w);
-        heat = World.Cell(w, g, threat, cell.x, cell.y);
-        Console.WriteLine($"after enemy[0] moves to (260,250): {heat}");
+        World.Move(w, sources[0], 260f, 250f);
+        World.Process(w);
+        Console.WriteLine($"after enemy[0] moves to (260,250): {World.QueryAt(w, g, threat, 256f, 256f)}");
     }
 
     static void FearCrowd()
     {
         Console.WriteLine("== fear meter ==");
         var w = World.New();
-        var g = World.Grid(w, power: 8, x: 0f, y: 0f, size: 256f);
-        var fear = World.Layer(w);
-        var aura = Stamps.Circle(20);
+        var g = Grid.New(w, power: 8, x: 0f, y: 0f, size: 256f);
+        var fear = Layer.New(w);
+        var aura = Stamp.Circle(20);
         var decay = Fade.Stamp(20);
         var rng = new Random(3);
 
-        var monsters = 12;
-        var pos = Arena(rng, monsters, 256f);
-        var bounds = (float*)NativeMemory.AlignedAlloc((nuint)(monsters * sizeof(float)), 64);
-        var stamps = (byte*)NativeMemory.Alloc((nuint)monsters);
-        var fades = (byte*)NativeMemory.Alloc((nuint)monsters);
-        for (var i = 0; i < monsters; i++) { bounds[i] = 30f; stamps[i] = aura; fades[i] = decay; }
+        for (var i = 0; i < 12; i++)
+            World.Place(w, fear, (float)(rng.NextDouble() * 256), (float)(rng.NextDouble() * 256), 30f, aura, decay);
 
-        World.Queue(w, fear, pos, bounds, stamps, fades, monsters);
-
-        var villagers = 500;
-        var vpos = Arena(rng, villagers, 256f);
+        var villagers = new (float x, float y)[500];
+        for (var i = 0; i < villagers.Length; i++)
+            villagers[i] = ((float)(rng.NextDouble() * 256), (float)(rng.NextDouble() * 256));
 
         for (var step = 0; step < 4; step++)
         {
-            World.Apply(w);
+            World.Process(w);
             var scared = 0;
-            for (var i = 0; i < villagers; i++)
-            {
-                var c = ToCell(0f, 256f, 256, vpos[i].X, vpos[i].Y);
-                if (World.Cell(w, g, fear, c.x, c.y) > 15) scared++;
-            }
-            Console.WriteLine($"step {step}: {scared}/{villagers} villagers scared");
+            foreach (var (vx, vy) in villagers)
+                if (World.QueryAt(w, g, fear, vx, vy) > 15) scared++;
+            Console.WriteLine($"step {step}: {scared}/{villagers.Length} villagers scared");
         }
     }
 
@@ -89,53 +63,40 @@ unsafe class Scenarios
     {
         Console.WriteLine("== traffic congestion ==");
         var w = World.New();
-        var downtown = World.Grid(w, power: 9, x: 0f, y: 0f, size: 1024f);
-        var suburbs = World.Grid(w, power: 6, x: 1024f, y: 0f, size: 2048f);
-        var traffic = World.Layer(w);
-        var car = Stamps.Box(4);
+        var downtown = Grid.New(w, power: 9, x: 0f, y: 0f, size: 1024f);
+        var suburbs = Grid.New(w, power: 6, x: 1024f, y: 0f, size: 2048f);
+        var traffic = Layer.New(w);
+        var car = Stamp.Box(4);
         var rng = new Random(11);
 
-        var cars = 2000;
-        var pos = (Float2*)NativeMemory.AlignedAlloc((nuint)(cars * sizeof(Float2)), 64);
-        var bounds = (float*)NativeMemory.AlignedAlloc((nuint)(cars * sizeof(float)), 64);
-        var stamps = (byte*)NativeMemory.Alloc((nuint)cars);
-        var fades = (byte*)NativeMemory.Alloc((nuint)cars);
+        const int cars = 2000;
         for (var i = 0; i < cars; i++)
         {
             var downtownCar = i < 1600;
-            pos[i] = downtownCar
-                ? new Float2((float)(rng.NextDouble() * 1024), (float)(rng.NextDouble() * 1024))
-                : new Float2(1024f + (float)(rng.NextDouble() * 2048), (float)(rng.NextDouble() * 2048));
-            bounds[i] = 12f; stamps[i] = car; fades[i] = 0;
+            World.Place(w, traffic,
+                downtownCar ? (float)(rng.NextDouble() * 1024) : 1024f + (float)(rng.NextDouble() * 2048),
+                downtownCar ? (float)(rng.NextDouble() * 1024) : (float)(rng.NextDouble() * 2048),
+                12f, car);
         }
 
-        World.Queue(w, traffic, pos, bounds, stamps, fades, cars);
-        for (var i = 0; i < 50; i++) World.Apply(w);
+        for (var i = 0; i < 50; i++) World.Process(w);
         var bestSerial = double.MaxValue; var bestSliced = double.MaxValue;
         for (var r = 0; r < 100; r++)
         {
             var t = Stopwatch.GetTimestamp();
-            World.Apply(w);
+            World.Process(w);
             var el = Stopwatch.GetElapsedTime(t).TotalNanoseconds;
             if (el < bestSerial) bestSerial = el;
             t = Stopwatch.GetTimestamp();
-            World.BeginApply(w);
+            World.BeginProcess(w);
             var slice = cars / 4;
-            Parallel.For(0, 4, sidx => World.ApplySlice(w, 0, sidx * slice, slice));
+            Parallel.For(0, 4, sidx => World.ProcessSlice(w, sidx * slice, slice));
             el = Stopwatch.GetElapsedTime(t).TotalNanoseconds;
             if (el < bestSliced) bestSliced = el;
         }
         Console.WriteLine($"{cars} cars over 2 grids — serial {bestSerial:F0}ns ({bestSerial / cars:F1}ns/car), 4-way sliced {bestSliced:F0}ns");
 
-        var junction = new Float2(512f, 512f);
-        var jc = ToCell(0f, 1024f, 512, junction.X, junction.Y);
-        var level = World.Cell(w, downtown, traffic, jc.x, jc.y);
-        Console.WriteLine($"downtown junction congestion: {level} cars nearby");
-        var suburbJunction = ToCell(1024f, 2048f, 64, 1536f, 1536f);
-        level = World.Cell(w, suburbs, traffic, suburbJunction.x, suburbJunction.y);
-        Console.WriteLine($"suburb junction congestion:   {level} cars nearby");
+        Console.WriteLine($"downtown junction congestion: {World.QueryAt(w, downtown, traffic, 512f, 512f)} cars nearby");
+        Console.WriteLine($"suburb junction congestion:   {World.QueryAt(w, suburbs, traffic, 1536f, 1536f)} cars nearby");
     }
-
-    static (int x, int y) ToCell(float origin, float size, int cells, float wx, float wy)
-        => ((int)((wx - origin) * cells / size), (int)((wy - origin) * cells / size));
 }

@@ -16,7 +16,7 @@ public readonly struct CellWeight
 
 public static class PaintedCanvas
 {
-    public static Stamp[] ToStamps(ReadOnlySpan<CellWeight> cells, Int2 origin)
+    public static FieldStamp[] ToStamps(ReadOnlySpan<CellWeight> cells, Int2 origin)
     {
         var sorted = cells.ToArray();
         Array.Sort(sorted, static (a, b) =>
@@ -25,7 +25,7 @@ public static class PaintedCanvas
             return c != 0 ? c : a.Offset.X.CompareTo(b.Offset.X);
         });
 
-        var stamps = new List<Stamp>(sorted.Length);
+        var stamps = new List<FieldStamp>(sorted.Length);
         var index = 0;
         while (index < sorted.Length)
         {
@@ -47,7 +47,7 @@ public static class PaintedCanvas
                 x1 = sorted[++index].Offset.X;
             }
 
-            stamps.Add(new Stamp(
+            stamps.Add(new FieldStamp(
                 InfluenceShape.SolidRect(new Int2(x0, y), new Int2(x1 - x0 + 1, 1), (sbyte)Math.Clamp(weight, sbyte.MinValue, sbyte.MaxValue)),
                 origin));
             index++;

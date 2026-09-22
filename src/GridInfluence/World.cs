@@ -3,12 +3,6 @@ using System.Runtime.InteropServices;
 
 namespace GridInfluence;
 
-public readonly struct Float2
-{
-    public readonly float X, Y;
-    public Float2(float x, float y) { X = x; Y = y; }
-}
-
 internal struct MarkRec
 {
     public int X, Y, R, W;
@@ -43,19 +37,18 @@ internal unsafe struct GridCtx
     public uint ApplyGen;
 }
 
-internal unsafe struct QueueEntry
+internal unsafe struct SourceColumns
 {
-    public Float2* Pos;
-    public float* Bounds;
-    public byte* Stamps;
-    public byte* Fades;
-    public short* Mul;
-    public sbyte* GridHint;
+    public NativeBuffer<float> X;
+    public NativeBuffer<float> Y;
+    public NativeBuffer<float> Bound;
+    public NativeBuffer<byte> Stamp;
+    public NativeBuffer<byte> Fade;
+    public NativeBuffer<byte> Alive;
+    public NativeBuffer<byte> Layer;
+    public NativeBuffer<short> Mul;
+    public NativeBuffer<sbyte> Hint;
     public int Count;
-    public int MulCapacity;
-    public int HintCapacity;
-    public int HasFade;
-    public byte Layer;
 }
 
 internal unsafe struct WorldCtx
@@ -63,9 +56,7 @@ internal unsafe struct WorldCtx
     public GridCtx* Grids;
     public int GridCount;
     public int LayerCount;
-    public QueueEntry* Queue;
-    public int QueueCount;
-    public int QueueCapacity;
+    public SourceColumns Sources;
 }
 
 public static unsafe class World
@@ -89,17 +80,21 @@ public static unsafe class World
 
     public static byte New()
     {
+        if (_worldCount >= MaxWorlds) throw new InvalidOperationException("World limit reached.");
+
         var id = (byte)_worldCount++;
         var w = Worlds + id;
         w->Grids = (GridCtx*)NativeMemory.AllocZeroed((nuint)(MaxGrids * sizeof(GridCtx)));
-        w->QueueCapacity = 64;
-        w->Queue = (QueueEntry*)NativeMemory.AllocZeroed((nuint)(w->QueueCapacity * sizeof(QueueEntry)));
         return id;
     }
 
-    public static byte Grid(byte world, int power, float x, float y, float size)
+    internal static byte AddGrid(byte world, int power, float x, float y, float size)
     {
         var w = Worlds + world;
+        if (w->GridCount >= MaxGrids) throw new InvalidOperationException("Grid limit reached.");
+        if (power < 5 || power > 14) throw new ArgumentOutOfRangeException(nameof(power));
+        if (size <= 0f) throw new ArgumentOutOfRangeException(nameof(size));
+
         var id = (byte)w->GridCount++;
         var g = w->Grids + id;
         g->Log2 = power;
@@ -133,7 +128,12 @@ public static unsafe class World
         return id;
     }
 
-    public static byte Layer(byte world) => (byte)(Worlds + world)->LayerCount++;
+    internal static byte AddLayer(byte world)
+    {
+        var w = Worlds + world;
+        if (w->LayerCount >= MaxLayers) throw new InvalidOperationException("Layer limit reached.");
+        return (byte)w->LayerCount++;
+    }
 
     internal static byte StampNext() => (byte)_stampCount++;
     internal static byte FadeNext(int percent)
@@ -143,48 +143,80 @@ public static unsafe class World
         return id;
     }
 
-    public static void Queue(
-        byte world, byte layer,
-        Float2* positions, float* bounds, byte* stamps, byte* fades, int count)
+    public static int Place(byte world, byte layer, float x, float y, float bound, byte stamp, byte fade = 0)
     {
         var w = Worlds + world;
-        if (w->QueueCount >= w->QueueCapacity) GrowQueue(w);
-        var q = w->Queue + w->QueueCount++;
-        q->Pos = positions;
-        q->Bounds = bounds;
-        q->Stamps = stamps;
-        q->Fades = fades;
-        q->Count = count;
-        q->Layer = layer;
-        if (q->MulCapacity < count)
-        {
-            if (q->Mul != null) NativeMemory.Free(q->Mul);
-            q->MulCapacity = Math.Max(count, 64);
-            q->Mul = (short*)NativeMemory.AlignedAlloc((nuint)(q->MulCapacity * sizeof(short)), 64);
-            for (var i = 0; i < q->MulCapacity; i++) q->Mul[i] = 1000;
-        }
-        if (q->HintCapacity < count)
-        {
-            if (q->GridHint != null) NativeMemory.Free(q->GridHint);
-            q->HintCapacity = Math.Max(count, 64);
-            q->GridHint = (sbyte*)NativeMemory.Alloc((nuint)q->HintCapacity);
-            for (var i = 0; i < q->HintCapacity; i++) q->GridHint[i] = -1;
-        }
-        q->HasFade = 0;
-        for (var i = 0; i < count; i++) if (fades[i] != 0) { q->HasFade = 1; break; }
+        var s = &w->Sources;
+        if (layer >= w->LayerCount || stamp == 0 || stamp >= _stampCount) return -1;
+        if (s->Count == s->X.Length) GrowSources(s);
+
+        var i = s->Count++;
+        s->X.Span[i] = x;
+        s->Y.Span[i] = y;
+        s->Bound.Span[i] = bound;
+        s->Stamp.Span[i] = stamp;
+        s->Fade.Span[i] = fade;
+        s->Alive.Span[i] = 1;
+        s->Layer.Span[i] = layer;
+        s->Mul.Span[i] = 1000;
+        s->Hint.Span[i] = -1;
+        return i;
     }
 
-    public static void ClearQueue(byte world)
+    public static void Move(byte world, int source, float x, float y)
     {
-        var w = Worlds + world;
-        for (var e = 0; e < w->QueueCount; e++)
-        {
-            var q = w->Queue + e;
-            if (q->Mul != null) { NativeMemory.Free(q->Mul); q->Mul = null; }
-            if (q->GridHint != null) { NativeMemory.Free(q->GridHint); q->GridHint = null; }
-            q->MulCapacity = 0; q->HintCapacity = 0;
-        }
-        w->QueueCount = 0;
+        var s = &(Worlds + world)->Sources;
+        if ((uint)source >= (uint)s->Count || s->Alive.Span[source] == 0) return;
+
+        s->X.Span[source] = x;
+        s->Y.Span[source] = y;
+        s->Hint.Span[source] = -1;
+    }
+
+    public static void SetBound(byte world, int source, float bound)
+    {
+        var s = &(Worlds + world)->Sources;
+        if ((uint)source >= (uint)s->Count || s->Alive.Span[source] == 0) return;
+
+        s->Bound.Span[source] = bound;
+        s->Hint.Span[source] = -1;
+    }
+
+    public static void SetFade(byte world, int source, byte fade)
+    {
+        var s = &(Worlds + world)->Sources;
+        if ((uint)source >= (uint)s->Count || s->Alive.Span[source] == 0) return;
+
+        s->Fade.Span[source] = fade;
+    }
+
+    public static void Remove(byte world, int source)
+    {
+        var s = &(Worlds + world)->Sources;
+        if ((uint)source >= (uint)s->Count) return;
+
+        s->Alive.Span[source] = 0;
+    }
+
+    public static void Clear(byte world)
+    {
+        var s = &(Worlds + world)->Sources;
+        new Span<byte>(s->Alive.Pointer, s->Count).Clear();
+        s->Count = 0;
+    }
+
+    private static void GrowSources(SourceColumns* s)
+    {
+        var capacity = Math.Max(64, s->X.Length * 2);
+        s->X.Resize(capacity);
+        s->Y.Resize(capacity);
+        s->Bound.Resize(capacity);
+        s->Stamp.Resize(capacity);
+        s->Fade.Resize(capacity);
+        s->Alive.Resize(capacity);
+        s->Layer.Resize(capacity);
+        s->Mul.Resize(capacity);
+        s->Hint.Resize(capacity);
     }
 
     public static void FadeLayer(byte world, byte grid, byte layer, byte fade)
@@ -197,18 +229,7 @@ public static unsafe class World
     public static void FadeGrid(byte world, byte grid, byte fade)
         => (Worlds + world)->Grids[grid].GridFade = fade;
 
-    private static void GrowQueue(WorldCtx* w)
-    {
-        var cap = w->QueueCapacity * 2;
-        var next = (QueueEntry*)NativeMemory.AllocZeroed((nuint)(cap * sizeof(QueueEntry)));
-        Buffer.MemoryCopy(w->Queue, next, (long)cap * sizeof(QueueEntry),
-            (long)w->QueueCapacity * sizeof(QueueEntry));
-        NativeMemory.Free(w->Queue);
-        w->Queue = next;
-        w->QueueCapacity = cap;
-    }
-
-    public static void BeginApply(byte world)
+    public static void BeginProcess(byte world)
     {
         var w = Worlds + world;
         for (var gi = 0; gi < w->GridCount; gi++)
@@ -227,41 +248,43 @@ public static unsafe class World
         }
     }
 
-    public static void Apply(byte world)
+    public static void Process(byte world)
     {
-        BeginApply(world);
-        var w = Worlds + world;
-        for (var e = 0; e < w->QueueCount; e++) ApplySlice(world, e, 0, (w->Queue + e)->Count);
+        BeginProcess(world);
+        ProcessSlice(world, 0, (Worlds + world)->Sources.Count);
     }
 
-    public static void ApplySlice(byte world, int queueEntry, int start, int count)
+    public static void ProcessSlice(byte world, int start, int count)
     {
         var w = Worlds + world;
-        var q = w->Queue + queueEntry;
-        var pos = q->Pos;
-        var bounds = q->Bounds;
-        var stamps = q->Stamps;
-        var fades = q->Fades;
-        var mul = q->Mul;
-        var hints = q->GridHint;
-        var hasFade = q->HasFade;
-        var end = Math.Min(start + count, q->Count);
-        var layer = q->Layer;
+        var s = &w->Sources;
+        var xs = s->X.Pointer;
+        var ys = s->Y.Pointer;
+        var bounds = s->Bound.Pointer;
+        var stamps = s->Stamp.Pointer;
+        var fades = s->Fade.Pointer;
+        var alive = s->Alive.Pointer;
+        var layers = s->Layer.Pointer;
+        var mul = s->Mul.Pointer;
+        var hints = s->Hint.Pointer;
+        var end = Math.Min(start + count, s->Count);
         for (var i = start; i < end; i++)
         {
+            if (alive[i] == 0) continue;
+            var fade = fades[i];
             var data = StampData[stamps[i]];
-            var wgt = hasFade != 0
+            var wgt = fade != 0
                 ? (sbyte)(data & 0xFF) * mul[i] / 1000
                 : (sbyte)(data & 0xFF);
-            var fade = fades[i];
             if (fade != 0) mul[i] = (short)(mul[i] * FadeRate[fade] / 1000);
             if (wgt == 0) continue;
             var shape = data >> 8;
-            var px = pos[i].X;
-            var py = pos[i].Y;
+            var px = xs[i];
+            var py = ys[i];
             var bd = bounds[i];
             var wx0 = px - bd; var wx1 = px + bd;
             var wy0 = py - bd; var wy1 = py + bd;
+            var layer = layers[i];
             var hint = hints[i];
             if (hint >= 0 && hint < w->GridCount)
             {
@@ -301,16 +324,6 @@ public static unsafe class World
         if (slot >= ls->MarksCapacity) return;
         var m = ls->Marks + slot;
         m->X = cx; m->Y = cy; m->R = r; m->W = wfinal | (shape << 24);
-    }
-
-    private static void GrowMarks(LayerState* ls)
-    {
-        var cap = ls->MarksCapacity * 2;
-        var next = (MarkRec*)NativeMemory.AlignedAlloc((nuint)(cap * sizeof(MarkRec)), 64);
-        Buffer.MemoryCopy(ls->Marks, next, (long)cap * sizeof(MarkRec), (long)ls->MarksCount * sizeof(MarkRec));
-        NativeMemory.AlignedFree(ls->Marks);
-        ls->Marks = next;
-        ls->MarksCapacity = cap;
     }
 
     private static void BuildBuckets(GridCtx* g, int layer)
@@ -366,11 +379,12 @@ public static unsafe class World
         ls->BuiltGen = g->ApplyGen;
     }
 
-    public static short Cell(byte world, byte grid, byte layer, int x, int y)
+    public static short Query(byte world, byte grid, byte layer, int x, int y)
     {
         var w = Worlds + world;
         if (grid >= w->GridCount || layer >= w->LayerCount) return 0;
         var g = w->Grids + grid;
+        if ((uint)x >= (uint)g->Size || (uint)y >= (uint)g->Size) return 0;
         var ls = g->Layers + layer;
         if (ls->MarksCursor <= 0) return 0;
         ls->MarksCount = Math.Min(ls->MarksCursor, ls->MarksCapacity);
@@ -394,13 +408,24 @@ public static unsafe class World
         return (short)Math.Clamp(sum, short.MinValue, short.MaxValue);
     }
 
-    public static long Total(byte world, byte grid, byte layer, int x, int y, int wdt, int hgt)
+    public static long Query(byte world, byte grid, byte layer, int x, int y, int wdt, int hgt)
     {
         var sum = 0L;
         for (var cy = y; cy < y + hgt; cy++)
         for (var cx = x; cx < x + wdt; cx++)
-            sum += Cell(world, grid, layer, cx, cy);
+            sum += Query(world, grid, layer, cx, cy);
         return sum;
+    }
+
+    public static short QueryAt(byte world, byte grid, byte layer, float x, float y)
+    {
+        var w = Worlds + world;
+        if (grid >= w->GridCount) return 0;
+        var g = w->Grids + grid;
+        var cx = (int)((x - g->OriginX) * g->Scale);
+        var cy = (int)((y - g->OriginY) * g->Scale);
+        if ((uint)cx >= (uint)g->Size || (uint)cy >= (uint)g->Size) return 0;
+        return Query(world, grid, layer, cx, cy);
     }
 }
 
@@ -409,20 +434,4 @@ public static unsafe class Fade
     public static byte Stamp(int percent) => World.FadeNext(percent);
     public static byte Layer(int percent) => World.FadeNext(percent);
     public static byte Grid(int percent) => World.FadeNext(percent);
-}
-
-public static unsafe class Stamps
-{
-    public static byte Circle(sbyte strength) => Register(0, strength);
-    public static byte Box(sbyte strength) => Register(1, strength);
-    public static byte Ring(sbyte strength) => Register(2, strength);
-
-    private static byte Register(byte shape, sbyte strength)
-    {
-        var id = World.StampNext();
-        World.StampShape[id] = shape;
-        World.StampStrength[id] = strength;
-        World.StampData[id] = (ushort)((byte)strength | (shape << 8));
-        return id;
-    }
 }

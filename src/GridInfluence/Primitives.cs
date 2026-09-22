@@ -3,6 +3,12 @@ using System.Runtime.InteropServices;
 
 namespace GridInfluence;
 
+public readonly struct Float2
+{
+    public readonly float X, Y;
+    public Float2(float x, float y) { X = x; Y = y; }
+}
+
 [StructLayout(LayoutKind.Sequential)]
 public readonly struct CellRect
 {

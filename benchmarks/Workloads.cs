@@ -4,9 +4,9 @@ namespace Benchmarks;
 
 internal static class Fixtures
 {
-    public static Stamp[] BuildStamps(int count, int extent)
+    public static FieldStamp[] BuildStamps(int count, int extent)
     {
-        var stamps = new Stamp[count];
+        var stamps = new FieldStamp[count];
         var state = 0x9E3779B9u;
         for (var i = 0; i < count; i++)
         {
@@ -16,8 +16,8 @@ internal static class Fixtures
             var y = (int)(state % (uint)(extent - 96)) + 48;
             var radius = 8;
             stamps[i] = i % 2 == 0
-                ? new Stamp(InfluenceShape.Disc(Int2.Zero, radius, 100), new Int2(x, y))
-                : new Stamp(InfluenceShape.SolidRect(new Int2(-6, -6), new Int2(12, 12), 60), new Int2(x, y));
+                ? new FieldStamp(InfluenceShape.Disc(Int2.Zero, radius, 100), new Int2(x, y))
+                : new FieldStamp(InfluenceShape.SolidRect(new Int2(-6, -6), new Int2(12, 12), 60), new Int2(x, y));
         }
 
         return stamps;
@@ -48,7 +48,7 @@ internal sealed class NaiveField
 
     public int this[int x, int y] => _cells[y * _extent + x];
 
-    public void Tick(ReadOnlySpan<Stamp> stamps)
+    public void Tick(ReadOnlySpan<FieldStamp> stamps)
     {
         if (_decay > 0) DecaySpread();
         else Array.Clear(_cells);
@@ -82,7 +82,7 @@ internal sealed class NaiveField
         return IntegerMath.Outflow(_cells[y * _extent + x], _decay, _spread);
     }
 
-    private void Paint(in Stamp stamp)
+    private void Paint(in FieldStamp stamp)
     {
         var shape = stamp.Shape;
         var origin = stamp.Origin;
@@ -131,7 +131,7 @@ internal sealed class PipelineField : IDisposable
 
     public Field Front => _front;
 
-    public FieldStats Tick(ReadOnlySpan<Stamp> stamps)
+    public FieldStats Tick(ReadOnlySpan<FieldStamp> stamps)
     {
         _tick++;
         var stencil = Stencil.Create(_front, Fixtures.DecayPerMille, Fixtures.SpreadDenominator);
@@ -140,7 +140,7 @@ internal sealed class PipelineField : IDisposable
         return stats;
     }
 
-    public FieldStats TickNoDecay(ReadOnlySpan<Stamp> stamps)
+    public FieldStats TickNoDecay(ReadOnlySpan<FieldStamp> stamps)
     {
         _tick++;
         return _front.Tick(stamps, _tick);
