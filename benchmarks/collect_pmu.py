@@ -35,6 +35,9 @@ SCENARIOS = (
     "query",
     "ppm-decode",
     "ppm-encode",
+    "world-apply",
+    "world-apply-multi",
+    "world-query",
 )
 
 

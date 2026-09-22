@@ -22,6 +22,9 @@ internal static class Pmu
             "query" => MeasureQuery(scenario),
             "ppm-decode" => MeasureDecode(scenario),
             "ppm-encode" => MeasureEncode(scenario),
+            "world-apply" => MeasureWorldApply(scenario, 100_000, 1),
+            "world-apply-multi" => MeasureWorldApply(scenario, 100_000, 32),
+            "world-query" => MeasureWorldQuery(scenario),
             _ => throw new ArgumentOutOfRangeException(nameof(scenario))
         };
     }
@@ -167,5 +170,70 @@ internal static class Pmu
             Pnm.SaveGray(samples, size, size, stream, 65535);
             return stream.Length;
         }
+    }
+
+    private static unsafe int MeasureWorldApply(string scenario, int items, int grids)
+    {
+        var w = World.New();
+        for (var i = 0; i < grids; i++) World.Grid(w, 8, i * 256f, 0f, 256f);
+        var l = World.Layer(w);
+        var s = Stamps.Box(100);
+        var pos = (Float2*)System.Runtime.InteropServices.NativeMemory.AlignedAlloc((nuint)(items * sizeof(Float2)), 64);
+        var bounds = (float*)System.Runtime.InteropServices.NativeMemory.AlignedAlloc((nuint)(items * sizeof(float)), 64);
+        var stamps = (byte*)System.Runtime.InteropServices.NativeMemory.Alloc((nuint)items);
+        var fades = (byte*)System.Runtime.InteropServices.NativeMemory.Alloc((nuint)items);
+        var rng = 11;
+        for (var i = 0; i < items; i++)
+        {
+            rng = rng * 1664525 + 1013904223;
+            pos[i] = new Float2(rng % (uint)(220 * grids) + 18f, (rng >> 8) % 220 + 18f);
+            bounds[i] = 8f; stamps[i] = s; fades[i] = 0;
+        }
+        World.Queue(w, l, pos, bounds, stamps, fades, items);
+        for (var i = 0; i < WarmupTicks; i++) World.Apply(w);
+
+        Console.WriteLine($"ready {MeasuredTicks}");
+        if (Console.ReadLine() != "go") throw new InvalidOperationException();
+
+        long receipt = 0;
+        for (var i = 0; i < MeasuredTicks; i++)
+        {
+            World.Apply(w);
+            receipt ^= World.Cell(w, 0, l, 128, 128);
+        }
+
+        Console.WriteLine($"{receipt} {MeasuredTicks}");
+        _ = Console.ReadLine();
+        return 0;
+    }
+
+    private static unsafe int MeasureWorldQuery(string scenario)
+    {
+        var w = World.New();
+        var g = World.Grid(w, 8, 0f, 0f, 256f);
+        var l = World.Layer(w);
+        var s = Stamps.Box(100);
+        var pos = (Float2*)System.Runtime.InteropServices.NativeMemory.AlignedAlloc((nuint)(2000 * sizeof(Float2)), 64);
+        var bounds = (float*)System.Runtime.InteropServices.NativeMemory.AlignedAlloc((nuint)(2000 * sizeof(float)), 64);
+        var stamps = (byte*)System.Runtime.InteropServices.NativeMemory.Alloc(2000);
+        var fades = (byte*)System.Runtime.InteropServices.NativeMemory.Alloc(2000);
+        for (var i = 0; i < 2000; i++)
+        {
+            pos[i] = new Float2(i % 240 + 8f, i * 7 % 240 + 8f);
+            bounds[i] = 8f; stamps[i] = s; fades[i] = 0;
+        }
+        World.Queue(w, l, pos, bounds, stamps, fades, 2000);
+        World.Apply(w);
+        for (var i = 0; i < QueryWarmup; i++) _ = World.Cell(w, g, l, i % 256, (i * 3) % 256);
+
+        Console.WriteLine($"ready {QueryMeasured}");
+        if (Console.ReadLine() != "go") throw new InvalidOperationException();
+
+        long receipt = 0;
+        for (var i = 0; i < QueryMeasured; i++) receipt += World.Cell(w, g, l, i % 256, (i * 3) % 256);
+
+        Console.WriteLine($"{receipt} {QueryMeasured}");
+        _ = Console.ReadLine();
+        return 0;
     }
 }
