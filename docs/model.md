@@ -104,3 +104,26 @@ same-machine, same-fixture, one-variable comparisons only.
   `warm-parallel-tick-allocates-0-bytes`, and bit-exactness is `pipeline-parallel-matches-naive-*`.
 - **Total reads**: every reader returns 0 for missing or stale chunks; no input can cause an
   out-of-bounds access. Budget-oversized stamps drop whole, deterministically.
+
+## World engine (`World`, `Stamps`, `Fade`)
+
+A second, virtual-field engine alongside `Field`: grids never rasterize to a cell buffer — a mark
+stays a record and influence is evaluated at query time.
+
+- **Shape**: `World` holds up to 32 `GridCtx` (power-of-two `Size`, world-space rect
+  `Origin/WorldSize`) and 32 layers. `Queue` stores caller-owned pointers (`Float2*`, `float*`,
+  `byte*`) — caller must keep the memory alive and stable between `Queue` and `ClearQueue`;
+  engine never copies or mutates caller arrays except `Mul`/`GridHint` (engine-owned scratch
+  parallel to each queue entry).
+- **Apply**: per queued item — decay `Mul` (fade id 0 skips), weight = `strength×mul/1000`,
+  route by mark-rect ∩ grid-rect (float world space; a mark straddling a seam emits into every
+  grid it overlaps → no clipping, no edge jitter), convert to cell ints, append a 16-byte
+  `MarkRec` to that grid-layer's contiguous mark table. `sbyte` strengths, int weights; cells
+  saturate to `short` at read.
+- **Queries**: `Cell` lazily builds a CSR tile index per (grid, layer) on first read after an
+  apply (`BuiltGen` vs `ApplyGen`), then scans only that tile's marks. `Total` sums `Cell`.
+- **Determinism**: marks append in queue order; bucket order is stable within a tile.
+- **Concurrency**: single-threaded serial; no internal workers. Worlds are independent — callers
+  may apply different worlds on different threads.
+- **Ownership**: all engine state is `NativeMemory`/`AlignedAlloc`; `ClearQueue` frees `Mul`/
+  `GridHint`. No managed state on any warm path; `Queue`/`Apply`/`Cell`/`Total` allocate 0 B.
