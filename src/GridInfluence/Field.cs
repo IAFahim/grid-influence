@@ -30,20 +30,20 @@ public readonly struct FieldStats
 
 public readonly struct Stencil
 {
-    public InfluenceField Source { get; }
+    public Field Source { get; }
     public int DecayPerMille { get; }
     public int SpreadDenominator { get; }
 
-    private Stencil(InfluenceField source, int decayPerMille, int spreadDenominator)
+    private Stencil(Field source, int decayPerMille, int spreadDenominator)
     {
         Source = source;
         DecayPerMille = decayPerMille;
         SpreadDenominator = spreadDenominator;
     }
 
-    public static Stencil Create(InfluenceField source, int decayPerMille, int spreadDenominator)
+    public static Stencil Create(Field source, int decayPerMille, int spreadDenominator)
     {
-        ArgumentNullException.ThrowIfNull(source);
+        if (!source.IsCreated) throw new ArgumentNullException(nameof(source));
         ArgumentOutOfRangeException.ThrowIfNegative(decayPerMille);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(decayPerMille, 1000);
         ArgumentOutOfRangeException.ThrowIfLessThan(spreadDenominator, 1);
@@ -51,25 +51,35 @@ public readonly struct Stencil
     }
 }
 
-public sealed unsafe class InfluenceField : IDisposable
+internal unsafe struct StencilCore
+{
+    public FieldContext* Source;
+    public int DecayPerMille;
+    public int SpreadDenominator;
+}
+
+internal unsafe struct FieldContext
 {
     private const int MaxSpansPerSchedule = 1 << 20;
     private const int MaxChunksPerSchedule = 1 << 14;
     private const int CompactionInterval = 60;
 
-    private readonly GridSpec _spec;
+    internal GridSpec _spec;
     private CoordMap _slotByCoord;
     private NativeBuffer<Int2> _coordBySlot;
     private NativeBuffer<uint> _lastWritten;
     private NativeBuffer<byte> _nonZero;
     private NativeBuffer<uint> _prepared;
     private NativeBuffer<int> _freeSlots;
+    private NativeBuffer<byte> _frontierMasks;
     private NativeBuffer<int> _activeSlots;
     private NativeBuffer<short> _data;
     private NativeBuffer<Stamp> _sortedStamps;
     private NativeBuffer<int> _offsets;
     private NativeBuffer<WeightedRect> _spans;
     private NativeBuffer<short> _halo;
+    private StencilCore _scanStencil;
+    private StencilCore _parallelStencil;
     private int _slotCount;
     private int _liveSlots;
     private int _activeCount;
@@ -77,62 +87,43 @@ public sealed unsafe class InfluenceField : IDisposable
     private int _chunksActivated;
     private int _spanDrops;
     private int _chunkDrops;
-    private uint _frameId = 1;
+    private uint _frameId;
     private uint _scheduleVersion;
-    private bool _disposed;
+    internal bool _disposed;
 
-    private readonly Thread[]? _workers;
-    private readonly ManualResetEventSlim[]? _workerSignals;
+    internal int _workerCount;
+    internal nint _poolHandle;
     private int _haloSlice;
     private long _workClaim;
     private int _workGeneration;
     private int _workPending;
     private int _workCount;
     private int _workPhase;
-    private Stencil _parallelStencil;
-    private volatile bool _workExit;
+    internal int _workExit;
 
-    public GridSpec Spec => _spec;
-    public uint FrameId => _frameId;
-    public int ActiveSlotCount => _activeCount;
-    public int SlotCount => _slotCount;
+    internal readonly GridSpec Spec => _spec;
+    internal readonly uint FrameId => _frameId;
+    internal readonly int ActiveSlotCount => _activeCount;
+    internal readonly int SlotCount => _slotCount;
 
-    public InfluenceField(GridSpec spec) : this(spec, 0)
-    {
-    }
-
-    public InfluenceField(GridSpec spec, int parallelism)
+    internal void Init(GridSpec spec, int parallelism, nint poolHandle)
     {
         _spec = spec;
+        _frameId = 1;
         _slotByCoord = CoordMap.Create(64);
-        var workers = parallelism > 1 ? parallelism - 1 : 0;
+        _workerCount = parallelism > 1 ? parallelism - 1 : 0;
+        _poolHandle = poolHandle;
         _haloSlice = (spec.ChunkSize + 2) * (spec.ChunkSize + 2);
-        _halo.Resize(_haloSlice * (workers + 1));
-        if (workers > 0)
-        {
-            _workerSignals = new ManualResetEventSlim[workers];
-            _workers = new Thread[workers];
-            for (var i = 0; i < workers; i++)
-            {
-                var index = i + 1;
-                _workerSignals[i] = new ManualResetEventSlim(false);
-                _workers[i] = new Thread(() => WorkerEntry(index)) { IsBackground = true, Name = $"GridInfluence-Resolve-{index}" };
-                _workers[i].Start();
-            }
-        }
+        _halo.Resize(_haloSlice * (_workerCount + 1));
     }
 
-    public FieldStats Tick(ReadOnlySpan<Stamp> stamps, uint tick, Stencil stencil = default)
+    internal FieldStats Tick(ReadOnlySpan<Stamp> stamps, uint tick, StencilCore stencil)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        if (stencil.Source != null && !CompatibleSpecs(stencil.Source))
-            throw new ArgumentException("Stencil source field was created with a different GridSpec.", nameof(stencil));
-
         var reset = AdvanceFrame(tick);
         _scheduleVersion = _scheduleVersion == uint.MaxValue ? 1u : _scheduleVersion + 1;
         if (stamps.IsEmpty
             && _activeCount == 0
-            && (stencil.Source == null || stencil.Source._activeCount == 0))
+            && (stencil.Source == null || stencil.Source->_activeCount == 0))
         {
             var idleEvicted = reset ? EvictAllSlots() : EvictStaleSlots();
             if (_frameId % CompactionInterval == 0 && _freeSlots.Length > 0) CompactSlots();
@@ -156,15 +147,11 @@ public sealed unsafe class InfluenceField : IDisposable
             _activeCount);
     }
 
-    public FieldReader AsReader()
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        return new FieldReader(_slotByCoord, _lastWritten.Pointer, _lastWritten.Length, _data.Pointer, _spec, _frameId);
-    }
+    internal readonly FieldReader AsReader()
+        => new(_slotByCoord, _lastWritten.Pointer, _lastWritten.Length, _data.Pointer, _spec, _frameId);
 
-    public void WriteRegion(Int2 min, Int2 size, ReadOnlySpan<int> weights)
+    internal void WriteRegion(Int2 min, Int2 size, ReadOnlySpan<int> weights)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
         if (size.X < 0 || size.Y < 0) throw new ArgumentOutOfRangeException(nameof(size));
         if (size.X * size.Y > weights.Length)
             throw new ArgumentException("Weights span is smaller than the region.", nameof(weights));
@@ -193,9 +180,8 @@ public sealed unsafe class InfluenceField : IDisposable
         ActivateRegion(min, size);
     }
 
-    public void ReadRegion(Int2 min, Int2 size, Span<int> destination)
+    internal void ReadRegion(Int2 min, Int2 size, Span<int> destination)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
         if (size.X < 0 || size.Y < 0) throw new ArgumentOutOfRangeException(nameof(size));
         if (size.X * size.Y > destination.Length)
             throw new ArgumentException("Destination span is smaller than the region.", nameof(destination));
@@ -248,25 +234,18 @@ public sealed unsafe class InfluenceField : IDisposable
         }
     }
 
-    public void Dispose()
+    internal void DisposeState()
     {
         if (_disposed) return;
 
         _disposed = true;
-        if (_workers != null)
-        {
-            _workExit = true;
-            var signals = _workerSignals!;
-            for (var i = 0; i < signals.Length; i++) signals[i].Set();
-            foreach (var worker in _workers) worker.Join();
-            foreach (var signal in signals) signal.Dispose();
-        }
         _slotByCoord.Dispose();
         _coordBySlot.Dispose();
         _lastWritten.Dispose();
         _nonZero.Dispose();
         _prepared.Dispose();
         _freeSlots.Dispose();
+        _frontierMasks.Dispose();
         _activeSlots.Dispose();
         _data.Dispose();
         _sortedStamps.Dispose();
@@ -287,10 +266,10 @@ public sealed unsafe class InfluenceField : IDisposable
 
     internal int FreeSlotCount => _freeSlots.Length;
 
-    private bool CompatibleSpecs(InfluenceField other)
-        => _spec.Log2 == other._spec.Log2
-           && _spec.Stride == other._spec.Stride
-           && _spec.RetentionFrames == other._spec.RetentionFrames;
+    internal readonly bool CompatibleSpecs(FieldContext* other)
+        => _spec.Log2 == other->_spec.Log2
+           && _spec.Stride == other->_spec.Stride
+           && _spec.RetentionFrames == other->_spec.RetentionFrames;
 
     private bool AdvanceFrame(uint tick)
     {
@@ -300,7 +279,7 @@ public sealed unsafe class InfluenceField : IDisposable
         return reset;
     }
 
-    private int Prepare(ReadOnlySpan<Stamp> stamps, Stencil stencil, bool reset)
+    private int Prepare(ReadOnlySpan<Stamp> stamps, StencilCore stencil, bool reset)
     {
         var evicted = reset ? EvictAllSlots() : EvictStaleSlots();
         if (_frameId % CompactionInterval == 0 && _freeSlots.Length > 0) CompactSlots();
@@ -371,6 +350,7 @@ public sealed unsafe class InfluenceField : IDisposable
 
     private void CompactSlots()
     {
+        _slotByCoord.Rehash();
         var highestSlot = _slotCount - 1;
         var freeSlots = _freeSlots.Span;
         for (var i = 0; i < freeSlots.Length; i++) MoveSlotDown(freeSlots[i], ref highestSlot);
@@ -416,43 +396,66 @@ public sealed unsafe class InfluenceField : IDisposable
         }
     }
 
-    private void ActivateStencilFrontier(Stencil stencil)
+    private void ActivateStencilFrontier(StencilCore stencil)
     {
         var source = stencil.Source;
-        for (var i = 0; i < source._activeCount; i++) ActivateStencilSlot(stencil, source._activeSlots.Span[i]);
+        if (source == null) return;
+        var count = source->_activeCount;
+        if (count == 0) return;
+        if (_frontierMasks.Length < count) _frontierMasks.Resize(count);
+        _scanStencil = stencil;
+        if (_workerCount > 0 && count >= 64)
+            RunParallel(4, count);
+        else
+            for (var i = 0; i < count; i++) ScanFrontierSlot(i);
+        var sourceActive = source->_activeSlots.Span;
+        var masks = _frontierMasks.Span;
+        for (var i = 0; i < count; i++)
+        {
+            var slot = sourceActive[i];
+            var mask = masks[i];
+            if (mask == 0) continue;
+            var coord = source->_coordBySlot.Span[slot];
+            Activate(coord);
+            if ((mask & 1) != 0) Activate(coord + new Int2(-1, 0));
+            if ((mask & 2) != 0) Activate(coord + new Int2(1, 0));
+            if ((mask & 4) != 0) Activate(coord + new Int2(0, -1));
+            if ((mask & 8) != 0) Activate(coord + new Int2(0, 1));
+        }
     }
 
-    private void ActivateStencilSlot(Stencil stencil, int slot)
+    private void ScanFrontierSlot(int i)
     {
-        var source = stencil.Source;
-        if (!IsStencilSlotLive(source, slot)) return;
-
-        var coord = source._coordBySlot.Span[slot];
-        Activate(coord);
-        ActivateStencilNeighbours(source, stencil, slot * _spec.ElementsPerChunk, coord);
-    }
-
-    private bool IsStencilSlotLive(InfluenceField source, int slot)
-    {
-        if ((uint)slot < (uint)source._lastWritten.Length && source._lastWritten.Span[slot] != source._frameId)
-            return false;
-
-        return (uint)slot >= (uint)source._nonZero.Length || source._nonZero.Span[slot] != 0;
-    }
-
-    private void ActivateStencilNeighbours(InfluenceField source, Stencil stencil, int baseIndex, Int2 coord)
-    {
+        var source = _scanStencil.Source;
+        var slot = source->_activeSlots.Span[i];
+        if (!IsStencilSlotLive(source, slot))
+        {
+            _frontierMasks.Span[i] = 0;
+            return;
+        }
+        var stencil = _scanStencil;
         var size = _spec.ChunkSize;
         var stride = _spec.Stride;
-        if (NeedsActivationEdge(source, stencil, baseIndex, 0, 0, 0, 1, size, stride)) Activate(coord + new Int2(-1, 0));
-        if (NeedsActivationEdge(source, stencil, baseIndex, size - 1, 0, 0, 1, size, stride)) Activate(coord + new Int2(1, 0));
-        if (NeedsActivationEdge(source, stencil, baseIndex, 0, 0, 1, 0, size, stride)) Activate(coord + new Int2(0, -1));
-        if (NeedsActivationEdge(source, stencil, baseIndex, 0, size - 1, 1, 0, size, stride)) Activate(coord + new Int2(0, 1));
+        var baseIndex = slot * _spec.ElementsPerChunk;
+        var mask = (byte)16;
+        if (NeedsActivationEdge(source, stencil, baseIndex, 0, 0, 0, 1, size, stride)) mask |= 1;
+        if (NeedsActivationEdge(source, stencil, baseIndex, size - 1, 0, 0, 1, size, stride)) mask |= 2;
+        if (NeedsActivationEdge(source, stencil, baseIndex, 0, 0, 1, 0, size, stride)) mask |= 4;
+        if (NeedsActivationEdge(source, stencil, baseIndex, 0, size - 1, 1, 0, size, stride)) mask |= 8;
+        _frontierMasks.Span[i] = mask;
     }
 
-    private bool NeedsActivationEdge(
-        InfluenceField source,
-        Stencil stencil,
+    private static bool IsStencilSlotLive(FieldContext* source, int slot)
+    {
+        if ((uint)slot < (uint)source->_lastWritten.Length && source->_lastWritten.Span[slot] != source->_frameId)
+            return false;
+
+        return (uint)slot >= (uint)source->_nonZero.Length || source->_nonZero.Span[slot] != 0;
+    }
+
+    private static bool NeedsActivationEdge(
+        FieldContext* source,
+        StencilCore stencil,
         int baseIndex,
         int startX,
         int startY,
@@ -461,12 +464,34 @@ public sealed unsafe class InfluenceField : IDisposable
         int count,
         int stride)
     {
+        var keepFactor = 1000 - stencil.DecayPerMille;
+        if (keepFactor <= 0) return false;
+        var thresholdLong = ((long)stencil.SpreadDenominator * 1000 + keepFactor - 1) / keepFactor;
+        if (thresholdLong > short.MaxValue) return false;
+        var threshold = (int)thresholdLong;
+
+        var data = source->_data.Pointer + baseIndex;
+        if (dx == 1 && Vector.IsHardwareAccelerated && count >= Vector<short>.Count)
+        {
+            var lanes = Vector<short>.Count;
+            var bound = new Vector<int>(threshold);
+            var row = data + (long)startY * stride + startX;
+            var i = 0;
+            for (; i <= count - lanes; i += lanes)
+            {
+                Vector.Widen(new Vector<short>(new ReadOnlySpan<short>(row + i, lanes)), out var lo, out var hi);
+                if (Vector.GreaterThanOrEqualAny(Vector.Abs(lo), bound)
+                    || Vector.GreaterThanOrEqualAny(Vector.Abs(hi), bound))
+                    return true;
+            }
+            for (; i < count; i++)
+                if (row[i] >= threshold || row[i] <= -threshold) return true;
+            return false;
+        }
         for (var i = 0; i < count; i++)
         {
-            var x = startX + i * dx;
-            var y = startY + i * dy;
-            if (IntegerMath.Outflow(source._data.Span[baseIndex + y * stride + x], stencil.DecayPerMille, stencil.SpreadDenominator) != 0)
-                return true;
+            var v = data[(long)(startY + i * dy) * stride + startX + i * dx];
+            if (v >= threshold || v <= -threshold) return true;
         }
 
         return false;
@@ -592,7 +617,7 @@ public sealed unsafe class InfluenceField : IDisposable
         var elements = _spec.ElementsPerChunk;
         var data = _data.Pointer;
         var active = _activeSlots.Pointer;
-        if (_workers != null && _activeCount >= 128)
+        if (_workerCount > 0 && _activeCount >= 128)
         {
             RunParallel(0, _activeCount);
             return;
@@ -606,7 +631,7 @@ public sealed unsafe class InfluenceField : IDisposable
         var offsets = _offsets.Span;
         var sorted = _sortedStamps.Span;
         var spanPointer = _spans.Pointer;
-        if (_workers != null && _stampCount >= 64 && _activeCount >= 128)
+        if (_workerCount > 0 && _stampCount >= 64 && _activeCount >= 128)
         {
             RunParallel(2, _stampCount);
             return;
@@ -623,7 +648,7 @@ public sealed unsafe class InfluenceField : IDisposable
     {
         var offsets = _offsets.Span;
         var spans = _spans.Pointer;
-        if (_workers != null && _stampCount >= 64 && _activeCount >= 128)
+        if (_workerCount > 0 && _stampCount >= 64 && _activeCount >= 128)
         {
             RunParallel(3, _stampCount);
             return;
@@ -705,26 +730,14 @@ public sealed unsafe class InfluenceField : IDisposable
         _workPending = count;
         _workGeneration++;
         Volatile.Write(ref _workClaim, (long)_workGeneration << 32);
-        var signals = _workerSignals!;
+        var signals = ((WorkerPool)System.Runtime.InteropServices.GCHandle.FromIntPtr(_poolHandle).Target!).Signals;
         var wake = Math.Min(signals.Length, Math.Max(1, count >> 3));
         for (var i = 0; i < wake; i++) signals[i].Set();
         DrainWork(0);
         while (Volatile.Read(ref _workPending) != 0) Thread.SpinWait(1);
     }
 
-    private void WorkerEntry(int worker)
-    {
-        var signal = _workerSignals![worker - 1];
-        while (true)
-        {
-            signal.Wait();
-            if (_workExit) return;
-            DrainWork(worker);
-            signal.Reset();
-        }
-    }
-
-    private void DrainWork(int worker)
+    internal void DrainWork(int worker)
     {
         const int batch = 8;
         var generation = Volatile.Read(ref _workGeneration);
@@ -764,6 +777,9 @@ public sealed unsafe class InfluenceField : IDisposable
                     case 3:
                         for (var s = _offsets.Pointer[i]; s < _offsets.Pointer[i + 1]; s++) ScatterSpan(_spans.Pointer[s], true);
                         break;
+                    case 4:
+                        ScanFrontierSlot(i);
+                        break;
                     default:
                         new Span<short>(_data.Pointer + (long)active[i] * _spec.ElementsPerChunk, _spec.ElementsPerChunk).Clear();
                         break;
@@ -774,11 +790,11 @@ public sealed unsafe class InfluenceField : IDisposable
         }
     }
 
-    private void Resolve(Stencil stencil)
+    private void Resolve(StencilCore stencil)
     {
         var active = _activeSlots.Pointer;
         var hasStencil = stencil.Source != null;
-        if (_workers != null && _activeCount >= 128 && !ReferenceEquals(stencil.Source, this))
+        if (_workerCount > 0 && _activeCount >= 128 && stencil.Source != (FieldContext*)System.Runtime.CompilerServices.Unsafe.AsPointer(ref this))
         {
             _parallelStencil = stencil;
             RunParallel(1, _activeCount);
@@ -787,7 +803,7 @@ public sealed unsafe class InfluenceField : IDisposable
         for (var i = 0; i < _activeCount; i++) ResolveSlot(active[i], stencil, hasStencil, 0);
     }
 
-    private void ResolveSlot(int slot, Stencil stencil, bool hasStencil, int worker)
+    private void ResolveSlot(int slot, StencilCore stencil, bool hasStencil, int worker)
     {
         var field = _data.Pointer + (long)slot * _spec.ElementsPerChunk;
         _nonZero.Span[slot] = hasStencil
@@ -798,7 +814,7 @@ public sealed unsafe class InfluenceField : IDisposable
     private byte PrefixSumRun(short* field)
         => PrefixSumPass(field);
 
-    private byte PrefixSumRunStenciled(short* field, Stencil stencil, Int2 coord, int worker)
+    private byte PrefixSumRunStenciled(short* field, StencilCore stencil, Int2 coord, int worker)
     {
         PrefixSumPass(field);
         ApplyStencil(stencil, coord, field, worker);
@@ -907,7 +923,7 @@ public sealed unsafe class InfluenceField : IDisposable
         return acc != 0 ? (byte)1 : (byte)0;
     }
 
-    private void ApplyStencil(Stencil stencil, Int2 coord, short* field, int worker = 0)
+    private void ApplyStencil(StencilCore stencil, Int2 coord, short* field, int worker = 0)
     {
         var source = stencil.Source;
         var haloStride = _spec.ChunkSize + 2;
@@ -918,11 +934,11 @@ public sealed unsafe class InfluenceField : IDisposable
         AddInflow(field, halo, haloStride);
     }
 
-    private void DecaySelf(InfluenceField source, Stencil stencil, Int2 coord, short* field, short* halo, int haloStride)
+    private void DecaySelf(FieldContext* source, StencilCore stencil, Int2 coord, short* field, short* halo, int haloStride)
     {
-        if (!source._slotByCoord.TryGetValue(coord, out var slot) || !IsStencilSlotLive(source, slot)) return;
+        if (!source->_slotByCoord.TryGetValue(coord, out var slot) || !IsStencilSlotLive(source, slot)) return;
 
-        var self = source._data.Pointer + (long)slot * _spec.ElementsPerChunk;
+        var self = source->_data.Pointer + (long)slot * _spec.ElementsPerChunk;
         for (var y = 0; y < _spec.ChunkSize; y++)
             DecayRow(
                 self + (long)y * _spec.Stride,
@@ -972,7 +988,7 @@ public sealed unsafe class InfluenceField : IDisposable
 
     private static Vector<int> DivideExact(Vector<int> values, MagicDivisor divisor) => divisor.Divide(values);
 
-    private void DecayRow(short* source, short* haloRow, short* target, Stencil stencil)
+    private void DecayRow(short* source, short* haloRow, short* target, StencilCore stencil)
     {
         var decay = stencil.DecayPerMille;
         var spread = stencil.SpreadDenominator;
@@ -1010,7 +1026,7 @@ public sealed unsafe class InfluenceField : IDisposable
         }
     }
 
-    private void FillHalo(InfluenceField source, Stencil stencil, Int2 coord, short* halo, int haloStride)
+    private void FillHalo(FieldContext* source, StencilCore stencil, Int2 coord, short* halo, int haloStride)
     {
         var chunkSize = _spec.ChunkSize;
         FillHaloColumn(source, stencil, coord + new Int2(-1, 0), chunkSize - 1, 0, halo, haloStride);
@@ -1020,17 +1036,17 @@ public sealed unsafe class InfluenceField : IDisposable
     }
 
     private void FillHaloColumn(
-        InfluenceField source,
-        Stencil stencil,
+        FieldContext* source,
+        StencilCore stencil,
         Int2 coord,
         int sourceX,
         int haloX,
         short* halo,
         int haloStride)
     {
-        if (!source._slotByCoord.TryGetValue(coord, out var slot) || !IsStencilSlotLive(source, slot)) return;
+        if (!source->_slotByCoord.TryGetValue(coord, out var slot) || !IsStencilSlotLive(source, slot)) return;
 
-        var start = source._data.Pointer + (long)slot * _spec.ElementsPerChunk + sourceX;
+        var start = source->_data.Pointer + (long)slot * _spec.ElementsPerChunk + sourceX;
         var chunkSize = _spec.ChunkSize;
         var stride = _spec.Stride;
         var decay = stencil.DecayPerMille;
@@ -1060,17 +1076,17 @@ public sealed unsafe class InfluenceField : IDisposable
     }
 
     private void FillHaloRow(
-        InfluenceField source,
-        Stencil stencil,
+        FieldContext* source,
+        StencilCore stencil,
         Int2 coord,
         int sourceY,
         int haloY,
         short* halo,
         int haloStride)
     {
-        if (!source._slotByCoord.TryGetValue(coord, out var slot) || !IsStencilSlotLive(source, slot)) return;
+        if (!source->_slotByCoord.TryGetValue(coord, out var slot) || !IsStencilSlotLive(source, slot)) return;
 
-        var start = source._data.Pointer + (long)slot * _spec.ElementsPerChunk + (long)sourceY * _spec.Stride;
+        var start = source->_data.Pointer + (long)slot * _spec.ElementsPerChunk + (long)sourceY * _spec.Stride;
         var chunkSize = _spec.ChunkSize;
         var decay = stencil.DecayPerMille;
         var spread = stencil.SpreadDenominator;
@@ -1125,5 +1141,143 @@ public sealed unsafe class InfluenceField : IDisposable
         }
         for (; x < chunkSize; x++)
             target[x] = Saturate(target[x] + center[x - 1] + center[x + 1] + below[x] + above[x]);
+    }
+}
+
+internal sealed unsafe class WorkerPool : IDisposable
+{
+    internal readonly Thread[] Threads;
+    internal readonly ManualResetEventSlim[] Signals;
+    internal FieldContext* Ctx;
+
+    internal WorkerPool(FieldContext* ctx, int workers)
+    {
+        Ctx = ctx;
+        Signals = new ManualResetEventSlim[workers];
+        Threads = new Thread[workers];
+        for (var i = 0; i < workers; i++)
+        {
+            var index = i + 1;
+            Signals[i] = new ManualResetEventSlim(false);
+            Threads[i] = new Thread(() => Entry(index)) { IsBackground = true, Name = $"GridInfluence-Resolve-{index}" };
+            Threads[i].Start();
+        }
+    }
+
+    private void Entry(int worker)
+    {
+        var signal = Signals[worker - 1];
+        while (true)
+        {
+            signal.Wait();
+            if (Volatile.Read(ref Ctx->_workExit) != 0) return;
+            Ctx->DrainWork(worker);
+            signal.Reset();
+        }
+    }
+
+    public void Dispose()
+    {
+        Volatile.Write(ref Ctx->_workExit, 1);
+        foreach (var signal in Signals) signal.Set();
+        foreach (var thread in Threads) thread.Join();
+        foreach (var signal in Signals) signal.Dispose();
+    }
+}
+
+public unsafe struct Field : IDisposable, IEquatable<Field>
+{
+    internal FieldContext* _ctx;
+    internal WorkerPool? _pool;
+
+    public Field(GridSpec spec) : this(spec, 0)
+    {
+    }
+
+    public Field(GridSpec spec, int parallelism)
+    {
+        _ctx = (FieldContext*)System.Runtime.InteropServices.NativeMemory.AllocZeroed((nuint)sizeof(FieldContext));
+        _pool = null;
+        var workers = parallelism > 1 ? parallelism - 1 : 0;
+        if (workers > 0)
+        {
+            _pool = new WorkerPool(_ctx, workers);
+            _ctx->Init(spec, parallelism, System.Runtime.InteropServices.GCHandle.ToIntPtr(
+                System.Runtime.InteropServices.GCHandle.Alloc(_pool)));
+        }
+        else
+        {
+            _ctx->Init(spec, parallelism, 0);
+        }
+    }
+
+    internal readonly bool IsCreated => _ctx != null && !_ctx->_disposed;
+    internal readonly FieldContext* Ctx => _ctx;
+
+    public readonly GridSpec Spec => _ctx->_spec;
+    public readonly uint FrameId => _ctx->FrameId;
+    public readonly int ActiveSlotCount => _ctx->ActiveSlotCount;
+    public readonly int SlotCount => _ctx->SlotCount;
+
+    public readonly FieldStats Tick(ReadOnlySpan<Stamp> stamps)
+        => Tick(stamps, _ctx->FrameId + 1, default);
+
+    public readonly FieldStats Tick(ReadOnlySpan<Stamp> stamps, Stencil stencil)
+        => Tick(stamps, _ctx->FrameId + 1, stencil);
+
+    public readonly FieldStats Tick(ReadOnlySpan<Stamp> stamps, uint tick, Stencil stencil = default)
+    {
+        if (_ctx == null || _ctx->_disposed) throw new ObjectDisposedException(nameof(Field));
+        var source = stencil.Source._ctx;
+        if (source != null && !_ctx->CompatibleSpecs(source))
+            throw new ArgumentException("Stencil source field was created with a different GridSpec.", nameof(stencil));
+        return _ctx->Tick(stamps, tick, new StencilCore
+        {
+            Source = source,
+            DecayPerMille = stencil.DecayPerMille,
+            SpreadDenominator = stencil.SpreadDenominator,
+        });
+    }
+
+    public readonly FieldReader AsReader()
+    {
+        if (_ctx == null || _ctx->_disposed) throw new ObjectDisposedException(nameof(Field));
+        return _ctx->AsReader();
+    }
+
+    public readonly void WriteRegion(Int2 min, Int2 size, ReadOnlySpan<int> weights)
+    {
+        if (_ctx == null || _ctx->_disposed) throw new ObjectDisposedException(nameof(Field));
+        _ctx->WriteRegion(min, size, weights);
+    }
+
+    public readonly void ReadRegion(Int2 min, Int2 size, Span<int> destination)
+    {
+        if (_ctx == null || _ctx->_disposed) throw new ObjectDisposedException(nameof(Field));
+        _ctx->ReadRegion(min, size, destination);
+    }
+
+    internal readonly int ActiveSlot(int index) => _ctx->ActiveSlot(index);
+    internal readonly Int2 CoordOf(int slot) => _ctx->CoordOf(slot);
+    internal readonly CoordMap SlotMap => _ctx->SlotMap;
+    internal readonly uint* LastWrittenPointer => _ctx->LastWrittenPointer;
+    internal readonly int LastWrittenLength => _ctx->LastWrittenLength;
+    internal readonly int FreeSlotCount => _ctx->FreeSlotCount;
+
+    public readonly bool Equals(Field other) => _ctx == other._ctx;
+    public readonly override bool Equals(object? obj) => obj is Field other && Equals(other);
+    public readonly override int GetHashCode() => (int)(nint)_ctx;
+    public static bool operator ==(Field left, Field right) => left._ctx == right._ctx;
+    public static bool operator !=(Field left, Field right) => left._ctx != right._ctx;
+
+    public void Dispose()
+    {
+        if (_ctx == null) return;
+        _pool?.Dispose();
+        if (_ctx->_poolHandle != 0)
+            System.Runtime.InteropServices.GCHandle.FromIntPtr(_ctx->_poolHandle).Free();
+        _ctx->DisposeState();
+        System.Runtime.InteropServices.NativeMemory.Free(_ctx);
+        _ctx = null;
     }
 }

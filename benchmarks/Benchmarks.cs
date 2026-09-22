@@ -161,7 +161,7 @@ public class IoBenchmarks
 
     private byte[] _encoded = [];
     private WeightMap _map = null!;
-    private InfluenceField _field = null!;
+    private Field _field;
     private int[] _region = new int[Size * Size];
     private MemoryStream _stream = new(Size * Size * 2 + 64);
 
@@ -182,7 +182,7 @@ public class IoBenchmarks
         _encoded = File.ReadAllBytes(path);
         File.Delete(path);
 
-        _field = new InfluenceField(GridSpec.FromPowerOfTwo(5, uint.MaxValue));
+        _field = new Field(GridSpec.FromPowerOfTwo(5, uint.MaxValue));
     }
 
     [GlobalCleanup]

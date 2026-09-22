@@ -13,7 +13,7 @@ public sealed class BudgetRetentionTests
     [Fact]
     public void SpanBudget_DropsOversizedStampWhole()
     {
-        using var field = new InfluenceField(GridSpec.FromPowerOfTwo(3, uint.MaxValue));
+        using var field = new Field(GridSpec.FromPowerOfTwo(3, uint.MaxValue));
         var stats = field.Tick([Disc(600_000, 10)], 1);
 
         Assert.Equal(1, stats.StampsIn);
@@ -26,7 +26,7 @@ public sealed class BudgetRetentionTests
     [Fact]
     public void ChunkBudget_DropsStampThatSpawnsTooManyChunks()
     {
-        using var field = new InfluenceField(GridSpec.FromPowerOfTwo(3, uint.MaxValue));
+        using var field = new Field(GridSpec.FromPowerOfTwo(3, uint.MaxValue));
         var stats = field.Tick([Disc(70_000, 10)], 1);
 
         Assert.Equal(0, stats.StampsDroppedSpanBudget);
@@ -40,8 +40,8 @@ public sealed class BudgetRetentionTests
         var big = Disc(600_000, 10);
         var small = Disc(3, 10);
 
-        using var fieldA = new InfluenceField(GridSpec.FromPowerOfTwo(3, uint.MaxValue));
-        using var fieldB = new InfluenceField(GridSpec.FromPowerOfTwo(3, uint.MaxValue));
+        using var fieldA = new Field(GridSpec.FromPowerOfTwo(3, uint.MaxValue));
+        using var fieldB = new Field(GridSpec.FromPowerOfTwo(3, uint.MaxValue));
         fieldA.Tick([small, big], 1);
         fieldB.Tick([big, small], 1);
 
@@ -54,7 +54,7 @@ public sealed class BudgetRetentionTests
     [Fact]
     public void Retention_EvictsAfterConfiguredTicks()
     {
-        using var field = new InfluenceField(GridSpec.FromPowerOfTwo(2, 4));
+        using var field = new Field(GridSpec.FromPowerOfTwo(2, 4));
         field.Tick([Cell(5)], 2);
         Assert.Equal(1, field.SlotCount);
         Assert.Equal(0, field.FreeSlotCount);
@@ -70,7 +70,7 @@ public sealed class BudgetRetentionTests
     [Fact]
     public void Retention_MaxValue_KeepsChunksResidentForever()
     {
-        using var field = new InfluenceField(GridSpec.FromPowerOfTwo(2, uint.MaxValue));
+        using var field = new Field(GridSpec.FromPowerOfTwo(2, uint.MaxValue));
         field.Tick([Cell(5)], 1);
 
         for (var tick = 2u; tick < 40u; tick++) field.Tick([], tick);
@@ -82,7 +82,7 @@ public sealed class BudgetRetentionTests
     [Fact]
     public void Compaction_RelocatesLiveChunksDownAndPreservesMappings()
     {
-        using var field = new InfluenceField(GridSpec.FromPowerOfTwo(2, 4));
+        using var field = new Field(GridSpec.FromPowerOfTwo(2, 4));
         field.Tick([Cell(9, new Int2(0, 0)), Cell(9, new Int2(24, 0))], 1);
         Assert.Equal(2, field.SlotCount);
 
@@ -98,7 +98,7 @@ public sealed class BudgetRetentionTests
     [Fact]
     public void Compaction_TruncatesWhenEverythingIsFree()
     {
-        using var field = new InfluenceField(GridSpec.FromPowerOfTwo(2, 4));
+        using var field = new Field(GridSpec.FromPowerOfTwo(2, 4));
         field.Tick([Cell(9, new Int2(0, 0))], 59);
         field.Tick([Cell(9, new Int2(0, 0)), Cell(9, new Int2(24, 0))], 60);
         Assert.Equal(2, field.SlotCount);

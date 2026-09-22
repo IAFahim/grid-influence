@@ -79,7 +79,7 @@ internal static class Verification
 
     private static bool RegionRoundTrip()
     {
-        using var field = new InfluenceField(GridSpec.FromPowerOfTwo(3, uint.MaxValue));
+        using var field = new Field(GridSpec.FromPowerOfTwo(3, uint.MaxValue));
         var weights = new int[11 * 7];
         for (var i = 0; i < weights.Length; i++) weights[i] = i * 13 - 70;
 
@@ -153,7 +153,7 @@ internal static class Verification
 
     private static bool BudgetDrops()
     {
-        using var field = new InfluenceField(GridSpec.FromPowerOfTwo(3, uint.MaxValue));
+        using var field = new Field(GridSpec.FromPowerOfTwo(3, uint.MaxValue));
         var oversized = new Stamp(InfluenceShape.Disc(Int2.Zero, 600_000, 10), Int2.Zero);
         var stats = field.Tick([oversized], 1);
         return stats.StampsDroppedSpanBudget == 1 && field.ActiveSlotCount == 0;

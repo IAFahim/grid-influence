@@ -54,8 +54,8 @@ public readonly struct FieldConfig
 public sealed class FieldPair : IDisposable
 {
     public FieldConfig Config { get; }
-    public InfluenceField Front { get; private set; }
-    public InfluenceField? Back { get; private set; }
+    public Field Front { get; private set; }
+    public Field Back { get; private set; }
     public bool DoubleBuffered { get; }
     public uint Tick { get; private set; }
 
@@ -64,9 +64,9 @@ public sealed class FieldPair : IDisposable
         Config = config;
         var align = config.StrideAlignment == 0 ? 8 : config.StrideAlignment;
         var spec = GridSpec.FromPowerOfTwo(config.ChunkPower, config.RetentionFrames, align);
-        Front = new InfluenceField(spec);
+        Front = new Field(spec);
         DoubleBuffered = config.NeedsDoubleBuffer;
-        Back = DoubleBuffered ? new InfluenceField(spec) : null;
+        Back = DoubleBuffered ? new Field(spec) : default;
     }
 
     public FieldStats Step(ReadOnlySpan<Stamp> stamps)
@@ -77,7 +77,7 @@ public sealed class FieldPair : IDisposable
         var needsStencil = DoubleBuffered && Config.DecayPerMille > 0 && hasChunks;
         if (!hasPending && !hasChunks && !needsStencil) return default;
 
-        if (Back is null) return Front.Tick(stamps, Tick);
+        if (!Back.IsCreated) return Front.Tick(stamps, Tick);
 
         var stencil = Config.DecayPerMille > 0
             ? Stencil.Create(Front, Config.DecayPerMille, Config.SpreadDenominator)
@@ -89,7 +89,7 @@ public sealed class FieldPair : IDisposable
 
     public void Swap()
     {
-        if (Back is null) return;
+        if (!Back.IsCreated) return;
 
         var front = Front;
         Front = Back;
@@ -99,7 +99,7 @@ public sealed class FieldPair : IDisposable
     public void Dispose()
     {
         Front.Dispose();
-        Back?.Dispose();
+        if (Back.IsCreated) Back.Dispose();
     }
 }
 

@@ -75,7 +75,7 @@ public sealed class DiffusionIntegrationTests
         return grid;
     }
 
-    private static int[,] ReadBox(InfluenceField field, Int2 boxMin, Int2 boxSize)
+    private static int[,] ReadBox(Field field, Int2 boxMin, Int2 boxSize)
     {
         var box = new int[boxSize.X, boxSize.Y];
         var flat = new int[boxSize.X * boxSize.Y];
@@ -95,8 +95,8 @@ public sealed class DiffusionIntegrationTests
         const int spread = 4;
         var spec = GridSpec.FromPowerOfTwo(chunkPower, uint.MaxValue);
 
-        var front = new InfluenceField(spec);
-        var back = new InfluenceField(spec);
+        var front = new Field(spec);
+        var back = new Field(spec);
         try
         {
 
