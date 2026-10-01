@@ -22,8 +22,8 @@ internal unsafe struct StampVariant
 
 internal static unsafe class StampCatalog
 {
-    internal const int MaxStamps = 256;
-    internal const int MaxAxis = 256;
+    private const int MaxStamps = 256;
+    private const int MaxAxis = 256;
 
     private static readonly StampVariant* Variants =
         (StampVariant*)NativeMemory.AllocZeroed((nuint)(MaxStamps * sizeof(StampVariant)));

@@ -171,7 +171,7 @@ public static unsafe class World
             {
                 var ld = g->Layers + l;
                 var span = ld->Dirty.Span;
-                for (var i = 0; i < span.Length; i++) ld->InDirty[span[i]] = 0;
+                foreach (var tile in span) ld->InDirty[tile] = 0;
                 ld->Dirty.Resize(0);
 
                 var pages = &ld->Pages;
@@ -274,9 +274,8 @@ public static unsafe class World
                 var ld = g->Layers + l;
                 var span = ld->Dirty.Span;
                 var pages = &ld->Pages;
-                for (var i = 0; i < span.Length; i++)
+                foreach (var tile in span)
                 {
-                    var tile = span[i];
                     ld->InDirty[tile] = 0;
                     if (!pages->TryGet(tile, out var block)) continue;
 

@@ -12,10 +12,10 @@ internal static unsafe class TileBake
     internal const int DiffPitch = 48;
     internal const int DiffRows = 33;
 
-    internal static bool Vector => Sse2.IsSupported || AdvSimd.IsSupported;
+    private static bool Vector => Sse2.IsSupported || AdvSimd.IsSupported;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static int RoundQ16(int value)
+    private static int RoundQ16(int value)
         => (value + 32768 + (value >> 31)) >> 16;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -7,10 +7,9 @@ public sealed class EngineTests
     private static int RoundQ16(int value)
         => value < 0 ? -((-value + 32768) >> 16) : (value + 32768) >> 16;
 
-    private readonly struct Band
+    private readonly struct Band(int start, int end, int w)
     {
-        public readonly int Start, End, W;
-        public Band(int s, int e, int w) { Start = s; End = e; W = w; }
+        public readonly int Start = start, End = end, W = w;
     }
 
     private static Band[] Bands(int length, int phase)
@@ -22,16 +21,16 @@ public sealed class EngineTests
 
     private sealed class Oracle
     {
-        public int X, Y, Px, Py, Fx, Fy, Gain;
-        public sbyte[]? Samples;
-        public int W, H;
-        public sbyte Constant;
-        public bool Raster;
+        private int _x, _y, _px, _py, _fx, _fy, _gain;
+        private sbyte[]? _samples;
+        private int _w, _h;
+        private sbyte _constant;
+        private bool _raster;
 
         public static Oracle Box(float wx, float wy, float ox, float oy, float scale,
             int w, int h, sbyte value, int gain)
         {
-            var o = new Oracle { W = w, H = h, Constant = value, Gain = gain };
+            var o = new Oracle { _w = w, _h = h, _constant = value, _gain = gain };
             o.Position(wx, wy, ox, oy, scale);
             return o;
         }
@@ -39,48 +38,48 @@ public sealed class EngineTests
         public static Oracle Rast(float wx, float wy, float ox, float oy, float scale,
             sbyte[] samples, int w, int h, int gain)
         {
-            var o = new Oracle { W = w, H = h, Samples = samples, Gain = gain, Raster = true };
+            var o = new Oracle { _w = w, _h = h, _samples = samples, _gain = gain, _raster = true };
             o.Position(wx, wy, ox, oy, scale);
             return o;
         }
 
         private void Position(float wx, float wy, float ox, float oy, float scale)
         {
-            X = (int)MathF.Floor((wx - ox) * scale * 256f) - (W * 128);
-            Y = (int)MathF.Floor((wy - oy) * scale * 256f) - (H * 128);
-            Px = X >> 8;
-            Py = Y >> 8;
-            Fx = X & 255;
-            Fy = Y & 255;
+            _x = (int)MathF.Floor((wx - ox) * scale * 256f) - (_w * 128);
+            _y = (int)MathF.Floor((wy - oy) * scale * 256f) - (_h * 128);
+            _px = _x >> 8;
+            _py = _y >> 8;
+            _fx = _x & 255;
+            _fy = _y & 255;
         }
 
         private int Sample(int ix, int iy)
-            => (uint)ix < (uint)W && (uint)iy < (uint)H && Samples != null ? Samples[iy * W + ix] : 0;
+            => (uint)ix < (uint)_w && (uint)iy < (uint)_h && _samples != null ? _samples[iy * _w + ix] : 0;
 
         public long Contribution(int cx, int cy)
         {
-            var sx = cx - Px;
-            var sy = cy - Py;
-            if (Raster)
+            var sx = cx - _px;
+            var sy = cy - _py;
+            if (_raster)
             {
-                if (sx < 0 || sx > W || sy < 0 || sy > H) return 0;
-                var w00 = (256 - Fx) * (256 - Fy);
-                var w10 = Fx * (256 - Fy);
-                var w01 = (256 - Fx) * Fy;
-                var w11 = Fx * Fy;
+                if (sx < 0 || sx > _w || sy < 0 || sy > _h) return 0;
+                var w00 = (256 - _fx) * (256 - _fy);
+                var w10 = _fx * (256 - _fy);
+                var w01 = (256 - _fx) * _fy;
+                var w11 = _fx * _fy;
                 return (long)RoundQ16(
                     Sample(sx, sy) * w00 + Sample(sx - 1, sy) * w10 +
-                    Sample(sx, sy - 1) * w01 + Sample(sx - 1, sy - 1) * w11) * Gain;
+                    Sample(sx, sy - 1) * w01 + Sample(sx - 1, sy - 1) * w11) * _gain;
             }
 
             var xw = 0;
-            foreach (var b in Bands(W, Fx))
+            foreach (var b in Bands(_w, _fx))
                 if (sx >= b.Start && sx < b.End) { xw = b.W; break; }
             var yw = 0;
-            foreach (var b in Bands(H, Fy))
+            foreach (var b in Bands(_h, _fy))
                 if (sy >= b.Start && sy < b.End) { yw = b.W; break; }
             if (xw == 0 || yw == 0) return 0;
-            return (long)RoundQ16(Constant * xw * yw) * Gain;
+            return (long)RoundQ16(_constant * xw * yw) * _gain;
         }
     }
 
