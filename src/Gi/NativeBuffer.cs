@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 namespace Gi;
 
 [StructLayout(LayoutKind.Sequential)]
-internal unsafe struct NativeBuffer<T> : IDisposable where T : unmanaged
+internal unsafe struct NativeBuffer<T> where T : unmanaged
 {
     private T* _pointer;
     private int _length;
@@ -15,8 +15,6 @@ internal unsafe struct NativeBuffer<T> : IDisposable where T : unmanaged
     public Span<T> Span => _pointer == null ? default : new(_pointer, _length);
 
     public T* Pointer => _pointer;
-
-    public void SetLength(int value) => _length = value;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Resize(int length)
@@ -38,15 +36,5 @@ internal unsafe struct NativeBuffer<T> : IDisposable where T : unmanaged
         _pointer = pointer;
         _capacity = (int)(capacity / (nuint)sizeof(T));
         _length = length;
-    }
-
-    public void Dispose()
-    {
-        if (_pointer == null) return;
-
-        NativeMemory.AlignedFree(_pointer);
-        _pointer = null;
-        _length = 0;
-        _capacity = 0;
     }
 }
