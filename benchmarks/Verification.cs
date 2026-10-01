@@ -1,6 +1,6 @@
 using System.Diagnostics;
-using GridInfluence;
-using GridInfluence.Io;
+using Gi;
+using Gi.Io;
 
 namespace Benchmarks;
 

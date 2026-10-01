@@ -1,5 +1,5 @@
-using GridInfluence;
-using GridInfluence.Io;
+using Gi;
+using Gi.Io;
 
 var scenePath = "assets/scene.json";
 var outputDirectory = "frames";

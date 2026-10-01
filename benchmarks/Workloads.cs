@@ -1,4 +1,4 @@
-using GridInfluence;
+using Gi;
 
 namespace Benchmarks;
 

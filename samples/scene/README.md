@@ -1,6 +1,6 @@
 # Scene sample
 
-A complete consumer walkthrough of `GridInfluence` + `GridInfluence.Io`: a JSON scene drives two
+A complete consumer walkthrough of `Gi` + `Gi.Io`: a JSON scene drives two
 fields — a decaying `threat` field stamped by three moving clips (line, orbit, negative annulus)
 and a `terrain` field painted every frame from a 64×64 P5 weight image (`assets/bases.pgm`,
 signed 16-bit). The run captures PPM frames of the world at frames 0/40/80/119 and prints query

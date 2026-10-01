@@ -1,6 +1,6 @@
 # Repository rules
 
-GridInfluence is a standalone .NET library for chunked sparse integer influence fields. It has no
+Gi is a standalone .NET library for chunked sparse integer influence fields. It has no
 dependency on any timeline package and must not gain one.
 
 ## Code rules
@@ -18,8 +18,8 @@ dependency on any timeline package and must not gain one.
 ## Validation
 
 ```sh
-dotnet build GridInfluence.slnx -c Release -m:1
-dotnet test GridInfluence.slnx -c Release --no-build
+dotnet build Gi.slnx -c Release -m:1
+dotnet test Gi.slnx -c Release --no-build
 dotnet run --project samples/scene -c Release --no-build -- --scene samples/scene/assets/scene.json --out /tmp/frames
 dotnet run --project benchmarks -c Release --no-build -- --verify
 ```

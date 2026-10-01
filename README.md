@@ -1,4 +1,4 @@
-# GridInfluence
+# Gi
 
 Chunked, sparse, **integer** influence fields for .NET. Stamps (discs, capsules, sectors, rects,
 and more) are rasterized into horizontal spans and resolved with a difference array + prefix sum,
@@ -16,13 +16,13 @@ engine.
 
 | Package | Contents |
 |---------|----------|
-| [`GridInfluence`](src/GridInfluence/pack-readme.md) | The engine: fields, stamps, rasterizer, stencil resolve, readers, gradient/flow/territory/capture queries. Zero dependencies. |
-| [`GridInfluence.Io`](src/GridInfluence.Io/pack-readme.md) | PNM/PPM weight-map codec (load weights, export any frame) and a JSON scene runner for file-driven simulation. Separate on purpose: file formats are a consumer concern, not engine concerns. |
+| [`Gi`](src/Gi/pack-readme.md) | The engine: fields, stamps, rasterizer, stencil resolve, readers, gradient/flow/territory/capture queries. Zero dependencies. |
+| [`Gi.Io`](src/Gi.Io/pack-readme.md) | PNM/PPM weight-map codec (load weights, export any frame) and a JSON scene runner for file-driven simulation. Separate on purpose: file formats are a consumer concern, not engine concerns. |
 
 ## Quick start
 
 ```csharp
-using GridInfluence;
+using Gi;
 
 var spec = GridSpec.FromPowerOfTwo(chunkPower: 5, retentionFrames: 256);
 using var front = new InfluenceField(spec);
@@ -38,10 +38,10 @@ Int2 gradient = reader.Gradient(cell);
 ```
 
 Bulk weights in, world snapshots out — both cross the boundary as unmanaged spans
-(`WriteRegion`/`ReadRegion`) or PNM files via `GridInfluence.Io`:
+(`WriteRegion`/`ReadRegion`) or PNM files via `Gi.Io`:
 
 ```csharp
-using GridInfluence.Io;
+using Gi.Io;
 
 using var weights = Pnm.LoadWeights("weights.pgm");      // P5/P6, 8 or 16 bit, signed or unsigned
 field.WriteRegion(offset, size, weights.Samples);
@@ -119,8 +119,8 @@ unsafe proof: [`docs/model.md`](docs/model.md).
 
 ## Repository layout
 
-- `src/GridInfluence` — the engine package.
-- `src/GridInfluence.Io` — PNM codec and JSON scene runner package.
+- `src/Gi` — the engine package.
+- `src/Gi.Io` — PNM codec and JSON scene runner package.
 - `tests/` — rasterizer oracles, field algebra, diffusion integration, budgets, IO.
 - `benchmarks/` — BenchmarkDotNet suite, `--verify` receipts, PMU collector and committed counters.
 - `samples/scene` — end-to-end JSON + PNM walkthrough.

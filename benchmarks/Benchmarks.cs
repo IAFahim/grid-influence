@@ -7,8 +7,8 @@ using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Toolchains.InProcess.NoEmit;
 using Perfolizer.Horology;
-using GridInfluence;
-using GridInfluence.Io;
+using Gi;
+using Gi.Io;
 
 namespace Benchmarks;
 

@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using GridInfluence;
+using Gi;
 
 unsafe class Scenarios
 {

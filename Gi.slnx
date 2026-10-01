@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Gi/Gi.csproj" />
+    <Project Path="src/Gi.Io/Gi.Io.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/scene/Gi.Sample.csproj" />
+    <Project Path="samples/world/Gi.WorldSample.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Gi.Tests/Gi.Tests.csproj" />
+  </Folder>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/GiBenchmarks.csproj" />
+  </Folder>
+</Solution>

@@ -1,4 +1,4 @@
-# GridInfluence
+# Gi
 
 Chunked, sparse, **integer** influence fields for .NET — a faithful port of the core of
 [BovineLabs Timeline Grid Influence](https://github.com/vex-studio/com.bovinelabs.timeline.grid.influence)
@@ -46,7 +46,7 @@ float smooth = reader.SampleBilinear(4.5f, 7.5f);
 ```
 
 Or drive everything from a JSON scene with PPM weight layers via
-[`GridInfluence.Io`](../src/GridInfluence.Io/pack-readme.md) and see
+[`Gi.Io`](../src/Gi.Io/pack-readme.md) and see
 [`samples/scene`](../samples/scene/README.md).
 
 ## Receipts
@@ -54,7 +54,7 @@ Or drive everything from a JSON scene with PPM weight layers via
 Measured on the validation machine (i9-14900K, .NET 10, `benchmarks`), 256 stamps,
 4 ticks per invocation, median:
 
-| World   | Naive per-cell scatter + full-grid decay | GridInfluence serial | GridInfluence par=32 | Speedup |
+| World   | Naive per-cell scatter + full-grid decay | Gi serial | Gi par=32 | Speedup |
 |---------|------------------------------------------|----------------------|----------------------|---------|
 | 256²    | 1 755 µs                                 | ~230 µs              | ~230 µs              | ~7.6×   |
 | 1024²   | 26 781 µs                                | ~1 500 µs            | ~390 µs              | ~69×    |
