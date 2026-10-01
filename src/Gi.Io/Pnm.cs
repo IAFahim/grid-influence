@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -255,7 +256,28 @@ public static class Pnm
 
     private static unsafe void EncodeGray16(int* source, byte* target, int count, int maxVal)
     {
-        for (var i = 0; i < count; i++)
+        var i = 0;
+        if (Avx2.IsSupported)
+        {
+            var lowerBound = Vector256<int>.Zero;
+            var upperBound = Vector256.Create(maxVal);
+            var half = Vector256.Create(32768);
+            var swap = Vector256.Create(
+                (byte)1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12, 15, 14,
+                (byte)1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12, 15, 14);
+            var fix = Vector256.Create(
+                (byte)128, 0, 128, 0, 128, 0, 128, 0, 128, 0, 128, 0, 128, 0, 128, 0,
+                (byte)128, 0, 128, 0, 128, 0, 128, 0, 128, 0, 128, 0, 128, 0, 128, 0);
+            for (; i + Vector256<int>.Count * 2 <= count; i += Vector256<int>.Count * 2)
+            {
+                var low = Vector256.Min(Vector256.Max(Vector256.Load(source + i), lowerBound), upperBound) - half;
+                var high = Vector256.Min(Vector256.Max(Vector256.Load(source + i + Vector256<int>.Count), lowerBound), upperBound) - half;
+                var swapped = Avx2.Shuffle(Vector256.Narrow(low, high).AsByte(), swap);
+                Avx2.Xor(swapped, fix).Store(target + 2 * i);
+            }
+        }
+
+        for (; i < count; i++)
         {
             var value = Math.Clamp(source[i], 0, maxVal);
             BinaryPrimitives.WriteUInt16BigEndian(new Span<byte>(target + 2 * i, 2), (ushort)value);
@@ -264,7 +286,21 @@ public static class Pnm
 
     private static unsafe void EncodeGray8(int* source, byte* target, int count, int maxVal)
     {
-        for (var i = 0; i < count; i++) target[i] = (byte)Math.Clamp(source[i], 0, maxVal);
+        var i = 0;
+        if (Avx2.IsSupported)
+        {
+            var lowerBound = Vector256<int>.Zero;
+            var upperBound = Vector256.Create(maxVal);
+            for (; i + Vector256<int>.Count * 2 <= count; i += Vector256<int>.Count * 2)
+            {
+                var low = Vector256.Min(Vector256.Max(Vector256.Load(source + i), lowerBound), upperBound);
+                var high = Vector256.Min(Vector256.Max(Vector256.Load(source + i + Vector256<int>.Count), lowerBound), upperBound);
+                var packed = Vector256.Narrow(low, high);
+                Sse2.PackUnsignedSaturate(packed.GetLower(), packed.GetUpper()).Store(target + i);
+            }
+        }
+
+        for (; i < count; i++) target[i] = (byte)Math.Clamp(source[i], 0, maxVal);
     }
 
     public static void SaveColorRgb(string path, ReadOnlySpan<int> samples, int width, int height)

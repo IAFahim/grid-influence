@@ -16,7 +16,9 @@ under the MIT license; the engine carries no Unity dependencies.
 - Each tick: prepare slots (budgets, retention eviction, compaction every 60 ticks, stencil
   frontier — edge scans run in parallel, activation inserts stay serial and ordered) → rasterize
   stamps → clear active chunk difference arrays → scatter ±weight at span corners → resolve
-  (inclusive prefix sum per chunk, then decay/spread stencil against the previous buffer). The
+  (inclusive prefix sum per chunk — horizontal pass is an exact int32 SIMD lane scan with a
+  saturating scalar fallback per row, vertical pass is saturating vector adds — then decay/spread
+  stencil against the previous buffer). The
   difference-array trick makes a tick cost O(spans + touched chunks), independent of stamped area.
 - An idle tick — no stamps, nothing live, no live stencil source — skips the pipeline entirely:
   frame bookkeeping plus retention/compaction only (~12–45 ns).
@@ -69,6 +71,21 @@ The baseline is the cost model the difference-array design exists to replace: pa
 cell of every stamp every tick plus a full-grid decay pass. Burst/Unity numbers are not compared —
 same-machine, same-fixture, one-variable comparisons only.
 
+### Row-scan receipts (Ryzen 5 8500G, .NET 10.0.12, before/after, bit-identical outputs)
+
+The horizontal prefix pass is lowered to an exact int32 lane scan (AVX2/SSE2, zero blocks skipped,
+two interleaved rows per chunk) instead of the scalar saturating chain:
+
+| Workload (median)              | Before    | After     |
+|--------------------------------|-----------|-----------|
+| 1024² tick, no decay           | 909 µs    | 506 µs    |
+| 2048² tick, no decay           | 1 073 µs  | 577 µs    |
+| 1024² tick, decay + spread     | 3 646 µs  | 3 041 µs  |
+| 2048² tick, decay + spread     | 5 208 µs  | 4 293 µs  |
+| PNM gray-16 encode 1024²       | 3 413 µs  | 436 µs    |
+
+The i9-14900K table above predates the vectorized row scan and PNM encoders.
+
 ## Unsafe proof
 
 - **Lifetime**: `Field` is a value-type handle to a `FieldContext` block allocated once via
@@ -85,6 +102,15 @@ same-machine, same-fixture, one-variable comparisons only.
 - **Alignment**: every unmanaged block is 64-byte aligned; `ElementsPerChunk` strides are aligned
   to at least 8 cells, which satisfies `Vector128`/`Vector256` `Vector<short>` loads in the resolve
   pass. Vector adds use saturating `Vector.AddSaturate` semantics identical to the scalar clamp.
+  The horizontal row scan loads `Vector256`/`Vector128` blocks fully inside each row's
+  `[0, dimension)` cells (no padding or seam reads), computes exact int32 inclusive scans, and
+  stores a block only when every prefix so far lies in `[-32767, 32767]` — a superset of the
+  saturating range — otherwise the row is redone with the scalar saturating chain from the
+  offending block, so stored bits equal the scalar definition in all cases, including under
+  saturation. Vector zero tests use `CompareEqual` + `MoveMask`; `Avx.TestZ` is avoided because it
+  was observed returning true for nonzero operands on .NET 10.0.12 (x86-64-v4). The PNM encoders
+  clamp in int32, then narrow with a bias-32768 pre-shift (gray-16, byte-swapped and corrected by
+  a masked xor) or `PackUnsignedSaturate` (gray-8) — exact for clamped inputs.
 - **Concurrency**: the serial warm path is single-threaded and deterministic. CoordMap and buffers
   are single-writer. A defensive-copy bug on a readonly struct field (map table filled while its count
   stayed 0) was found by stress and fixed; buffer growth on a readonly struct field is forbidden by

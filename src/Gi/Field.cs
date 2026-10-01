@@ -1,4 +1,7 @@
 using System.Numerics;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 
 namespace Gi;
 
@@ -172,7 +175,37 @@ internal unsafe struct FieldContext
                 var chunk = _data.Pointer + (long)slot * elements;
                 var target = chunk + (long)localY * stride + (lo & (chunkSize - 1));
                 var weightsRow = weights.Slice(row * size.X + lo - min.X, hi - lo);
-                for (var x = 0; x < weightsRow.Length; x++)
+                var length = weightsRow.Length;
+                var x = 0;
+                if (Vector256.IsHardwareAccelerated)
+                {
+                    var lower = Vector256.Create(-32768);
+                    var upper = Vector256.Create(32767);
+                    ref var w = ref MemoryMarshal.GetReference(weightsRow);
+                    for (; x + Vector256<short>.Count <= length; x += Vector256<short>.Count)
+                    {
+                        var low = Vector256.LoadUnsafe(ref w, (nuint)x);
+                        var high = Vector256.LoadUnsafe(ref w, (nuint)(x + Vector256<int>.Count));
+                        Vector256.Narrow(
+                            Vector256.Min(Vector256.Max(low, lower), upper),
+                            Vector256.Min(Vector256.Max(high, lower), upper)).Store(target + x);
+                    }
+                }
+                if (Vector128.IsHardwareAccelerated)
+                {
+                    var lower = Vector128.Create(-32768);
+                    var upper = Vector128.Create(32767);
+                    ref var w = ref MemoryMarshal.GetReference(weightsRow);
+                    for (; x + Vector128<short>.Count <= length; x += Vector128<short>.Count)
+                    {
+                        var low = Vector128.LoadUnsafe(ref w, (nuint)x);
+                        var high = Vector128.LoadUnsafe(ref w, (nuint)(x + Vector128<int>.Count));
+                        Vector128.Narrow(
+                            Vector128.Min(Vector128.Max(low, lower), upper),
+                            Vector128.Min(Vector128.Max(high, lower), upper)).Store(target + x);
+                    }
+                }
+                for (; x < length; x++)
                     target[x] = Saturate(weightsRow[x]);
             }
         }
@@ -211,7 +244,28 @@ internal unsafe struct FieldContext
             for (var y = lo.Y; y < hi.Y; y++)
             {
                 var dst = destination.Slice((y - min.Y) * size.X + lo.X - min.X, width);
-                for (var x = 0; x < width; x++) dst[x] = data[x];
+                var x = 0;
+                if (Vector256.IsHardwareAccelerated)
+                {
+                    ref var d = ref MemoryMarshal.GetReference(dst);
+                    for (; x + Vector256<short>.Count <= width; x += Vector256<short>.Count)
+                    {
+                        (var low, var high) = Vector256.Widen(Vector256.Load(data + x));
+                        low.StoreUnsafe(ref d, (nuint)x);
+                        high.StoreUnsafe(ref d, (nuint)(x + Vector256<int>.Count));
+                    }
+                }
+                if (Vector128.IsHardwareAccelerated)
+                {
+                    ref var d = ref MemoryMarshal.GetReference(dst);
+                    for (; x + Vector128<short>.Count <= width; x += Vector128<short>.Count)
+                    {
+                        (var low, var high) = Vector128.Widen(Vector128.Load(data + x));
+                        low.StoreUnsafe(ref d, (nuint)x);
+                        high.StoreUnsafe(ref d, (nuint)(x + Vector128<int>.Count));
+                    }
+                }
+                for (; x < width; x++) dst[x] = data[x];
                 data += stride;
             }
         }
@@ -826,34 +880,9 @@ internal unsafe struct FieldContext
         var stride = _spec.Stride;
         var dimension = _spec.Dimension;
         var y = 0;
-        for (; y + 4 <= dimension; y += 4)
-        {
-            var row0 = field + (long)y * stride;
-            var row1 = row0 + stride;
-            var row2 = row1 + stride;
-            var row3 = row2 + stride;
-            var a = 0;
-            var b = 0;
-            var c = 0;
-            var d = 0;
-            for (var x = 0; x < dimension; x++)
-            {
-                a += row0[x]; row0[x] = Saturate(a);
-                b += row1[x]; row1[x] = Saturate(b);
-                c += row2[x]; row2[x] = Saturate(c);
-                d += row3[x]; row3[x] = Saturate(d);
-            }
-        }
-        for (; y < dimension; y++)
-        {
-            var row = field + (long)y * stride;
-            var running = 0;
-            for (var x = 0; x < dimension; x++)
-            {
-                running += row[x];
-                row[x] = Saturate(running);
-            }
-        }
+        for (; y + 2 <= dimension; y += 2)
+            RowScan.PrefixPair(field + (long)y * stride, field + (long)(y + 1) * stride, dimension);
+        if (y < dimension) RowScan.Prefix(field + (long)y * stride, dimension);
 
         var acc = 0;
         if (Vector.IsHardwareAccelerated && stride >= Vector<short>.Count)
