@@ -1,4 +1,5 @@
 bin/
 obj/
-samples/scene/frames/
 *.user
+BenchmarkDotNet.Artifacts/
+viz/out/
