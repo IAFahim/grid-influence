@@ -1,11 +1,11 @@
 using System.Text;
 using Gi;
 
-const int Cells = 256;
-const float Size = 256f;
+const int cells = 256;
+const float size = 256f;
 
 var w = World.New();
-var g = Grid.New(w, 8, 0f, 0f, Size);   // 256x256 cells, 1 cell = 1 unit
+var g = Grid.New(w, 8, 0f, 0f, size);   // 256x256 cells, 1 cell = 1 unit
 var threat = Layer.New(w);
 var trail = Layer.New(w);
 var danger = Layer.New(w);
@@ -80,16 +80,16 @@ var layerDefs = new (byte id, string name, string hex)[]
 };
 
 var json = new StringBuilder();
-json.Append("{\"cells\":").Append(Cells).Append(",\"size\":").Append((int)Size);
+json.Append("{\"cells\":").Append(cells).Append(",\"size\":").Append((int)size);
 json.Append(",\"layers\":[");
 for (var li = 0; li < layerDefs.Length; li++)
 {
     var (id, name, hex) = layerDefs[li];
     if (li > 0) json.Append(',');
     json.Append("{\"name\":\"").Append(name).Append("\",\"color\":\"").Append(hex).Append("\",\"values\":[");
-    for (var y = 0; y < Cells; y++)
-    for (var x = 0; x < Cells; x++)
-        json.Append(World.Query(w, g, id, x, y)).Append(x == Cells - 1 && y == Cells - 1 ? "" : ",");
+    for (var y = 0; y < cells; y++)
+    for (var x = 0; x < cells; x++)
+        json.Append(World.Query(w, g, id, x, y)).Append(x == cells - 1 && y == cells - 1 ? "" : ",");
     json.Append("]}");
 }
 json.Append("],\"sources\":[");
@@ -108,4 +108,4 @@ var html = Template.Html.Replace("/*__DATA__*/", json.ToString());
 var outDir = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "out");
 Directory.CreateDirectory(outDir);
 File.WriteAllText(Path.Combine(outDir, "index.html"), html);
-Console.WriteLine($"wrote out/index.html ({html.Length / 1024} KB), {markers.Count} markers, 3 layers x {Cells}x{Cells}");
+Console.WriteLine($"wrote out/index.html ({html.Length / 1024} KB), {markers.Count} markers, 3 layers x {cells}x{cells}");

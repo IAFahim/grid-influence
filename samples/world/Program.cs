@@ -1,4 +1,5 @@
-using Gi;
+
+namespace Gi.WorldSample;
 
 class Scenarios
 {

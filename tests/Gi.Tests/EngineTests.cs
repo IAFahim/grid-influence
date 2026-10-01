@@ -2,7 +2,7 @@ using Xunit;
 
 namespace Gi.Tests;
 
-public sealed unsafe class EngineTests
+public sealed class EngineTests
 {
     private static int RoundQ16(int value)
         => value < 0 ? -((-value + 32768) >> 16) : (value + 32768) >> 16;

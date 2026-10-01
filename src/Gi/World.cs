@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace Gi;
 
-internal unsafe struct SourceColumns
+internal struct SourceColumns
 {
     public NativeBuffer<float> X;
     public NativeBuffer<float> Y;
@@ -67,7 +67,7 @@ public static unsafe class World
         var id = (byte)_worldCount++;
         var w = Worlds + id;
         w->Grids = (GridCtx*)NativeMemory.AllocZeroed((nuint)(MaxGrids * sizeof(GridCtx)));
-        w->Prev = (int*)NativeMemory.AlignedAlloc((nuint)(TileBake.TileSize * sizeof(int)), 64);
+        w->Prev = (int*)NativeMemory.AlignedAlloc(TileBake.TileSize * sizeof(int), 64);
         return id;
     }
 
@@ -247,7 +247,7 @@ public static unsafe class World
         var pages = &ld->Pages;
         if (pages->TryGet(tile, out var block)) return block;
 
-        block = (byte*)NativeMemory.AlignedAlloc((nuint)BlockBytes, 64);
+        block = (byte*)NativeMemory.AlignedAlloc(BlockBytes, 64);
         new Span<byte>(block, BlockBytes).Clear();
         pages->Put(tile, block);
         return block;
