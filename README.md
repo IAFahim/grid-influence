@@ -1,139 +1,114 @@
 # Gi
 
-Chunked, sparse, **integer** influence fields for .NET. Stamps (discs, capsules, sectors, rects,
-and more) are rasterized into horizontal spans and resolved with a difference array + prefix sum,
-so a tick costs `O(spans + touched chunks)` — independent of the stamped area. Decay and spread
-run per tick with exact integer math, so results are bit-identical across machines. The data path
-is fully unmanaged: warm ticks and queries allocate **0 B**.
+Sparse tiled integer influence fields for .NET. One API, byte handles over unmanaged state,
+integer-exact deposits, **0 B** on warm `Process`/`Query`.
 
-Derived from the core of
-[BovineLabs Timeline Grid Influence](https://github.com/vex-studio/com.bovinelabs.timeline.grid.influence)
-(MIT, © 2026 BovineLabs) with the Unity/DOTS plumbing replaced by plain .NET. This library has no
-dependency on and no relationship to any timeline package — it is a standalone spatial-influence
-engine.
+This repository previously carried two engines (a rasterized tick field and a re-emitted marks
+engine). It now ships exactly one: the **deposit engine**. Mutations write incrementally into
+per-tile difference arrays; `Process` resolves only dirty tiles; queries read resolved `int16`
+pages. The re-emitted design was measured and retired — see [Receipts](#receipts).
 
-## Packages
+## Get started
 
-| Package | Contents |
-|---------|----------|
-| [`Gi`](src/Gi/pack-readme.md) | The engine: fields, stamps, rasterizer, stencil resolve, readers, gradient/flow/territory/capture queries. Zero dependencies. |
-| [`Gi.Io`](src/Gi.Io/pack-readme.md) | PNM/PPM weight-map codec (load weights, export any frame) and a JSON scene runner for file-driven simulation. Separate on purpose: file formats are a consumer concern, not engine concerns. |
-
-## Quick start
+```sh
+dotnet add package Gi --version 0.2.0-alpha.1
+```
 
 ```csharp
 using Gi;
 
-var spec = GridSpec.FromPowerOfTwo(chunkPower: 5, retentionFrames: 256);
-using var front = new InfluenceField(spec);
-using var back = new InfluenceField(spec);
+byte world = World.New();
+byte grid   = Grid.New(world, power: 8, x: 0f, y: 0f, size: 256f);  // 256×256 cells
+byte layer  = Layer.New(world);                                      // channel on every grid
+byte stamp  = Stamp.Box(16, 16, 60);                                 // or Stamp.New(samples, w, h)
 
-Stamp[] stamps = [new Stamp(InfluenceShape.Disc(Int2.Zero, 8, 100), new Int2(x, y))];
-back.Tick(stamps, tick, Stencil.Create(front, decayPerMille: 300, spreadDenominator: 4));
-(front, back) = (back, front);   // double-buffered pair: front now holds tick
+int source = World.Place(world, layer, 128.5f, 64f, stamp, gain: 8); // persistent source
+World.Move(world, source, 130f, 64f);    // negates old deposit, deposits new
+World.SetGain(world, source, 4);         // deposits the delta
+World.Process(world);                    // resolves dirty tiles once
 
-var reader = front.AsReader();   // ref struct, zero allocation
-int value = reader.ReadCell(new Int2(12, -6));
-Int2 gradient = reader.Gradient(cell);
+short cell = World.Query(world, grid, layer, 64, 32);        // one page read
+long  sum  = World.Query(world, grid, layer, 0, 0, 32, 32);  // region sum
+short at   = World.QueryAt(world, grid, layer, 130f, 64f);   // world-space point
+
+World.Remove(world, source);             // exact negation — no rebuild
+World.Clear(world);                      // frees every live tile block
 ```
 
-Bulk weights in, world snapshots out — both cross the boundary as unmanaged spans
-(`WriteRegion`/`ReadRegion`) or PNM files via `Gi.Io`:
+A world mixes resolutions freely — e.g. a 1024² grid near the camera and 64² grids far away —
+and a source deposits into every grid it overlaps, at each grid's own scale.
 
-```csharp
-using Gi.Io;
+## How it works
 
-using var weights = Pnm.LoadWeights("weights.pgm");      // P5/P6, 8 or 16 bit, signed or unsigned
-field.WriteRegion(offset, size, weights.Samples);
+- **Handles, not objects.** `World`, `Grid`, `Layer`, `Stamp` return `byte` ids into static
+  unmanaged arenas; `Place` returns an `int` source id. No managed allocation anywhere on the
+  data path.
+- **Deposits are incremental.** Each live tile owns one 12,480 B block (difference array + dense
+  buffer + `int16` page). `Place`/`Move`/`SetGain`/`Remove` apply exact integer deltas
+  immediately — moving a source never rescans the field.
+- **`Process` touches only dirty tiles.** A 2D prefix sum resolves each dirty difference array,
+  saturates to `short` after summation (so cancellation is preserved), and frees tiles that
+  resolve to zero. An unchanged world costs nothing.
+- **Sub-cell placement.** Positions convert to cell space in Q8; raster stamps deposit with
+  bilinear edge weights, uniform rasters take a difference-array box path.
+- **Deterministic.** Integer-only field math; deposits are commutative adds, so pages are
+  bit-identical across runs and machines, with or without SIMD.
 
-Pnm.SaveGraySigned($"frame-{tick:0000}.ppm", offset, size, snapshotSpan); // export any frame
-```
-
-Drive a whole simulation from JSON (fields, shapes, motion clips, image layers, captures) with the
-[scene sample](samples/scene/README.md):
-
-```sh
-dotnet run --project samples/scene -c Release
-```
-
-## World API (virtual field)
-
-A second engine for game-style worlds: many bounded power-of-two grids placed side by side in
-floating world space (a high-resolution grid near the camera, coarse grids far away). **Nothing is
-rasterized** — a mark stays a record and influence is evaluated at query time, so `Apply` costs
-`O(items)`, not `O(touched cells)`. The whole surface is byte ids over unmanaged state — no
-objects, no per-tick allocation:
-
-```csharp
-byte w  = World.New();                                   // a world
-byte g0 = World.Grid(w, power: 10, x: -512f, y: -512f, size: 512f);  // 1024², near camera
-byte g1 = World.Grid(w, power: 6,  x:    0f, y: -512f, size: 512f);  // 64², far
-byte l  = World.Layer(w);                                // a channel on every grid
-
-byte aggro = Stamps.Circle(strength: 1);                 // registered once -> byte id
-byte ember = Fade.Stamp(percent: 30);                    // mark decays 30% per apply
-
-// every frame: entities carry world-space float positions + bounds; they never know their grid
-World.Queue(w, l, positions, bounds, stamps, fades, n);  // retains pointers — no copy, no alloc
-World.FadeLayer(w, g0, l, Fade.Layer(percent: 10));      // scope fades set once, run at apply
-World.Apply(w);                                          // one serial pass: route + convert + emit
-
-short heat = World.Cell(w, g0, l, cx, cy);               // lazily bucketed tile scan
-long  zone = World.Total(w, g0, l, x, y, wdt, hgt);      // area sum
-```
-
-How it works:
-
-- **Routing is automatic.** `Apply` tests each mark's world-space rect against every grid rect; a
-  mark straddling a seam emits into *every* overlapped grid — no clipping, no edge jitter, and
-  different resolutions convert independently. A sticky per-item grid hint makes the common case
-  one rect test.
-- **Fades are multipliers, not sweeps.** `Fade.Stamp` decays a queued item's own multiplier;
-  `Fade.Layer`/`Fade.Grid` decay a whole channel or grid — O(1) work, and items with fade id 0
-  skip the path entirely.
-- **Queries materialize lazily.** The tile index for a (grid, layer) is built on the first read
-  after an apply; write-only frames never pay for it. `Cell` sums every mark covering the cell
-  (`Circle` coverage is true `dx²+dy²≤r²`, `Box` is rect), clamped to `short`.
-- **Caller parallelism.** `World.Apply` is serial. For scale, call `World.BeginApply(w)` once,
-  then `World.ApplySlice(w, entry, start, count)` on disjoint item ranges from your own threads —
-  marks claim slots with an atomic cursor and cell sums are commutative, so results are
-  bit-identical to serial.
-- **Unmanaged pointer contract.** `Queue` takes `Float2* positions, float* bounds, byte* stamps,
-  byte* fades` — the caller owns and may mutate them between applies (moving an entity is just
-  updating its position); they must stay alive until `ClearQueue`. Marks re-emit every `Apply`,
-  so the queue is persistent: queue once, apply every frame.
-
-Measured (i9-14900K, .NET 10, warm): **~5.4ns/item** serial on one grid, **~10.6ns/item** across
-32 grids, 0 B allocated per apply. 100K marks × 32 grids ≈ **~1 ms serial, ~0.5 ms** sliced across
-8 threads. See [`samples/world`](samples/world/Program.cs) for aggro-range, fear-meter, and
-traffic-congestion scenarios.
+Full semantics and the unsafe lifetime/aliasing/alignment/concurrency proof:
+[`docs/model.md`](docs/model.md). The [`viz`](viz) tool renders a three-layer scene to a
+self-contained HTML page.
 
 ## Receipts
 
-Same-machine, one-variable comparisons against the naive per-cell baseline (256 stamps/tick,
-.NET 10): **2.9×** at 256², **3.6×** at 1024², **11.0×** at 2048². Queries: ReadCell 3.0 ns,
-Gradient 6.1 ns, SampleBilinear 10.7 ns, 32×32 capture 1.37 µs — all 0 B. `--verify` asserts
-pipeline-vs-naive equality, PNM round trips, and the 0 B warm-path receipts; PMU counters live in
-[`benchmarks/pmu-receipts.jsonl`](benchmarks/pmu-receipts.jsonl). Full model, numbers, and the
-unsafe proof: [`docs/model.md`](docs/model.md).
+`dotnet run --project benchmarks -c Release -- --verify` asserts, before any timing:
 
-The resolve pass is fully vectorized on both axes: the horizontal prefix sum runs as an exact
-int32 AVX2/SSE2 lane scan (bit-identical to the saturating scalar chain, with a per-row fallback
-when any prefix would leave int16 range) and the PNM encoders are lane-clamped. Same-machine
-before/after (Ryzen 5 8500G, .NET 10): no-decay ticks −44–46%, decay ticks −17–19%, PNM gray-16
-encode 7.8× — outputs bit-identical. The decay/spread pass skips all-zero rows and edges outright
-and folds the nonzero scan into the decay/inflow stores.
+| Receipt | Checks |
+| --- | --- |
+| `process-matches-oracle` | 300 random boxes vs a per-cell band oracle |
+| `process-deterministic` | identical worlds produce identical pages |
+| `remove-restores-baseline` | remove rebuilds tiles without the source |
+| `warm-process-allocates-0-bytes` | unchanged and place/remove churn, 0 B |
+| `warm-query-allocates-0-bytes` | 200k cell reads, 0 B |
+| `saturated-sum-clamps` | saturation sticks at ±32767 after summation |
 
-## Repository layout
+The same suite passes with `DOTNET_EnableHWIntrinsic=0` (scalar fallback).
 
-- `src/Gi` — the engine package.
-- `src/Gi.Io` — PNM codec and JSON scene runner package.
-- `tests/` — rasterizer oracles, field algebra, diffusion integration, budgets, IO.
-- `benchmarks/` — BenchmarkDotNet suite, `--verify` receipts, PMU collector and committed counters.
-- `samples/scene` — end-to-end JSON + PNM walkthrough.
-- `samples/world` — World API scenarios: enemy aggro range, fear crowd meter, traffic congestion.
-- `docs/model.md` — semantics, receipts, unsafe lifetime/aliasing/alignment/concurrency proof.
+Why the deposit engine replaced the re-emitted marks engine (4,000 sources, 256² grid,
+100k queries/frame; i9-14900K, .NET 10, Release, min over reps):
+
+| per frame | marks (retired) | deposit |
+| --- | ---: | ---: |
+| unchanged `Process` | 41.6 µs | 0.0 µs |
+| move 200 + process | 51.1 µs | 212 µs |
+| single-source change | ~62 µs | 6 µs |
+| cell query | 1,040 ns | 2.9 ns |
+
+The marks engine re-emits every source per frame and scans marks per query; the deposit engine
+pays per mutation and reads a page. Writes are ~7× cheaper in marks, queries ~360× slower — the
+crossover is below ~700 queries/frame at full churn, which game-shaped workloads clear easily.
+
+## Run the full thing
+
+```sh
+dotnet build Gi.slnx -c Release -m:1
+dotnet test Gi.slnx -c Release --no-build
+dotnet run --project samples/world -c Release --no-build
+dotnet run --project benchmarks -c Release --no-build -- --verify
+DOTNET_EnableHWIntrinsic=0 dotnet run --project benchmarks -c Release --no-build -- --verify
+dotnet run --project viz -c Release --no-build   # writes viz/out/index.html
+```
+
+## Layout
+
+- `src/Gi` — the package: `World`, `Grid`, `Layer`, `Stamp`, tile bake, page map.
+- `tests/Gi.Tests` — oracle tests: box/raster deposits, cross-tile, multi-resolution, saturation,
+  move/remove/setgain exactness, sub-cell, determinism.
+- `benchmarks` — `--verify` receipts plus `--timing` scratch loop.
+- `samples/world` — aggro range, multi-resolution traffic, baked raster stamps.
+- `viz` — HTML field visualizer.
+- `docs/model.md` — semantics, receipts, unsafe proof.
 
 ## License
 
-[MIT](LICENSE) — © IAFahim; portions derived from BovineLabs Timeline Grid Influence (© BovineLabs, MIT).
+[MIT](LICENSE) — © IAFahim; portions derived from BovineLabs Timeline Grid Influence
+(© BovineLabs, MIT).
