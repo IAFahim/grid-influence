@@ -2,6 +2,7 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 
 namespace Gi;
 
@@ -59,9 +60,50 @@ internal unsafe struct StencilCore
     public FieldContext* Source;
     public int DecayPerMille;
     public int SpreadDenominator;
+    public MagicDivisor Thousand;
+    public MagicDivisor Spread;
 }
 
-internal unsafe struct FieldContext
+internal readonly struct MagicDivisor
+{
+    public readonly long Multiplier;
+    public readonly int Shift;
+    public readonly int BiasMask;
+    public readonly bool IsVectorizable;
+
+    private MagicDivisor(long multiplier, int shift, int biasMask, bool vectorizable)
+    {
+        Multiplier = multiplier;
+        Shift = shift;
+        BiasMask = biasMask;
+        IsVectorizable = vectorizable;
+    }
+
+    public static MagicDivisor Of(int divisor)
+    {
+        if ((divisor & (divisor - 1)) == 0)
+            return new MagicDivisor(0, BitOperations.TrailingZeroCount(divisor), divisor - 1, true);
+        for (var l = 0; l < 33; l++)
+        {
+            var m = ((1L << (32 + l)) + divisor - 1) / divisor;
+            if (m <= int.MaxValue && m * divisor - (1L << (32 + l)) <= (1L << l))
+                return new MagicDivisor(m, 32 + l, 0, true);
+        }
+        return default;
+    }
+
+    public Vector<int> Divide(Vector<int> values)
+    {
+        if (Multiplier == 0)
+            return (values + ((values >> 31) & new Vector<int>(BiasMask))) >> Shift;
+        Vector.Widen(values, out var lo, out var hi);
+        var m = new Vector<long>(Multiplier);
+        var q = Vector.Narrow((lo * m) >> Shift, (hi * m) >> Shift);
+        return q + ((values >> 31) & Vector<int>.One);
+    }
+}
+
+    internal unsafe struct FieldContext
 {
     private const int MaxSpansPerSchedule = 1 << 20;
     private const int MaxChunksPerSchedule = 1 << 14;
@@ -135,6 +177,11 @@ internal unsafe struct FieldContext
             _chunksActivated = 0;
             _stampCount = 0;
             return new FieldStats(0, 0, 0, 0, idleEvicted, 0);
+        }
+        if (stencil.Source != null)
+        {
+            stencil.Thousand = MagicDivisor.Of(1000);
+            stencil.Spread = MagicDivisor.Of(stencil.SpreadDenominator);
         }
         var evicted = Prepare(stamps, stencil, reset);
         ClearActive();
@@ -870,9 +917,8 @@ internal unsafe struct FieldContext
 
     private byte PrefixSumRunStenciled(short* field, StencilCore stencil, Int2 coord, int worker)
     {
-        PrefixSumPass(field);
-        ApplyStencil(stencil, coord, field, worker);
-        return AnyNonZero(field);
+        var nonzero = PrefixSumPass(field);
+        return ApplyStencil(stencil, coord, field, nonzero, worker);
     }
 
     private byte PrefixSumPass(short* field)
@@ -952,78 +998,95 @@ internal unsafe struct FieldContext
         return acc != 0 ? (byte)1 : (byte)0;
     }
 
-    private void ApplyStencil(StencilCore stencil, Int2 coord, short* field, int worker = 0)
+    private byte ApplyStencil(StencilCore stencil, Int2 coord, short* field, byte nonzero, int worker = 0)
     {
         var source = stencil.Source;
-        var haloStride = _spec.ChunkSize + 2;
+        var chunkSize = _spec.ChunkSize;
+        var haloStride = chunkSize + 2;
         var halo = _halo.Pointer + (long)worker * _haloSlice;
+        var self = LiveSlot(source, coord);
+        var left = LiveSlot(source, coord + new Int2(-1, 0));
+        var right = LiveSlot(source, coord + new Int2(1, 0));
+        var down = LiveSlot(source, coord + new Int2(0, -1));
+        var up = LiveSlot(source, coord + new Int2(0, 1));
+        var hasInflow = left >= 0 | right >= 0 | down >= 0 | up >= 0;
+        if (self < 0 && !hasInflow) return nonzero;
+
+        var vacc = Vector<short>.Zero;
         new Span<short>(halo, haloStride * haloStride).Clear();
-        FillHalo(source, stencil, coord, halo, haloStride);
-        DecaySelf(source, stencil, coord, field, halo, haloStride);
-        AddInflow(field, halo, haloStride);
+        if (left >= 0) FillHaloColumn(source, stencil, left, chunkSize - 1, 0, halo, haloStride);
+        if (right >= 0) FillHaloColumn(source, stencil, right, 0, chunkSize + 1, halo, haloStride);
+        if (down >= 0) FillHaloRow(source, stencil, down, chunkSize - 1, 0, halo, haloStride);
+        if (up >= 0) FillHaloRow(source, stencil, up, 0, chunkSize + 1, halo, haloStride);
+
+        var acc = 0;
+        if (self >= 0) acc |= DecaySelf(source, stencil, self, field, halo, haloStride, ref vacc);
+        acc |= AddInflow(field, halo, haloStride, ref vacc);
+        for (var i = 0; i < Vector<short>.Count; i++) acc |= (ushort)vacc[i];
+        return acc != 0 ? (byte)1 : (byte)0;
     }
 
-    private void DecaySelf(FieldContext* source, StencilCore stencil, Int2 coord, short* field, short* halo, int haloStride)
-    {
-        if (!source->_slotByCoord.TryGetValue(coord, out var slot) || !IsStencilSlotLive(source, slot)) return;
+    private static int LiveSlot(FieldContext* source, Int2 coord)
+        => source->_slotByCoord.TryGetValue(coord, out var slot) && IsStencilSlotLive(source, slot) ? slot : -1;
 
+    private int DecaySelf(
+        FieldContext* source,
+        StencilCore stencil,
+        int slot,
+        short* field,
+        short* halo,
+        int haloStride,
+        ref Vector<short> nonzero)
+    {
         var self = source->_data.Pointer + (long)slot * _spec.ElementsPerChunk;
+        var acc = 0;
         for (var y = 0; y < _spec.ChunkSize; y++)
-            DecayRow(
+            acc |= DecayRow(
                 self + (long)y * _spec.Stride,
                 halo + (long)(y + 1) * haloStride + 1,
                 field + (long)y * _spec.Stride,
-                stencil);
-    }
-
-    private readonly struct MagicDivisor
-    {
-        public readonly long Multiplier;
-        public readonly int Shift;
-        public readonly int BiasMask;
-        public readonly bool IsVectorizable;
-
-        private MagicDivisor(long multiplier, int shift, int biasMask, bool vectorizable)
-        {
-            Multiplier = multiplier;
-            Shift = shift;
-            BiasMask = biasMask;
-            IsVectorizable = vectorizable;
-        }
-
-        public static MagicDivisor Of(int divisor)
-        {
-            if ((divisor & (divisor - 1)) == 0)
-                return new MagicDivisor(0, BitOperations.TrailingZeroCount(divisor), divisor - 1, true);
-            for (var l = 0; l < 33; l++)
-            {
-                var m = ((1L << (32 + l)) + divisor - 1) / divisor;
-                if (m <= int.MaxValue && m * divisor - (1L << (32 + l)) <= (1L << l))
-                    return new MagicDivisor(m, 32 + l, 0, true);
-            }
-            return default;
-        }
-
-        public Vector<int> Divide(Vector<int> values)
-        {
-            if (Multiplier == 0)
-                return (values + ((values >> 31) & new Vector<int>(BiasMask))) >> Shift;
-            Vector.Widen(values, out var lo, out var hi);
-            var m = new Vector<long>(Multiplier);
-            var q = Vector.Narrow((lo * m) >> Shift, (hi * m) >> Shift);
-            return q + ((values >> 31) & Vector<int>.One);
-        }
+                stencil,
+                ref nonzero);
+        return acc;
     }
 
     private static Vector<int> DivideExact(Vector<int> values, MagicDivisor divisor) => divisor.Divide(values);
 
-    private void DecayRow(short* source, short* haloRow, short* target, StencilCore stencil)
+    private int DecayRow(short* source, short* haloRow, short* target, StencilCore stencil, ref Vector<short> nonzero)
     {
         var decay = stencil.DecayPerMille;
         var spread = stencil.SpreadDenominator;
         var chunkSize = _spec.ChunkSize;
-        var divisor = MagicDivisor.Of(spread);
-        var thousand = MagicDivisor.Of(1000);
+        var divisor = stencil.Spread;
+        var thousand = stencil.Thousand;
+        var acc = 0;
+        if (Vector.IsHardwareAccelerated)
+        {
+            var lanes = Vector<short>.Count;
+            var zero = true;
+            int z;
+            for (z = 0; z + lanes <= chunkSize; z += lanes)
+            {
+                if (new Vector<short>(new ReadOnlySpan<short>(source + z, lanes)) != Vector<short>.Zero)
+                {
+                    zero = false;
+                    break;
+                }
+            }
+
+            if (zero)
+            {
+                for (; z < chunkSize; z++)
+                    if (source[z] != 0)
+                    {
+                        zero = false;
+                        break;
+                    }
+            }
+
+            if (zero) return 0;
+        }
+
         var x = 0;
         if (Vector.IsHardwareAccelerated && divisor.IsVectorizable && thousand.IsVectorizable && chunkSize >= Vector<short>.Count)
         {
@@ -1040,10 +1103,11 @@ internal unsafe struct FieldContext
                 var outflowHi = divisor.Divide(keptHi);
                 Vector.Narrow(outflowLo, outflowHi).CopyTo(new Span<short>(haloRow + x, lanes));
                 Vector.Widen(new Vector<short>(new ReadOnlySpan<short>(target + x, lanes)), out var tlo, out var thi);
-                Vector.Narrow(
+                var updated = Vector.Narrow(
                     Vector.Min(Vector.Max(tlo + keptLo - (outflowLo << 2), min), max),
-                    Vector.Min(Vector.Max(thi + keptHi - (outflowHi << 2), min), max))
-                    .CopyTo(new Span<short>(target + x, lanes));
+                    Vector.Min(Vector.Max(thi + keptHi - (outflowHi << 2), min), max));
+                updated.CopyTo(new Span<short>(target + x, lanes));
+                nonzero |= updated;
             }
         }
         for (; x < chunkSize; x++)
@@ -1052,36 +1116,28 @@ internal unsafe struct FieldContext
             var outflow = kept / spread;
             haloRow[x] = (short)outflow;
             target[x] = Saturate(target[x] + kept - 4 * outflow);
+            acc |= (ushort)target[x];
         }
-    }
 
-    private void FillHalo(FieldContext* source, StencilCore stencil, Int2 coord, short* halo, int haloStride)
-    {
-        var chunkSize = _spec.ChunkSize;
-        FillHaloColumn(source, stencil, coord + new Int2(-1, 0), chunkSize - 1, 0, halo, haloStride);
-        FillHaloColumn(source, stencil, coord + new Int2(1, 0), 0, chunkSize + 1, halo, haloStride);
-        FillHaloRow(source, stencil, coord + new Int2(0, -1), chunkSize - 1, 0, halo, haloStride);
-        FillHaloRow(source, stencil, coord + new Int2(0, 1), 0, chunkSize + 1, halo, haloStride);
+        return acc;
     }
 
     private void FillHaloColumn(
         FieldContext* source,
         StencilCore stencil,
-        Int2 coord,
+        int slot,
         int sourceX,
         int haloX,
         short* halo,
         int haloStride)
     {
-        if (!source->_slotByCoord.TryGetValue(coord, out var slot) || !IsStencilSlotLive(source, slot)) return;
-
         var start = source->_data.Pointer + (long)slot * _spec.ElementsPerChunk + sourceX;
         var chunkSize = _spec.ChunkSize;
         var stride = _spec.Stride;
         var decay = stencil.DecayPerMille;
         var spread = stencil.SpreadDenominator;
-        var divisor = MagicDivisor.Of(spread);
-        var thousand = MagicDivisor.Of(1000);
+        var divisor = stencil.Spread;
+        var thousand = stencil.Thousand;
         var y = 0;
         if (Vector.IsHardwareAccelerated && divisor.IsVectorizable && thousand.IsVectorizable && chunkSize >= Vector<short>.Count)
         {
@@ -1091,6 +1147,7 @@ internal unsafe struct FieldContext
             for (; y <= chunkSize - lanes; y += lanes)
             {
                 for (var j = 0; j < lanes; j++) gathered[j] = start[(long)(y + j) * stride];
+                if (new Vector<short>(gathered) == Vector<short>.Zero) continue;
                 Vector.Widen(new Vector<short>(gathered), out var vlo, out var vhi);
                 var outflow = Vector.Narrow(
                     divisor.Divide(thousand.Divide(vlo * keepFactor)),
@@ -1100,27 +1157,28 @@ internal unsafe struct FieldContext
             }
         }
         for (; y < chunkSize; y++)
-            halo[(long)(y + 1) * haloStride + haloX] =
-                (short)IntegerMath.Outflow(start[(long)y * stride], decay, spread);
+        {
+            var value = start[(long)y * stride];
+            if (value != 0)
+                halo[(long)(y + 1) * haloStride + haloX] = (short)IntegerMath.Outflow(value, decay, spread);
+        }
     }
 
     private void FillHaloRow(
         FieldContext* source,
         StencilCore stencil,
-        Int2 coord,
+        int slot,
         int sourceY,
         int haloY,
         short* halo,
         int haloStride)
     {
-        if (!source->_slotByCoord.TryGetValue(coord, out var slot) || !IsStencilSlotLive(source, slot)) return;
-
         var start = source->_data.Pointer + (long)slot * _spec.ElementsPerChunk + (long)sourceY * _spec.Stride;
         var chunkSize = _spec.ChunkSize;
         var decay = stencil.DecayPerMille;
         var spread = stencil.SpreadDenominator;
-        var divisor = MagicDivisor.Of(spread);
-        var thousand = MagicDivisor.Of(1000);
+        var divisor = stencil.Spread;
+        var thousand = stencil.Thousand;
         var x = 0;
         if (Vector.IsHardwareAccelerated && divisor.IsVectorizable && thousand.IsVectorizable && chunkSize >= Vector<short>.Count)
         {
@@ -1128,7 +1186,9 @@ internal unsafe struct FieldContext
             var keepFactor = new Vector<int>(1000 - decay);
             for (; x <= chunkSize - lanes; x += lanes)
             {
-                Vector.Widen(new Vector<short>(new ReadOnlySpan<short>(start + x, lanes)), out var vlo, out var vhi);
+                var block = new Vector<short>(new ReadOnlySpan<short>(start + x, lanes));
+                if (block == Vector<short>.Zero) continue;
+                Vector.Widen(block, out var vlo, out var vhi);
                 var outflow = Vector.Narrow(
                     divisor.Divide(thousand.Divide(vlo * keepFactor)),
                     divisor.Divide(thousand.Divide(vhi * keepFactor)));
@@ -1136,21 +1196,27 @@ internal unsafe struct FieldContext
             }
         }
         for (; x < chunkSize; x++)
-            halo[(long)haloY * haloStride + x + 1] =
-                (short)IntegerMath.Outflow(start[x], decay, spread);
+        {
+            var value = start[x];
+            if (value != 0)
+                halo[(long)haloY * haloStride + x + 1] = (short)IntegerMath.Outflow(value, decay, spread);
+        }
     }
 
-    private void AddInflow(short* field, short* halo, int haloStride)
+    private int AddInflow(short* field, short* halo, int haloStride, ref Vector<short> nonzero)
     {
+        var acc = 0;
         for (var y = 0; y < _spec.ChunkSize; y++)
-            AddInflowRow(field + (long)y * _spec.Stride, halo + (long)(y + 1) * haloStride + 1, haloStride);
+            acc |= AddInflowRow(field + (long)y * _spec.Stride, halo + (long)(y + 1) * haloStride + 1, haloStride, ref nonzero);
+        return acc;
     }
 
-    private void AddInflowRow(short* target, short* center, int haloStride)
+    private int AddInflowRow(short* target, short* center, int haloStride, ref Vector<short> nonzero)
     {
         var below = center - haloStride;
         var above = center + haloStride;
         var chunkSize = _spec.ChunkSize;
+        var acc = 0;
         var x = 0;
         if (Vector.IsHardwareAccelerated && chunkSize >= Vector<short>.Count)
         {
@@ -1164,12 +1230,18 @@ internal unsafe struct FieldContext
                     Vector.AddSaturate(
                         new Vector<short>(new ReadOnlySpan<short>(below + x, lanes)),
                         new Vector<short>(new ReadOnlySpan<short>(above + x, lanes))));
-                Vector.AddSaturate(new Vector<short>(new ReadOnlySpan<short>(target + x, lanes)), sum)
-                    .CopyTo(new Span<short>(target + x, lanes));
+                var value = Vector.AddSaturate(new Vector<short>(new ReadOnlySpan<short>(target + x, lanes)), sum);
+                value.CopyTo(new Span<short>(target + x, lanes));
+                nonzero |= value;
             }
         }
-        for (; x < chunkSize; x++)
-            target[x] = Saturate(target[x] + center[x - 1] + center[x + 1] + below[x] + above[x]);
+        for (var x2 = x; x2 < chunkSize; x2++)
+        {
+            target[x2] = Saturate(target[x2] + center[x2 - 1] + center[x2 + 1] + below[x2] + above[x2]);
+            acc |= (ushort)target[x2];
+        }
+
+        return acc;
     }
 }
 

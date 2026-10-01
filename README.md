@@ -120,8 +120,9 @@ unsafe proof: [`docs/model.md`](docs/model.md).
 The resolve pass is fully vectorized on both axes: the horizontal prefix sum runs as an exact
 int32 AVX2/SSE2 lane scan (bit-identical to the saturating scalar chain, with a per-row fallback
 when any prefix would leave int16 range) and the PNM encoders are lane-clamped. Same-machine
-before/after (Ryzen 5 8500G, .NET 10): no-decay ticks −44–46%, decay ticks −17%, PNM gray-16
-encode 7.8× — outputs bit-identical.
+before/after (Ryzen 5 8500G, .NET 10): no-decay ticks −44–46%, decay ticks −17–19%, PNM gray-16
+encode 7.8× — outputs bit-identical. The decay/spread pass skips all-zero rows and edges outright
+and folds the nonzero scan into the decay/inflow stores.
 
 ## Repository layout
 

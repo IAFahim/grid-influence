@@ -23,7 +23,12 @@ under the MIT license; the engine carries no Unity dependencies.
 - An idle tick — no stamps, nothing live, no live stencil source — skips the pipeline entirely:
   frame bookkeeping plus retention/compaction only (~12–45 ns).
 - Decay/spread are per tick: `kept = v·(1000−decay)/1000`, each 4-neighbour receives
-  `kept/spread`. Cross-chunk flow uses edge halos. Chunks deactivate only at exact zero.
+  `kept/spread`. Cross-chunk flow uses edge halos. All-zero source rows are detected and skipped
+  (`kept(0)=outflow(0)=0`, so the row is an identity and the halo band is already zero from the
+  halo clear); all-zero neighbour edges skip the halo fill the same way. The chunk's nonzero flag
+  is OR-folded out of the decay/inflow stores instead of a separate scan pass, and a chunk that is
+  neither live nor adjacent to a live chunk skips the stencil entirely. Chunks deactivate only at
+  exact zero.
 - Stamps sorted before budget accounting, so budget drops are insertion-order independent; pure
   integer math makes results bit-identical across machines.
 - Stamps are per-tick emissions: a field rescheduled with no stamps shows no cells unless decay
@@ -86,6 +91,30 @@ two interleaved rows per chunk) instead of the scalar saturating chain:
 
 The i9-14900K table above predates the vectorized row scan and PNM encoders.
 
+### Stencil-pass receipts (Ryzen 5 8500G, .NET 10.0.12, before/after, bit-identical outputs)
+
+The decay/spread pass drops work instead of re-mathematicizing it: per-tick hoisted magic
+divisors, all-zero row/edge skips, the nonzero flag folded into the decay/inflow stores, and a
+full skip for chunks with no live chunk in or around them:
+
+| Workload (median)                                  | Before    | After     |
+|----------------------------------------------------|-----------|-----------|
+| 2048² sparse decay harness, interleaved A/B        | 1 094 µs  | 889 µs    |
+| TickBenchmarks 1024² decay + spread                | 3 158 µs  | 2 599 µs  |
+| TickBenchmarks 2048² decay + spread                | 4 331 µs  | 3 600 µs  |
+
+Both TickBenchmarks rows are a same-session before/after (working tree vs HEAD worktree); the
+harness A/B ran three interleaved rounds per variant. No-decay rows are unchanged within noise.
+Sparse fields win most (more all-zero rows); dense fields win the folded nonzero scan only.
+Receipts matched at equal tick parity — outputs bit-identical.
+
+Two measured dead ends, kept on record so they are not retried: fusing decay and inflow into one
+row-pipelined pass was 44% slower than the two separate passes (store-to-load interleaving beats
+pass locality on Zen 4), and replacing the 64-bit-lane magic division with an exhaustively
+validated double-precision divide (int→double convert, reciprocal multiply, biased round, sign
+fixup) was 26% slower — x86 SIMD float/int conversion ports serialize the sequence even though it
+is exact and uses fewer arithmetic ops.
+
 ## Unsafe proof
 
 - **Lifetime**: `Field` is a value-type handle to a `FieldContext` block allocated once via
@@ -111,6 +140,24 @@ The i9-14900K table above predates the vectorized row scan and PNM encoders.
   was observed returning true for nonzero operands on .NET 10.0.12 (x86-64-v4). The PNM encoders
   clamp in int32, then narrow with a bias-32768 pre-shift (gray-16, byte-swapped and corrected by
   a masked xor) or `PackUnsignedSaturate` (gray-8) — exact for clamped inputs.
+- **Stencil skips and the folded nonzero flag**: an all-zero decay source row is an identity —
+  `kept(0)=0` and `outflow(0)=0` leave the target row unchanged and would only write zeros into a
+  halo band that the per-chunk halo clear already zeroed — so the row is skipped after an
+  OR-test of its source block, and skipping the halo write is bit-identical to writing zeros. The
+  same argument skips halo edge fills whose gathered neighbour block is all zero. The nonzero flag
+  is OR-folded out of the vector stores of the decay and inflow passes instead of a separate
+  post-pass scan: the decay pass fully overwrites every `[0, chunkSize)` cell of every row, the
+  inflow pass writes every cell again, and a saturating add keeps any nonzero operand nonzero, so
+  the OR of the stored values equals the OR of a full re-scan. A chunk that is neither live in the
+  stencil source nor adjacent to a live chunk reads the prefix-pass flag unchanged: no decay writes
+  (not live) and inflow would add an all-zero halo (no live neighbours can put anything in it).
+- **Measurement hazards on this runtime** (.NET 10.0.12, x86-64-v4): `Avx.TestZ` was observed
+  returning true for nonzero operands (documented above), and `dotnet-trace` sampled-thread-time
+  leaf attribution is not trustworthy either — the same workload profiled before/after removing one
+  small memset reported 92.8% exclusive in `Buffer.ZeroMemoryInternal` and then 50% in
+  `Array.Sort` while a direct measurement of the sort showed 4.2 µs per tick (0.4%). Every number
+  in these receipts comes from interleaved A/B runs or per-phase timestamps, never from profiler
+  leaf attribution.
 - **Concurrency**: the serial warm path is single-threaded and deterministic. CoordMap and buffers
   are single-writer. A defensive-copy bug on a readonly struct field (map table filled while its count
   stayed 0) was found by stress and fixed; buffer growth on a readonly struct field is forbidden by

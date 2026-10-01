@@ -12,8 +12,8 @@ dotnet run -c Release                # writes ./frames/*.ppm and prints the tran
 dotnet run -c Release -- --scene assets/scene.json --out /tmp/frames
 ```
 
-Expected transcript ends with reads over the stamped positions (patrol end ≈ 468, orbit ≈ 398,
-negative wall ≈ −138), a terrain controller of +1 on base alpha, a descent gradient away from the
+Expected transcript ends with reads over the stamped positions (patrol end ≈ 167, orbit ≈ 339,
+negative wall ≈ −150), a terrain controller of +1 on base alpha, a descent gradient away from the
 threat ridge, and `safe to place at (22, 18)? = False`.
 
 Open `frames/threat-0080.ppm` in any image viewer that reads PNM (green = positive influence,
