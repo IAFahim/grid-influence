@@ -33,3 +33,26 @@ jobs:
         env:
           DOTNET_EnableHWIntrinsic: "0"
       - run: dotnet pack src/Gi -c Release --no-build -o artifacts/packages
+
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7
+        with:
+          dotnet-version: 10.0.x
+      - name: Install the JetBrains inspectcode CLI
+        run: dotnet tool install --global jetbrains.resharper.globaltools
+      - name: Inspection sweep — any warning or error fails the build
+        run: |
+          jb inspectcode Gi.slnx --severity=WARNING --build --output=inspect.json
+          python3 - <<'EOF'
+          import json, sys
+          results = [r for run in json.load(open('inspect.json'))['runs'] for r in run.get('results', [])]
+          for r in results:
+              loc = r['locations'][0]['physicalLocation']
+              print(r['level'], r['ruleId'], loc['artifactLocation']['uri'], loc.get('region', {}).get('startLine'))
+          sys.exit(f'{len(results)} inspection findings at warning severity or above' if results else 0)
+          EOF

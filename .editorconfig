@@ -1,0 +1,30 @@
+root = true
+
+[*]
+charset = utf-8
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.cs]
+indent_style = space
+indent_size = 4
+
+# The inspection contract: warning severity and above must stay at zero
+# (ci.yml inspect job), and suggestion-level findings are either taken or
+# scoped off here with the reason. Two deliberate rejections (050c199):
+# - World.cs: '??=' on the byte* field does not compile (CS0019), so the
+#   explicit null check stays.
+# - Stamp.cs: Stamp.New(sbyte*) is public API for unmanaged callers even
+#   though nothing in-repo calls it.
+[src/Gi/World.cs]
+resharper_convert_if_statement_to_null_coalescing_assignment_highlighting = none
+
+[src/Gi/Stamp.cs]
+resharper_unused_member_global_highlighting = none
+
+[*.{csproj,props,targets,slnx}]
+indent_style = space
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
