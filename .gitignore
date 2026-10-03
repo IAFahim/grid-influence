@@ -3,4 +3,5 @@ obj/
 *.user
 BenchmarkDotNet.Artifacts/
 viz/out/
+tools/stats/out/
 samples/scene/frames/

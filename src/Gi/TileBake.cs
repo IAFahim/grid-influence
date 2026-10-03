@@ -200,6 +200,8 @@ internal static unsafe class TileBake
 
     internal static bool Resolve(int* difference, int* dense, int* previousRow, short* output)
     {
+        if (Avx2.IsSupported) return Resolve256(difference, dense, previousRow, output);
+
         var acc = Vector128<int>.Zero;
         var any = false;
         var vector = Vector;
@@ -239,6 +241,37 @@ internal static unsafe class TileBake
         }
 
         return vector ? !Vector128.EqualsAll(acc, Vector128<int>.Zero) : any;
+    }
+
+    private static bool Resolve256(int* difference, int* dense, int* previousRow, short* output)
+    {
+        var acc = Vector256<int>.Zero;
+        var fourth = Vector256.Create(3);
+        var last = Vector256.Create(7);
+        for (var y = 0; y < TileSize; y++)
+        {
+            var diffRow = difference + y * DiffPitch;
+            var denseRow = dense + y * TileSize;
+            var outRow = output + y * TileSize;
+            var carry = Vector256<int>.Zero;
+            for (var x = 0; x < TileSize; x += 8)
+            {
+                var h = Avx.LoadVector256(diffRow + x);
+                h += Avx2.ShiftLeftLogical128BitLane(h.AsByte(), 4).AsInt32();
+                h += Avx2.ShiftLeftLogical128BitLane(h.AsByte(), 8).AsInt32();
+                h += Avx2.Blend(Vector256<int>.Zero, Avx2.PermuteVar8x32(h, fourth), 0xf0);
+                h += carry;
+                carry = Avx2.PermuteVar8x32(h, last);
+                var boxes = h + Avx.LoadVector256(previousRow + x);
+                Avx.Store(previousRow + x, boxes);
+                var total = boxes + Avx.LoadVector256(denseRow + x);
+                acc |= total;
+                var packed = Avx2.PackSignedSaturate(total, total);
+                Sse2.Store(outRow + x, Avx2.Permute4x64(packed.AsInt64(), 0xd8).GetLower().AsInt16());
+            }
+        }
+
+        return !Vector256.EqualsAll(acc, Vector256<int>.Zero);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

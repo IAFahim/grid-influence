@@ -22,7 +22,7 @@ internal unsafe struct StampVariant
 
 internal static unsafe class StampCatalog
 {
-    private const int MaxStamps = 256;
+    internal const int MaxStamps = 256;
     private const int MaxAxis = 256;
 
     private static readonly StampVariant* Variants =

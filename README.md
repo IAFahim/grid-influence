@@ -57,6 +57,14 @@ and a source deposits into every grid it overlaps, at each grid's own scale.
 Full semantics and the unsafe lifetime/aliasing/alignment/concurrency proof:
 [`docs/model.md`](docs/model.md). The [`viz`](viz) tool renders a three-layer scene to a
 self-contained HTML page.
+The [`tools/stats`](tools/stats) CLI reports internal statistics, native memory, and timings
+as compact JSON without reflection:
+
+```sh
+dotnet run --project tools/stats -c Release -- stats
+dotnet run --project tools/stats -c Release -- profile
+bash tools/stats/perf.sh stat --iterations 12000
+```
 
 ## Receipts
 
@@ -106,6 +114,7 @@ dotnet run --project viz -c Release --no-build   # writes viz/out/index.html
 - `benchmarks` — `--verify` receipts plus `--timing` scratch loop.
 - `samples/world` — aggro range, multi-resolution traffic, baked raster stamps.
 - `viz` — HTML field visualizer.
+- `tools/stats` — JSON internal stats, memory accounting, allocation receipts, and Linux perf.
 - `docs/model.md` — semantics, receipts, unsafe proof.
 
 ## License

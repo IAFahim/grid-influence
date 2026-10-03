@@ -30,11 +30,20 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
 - **Query**: `World.Query(world, grid, layer, x, y)` is one hash lookup + page read;
   `(x, y, w, h)` sums a rect tile-wise; `QueryAt` takes world-space floats. Invalid handles,
   out-of-range cells, and missing pages all read 0 — no exceptions on the warm path.
+  Region endpoints widen to `long` before clipping, so oversized rectangles cannot overflow.
+  Invalid worlds make mutation and process calls return immediately; `Place` returns `-1`.
+  Grid/layer creation rejects invalid worlds before accessing the arena.
+  Empty region queries return before iterating tiles; full-grid sums scan allocated map slots
+  and live pages, so large sparse grids do not visit every possible tile.
 - **Determinism**: field contents are integer-only; the only float math is the world→cell
   conversion (`multiply + floor`, correctly rounded IEEE ops). Deposits are commutative integer
   adds, so pages are bit-identical across runs and machines.
 - **Idle process**: an unchanged world drains an empty dirty list and returns immediately —
   0 B warm.
+  Moving a source to its stored position leaves the dirty lists empty. Page-map tombstones
+  trigger compaction at the current capacity; only live-slot pressure requires growth.
+  Tile resolution uses eight-cell AVX2 prefixes where available, with the existing four-cell
+  SSE2/AdvSimd and scalar paths preserving the same integer sum and saturation semantics.
 
 ## Usage
 
@@ -84,14 +93,41 @@ reps); the perf pass behind them was `perf`-profile guided, receipts first.
 - **Aliasing**: each block is written by deposits and resolved in place; `Prev` is per-world
   scratch used by exactly one tile resolve at a time; sources are read-only during deposits of
   other sources. `PageMap` mutation happens only through its owning `LayerData` pointer.
-- **Alignment**: every unmanaged block is 64-byte aligned; `Vector128<int>` loads/stores in
-  `Resolve`/`PackDense`/`EmitRaster` use unaligned semantics (`LoadVector128`, widened unaligned
-  4-byte stamp reads, `PackSignedSaturate` results stored through scalar 8-byte writes on
-  8-byte-aligned short offsets).
+- **Alignment**: tile blocks, native buffers, page-map arrays, and prefix scratch use 64-byte
+  aligned allocations. World/grid/layer/catalog metadata uses `AllocZeroed` with natural
+  alignment; raster samples require only byte alignment. SIMD accesses use unaligned load/store
+  semantics. AVX2 resolves eight `int32` cells per group: each 128-bit lane computes its own
+  prefix, the low lane's final sum carries into the high lane, and the eighth sum carries to
+  the next group. Saturating pack results permute 64-bit chunks into cell order before storing
+  eight `int16` values. Groups cover exactly cells 0–31 and never read padded columns or beyond
+  the 32-cell scratch/page rows. Raster taps widen unaligned 4-byte sample reads within the
+  padded allocation.
 - **Concurrency**: `Place`/`Move`/`SetGain`/`Remove`/`Process` are serial; there is no shared
   mutable state between worlds, so different worlds may run on different threads. Within one
   world all access is single-threaded; no locks or interlocked ops exist.
+  World creation and stamp catalog mutation are also serialized across worlds because their
+  arenas and counts are process-wide.
 - **Bounds**: stamps clip to grid rects before marking; tile-local box corners land in
   `[0,32]×[0,32]` of the difference array (rows 0–32 exist for the exclusive far edge; column 32
   is written but never read, by design of the half-open prefix form). Raster fragments clip to
   the tile and read only inside the padded stamp allocation.
+
+## Tool inspection
+
+`tools/stats` reads internal state through friend access, without reflection, counters on the
+data path, or additional public types. `Inspection.Read` validates the world handle, scans
+source liveness and grid/layer metadata, and returns a pointer-free value snapshot. Its cost
+is O(source slots + grids × layers + catalog stamps); it does not scan cells or page-map slots.
+Memory includes allocated capacity, retained source/dirty buffers after `Clear`, every live
+12,480 B tile block, and shared world/stamp arenas plus padded rasters. The selected world and
+process-wide shared allocations are reported separately; allocator metadata, alignment slack,
+other worlds, and the runtime are excluded from native totals. GC heap and process memory are
+separate runtime observations.
+
+Inspection shares the owner's lifetime and thread rules: capture it on the world-owning thread
+between mutations/process calls, and serialize stamp creation with the capture. It neither
+mutates nor frees storage, creates aliases that escape the capture, nor allocates managed or
+native memory. All pointer reads use the naturally aligned owning structs and bounded allocated
+capacities. The CLI is single-threaded and formats only after capture and timing. JSON uses
+`Utf8JsonWriter` directly with static UTF-8 property names and a fixed object/array layout;
+serializer reflection is disabled in the tool project.

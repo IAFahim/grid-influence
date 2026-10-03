@@ -12,6 +12,8 @@ internal unsafe struct NativeBuffer<T> where T : unmanaged
 
     public int Length => _length;
 
+    public readonly int Capacity => _capacity;
+
     public Span<T> Span => _pointer == null ? default : new(_pointer, _length);
 
     public T* Pointer => _pointer;

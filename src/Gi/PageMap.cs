@@ -20,6 +20,10 @@ internal unsafe struct PageMap
 
     public readonly int SlotCount => _used == null ? 0 : _mask + 1;
 
+    public readonly int Count => _count;
+
+    public readonly int TombstoneCount => _tombstones;
+
     public readonly byte* Used => _used;
 
     public readonly byte** Blocks => _blocks;
@@ -44,7 +48,7 @@ internal unsafe struct PageMap
     public void Put(int tile, byte* block)
     {
         if (_mask == 0 || (_count + _tombstones + 1) * 4 >= (_mask + 1) * 3)
-            GrowTo(Math.Max(16, (_count + _tombstones + 1) * 2));
+            GrowTo(Math.Max(SlotCount, (_count + 1) * 2));
 
         var index = SlotOf(tile);
         var tombstone = -1;

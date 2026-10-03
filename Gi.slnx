@@ -13,5 +13,6 @@
   </Folder>
   <Folder Name="/tools/">
     <Project Path="viz/Gi.Viz.csproj" />
+    <Project Path="tools/stats/Gi.Stats.csproj" />
   </Folder>
 </Solution>

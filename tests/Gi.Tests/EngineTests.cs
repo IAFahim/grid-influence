@@ -402,4 +402,157 @@ public sealed class EngineTests
         Assert.Equal(400, World.QueryAt(w, g, l, 128f, 128f));
         Assert.Equal(World.Query(w, g, l, 64, 64), World.QueryAt(w, g, l, 128f, 128f));
     }
+
+    [Fact]
+    public void InvalidWorld_DoesNotAccessNativeArena()
+    {
+        Assert.Equal(-1, World.Place(255, 0, 0f, 0f, 1, 1));
+        Assert.Equal(0, World.Query(255, 0, 0, 0, 0));
+        Assert.Equal(0, World.Query(255, 0, 0, 0, 0, 32, 32));
+        Assert.Equal(0, World.QueryAt(255, 0, 0, 0f, 0f));
+        World.Move(255, 0, 0f, 0f);
+        World.SetGain(255, 0, 1);
+        World.Remove(255, 0);
+        World.Process(255);
+        World.Clear(255);
+        Assert.Throws<ArgumentOutOfRangeException>(() => Grid.New(255, 5, 0f, 0f, 32f));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Layer.New(255));
+        Assert.False(Stats.Inspection.Read(255).Valid);
+    }
+
+    [Fact]
+    public void RegionQuery_ClipsWithoutIntegerOverflow()
+    {
+        var w = World.New();
+        var g = Grid.New(w, 6, 0f, 0f, 64f);
+        var l = Layer.New(w);
+        World.Place(w, l, 32f, 32f, Stamp.Box(8, 8, 10), 1);
+        World.Process(w);
+        Assert.Equal(360, World.Query(w, g, l, 30, 30, int.MaxValue, int.MaxValue));
+        Assert.Equal(0, World.Query(w, g, l, int.MaxValue, int.MaxValue, int.MaxValue, int.MaxValue));
+        Assert.Equal(0, World.Query(w, g, l, int.MinValue, int.MinValue, int.MaxValue, int.MaxValue));
+    }
+
+    [Fact]
+    public void Move_UnchangedPositionKeepsPagesClean()
+    {
+        var w = World.New();
+        var g = Grid.New(w, 6, 0f, 0f, 64f);
+        var l = Layer.New(w);
+        var source = World.Place(w, l, 32.25f, 32.5f, Stamp.Box(8, 8, 60), 4);
+        World.Process(w);
+        var before = Stats.Inspection.Read(w);
+        var sum = World.Query(w, g, l, 0, 0, 64, 64);
+        World.Move(w, source, 32.25f, 32.5f);
+        var after = Stats.Inspection.Read(w);
+        Assert.Equal(0, after.DirtyTiles);
+        Assert.Equal(before.WorldBytes, after.WorldBytes);
+        Assert.Equal(sum, World.Query(w, g, l, 0, 0, 64, 64));
+    }
+
+    [Fact]
+    public unsafe void PageMap_TombstoneChurnKeepsCapacityBounded()
+    {
+        var map = new PageMap();
+        byte block = 1;
+        try
+        {
+            map.Put(0, &block);
+            for (var i = 1; i < 10000; i++)
+            {
+                map.Put(i, &block);
+                Assert.True(map.Remove(i));
+                Assert.Equal(16, map.SlotCount);
+                Assert.Equal(1, map.Count);
+                Assert.True(map.TryGet(0, out var found));
+                Assert.True(found == &block);
+            }
+        }
+        finally
+        {
+            map.Reset();
+        }
+    }
+
+    [Fact]
+    public unsafe void Resolve_MatchesScalarPrefixAcrossVectorLanes()
+    {
+        var difference = stackalloc int[TileBake.DiffRows * TileBake.DiffPitch];
+        var dense = stackalloc int[32 * 32];
+        var previous = stackalloc int[32];
+        var expectedPrevious = stackalloc int[32];
+        var output = stackalloc short[32 * 32];
+        new Span<int>(difference, TileBake.DiffRows * TileBake.DiffPitch).Clear();
+        new Span<int>(previous, 32).Clear();
+        new Span<int>(expectedPrevious, 32).Clear();
+        for (var y = 0; y < 32; y++)
+        for (var x = 0; x < 32; x++)
+        {
+            difference[y * TileBake.DiffPitch + x] = ((y * 37 + x * 13) % 41 - 20) * 4096;
+            dense[y * 32 + x] = ((y * 19 + x * 31) % 17 - 8) * 70000;
+        }
+
+        Assert.True(TileBake.Resolve(difference, dense, previous, output));
+        for (var y = 0; y < 32; y++)
+        {
+            var carry = 0;
+            for (var x = 0; x < 32; x++)
+            {
+                carry += difference[y * TileBake.DiffPitch + x];
+                expectedPrevious[x] += carry;
+                var expected = (short)Math.Clamp(expectedPrevious[x] + dense[y * 32 + x], short.MinValue, short.MaxValue);
+                Assert.Equal(expected, output[y * 32 + x]);
+            }
+        }
+
+        new Span<int>(difference, TileBake.DiffRows * TileBake.DiffPitch).Clear();
+        new Span<int>(dense, 32 * 32).Clear();
+        new Span<int>(previous, 32).Clear();
+        Assert.False(TileBake.Resolve(difference, dense, previous, output));
+        for (var i = 0; i < 32 * 32; i++) Assert.Equal(0, output[i]);
+    }
+
+    [Fact]
+    public void Inspection_AccountsForRetainedCapacityAfterClear()
+    {
+        var w = World.New();
+        var g = Grid.New(w, 6, 0f, 0f, 64f);
+        var l = Layer.New(w);
+        var empty = Stats.Inspection.Read(w);
+        World.Place(w, l, 16f, 16f, Stamp.Box(4, 4, 60), 2);
+        var pending = Stats.Inspection.Read(w);
+        Assert.Equal(1, pending.LiveSources);
+        Assert.Equal(1, pending.LiveTiles);
+        Assert.Equal(1, pending.DirtyTiles);
+        Assert.Equal(64 * 12, pending.SourceBytes);
+        Assert.Equal(12480, pending.DifferenceBytes + pending.DenseBytes + pending.PageBytes);
+        Assert.Equal(4, pending.DirtyFlagBytes);
+        Assert.Equal(64, pending.DirtyQueueBytes);
+        World.Process(w);
+        Assert.Equal(1920, World.Query(w, g, l, 0, 0, 64, 64));
+        World.Clear(w);
+        var cleared = Stats.Inspection.Read(w);
+        Assert.Equal(0, cleared.SourceSlots);
+        Assert.Equal(64, cleared.SourceCapacity);
+        Assert.Equal(0, cleared.LiveTiles);
+        Assert.Equal(0, cleared.MapBytes);
+        Assert.Equal(empty.WorldBytes + 64 * 12 + 4 + 64, cleared.WorldBytes);
+    }
+
+    [Fact]
+    public void FullRegionQuery_SumsLivePagesOnLargeSparseGrid()
+    {
+        var w = World.New();
+        var g = Grid.New(w, 14, 0f, 0f, 16384f);
+        var l = Layer.New(w);
+        Assert.Equal(0, World.Query(w, g, l, 0, 0, 16384, 16384));
+        var a = World.Place(w, l, 31.5f, 31.5f, Stamp.Box(4, 4, 64), 1);
+        World.Place(w, l, 16000f, 16000f, Stamp.Box(4, 4, -32), 1);
+        World.Process(w);
+        Assert.Equal(512, World.Query(w, g, l, 0, 0, 16384, 16384));
+        Assert.Equal(512, World.Query(w, g, l, -1, -1, int.MaxValue, int.MaxValue));
+        World.Remove(w, a);
+        World.Process(w);
+        Assert.Equal(-512, World.Query(w, g, l, 0, 0, 16384, 16384));
+    }
 }

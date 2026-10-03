@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Gi\Gi.csproj" />
+    <Compile Include="../../tools/stats/Inspection.cs" Link="Tools/Inspection.cs" />
   </ItemGroup>
 
 </Project>

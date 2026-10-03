@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace Gi;
@@ -43,9 +44,9 @@ internal unsafe struct WorldCtx
 
 public static unsafe class World
 {
-    private const int MaxWorlds = 32;
-    private const int MaxGrids = 32;
-    private const int MaxLayers = 32;
+    internal const int MaxWorlds = 32;
+    internal const int MaxGrids = 32;
+    internal const int MaxLayers = 32;
     private const int MinPower = 5;
     private const int MaxPower = 14;
     private const int MaxGain = 16;
@@ -59,6 +60,9 @@ public static unsafe class World
     private static readonly WorldCtx* Worlds =
         (WorldCtx*)NativeMemory.AllocZeroed((nuint)(MaxWorlds * sizeof(WorldCtx)));
     private static int _worldCount;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static WorldCtx* GetContext(byte world) => world < _worldCount ? Worlds + world : null;
 
     public static byte New()
     {
@@ -77,7 +81,8 @@ public static unsafe class World
         ArgumentOutOfRangeException.ThrowIfGreaterThan(power, MaxPower);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(size, 0f);
 
-        var w = Worlds + world;
+        var w = GetContext(world);
+        if (w == null) throw new ArgumentOutOfRangeException(nameof(world));
         if (w->GridCount >= MaxGrids) throw new InvalidOperationException("Grid limit reached.");
 
         var id = (byte)w->GridCount++;
@@ -95,15 +100,16 @@ public static unsafe class World
 
     internal static byte AddLayer(byte world)
     {
-        var w = Worlds + world;
+        var w = GetContext(world);
+        if (w == null) throw new ArgumentOutOfRangeException(nameof(world));
         if (w->LayerCount >= MaxLayers) throw new InvalidOperationException("Layer limit reached.");
         return (byte)w->LayerCount++;
     }
 
     public static int Place(byte world, byte layer, float x, float y, byte stamp, int gain)
     {
-        var w = Worlds + world;
-        if (layer >= w->LayerCount || stamp == 0 || stamp >= StampCatalog.Count) return -1;
+        var w = GetContext(world);
+        if (w == null || layer >= w->LayerCount || stamp == 0 || stamp >= StampCatalog.Count) return -1;
 
         var s = &w->Sources;
         if (s->Count == s->X.Length) GrowSources(s);
@@ -129,6 +135,7 @@ public static unsafe class World
         var gain = s->Gain.Pointer[source];
         var oldX = s->X.Pointer[source];
         var oldY = s->Y.Pointer[source];
+        if (oldX == x && oldY == y) return;
         s->X.Pointer[source] = x;
         s->Y.Pointer[source] = y;
         Deposit(w, oldX, oldY, stamp, layer, -gain);
@@ -159,7 +166,8 @@ public static unsafe class World
 
     public static void Clear(byte world)
     {
-        var w = Worlds + world;
+        var w = GetContext(world);
+        if (w == null) return;
         var s = &w->Sources;
         new Span<byte>(s->Alive.Pointer, s->Count).Clear();
         s->Count = 0;
@@ -187,9 +195,9 @@ public static unsafe class World
 
     private static bool TrySource(byte world, int source, out WorldCtx* w, out SourceColumns* s)
     {
-        w = Worlds + world;
-        s = &w->Sources;
-        return (uint)source < (uint)s->Count && s->Alive.Pointer[source] != 0;
+        w = GetContext(world);
+        s = w == null ? null : &w->Sources;
+        return s != null && (uint)source < (uint)s->Count && s->Alive.Pointer[source] != 0;
     }
 
     private static void Deposit(WorldCtx* w, float x, float y, byte stampId, byte layer, int gain)
@@ -265,7 +273,8 @@ public static unsafe class World
 
     public static void Process(byte world)
     {
-        var w = Worlds + world;
+        var w = GetContext(world);
+        if (w == null) return;
         for (var gi = 0; gi < w->GridCount; gi++)
         {
             var g = w->Grids + gi;
@@ -303,10 +312,11 @@ public static unsafe class World
         s->Alive.Resize(capacity);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static short Query(byte world, byte grid, byte layer, int x, int y)
     {
-        var w = Worlds + world;
-        if (grid >= w->GridCount || layer >= w->LayerCount) return 0;
+        var w = GetContext(world);
+        if (w == null || grid >= w->GridCount || layer >= w->LayerCount) return 0;
 
         var g = w->Grids + grid;
         if ((uint)x >= (uint)g->Size || (uint)y >= (uint)g->Size) return 0;
@@ -321,19 +331,35 @@ public static unsafe class World
 
     public static long Query(byte world, byte grid, byte layer, int x, int y, int width, int height)
     {
-        var w = Worlds + world;
-        if (grid >= w->GridCount || layer >= w->LayerCount || width <= 0 || height <= 0) return 0;
+        var w = GetContext(world);
+        if (w == null || grid >= w->GridCount || layer >= w->LayerCount || width <= 0 || height <= 0) return 0;
 
         var g = w->Grids + grid;
-        var x1 = Math.Min(x + width, g->Size);
-        var y1 = Math.Min(y + height, g->Size);
+        var x1 = (int)Math.Min((long)x + width, g->Size);
+        var y1 = (int)Math.Min((long)y + height, g->Size);
         var x0 = Math.Max(x, 0);
         var y0 = Math.Max(y, 0);
         if (x1 <= x0 || y1 <= y0) return 0;
 
         var pages = &g->Layers[layer].Pages;
+        if (pages->Count == 0) return 0;
         var tps = g->TilesPerSide;
         var sum = 0L;
+        if (x0 == 0 && y0 == 0 && x1 == g->Size && y1 == g->Size)
+        {
+            var used = pages->Used;
+            var blocks = pages->Blocks;
+            var slots = pages->SlotCount;
+            for (var slot = 0; slot < slots; slot++)
+            {
+                if (used[slot] != PageMap.Live) continue;
+                var page = (short*)(blocks[slot] + PageOffset);
+                for (var cell = 0; cell < Cells; cell++) sum += page[cell];
+            }
+
+            return sum;
+        }
+
         for (var ty = y0 >> TileBake.TileBits; ty <= (y1 - 1) >> TileBake.TileBits; ty++)
         for (var tx = x0 >> TileBake.TileBits; tx <= (x1 - 1) >> TileBake.TileBits; tx++)
         {
@@ -356,8 +382,8 @@ public static unsafe class World
 
     public static short QueryAt(byte world, byte grid, byte layer, float x, float y)
     {
-        var w = Worlds + world;
-        if (grid >= w->GridCount || layer >= w->LayerCount) return 0;
+        var w = GetContext(world);
+        if (w == null || grid >= w->GridCount || layer >= w->LayerCount) return 0;
 
         var g = w->Grids + grid;
         var cx = (int)MathF.Floor((x - g->OriginX) * g->Scale);
