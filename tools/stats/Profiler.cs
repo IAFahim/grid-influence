@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using Gi;
 
 namespace Gi.Stats;
 

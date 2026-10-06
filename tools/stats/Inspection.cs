@@ -1,5 +1,3 @@
-using Gi;
-
 namespace Gi.Stats;
 
 internal struct Snapshot
@@ -57,7 +55,7 @@ internal static unsafe class Inspection
             GridBytes = World.MaxGrids * sizeof(GridCtx),
             ScratchBytes = TileBake.TileSize * sizeof(int),
             SourceBytes = (long)s->X.Capacity * sizeof(float) + (long)s->Y.Capacity * sizeof(float) +
-                s->Stamp.Capacity + (long)s->Layer.Capacity + s->Gain.Capacity + s->Alive.Capacity,
+                s->Stamp.Capacity + s->Layer.Capacity + s->Gain.Capacity + s->Alive.Capacity,
             WorldArenaBytes = World.MaxWorlds * sizeof(WorldCtx),
             StampArenaBytes = StampCatalog.MaxStamps * sizeof(StampVariant),
             Stamps = StampCatalog.Count - 1,

@@ -1,5 +1,3 @@
-using Gi;
-
 namespace Gi.Stats;
 
 internal readonly struct Scene(byte world, byte grid, int cells, int layers, int sources, int moves)

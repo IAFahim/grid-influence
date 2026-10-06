@@ -1,5 +1,3 @@
-using Gi;
-
 namespace Gi.Stats;
 
 internal readonly record struct Receipt(string Name, bool Passed, long Value);

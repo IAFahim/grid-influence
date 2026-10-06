@@ -11,13 +11,17 @@ indent_size = 4
 
 # The inspection contract: warning severity and above must stay at zero
 # (ci.yml inspect job), and suggestion-level findings are either taken or
-# scoped off here with the reason. Two deliberate rejections (050c199):
+# scoped off here with the reason. Deliberate rejections:
 # - World.cs: '??=' on the byte* field does not compile (CS0019), so the
-#   explicit null check stays.
+#   explicit null check stays. (050c199)
+# - World.cs: Move's early-out compares floats by == on purpose — it must
+#   skip only a bitwise-unchanged position, and Equals would flip NaN and
+#   -0.0. (075ce60)
 # - Stamp.cs: Stamp.New(sbyte*) is public API for unmanaged callers even
-#   though nothing in-repo calls it.
+#   though nothing in-repo calls it. (050c199)
 [src/Gi/World.cs]
 resharper_convert_if_statement_to_null_coalescing_assignment_highlighting = none
+resharper_compare_of_floats_by_equality_operator_highlighting = none
 
 [src/Gi/Stamp.cs]
 resharper_unused_member_global_highlighting = none
