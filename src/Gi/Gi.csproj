@@ -8,7 +8,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Version>$(GiVersion)</Version>
-    <PackageId>Gi</PackageId>
+    <PackageId>Gi.Influence</PackageId>
     <Authors>IAFahim</Authors>
     <Description>Sparse tiled integer influence fields: difference-array boxes, bilinear raster stamps with sub-cell placement, per-tile prefix-sum resolve, multi-resolution grids, byte-handle API.</Description>
     <PackageProjectUrl>https://github.com/IAFahim/grid-influence</PackageProjectUrl>

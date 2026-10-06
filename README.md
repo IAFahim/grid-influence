@@ -11,7 +11,7 @@ pages. The re-emitted design was measured and retired — see [Receipts](#receip
 ## Get started
 
 ```sh
-dotnet add package Gi --version 0.2.0-alpha.1
+dotnet add package Gi.Influence --version 0.2.0-alpha.1
 ```
 
 ```csharp

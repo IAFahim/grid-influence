@@ -1,0 +1,83 @@
+name: publish-nuget
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing v-prefixed release tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          persist-credentials: false
+      - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7
+        with:
+          dotnet-version: 10.0.x
+      - name: Tag matches GiVersion
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          grep -F "<GiVersion>$version</GiVersion>" Directory.Build.props
+      - run: dotnet build Gi.slnx -c Release -m:1
+      - run: dotnet test Gi.slnx -c Release --no-build
+      - run: dotnet run --project samples/world -c Release --no-build
+      - run: dotnet run --project benchmarks -c Release --no-build -- --verify
+      - run: dotnet run --project benchmarks -c Release --no-build -- --verify
+        env:
+          DOTNET_EnableHWIntrinsic: "0"
+      - run: dotnet pack src/Gi -c Release --no-build -o artifacts/packages
+      - name: Packed file matches tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          test -f "artifacts/packages/Gi.Influence.$version.nupkg"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: gi-influence-${{ inputs.tag }}-${{ github.run_id }}
+          path: artifacts/packages/*
+          if-no-files-found: error
+          compression-level: 0
+
+  publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: nuget-production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: gi-influence-${{ inputs.tag }}-${{ github.run_id }}
+          path: artifacts/packages
+      - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7
+        with:
+          dotnet-version: 10.0.x
+      - uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841
+        id: login
+        with:
+          user: iafahim
+      - name: Push package
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          dotnet nuget push "artifacts/packages/Gi.Influence.$version.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
