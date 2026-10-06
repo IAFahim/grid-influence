@@ -28,7 +28,9 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   saturates to `short` **after** summation so cancellation is preserved. A tile that resolves to
   all-zero frees its block and leaves the map — a missing page reads as 0.
 - **Query**: `World.Query(world, grid, layer, x, y)` is one hash lookup + page read;
-  `(x, y, w, h)` sums a rect tile-wise; `QueryAt` takes world-space floats. Invalid handles,
+  `(x, y, w, h)` sums a rect tile-wise; `QueryAt` takes world-space floats;
+  `QueryRegion(world, grid, layer, x, y, w, h, short* dst)` fills `w×h` cells row-major with
+  exactly the per-cell `Query` values, copying row segments per tile. Invalid handles,
   out-of-range cells, and missing pages all read 0 — no exceptions on the warm path.
   Region endpoints widen to `long` before clipping, so oversized rectangles cannot overflow.
   Invalid worlds make mutation and process calls return immediately; `Place` returns `-1`.
@@ -76,6 +78,8 @@ world rect at its own cell density; a source deposits into every grid it overlap
 - `remove-restores-baseline` — remove rebuilds tiles without the source.
 - `warm-process-allocates-0-bytes` — unchanged and place/remove churn, 0 B.
 - `warm-query-allocates-0-bytes` — 200k cell reads, 0 B.
+- `query-region-matches-cells` — bulk fill equals per-cell reads across tile boundaries,
+  clipped and negative-offset regions, 0 B warm.
 - `saturated-sum-clamps` — saturation sticks at ±32767 after summation.
 
 Timing receipts live in the README (deposit vs re-emitted marks, i9-14900K, .NET 10, min over
@@ -83,12 +87,16 @@ reps); the perf pass behind them was `perf`-profile guided, receipts first.
 
 ## Unsafe proof
 
-- **Lifetime**: `Worlds` is a static arena of 32 `WorldCtx` allocated once; world contents are
+- **Lifetime**: the world arena (32 `WorldCtx`) and stamp catalog (256 `StampVariant`) are
+  process-lifetime pools allocated by the first creation call (`World.New`, `Stamp.New`,
+  `Stamp.Box`) — never by static construction, so no static constructor on the assembly performs
+  calls and Burst can compile `Query`/`QueryRegion` call graphs; world contents are
   `NativeHeap` blocks owned by the context (grid array, `LayerData` array,
   `InDirty`/`Dirty` per layer, `Prev` scratch, `SourceColumns` buffers) or by a `PageMap` (each
   12,480 B block — difference array + dense buffer + page — is owned by its slot and freed exactly
   when the tile resolves to zero, the world is cleared, or the map is disposed). `Stamp` variants
-  are catalog-owned for process lifetime. No `World.Free` exists: worlds are process-lifetime
+  are catalog-owned for process lifetime. `QueryRegion` writes only the caller's destination.
+  No `World.Free` exists: worlds are process-lifetime
   singletons, so no pointer escapes an owner.
 - **Aliasing**: each block is written by deposits and resolved in place; `Prev` is per-world
   scratch used by exactly one tile resolve at a time; sources are read-only during deposits of
@@ -109,7 +117,11 @@ reps); the perf pass behind them was `perf`-profile guided, receipts first.
   mutable state between worlds, so different worlds may run on different threads. Within one
   world all access is single-threaded; no locks or interlocked ops exist.
   World creation and stamp catalog mutation are also serialized across worlds because their
-  arenas and counts are process-wide.
+  arenas and counts are process-wide. Pool initialization rides the same rule: the first
+  creation call allocates both arenas before any handle exists, and handles only originate
+  from creation calls, so no query can observe an uninitialized arena. `Query`/`QueryRegion`
+  read resolved pages only and may run concurrently with each other, never with mutation or
+  process.
 - **Bounds**: stamps clip to grid rects before marking; tile-local box corners land in
   `[0,32]×[0,32]` of the difference array (rows 0–32 exist for the exclusive far edge; column 32
   is written but never read, by design of the half-open prefix form). Raster fragments clip to

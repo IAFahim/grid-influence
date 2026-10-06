@@ -56,19 +56,18 @@ public static unsafe class World
     private const int PageOffset = DiffBytes + DenseBytes;
     private const int BlockBytes = PageOffset + PageBytes;
 
-    private static readonly WorldCtx* Worlds =
-        (WorldCtx*)NativeHeap.AllocZeroed((nuint)(MaxWorlds * sizeof(WorldCtx)));
     private static int _worldCount;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static WorldCtx* GetContext(byte world) => world < _worldCount ? Worlds + world : null;
+    internal static WorldCtx* GetContext(byte world) => world < _worldCount ? Runtime.Worlds + world : null;
 
     public static byte New()
     {
+        Runtime.Ensure();
         if (_worldCount >= MaxWorlds) throw new InvalidOperationException("World limit reached.");
 
         var id = (byte)_worldCount++;
-        var w = Worlds + id;
+        var w = Runtime.Worlds + id;
         w->Grids = (GridCtx*)NativeHeap.AllocZeroed((nuint)(MaxGrids * sizeof(GridCtx)));
         w->Prev = (int*)NativeHeap.AlignedAlloc(TileBake.TileSize * sizeof(int));
         return id;
@@ -376,6 +375,51 @@ public static unsafe class World
         }
 
         return sum;
+    }
+
+    public static void QueryRegion(
+        byte world, byte grid, byte layer, int x, int y, int width, int height, short* destination)
+    {
+        var w = GetContext(world);
+        if (w == null || grid >= w->GridCount || layer >= w->LayerCount || width <= 0 || height <= 0) return;
+
+        var g = w->Grids + grid;
+        var pages = &g->Layers[layer].Pages;
+        var tps = g->TilesPerSide;
+        var mask = TileBake.TileSize - 1;
+
+        for (var row = 0; row < height; row++)
+        {
+            var cy = y + row;
+            var dst = destination + (long)row * width;
+            if ((uint)cy >= (uint)g->Size)
+            {
+                for (var i = 0; i < width; i++) dst[i] = 0;
+                continue;
+            }
+
+            var ty = cy >> TileBake.TileBits;
+            var ly = cy & mask;
+            var cx = x;
+            var col = 0;
+            while (col < width)
+            {
+                var run = Math.Min((((cx >> TileBake.TileBits) + 1) << TileBake.TileBits) - cx, width - col);
+                if ((uint)cx < (uint)g->Size && pages->TryGet(ty * tps + (cx >> TileBake.TileBits), out var block))
+                {
+                    var page = (short*)(block + PageOffset);
+                    var src = page + ly * TileBake.TileSize + (cx & mask);
+                    for (var i = 0; i < run; i++) dst[col + i] = src[i];
+                }
+                else
+                {
+                    for (var i = 0; i < run; i++) dst[col + i] = 0;
+                }
+
+                cx += run;
+                col += run;
+            }
+        }
     }
 
     public static short QueryAt(byte world, byte grid, byte layer, float x, float y)

@@ -16,6 +16,7 @@ internal static class Verification
         Check("remove-restores-baseline", RemoveRestoresBaseline());
         Check("warm-process-allocates-0-bytes", WarmProcessAllocationFree());
         Check("warm-query-allocates-0-bytes", WarmQueryAllocationFree());
+        Check("query-region-matches-cells", QueryRegionMatchesCells());
         Check("saturated-sum-clamps", SaturatedSumClamps());
 
         Console.WriteLine(failures == 0 ? "verification: all receipts green" : $"verification: {failures} failures");
@@ -195,6 +196,57 @@ internal static class Verification
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         _ = acc;
         Console.WriteLine($"  warm query over 200k cells: {allocated} B");
+        return allocated == 0;
+    }
+
+    private static unsafe bool QueryRegionMatchesCells()
+    {
+        var w = Gi.World.New();
+        var g = Gi.Grid.New(w, 8, 0f, 0f, 256f);
+        var l = Gi.Layer.New(w);
+        var box = Gi.Stamp.Box(14, 14, 80);
+        var samples = new sbyte[6 * 9];
+        for (var i = 0; i < samples.Length; i++) samples[i] = (sbyte)(i * 17 % 40 - 20);
+        var raster = Gi.Stamp.New(samples, 6, 9);
+        var rng = new Random(23);
+        for (var i = 0; i < 300; i++)
+        {
+            var x = (float)(rng.NextDouble() * 256);
+            var y = (float)(rng.NextDouble() * 256);
+            Gi.World.Place(w, l, x, y, rng.Next(2) == 0 ? box : raster, 4 + rng.Next(13));
+        }
+
+        Gi.World.Process(w);
+
+        var buffer = new short[256 * 256];
+        fixed (short* p = buffer)
+        {
+            Gi.World.QueryRegion(w, g, l, 0, 0, 256, 256, p);
+            for (var cy = 0; cy < 256; cy++)
+            for (var cx = 0; cx < 256; cx++)
+                if (p[cy * 256 + cx] != Gi.World.Query(w, g, l, cx, cy)) return false;
+
+            Gi.World.QueryRegion(w, g, l, 30, 62, 91, 133, p);
+            for (var row = 0; row < 133; row++)
+            for (var col = 0; col < 91; col++)
+                if (p[row * 91 + col] != Gi.World.Query(w, g, l, 30 + col, 62 + row)) return false;
+
+            Gi.World.QueryRegion(w, g, l, -7, 250, 20, 12, p);
+            for (var row = 0; row < 12; row++)
+            for (var col = 0; col < 20; col++)
+                if (p[row * 20 + col] != Gi.World.Query(w, g, l, -7 + col, 250 + row)) return false;
+        }
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        fixed (short* p = buffer)
+        {
+            for (var i = 0; i < 100; i++) Gi.World.QueryRegion(w, g, l, 0, 0, 256, 256, p);
+        }
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Console.WriteLine($"  warm query-region over 100 full grids: {allocated} B");
         return allocated == 0;
     }
 

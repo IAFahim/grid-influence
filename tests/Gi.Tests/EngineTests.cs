@@ -555,4 +555,67 @@ public sealed class EngineTests
         World.Process(w);
         Assert.Equal(-512, World.Query(w, g, l, 0, 0, 16384, 16384));
     }
+
+    [Fact]
+    public unsafe void QueryRegion_MatchesCellQuery_AcrossTileBoundaries()
+    {
+        var w = World.New();
+        var g = Grid.New(w, power: 7, x: 0f, y: 0f, size: 128f);
+        var l = Layer.New(w);
+        var box = Stamp.Box(12, 8, 90);
+        var samples = new sbyte[5 * 5];
+        for (var i = 0; i < samples.Length; i++) samples[i] = (sbyte)(i * 11 % 30 - 15);
+        var raster = Stamp.New(samples, 5, 5);
+        var rng = new Random(31);
+        for (var i = 0; i < 80; i++)
+        {
+            World.Place(w, l, (float)(rng.NextDouble() * 128), (float)(rng.NextDouble() * 128), box, 6 + rng.Next(11));
+            World.Place(w, l, (float)(rng.NextDouble() * 128), (float)(rng.NextDouble() * 128), raster, 4);
+        }
+
+        World.Process(w);
+
+        (int x, int y, int width, int height)[] regions =
+        {
+            (0, 0, 128, 128),
+            (29, 33, 40, 17),
+            (126, 126, 5, 5),
+            (-3, -4, 10, 9),
+            (60, 120, 8, 20),
+            (31, 31, 2, 2),
+        };
+
+        foreach (var (x, y, width, height) in regions)
+        {
+            var buffer = new short[width * height];
+            fixed (short* p = buffer) World.QueryRegion(w, g, l, x, y, width, height, p);
+            for (var row = 0; row < height; row++)
+            for (var col = 0; col < width; col++)
+                Assert.Equal(World.Query(w, g, l, x + col, y + row), buffer[row * width + col]);
+        }
+    }
+
+    [Fact]
+    public unsafe void QueryRegion_ZeroesUntouchedAndFreedPages()
+    {
+        var w = World.New();
+        var g = Grid.New(w, power: 6, x: 0f, y: 0f, size: 64f);
+        var l = Layer.New(w);
+
+        var untouched = new short[64 * 64];
+        fixed (short* p = untouched) World.QueryRegion(w, g, l, 0, 0, 64, 64, p);
+        Assert.All(untouched, v => Assert.Equal(0, v));
+
+        var source = World.Place(w, l, 32f, 32f, Stamp.Box(8, 8, 50), 6);
+        World.Process(w);
+        var placed = new short[64 * 64];
+        fixed (short* p = placed) World.QueryRegion(w, g, l, 0, 0, 64, 64, p);
+        Assert.Equal(300, placed[32 * 64 + 32]);
+
+        World.Remove(w, source);
+        World.Process(w);
+        var freed = new short[64 * 64];
+        fixed (short* p = freed) World.QueryRegion(w, g, l, 0, 0, 64, 64, p);
+        Assert.All(freed, v => Assert.Equal(0, v));
+    }
 }

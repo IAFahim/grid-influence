@@ -23,18 +23,16 @@ internal static unsafe class StampCatalog
     internal const int MaxStamps = 256;
     private const int MaxAxis = 256;
 
-    private static readonly StampVariant* Variants =
-        (StampVariant*)NativeHeap.AllocZeroed((nuint)(MaxStamps * sizeof(StampVariant)));
-
     private static int _count = 1;
 
     internal static int Count => _count;
 
-    internal static StampVariant* Get(byte id) => Variants + id;
+    internal static StampVariant* Get(byte id) => Runtime.Stamps + id;
 
     public static byte Bake(sbyte* data, int width, int height)
     {
         Validate(width, height);
+        Runtime.Ensure();
 
         var uniform = true;
         var first = data[0];
@@ -46,7 +44,7 @@ internal static unsafe class StampCatalog
         if (uniform) return Box(width, height, first);
 
         var id = Reserve();
-        var v = Variants + id;
+        var v = Runtime.Stamps + id;
         var pitch = width + 2;
         var basePtr = (sbyte*)NativeHeap.AllocZeroed((nuint)(pitch * (height + 2)));
         for (var y = 0; y < height; y++)
@@ -71,9 +69,10 @@ internal static unsafe class StampCatalog
     public static byte Box(int width, int height, sbyte value)
     {
         Validate(width, height);
+        Runtime.Ensure();
 
         var id = Reserve();
-        var v = Variants + id;
+        var v = Runtime.Stamps + id;
         v->Kind = StampKind.ConstantRectangle;
         v->Width = width;
         v->Height = height;

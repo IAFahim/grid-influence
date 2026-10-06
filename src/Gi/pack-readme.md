@@ -7,7 +7,8 @@ data path, 0 B allocation on warm Process/Query.
 
 Targets `net10.0` (with SSE2/AVX2/Neon resolve paths) and `netstandard2.1` for engines such as
 Unity — the netstandard build compiles the same scalar paths that the intrinsics-off
-verification run exercises.
+verification run exercises. Query paths allocate nothing and perform no static-construction
+calls, so Burst jobs can call `World.Query` and `World.QueryRegion` directly.
 
 ```csharp
 byte world = World.New();
@@ -17,6 +18,7 @@ byte stamp = Stamp.New(samples, 16, 16);   // or Stamp.Box(8, 8, 100)
 World.Place(world, layer, x, y, stamp, gain: 8);
 World.Process(world);
 short v = World.Query(world, grid, layer, cx, cy);
+fixed (short* page = destination) World.QueryRegion(world, grid, layer, 0, 0, 256, 256, page);
 ```
 
 Full semantics, receipts, and the unsafe proof:
