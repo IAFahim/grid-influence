@@ -1,5 +1,4 @@
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 
 namespace Gi;
 
@@ -58,7 +57,7 @@ public static unsafe class World
     private const int BlockBytes = PageOffset + PageBytes;
 
     private static readonly WorldCtx* Worlds =
-        (WorldCtx*)NativeMemory.AllocZeroed((nuint)(MaxWorlds * sizeof(WorldCtx)));
+        (WorldCtx*)NativeHeap.AllocZeroed((nuint)(MaxWorlds * sizeof(WorldCtx)));
     private static int _worldCount;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -70,16 +69,15 @@ public static unsafe class World
 
         var id = (byte)_worldCount++;
         var w = Worlds + id;
-        w->Grids = (GridCtx*)NativeMemory.AllocZeroed((nuint)(MaxGrids * sizeof(GridCtx)));
-        w->Prev = (int*)NativeMemory.AlignedAlloc(TileBake.TileSize * sizeof(int), 64);
+        w->Grids = (GridCtx*)NativeHeap.AllocZeroed((nuint)(MaxGrids * sizeof(GridCtx)));
+        w->Prev = (int*)NativeHeap.AlignedAlloc(TileBake.TileSize * sizeof(int));
         return id;
     }
 
     internal static byte AddGrid(byte world, int power, float x, float y, float size)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThan(power, MinPower);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(power, MaxPower);
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(size, 0f);
+        if (power < MinPower || power > MaxPower) throw new ArgumentOutOfRangeException(nameof(power));
+        if (size <= 0f) throw new ArgumentOutOfRangeException(nameof(size));
 
         var w = GetContext(world);
         if (w == null) throw new ArgumentOutOfRangeException(nameof(world));
@@ -94,7 +92,7 @@ public static unsafe class World
         g->ScaleQ8 = g->Scale * 256f;
         g->TilesPerSide = g->Size >> TileBake.TileBits;
         g->TileCount = g->TilesPerSide * g->TilesPerSide;
-        g->Layers = (LayerData*)NativeMemory.AllocZeroed((nuint)(MaxLayers * sizeof(LayerData)));
+        g->Layers = (LayerData*)NativeHeap.AllocZeroed((nuint)(MaxLayers * sizeof(LayerData)));
         return id;
     }
 
@@ -187,7 +185,7 @@ public static unsafe class World
                 var blocks = pages->Blocks;
                 var slots = pages->SlotCount;
                 for (var i = 0; i < slots; i++)
-                    if (used[i] == PageMap.Live) NativeMemory.AlignedFree(blocks[i]);
+                    if (used[i] == PageMap.Live) NativeHeap.AlignedFree(blocks[i]);
                 pages->Reset();
             }
         }
@@ -246,7 +244,7 @@ public static unsafe class World
     {
         var ld = g->Layers + layer;
         if (ld->InDirty == null)
-            ld->InDirty = (byte*)NativeMemory.AllocZeroed((nuint)g->TileCount);
+            ld->InDirty = (byte*)NativeHeap.AllocZeroed((nuint)g->TileCount);
         return ld;
     }
 
@@ -255,7 +253,7 @@ public static unsafe class World
         var pages = &ld->Pages;
         if (pages->TryGet(tile, out var block)) return block;
 
-        block = (byte*)NativeMemory.AlignedAlloc(BlockBytes, 64);
+        block = (byte*)NativeHeap.AlignedAlloc(BlockBytes);
         new Span<byte>(block, BlockBytes).Clear();
         pages->Put(tile, block);
         return block;
@@ -292,7 +290,7 @@ public static unsafe class World
                     if (!TileBake.Resolve((int*)block, (int*)(block + DiffBytes), w->Prev, (short*)(block + PageOffset)))
                     {
                         pages->Remove(tile);
-                        NativeMemory.AlignedFree(block);
+                        NativeHeap.AlignedFree(block);
                     }
                 }
 

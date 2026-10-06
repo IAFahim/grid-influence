@@ -1,6 +1,7 @@
+#if NET
 using System.Numerics;
+#endif
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 
 namespace Gi;
 
@@ -30,6 +31,22 @@ internal unsafe struct PageMap
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private readonly int SlotOf(int key) => (int)((uint)key * 2654435761u >> _shift);
+
+#if NET
+    private static int TrailingZeroCount(int value) => BitOperations.TrailingZeroCount(value);
+#else
+    private static int TrailingZeroCount(int value)
+    {
+        var count = 0;
+        while ((value & 1) == 0)
+        {
+            value >>= 1;
+            count++;
+        }
+
+        return count;
+    }
+#endif
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public readonly bool TryGet(int tile, out byte* block)
@@ -104,9 +121,9 @@ internal unsafe struct PageMap
     {
         if (_used == null) return;
 
-        NativeMemory.AlignedFree(_keys);
-        NativeMemory.AlignedFree(_blocks);
-        NativeMemory.AlignedFree(_used);
+        NativeHeap.AlignedFree(_keys);
+        NativeHeap.AlignedFree(_blocks);
+        NativeHeap.AlignedFree(_used);
         _keys = null;
         _blocks = null;
         _used = null;
@@ -125,11 +142,11 @@ internal unsafe struct PageMap
         var oldUsed = _used;
         var oldMask = _mask;
 
-        _keys = (int*)NativeMemory.AlignedAlloc((nuint)capacity * sizeof(int), 64);
-        _blocks = (byte**)NativeMemory.AlignedAlloc((nuint)capacity * (nuint)sizeof(byte*), 64);
-        _used = (byte*)NativeMemory.AlignedAlloc((nuint)capacity, 64);
+        _keys = (int*)NativeHeap.AlignedAlloc((nuint)capacity * sizeof(int));
+        _blocks = (byte**)NativeHeap.AlignedAlloc((nuint)capacity * (nuint)sizeof(byte*));
+        _used = (byte*)NativeHeap.AlignedAlloc((nuint)capacity);
         _mask = capacity - 1;
-        _shift = 32 - BitOperations.TrailingZeroCount(capacity);
+        _shift = 32 - TrailingZeroCount(capacity);
         _count = 0;
         _tombstones = 0;
         new Span<byte>(_used, capacity).Clear();
@@ -139,9 +156,9 @@ internal unsafe struct PageMap
             for (var i = 0; i <= oldMask; i++)
                 if (oldUsed[i] == Live) AddUnchecked(oldKeys[i], oldBlocks[i]);
 
-            NativeMemory.AlignedFree(oldKeys);
-            NativeMemory.AlignedFree(oldBlocks);
-            NativeMemory.AlignedFree(oldUsed);
+            NativeHeap.AlignedFree(oldKeys);
+            NativeHeap.AlignedFree(oldBlocks);
+            NativeHeap.AlignedFree(oldUsed);
         }
     }
 

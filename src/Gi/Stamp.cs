@@ -1,5 +1,3 @@
-using System.Runtime.InteropServices;
-
 namespace Gi;
 
 internal enum StampKind : byte
@@ -26,7 +24,7 @@ internal static unsafe class StampCatalog
     private const int MaxAxis = 256;
 
     private static readonly StampVariant* Variants =
-        (StampVariant*)NativeMemory.AllocZeroed((nuint)(MaxStamps * sizeof(StampVariant)));
+        (StampVariant*)NativeHeap.AllocZeroed((nuint)(MaxStamps * sizeof(StampVariant)));
 
     private static int _count = 1;
 
@@ -50,7 +48,7 @@ internal static unsafe class StampCatalog
         var id = Reserve();
         var v = Variants + id;
         var pitch = width + 2;
-        var basePtr = (sbyte*)NativeMemory.AllocZeroed((nuint)(pitch * (height + 2)));
+        var basePtr = (sbyte*)NativeHeap.AllocZeroed((nuint)(pitch * (height + 2)));
         for (var y = 0; y < height; y++)
         {
             Buffer.MemoryCopy(
@@ -87,10 +85,8 @@ internal static unsafe class StampCatalog
 
     private static void Validate(int width, int height)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThan(width, 1);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(width, MaxAxis);
-        ArgumentOutOfRangeException.ThrowIfLessThan(height, 1);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(height, MaxAxis);
+        if (width < 1 || width > MaxAxis) throw new ArgumentOutOfRangeException(nameof(width));
+        if (height < 1 || height > MaxAxis) throw new ArgumentOutOfRangeException(nameof(height));
     }
 
     private static int Reserve()

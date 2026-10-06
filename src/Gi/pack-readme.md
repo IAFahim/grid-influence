@@ -5,6 +5,10 @@ raster deposits with sub-cell Q8 placement, per-tile 2D prefix-sum resolve into 
 pages, multi-resolution grids and independent layers per world. Zero dependencies, unmanaged
 data path, 0 B allocation on warm Process/Query.
 
+Targets `net10.0` (with SSE2/AVX2/Neon resolve paths) and `netstandard2.1` for engines such as
+Unity — the netstandard build compiles the same scalar paths that the intrinsics-off
+verification run exercises.
+
 ```csharp
 byte world = World.New();
 byte grid  = Grid.New(world, power: 8, x: 0f, y: 0f, size: 256f);

@@ -84,7 +84,7 @@ reps); the perf pass behind them was `perf`-profile guided, receipts first.
 ## Unsafe proof
 
 - **Lifetime**: `Worlds` is a static arena of 32 `WorldCtx` allocated once; world contents are
-  `NativeMemory`/`AlignedAlloc` blocks owned by the context (grid array, `LayerData` array,
+  `NativeHeap` blocks owned by the context (grid array, `LayerData` array,
   `InDirty`/`Dirty` per layer, `Prev` scratch, `SourceColumns` buffers) or by a `PageMap` (each
   12,480 B block — difference array + dense buffer + page — is owned by its slot and freed exactly
   when the tile resolves to zero, the world is cleared, or the map is disposed). `Stamp` variants
@@ -101,7 +101,10 @@ reps); the perf pass behind them was `perf`-profile guided, receipts first.
   the next group. Saturating pack results permute 64-bit chunks into cell order before storing
   eight `int16` values. Groups cover exactly cells 0–31 and never read padded columns or beyond
   the 32-cell scratch/page rows. Raster taps widen unaligned 4-byte sample reads within the
-  padded allocation.
+  padded allocation. On netstandard2.1 (Unity) `NativeHeap` backs onto `Marshal.AllocHGlobal`
+  with platform-natural alignment instead of 64-byte `AlignedAlloc`, and no SIMD paths compile:
+  every access in that build is a naturally aligned scalar load or store, so the weaker
+  alignment guarantee cannot be observed.
 - **Concurrency**: `Place`/`Move`/`SetGain`/`Remove`/`Process` are serial; there is no shared
   mutable state between worlds, so different worlds may run on different threads. Within one
   world all access is single-threaded; no locks or interlocked ops exist.

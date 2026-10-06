@@ -1,7 +1,9 @@
 using System.Runtime.CompilerServices;
+#if NET
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
+#endif
 
 namespace Gi;
 
@@ -12,7 +14,9 @@ internal static unsafe class TileBake
     internal const int DiffPitch = 48;
     internal const int DiffRows = 33;
 
+#if NET
     private static bool Vector => Sse2.IsSupported || AdvSimd.IsSupported;
+#endif
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int RoundQ16(int value)
@@ -154,6 +158,7 @@ internal static unsafe class TileBake
         var width = gx1 - gx0;
         var height = gy1 - gy0;
 
+#if NET
         var vector = Vector;
         var vw00 = Vector128.Create(w00);
         var vw10 = Vector128.Create(w10);
@@ -161,12 +166,14 @@ internal static unsafe class TileBake
         var vw11 = Vector128.Create(w11);
         var vhalf = Vector128.Create(32768);
         var vgain = Vector128.Create(gain);
+#endif
         for (var y = 0; y < height; y++)
         {
             var src = source + y * pitch;
             var upper = src - pitch;
             var dst = destination + y * TileSize;
             var x = 0;
+#if NET
             if (vector)
             {
                 for (; x + 4 <= width; x += 4)
@@ -181,6 +188,7 @@ internal static unsafe class TileBake
                     Store128(dst + x, Load128(dst + x) + rounded * vgain);
                 }
             }
+#endif
 
             for (; x < width; x++)
             {
@@ -194,17 +202,21 @@ internal static unsafe class TileBake
         }
     }
 
+#if NET
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static Vector128<int> Tap4(sbyte* p)
         => Vector128.Widen(Vector128.Widen(Vector128.CreateScalarUnsafe(*(int*)p).AsSByte()).Item1).Item1;
+#endif
 
     internal static bool Resolve(int* difference, int* dense, int* previousRow, short* output)
     {
+#if NET
         if (Avx2.IsSupported) return Resolve256(difference, dense, previousRow, output);
 
         var acc = Vector128<int>.Zero;
-        var any = false;
         var vector = Vector;
+#endif
+        var any = false;
         for (var y = 0; y < TileSize; y++)
         {
             var diffRow = difference + y * DiffPitch;
@@ -212,6 +224,7 @@ internal static unsafe class TileBake
             var outRow = output + y * TileSize;
             var carry = 0;
             var x = 0;
+#if NET
             if (vector)
             {
                 for (; x + 4 <= TileSize; x += 4)
@@ -227,6 +240,7 @@ internal static unsafe class TileBake
                 }
             }
             else
+#endif
             {
                 for (; x < TileSize; x++)
                 {
@@ -240,9 +254,14 @@ internal static unsafe class TileBake
             }
         }
 
+#if NET
         return vector ? !Vector128.EqualsAll(acc, Vector128<int>.Zero) : any;
+#else
+        return any;
+#endif
     }
 
+#if NET
     private static bool Resolve256(int* difference, int* dense, int* previousRow, short* output)
     {
         var acc = Vector256<int>.Zero;
@@ -321,4 +340,5 @@ internal static unsafe class TileBake
         for (var i = 0; i < 4; i++)
             destination[i] = (short)Math.Clamp(v[i], short.MinValue, short.MaxValue);
     }
+#endif
 }

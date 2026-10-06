@@ -28,11 +28,11 @@ internal unsafe struct NativeBuffer<T> where T : unmanaged
         }
 
         var capacity = (nuint)Math.Max(length, Math.Max(16, _capacity * 2)) * (nuint)sizeof(T);
-        var pointer = (T*)NativeMemory.AlignedAlloc(capacity, 64);
+        var pointer = (T*)NativeHeap.AlignedAlloc(capacity);
         if (_pointer != null)
         {
             Buffer.MemoryCopy(_pointer, pointer, (long)capacity, (long)_length * sizeof(T));
-            NativeMemory.AlignedFree(_pointer);
+            NativeHeap.AlignedFree(_pointer);
         }
 
         _pointer = pointer;
