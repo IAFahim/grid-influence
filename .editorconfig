@@ -19,12 +19,17 @@ indent_size = 4
 #   -0.0. (075ce60)
 # - Stamp.cs: Stamp.New(sbyte*) is public API for unmanaged callers even
 #   though nothing in-repo calls it. (050c199)
+# - ResolvePool.cs: WorkerLoop parks in a process-lifetime loop by design —
+#   pool workers are background threads that never terminate. (#20)
 [src/Gi/World.cs]
 resharper_convert_if_statement_to_null_coalescing_assignment_highlighting = none
 resharper_compare_of_floats_by_equality_operator_highlighting = none
 
 [src/Gi/Stamp.cs]
 resharper_unused_member_global_highlighting = none
+
+[src/Gi/ResolvePool.cs]
+resharper_function_never_returns_highlighting = none
 
 [*.{csproj,props,targets,slnx}]
 indent_style = space

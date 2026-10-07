@@ -17,6 +17,7 @@ internal static class Verification
         Check("warm-process-allocates-0-bytes", WarmProcessAllocationFree());
         Check("warm-query-allocates-0-bytes", WarmQueryAllocationFree());
         Check("query-region-matches-cells", QueryRegionMatchesCells());
+        Check("page-sum-matches-scan", PageSumMatchesScan());
         Check("saturated-sum-clamps", SaturatedSumClamps());
 
         Console.WriteLine(failures == 0 ? "verification: all receipts green" : $"verification: {failures} failures");
@@ -261,6 +262,51 @@ internal static class Verification
         return Gi.World.Query(w, g, l, 32, 32) == 32767;
     }
 
+    private static bool PageSumMatchesScan()
+    {
+        for (var world = 0; world < 3; world++)
+        {
+            var w = Gi.World.New();
+            var g = Gi.Grid.New(w, 8, 0f, 0f, 256f);
+            var l = Gi.Layer.New(w);
+            var box = Gi.Stamp.Box(14, 14, 80);
+            var samples = new sbyte[6 * 9];
+            for (var i = 0; i < samples.Length; i++) samples[i] = (sbyte)(i * 17 % 40 - 20);
+            var raster = Gi.Stamp.New(samples, 6, 9);
+            var rng = new Random(41 + world);
+            var sources = new int[90];
+            for (var churn = 0; churn < 5; churn++)
+            {
+                for (var i = 0; i < sources.Length; i++)
+                {
+                    var x = (float)(rng.NextDouble() * 256);
+                    var y = (float)(rng.NextDouble() * 256);
+                    if (churn > 0 && rng.Next(3) == 0)
+                    {
+                        Gi.World.Move(w, sources[rng.Next(churn * sources.Length / 5)], x, y);
+                        continue;
+                    }
+
+                    sources[i] = Gi.World.Place(w, l, x, y, rng.Next(2) == 0 ? box : raster, 1 + rng.Next(16));
+                }
+
+                if (churn > 0)
+                    for (var i = 0; i < 20; i++)
+                        Gi.World.Remove(w, sources[rng.Next(sources.Length)]);
+
+                Gi.World.Process(w);
+                var sum = Gi.World.Query(w, g, l, 0, 0, 256, 256);
+                var scan = 0L;
+                for (var cy = 0; cy < 256; cy++)
+                for (var cx = 0; cx < 256; cx++)
+                    scan += Gi.World.Query(w, g, l, cx, cy);
+                if (sum != scan) return false;
+            }
+        }
+
+        return true;
+    }
+
     public static void Timing()
     {
         var w = Gi.World.New();
@@ -304,5 +350,68 @@ internal static class Verification
             if (el < best) best = el;
         }
         Console.WriteLine($"query: {best / 10:F2} us per 1k cells ({acc})");
+
+        var movers = new int[200];
+        for (var i = 0; i < movers.Length; i++) movers[i] = i * 19 % 4000;
+        best = double.MaxValue;
+        for (var r = -1; r < 20; r++)
+        {
+            var t = Stopwatch.GetTimestamp();
+            for (var i = 0; i < movers.Length; i++)
+                Gi.World.Move(w, movers[i],
+                    (movers[i] * 5.13f + (r + 1) * 37.7f) % 1024f,
+                    (movers[i] * 7.29f + (r + 1) * 11.3f) % 1024f);
+            Gi.World.Process(w);
+            var el = Stopwatch.GetElapsedTime(t).TotalMicroseconds;
+            if (r >= 0 && el < best) best = el;
+        }
+        Console.WriteLine($"move-200 churn process: {best:F0} us");
+
+        var placed = new int[200];
+        best = double.MaxValue;
+        for (var r = -1; r < 20; r++)
+        {
+            var t = Stopwatch.GetTimestamp();
+            for (var i = 0; i < placed.Length; i++)
+                placed[i] = Gi.World.Place(w, l,
+                    (i * 41.3f + (r + 1) * 17.9f) % 1000f + 12f,
+                    (i * 29.7f + (r + 1) * 23.1f) % 1000f + 12f, stamp, 8);
+            Gi.World.Process(w);
+            var el = Stopwatch.GetElapsedTime(t).TotalMicroseconds;
+            if (r >= 0 && el < best) best = el;
+            for (var i = 0; i < placed.Length; i++) Gi.World.Remove(w, placed[i]);
+            Gi.World.Process(w);
+        }
+        Console.WriteLine($"place-200 churn process: {best:F0} us");
+
+        best = double.MaxValue;
+        long total = 0;
+        for (var r = 0; r < 20; r++)
+        {
+            var t = Stopwatch.GetTimestamp();
+            total += Gi.World.Query(w, g, l, 0, 0, 1024, 1024);
+            var el = Stopwatch.GetElapsedTime(t).TotalMicroseconds;
+            if (el < best) best = el;
+        }
+        Console.WriteLine($"full-grid sum (1024-grid): {best:F1} us ({total})");
+
+        var region = new short[256 * 256];
+        best = double.MaxValue;
+        long checksum = 0;
+        unsafe
+        {
+            fixed (short* p = region)
+            {
+                for (var r = 0; r < 20; r++)
+                {
+                    var t = Stopwatch.GetTimestamp();
+                    Gi.World.QueryRegion(w, g, l, 100, 76, 256, 256, p);
+                    var el = Stopwatch.GetElapsedTime(t).TotalMicroseconds;
+                    if (el < best) best = el;
+                    checksum += p[0] + p[65535];
+                }
+            }
+        }
+        Console.WriteLine($"query-region 256x256: {best:F1} us ({checksum})");
     }
 }

@@ -39,4 +39,12 @@ internal unsafe struct NativeBuffer<T> where T : unmanaged
         _capacity = (int)(capacity / (nuint)sizeof(T));
         _length = length;
     }
+
+    public void Ensure(int capacity)
+    {
+        if (capacity <= _capacity) return;
+        var length = _length;
+        Resize(capacity);
+        _length = length;
+    }
 }

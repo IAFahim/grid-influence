@@ -43,12 +43,16 @@ and a source deposits into every grid it overlaps, at each grid's own scale.
 - **Handles, not objects.** `World`, `Grid`, `Layer`, `Stamp` return `byte` ids into static
   unmanaged arenas; `Place` returns an `int` source id. No managed allocation anywhere on the
   data path.
-- **Deposits are incremental.** Each live tile owns one 12,480 B block (difference array + dense
-  buffer + `int16` page). `Place`/`Move`/`SetGain`/`Remove` apply exact integer deltas
-  immediately — moving a source never rescans the field.
+- **Deposits are incremental.** Each live tile owns one 6,528 B block (difference array + `int16`
+  page + `int64` page sum); raster deposits attach a dense buffer once, growing the block to
+  10,624 B — box-only tiles never carry it. `Place`/`Move`/`SetGain`/`Remove` apply exact integer
+  deltas immediately — moving a source never rescans the field.
 - **`Process` touches only dirty tiles.** A 2D prefix sum resolves each dirty difference array,
-  saturates to `short` after summation (so cancellation is preserved), and frees tiles that
-  resolve to zero. An unchanged world costs nothing.
+  saturates to `short` after summation (so cancellation is preserved), records the page sum, and
+  frees tiles that resolve to zero. Layers with ≥32 dirty tiles resolve on a small worker pool;
+  an unchanged world costs nothing.
+- **Queries read maintained state.** Cell reads are one page lookup; full-grid sums add one
+  `int64` per live page; `QueryRegion` bulk fills use vectorized row copies.
 - **Sub-cell placement.** Positions convert to cell space in Q8; raster stamps deposit with
   bilinear edge weights, uniform rasters take a difference-array box path.
 - **Deterministic.** Integer-only field math; deposits are commutative adds, so pages are
@@ -77,6 +81,8 @@ bash tools/stats/perf.sh stat --iterations 12000
 | `remove-restores-baseline` | remove rebuilds tiles without the source |
 | `warm-process-allocates-0-bytes` | unchanged and place/remove churn, 0 B |
 | `warm-query-allocates-0-bytes` | 200k cell reads, 0 B |
+| `query-region-matches-cells` | bulk fill equals per-cell reads across tile boundaries, 0 B warm |
+| `page-sum-matches-scan` | per-page sums equal a naive per-cell rescan across churn worlds |
 | `saturated-sum-clamps` | saturation sticks at ±32767 after summation |
 
 The same suite passes with `DOTNET_EnableHWIntrinsic=0` (scalar fallback).
@@ -94,6 +100,24 @@ Why the deposit engine replaced the re-emitted marks engine (4,000 sources, 256�
 The marks engine re-emits every source per frame and scans marks per query; the deposit engine
 pays per mutation and reads a page. Writes are ~7× cheaper in marks, queries ~360× slower — the
 crossover is below ~700 queries/frame at full churn, which game-shaped workloads clear easily.
+
+Perf pass after the VectorCraft review (Ryzen 5 8500G, .NET 10, 4000 sources / 1024² grid,
+min over 20 reps; before = `d90701c` measured with `DOTNET_TieredCompilation=0` to skip a
+tier-0 trap — see measurement hazards in `docs/model.md`):
+
+| `--timing` line | before | after | change |
+| --- | ---: | ---: | --- |
+| `query-region 256x256` | 31–40 µs | 7–15 µs | vectorized row copy/zero fills |
+| `full-grid sum (1024-grid)` | ~330 µs | ~0.8 µs | per-page sums written at resolve |
+| `move-200 churn process` | ~155 µs | 110–132 µs | pooled parallel resolve, slimmer tile blocks |
+| `place-200 churn process` | ~105 µs | 68–82 µs | pooled parallel resolve, slimmer tile blocks |
+
+Parallel resolve scales with the dirty-list size and the memory ceiling, not core count: a
+2048² / 8000-source / 400-move scene (2,400 dirty tiles, ~21 MB streamed per frame) goes
+245–255 → 155–168 µs — six workers measured slower than four (bandwidth-capped). Tile blocks
+shrank 12,480 → 10,624 B (difference-array pitch 48 → 33 ints) and then to 6,528 B for box-only
+tiles (dense buffers attach lazily per raster tile; a 9,267-tile box scene dropped from ~98.5 MB
+to ~61 MB). Pages are bit-identical pooled or sequential.
 
 ## Run the full thing
 

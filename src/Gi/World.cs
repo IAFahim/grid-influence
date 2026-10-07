@@ -1,4 +1,9 @@
 using System.Runtime.CompilerServices;
+#if NET
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.Arm;
+using System.Runtime.Intrinsics.X86;
+#endif
 
 namespace Gi;
 
@@ -49,12 +54,16 @@ public static unsafe class World
     private const int MinPower = 5;
     private const int MaxPower = 14;
     private const int MaxGain = 16;
-    private const int Cells = TileBake.TileSize * TileBake.TileSize;
-    private const int DenseBytes = Cells * sizeof(int);
-    private const int DiffBytes = TileBake.DiffRows * TileBake.DiffPitch * sizeof(int);
-    private const int PageBytes = Cells * sizeof(short);
-    private const int PageOffset = DiffBytes + DenseBytes;
-    private const int BlockBytes = PageOffset + PageBytes;
+    internal const int Cells = TileBake.TileSize * TileBake.TileSize;
+    internal const int DenseBytes = Cells * sizeof(int);
+    internal const int DiffBytes = TileBake.DiffRows * TileBake.DiffPitch * sizeof(int);
+    internal const int PageBytes = Cells * sizeof(short);
+    internal const int PageOffset = (DiffBytes + 31) & ~31;
+    internal const int DensePtrOffset = PageOffset + PageBytes;
+    internal const int DensePtrSlot = 8;
+    internal const int SumOffset = (DensePtrOffset + DensePtrSlot + 63) & ~63;
+    internal const int SumSlotBytes = 64;
+    internal const int BlockBytes = SumOffset + SumSlotBytes;
 
     private static int _worldCount;
 
@@ -184,7 +193,7 @@ public static unsafe class World
                 var blocks = pages->Blocks;
                 var slots = pages->SlotCount;
                 for (var i = 0; i < slots; i++)
-                    if (used[i] == PageMap.Live) NativeHeap.AlignedFree(blocks[i]);
+                    if (used[i] == PageMap.Live) FreeBlock(blocks[i]);
                 pages->Reset();
             }
         }
@@ -197,6 +206,9 @@ public static unsafe class World
         return s != null && (uint)source < (uint)s->Count && s->Alive.Pointer[source] != 0;
     }
 
+    #if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    #endif
     private static void Deposit(WorldCtx* w, float x, float y, byte stampId, byte layer, int gain)
     {
         if (gain == 0) return;
@@ -216,6 +228,7 @@ public static unsafe class World
             if (cx1 <= cx0 || cy1 <= cy0) continue;
 
             var ld = EnsureDirty(g, layer);
+            var raster = v->Kind != StampKind.ConstantRectangle;
             var tps = g->TilesPerSide;
             var tx0 = cx0 >> TileBake.TileBits;
             var tx1 = (cx1 - 1) >> TileBake.TileBits;
@@ -225,14 +238,18 @@ public static unsafe class World
             for (var tx = tx0; tx <= tx1; tx++)
             {
                 var tile = ty * tps + tx;
-                var block = TileBlock(ld, tile);
+                var block = TileBlock(ld, tile, raster);
 
                 var tileX0 = tx * TileBake.TileSize;
                 var tileY0 = ty * TileBake.TileSize;
                 if (v->Kind == StampKind.ConstantRectangle)
                     TileBake.EmitBox((int*)block, tileX0, tileY0, px, py, fx, fy, v, gain);
                 else
-                    TileBake.EmitRaster((int*)(block + DiffBytes), tileX0, tileY0, px, py, fx, fy, v, gain);
+                {
+                    var dense = *(byte**)(block + DensePtrOffset);
+                    if (dense == null) dense = (byte*)EnsureDense(ld, tile, block);
+                    TileBake.EmitRaster((int*)dense, tileX0, tileY0, px, py, fx, fy, v, gain);
+                }
 
                 MarkDirty(ld, tile);
             }
@@ -247,15 +264,46 @@ public static unsafe class World
         return ld;
     }
 
-    private static byte* TileBlock(LayerData* ld, int tile)
+    private static byte* TileBlock(LayerData* ld, int tile, bool dense)
     {
         var pages = &ld->Pages;
         if (pages->TryGet(tile, out var block)) return block;
 
-        block = (byte*)NativeHeap.AlignedAlloc(BlockBytes);
-        new Span<byte>(block, BlockBytes).Clear();
+        var bytes = (nuint)(dense ? BlockBytes + DenseBytes : BlockBytes);
+        block = (byte*)NativeHeap.AlignedAlloc(bytes);
+        new Span<byte>(block, (int)bytes).Clear();
+        if (dense) *(byte**)(block + DensePtrOffset) = block + BlockBytes;
         pages->Put(tile, block);
         return block;
+    }
+
+    private static int* EnsureDense(LayerData* ld, int tile, byte* block)
+    {
+        var dense = *(byte**)(block + DensePtrOffset);
+        if (dense != null) return (int*)dense;
+
+        var grown = (byte*)NativeHeap.AlignedAlloc((nuint)(BlockBytes + DenseBytes));
+        new Span<byte>(block, BlockBytes).CopyTo(new Span<byte>(grown, BlockBytes));
+        NativeHeap.AlignedFree(block);
+        dense = grown + BlockBytes;
+        new Span<byte>(dense, DenseBytes).Clear();
+        *(byte**)(grown + DensePtrOffset) = dense;
+        ld->Pages.Put(tile, grown);
+        return (int*)dense;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static int* DenseOf(byte* block)
+    {
+        var dense = *(byte**)(block + DensePtrOffset);
+        return (int*)(dense == null ? Runtime.ZeroDense : dense);
+    }
+
+    internal static void FreeBlock(byte* block)
+    {
+        var dense = *(byte**)(block + DensePtrOffset);
+        if (dense != null && dense != block + BlockBytes) NativeHeap.AlignedFree(dense);
+        NativeHeap.AlignedFree(block);
     }
 
     private static void MarkDirty(LayerData* ld, int tile)
@@ -268,10 +316,14 @@ public static unsafe class World
         ld->Dirty.Pointer[n] = tile;
     }
 
+    #if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    #endif
     public static void Process(byte world)
     {
         var w = GetContext(world);
         if (w == null) return;
+        var pooled = false;
         for (var gi = 0; gi < w->GridCount; gi++)
         {
             var g = w->Grids + gi;
@@ -280,22 +332,29 @@ public static unsafe class World
                 var ld = g->Layers + l;
                 var span = ld->Dirty.Span;
                 var pages = &ld->Pages;
-                foreach (var tile in span)
-                {
-                    ld->InDirty[tile] = 0;
-                    if (!pages->TryGet(tile, out var block)) continue;
-
-                    new Span<int>(w->Prev, TileBake.TileSize).Clear();
-                    if (!TileBake.Resolve((int*)block, (int*)(block + DiffBytes), w->Prev, (short*)(block + PageOffset)))
+                if (!pooled && span.Length >= ResolvePool.Threshold) pooled = ResolvePool.TryAcquire();
+                if (pooled && span.Length >= ResolvePool.Threshold)
+                    ResolvePool.ResolveLayer(w, ld, pages, span.Length);
+                else
+                    foreach (var tile in span)
                     {
-                        pages->Remove(tile);
-                        NativeHeap.AlignedFree(block);
+                        ld->InDirty[tile] = 0;
+                        if (!pages->TryGet(tile, out var block)) continue;
+
+                        new Span<int>(w->Prev, TileBake.TileSize).Clear();
+                        if (!TileBake.Resolve((int*)block, DenseOf(block), w->Prev,
+                            (short*)(block + PageOffset), (long*)(block + SumOffset)))
+                        {
+                            pages->Remove(tile);
+                            FreeBlock(block);
+                        }
                     }
-                }
 
                 ld->Dirty.Resize(0);
             }
         }
+
+        if (pooled) ResolvePool.Release();
     }
 
     private static void GrowSources(SourceColumns* s)
@@ -326,6 +385,9 @@ public static unsafe class World
         return page[(y & (TileBake.TileSize - 1)) * TileBake.TileSize + (x & (TileBake.TileSize - 1))];
     }
 
+    #if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    #endif
     public static long Query(byte world, byte grid, byte layer, int x, int y, int width, int height)
     {
         var w = GetContext(world);
@@ -350,8 +412,7 @@ public static unsafe class World
             for (var slot = 0; slot < slots; slot++)
             {
                 if (used[slot] != PageMap.Live) continue;
-                var page = (short*)(blocks[slot] + PageOffset);
-                for (var cell = 0; cell < Cells; cell++) sum += page[cell];
+                sum += *(long*)(blocks[slot] + SumOffset);
             }
 
             return sum;
@@ -377,6 +438,9 @@ public static unsafe class World
         return sum;
     }
 
+    #if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    #endif
     public static void QueryRegion(
         byte world, byte grid, byte layer, int x, int y, int width, int height, short* destination)
     {
@@ -394,7 +458,7 @@ public static unsafe class World
             var dst = destination + (long)row * width;
             if ((uint)cy >= (uint)g->Size)
             {
-                for (var i = 0; i < width; i++) dst[i] = 0;
+                FillRun(dst, width);
                 continue;
             }
 
@@ -409,11 +473,11 @@ public static unsafe class World
                 {
                     var page = (short*)(block + PageOffset);
                     var src = page + ly * TileBake.TileSize + (cx & mask);
-                    for (var i = 0; i < run; i++) dst[col + i] = src[i];
+                    CopyRun(dst + col, src, run);
                 }
                 else
                 {
-                    for (var i = 0; i < run; i++) dst[col + i] = 0;
+                    FillRun(dst + col, run);
                 }
 
                 cx += run;
@@ -421,6 +485,68 @@ public static unsafe class World
             }
         }
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void CopyRun(short* destination, short* source, int count)
+    {
+#if NET
+        if (Avx2.IsSupported)
+        {
+            var i = 0;
+            for (; i + 16 <= count; i += 16) Avx.Store(destination + i, Avx.LoadVector256(source + i));
+            for (; i < count; i++) destination[i] = source[i];
+            return;
+        }
+
+        if (Sse2.IsSupported || AdvSimd.IsSupported)
+        {
+            var i = 0;
+            for (; i + 8 <= count; i += 8) StoreShorts(destination + i, LoadShorts(source + i));
+            for (; i < count; i++) destination[i] = source[i];
+            return;
+        }
+#endif
+        for (var i = 0; i < count; i++) destination[i] = source[i];
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void FillRun(short* destination, int count)
+    {
+#if NET
+        if (Avx2.IsSupported)
+        {
+            var i = 0;
+            for (; i + 16 <= count; i += 16) Avx.Store(destination + i, Vector256<short>.Zero);
+            for (; i < count; i++) destination[i] = 0;
+            return;
+        }
+
+        if (Sse2.IsSupported || AdvSimd.IsSupported)
+        {
+            var i = 0;
+            for (; i + 8 <= count; i += 8) StoreShorts(destination + i, Vector128<short>.Zero);
+            for (; i < count; i++) destination[i] = 0;
+            return;
+        }
+#endif
+        for (var i = 0; i < count; i++) destination[i] = 0;
+    }
+
+#if NET
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector128<short> LoadShorts(short* p)
+    {
+        if (Sse2.IsSupported) return Sse2.LoadVector128(p);
+        return AdvSimd.LoadVector128(p);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void StoreShorts(short* p, Vector128<short> v)
+    {
+        if (Sse2.IsSupported) Sse2.Store(p, v);
+        else AdvSimd.Store(p, v);
+    }
+#endif
 
     public static short QueryAt(byte world, byte grid, byte layer, float x, float y)
     {

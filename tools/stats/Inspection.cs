@@ -24,13 +24,17 @@ internal struct Snapshot
     public long MapBytes;
     public long DifferenceBytes;
     public long DenseBytes;
+    public long DensePointerBytes;
     public long PageBytes;
+    public long PageSumBytes;
+    public long RasterTiles;
     public long WorldArenaBytes;
     public long StampArenaBytes;
     public long StampRasterBytes;
 
     public readonly long WorldBytes => GridBytes + LayerBytes + SourceBytes + ScratchBytes +
-        DirtyFlagBytes + DirtyQueueBytes + MapBytes + DifferenceBytes + DenseBytes + PageBytes;
+        DirtyFlagBytes + DirtyQueueBytes + MapBytes + DifferenceBytes + DenseBytes + DensePointerBytes +
+        PageBytes + PageSumBytes;
 
     public readonly long SharedBytes => WorldArenaBytes + StampArenaBytes + StampRasterBytes;
 
@@ -79,13 +83,24 @@ internal static unsafe class Inspection
                 result.MapBytes += (long)ld->Pages.SlotCount * (sizeof(int) + sizeof(byte*) + sizeof(byte));
                 result.DirtyQueueBytes += (long)ld->Dirty.Capacity * sizeof(int);
                 if (ld->InDirty != null) result.DirtyFlagBytes += g->TileCount;
+
+                var used = ld->Pages.Used;
+                var blocks = ld->Pages.Blocks;
+                for (var slot = 0; slot < ld->Pages.SlotCount; slot++)
+                {
+                    if (used[slot] != PageMap.Live) continue;
+                    if (*(byte**)(blocks[slot] + World.DensePtrOffset) == null) continue;
+                    result.RasterTiles++;
+                    result.DenseBytes += World.DenseBytes;
+                }
             }
         }
 
         var cells = TileBake.TileSize * TileBake.TileSize;
-        result.DifferenceBytes = result.LiveTiles * TileBake.DiffRows * TileBake.DiffPitch * sizeof(int);
-        result.DenseBytes = result.LiveTiles * cells * sizeof(int);
+        result.DifferenceBytes = result.LiveTiles * World.PageOffset;
+        result.DensePointerBytes = result.LiveTiles * (World.SumOffset - World.DensePtrOffset);
         result.PageBytes = result.LiveTiles * cells * sizeof(short);
+        result.PageSumBytes = result.LiveTiles * World.SumSlotBytes;
 
         for (var i = 1; i < StampCatalog.Count; i++)
         {

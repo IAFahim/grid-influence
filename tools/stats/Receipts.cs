@@ -24,7 +24,9 @@ internal static unsafe class Receipts
             pending.LayerBytes == 2 * World.MaxLayers * sizeof(LayerData) &&
             pending.SourceBytes == 64 * 12 && pending.MapBytes == 32 * (sizeof(int) + sizeof(byte*) + 1) &&
             pending.DirtyFlagBytes == 8 && pending.DirtyQueueBytes == 128 &&
-            pending.DifferenceBytes + pending.DenseBytes + pending.PageBytes == 2 * 12480 &&
+            pending.DifferenceBytes + pending.DenseBytes + pending.DensePointerBytes + pending.PageBytes +
+                pending.PageSumBytes == 2 * World.BlockBytes + World.DenseBytes &&
+            pending.RasterTiles == 1 &&
             pending.StampRasterBytes - empty.StampRasterBytes == 16 && pending.Stamps - empty.Stamps == 2;
 
         World.Process(world);
@@ -40,7 +42,7 @@ internal static unsafe class Receipts
         World.Process(world);
         var removed = Inspection.Read(world);
         var removalOk = removed.LiveSources == 1 && removed.SourceSlots == 2 && removed.LiveTiles == 1 &&
-            removed.Tombstones == 1 && processed.WorldBytes - removed.WorldBytes == 12480 &&
+            removed.Tombstones == 1 && processed.WorldBytes - removed.WorldBytes == World.BlockBytes &&
             World.Query(world, grid, layer, 0, 0, 64, 64) == 0;
 
         World.Move(world, b, 16f, 16f);

@@ -95,7 +95,10 @@ internal static class Report
             writer.WriteNumber("page_maps_bytes"u8, snapshot.MapBytes);
             writer.WriteNumber("difference_arrays_bytes"u8, snapshot.DifferenceBytes);
             writer.WriteNumber("dense_buffers_bytes"u8, snapshot.DenseBytes);
+            writer.WriteNumber("dense_pointer_bytes"u8, snapshot.DensePointerBytes);
+            writer.WriteNumber("raster_tiles"u8, snapshot.RasterTiles);
             writer.WriteNumber("query_pages_bytes"u8, snapshot.PageBytes);
+            writer.WriteNumber("page_sums_bytes"u8, snapshot.PageSumBytes);
             writer.WriteEndObject();
             writer.WriteStartObject("shared"u8);
             writer.WriteNumber("world_arena_bytes"u8, snapshot.WorldArenaBytes);
@@ -143,7 +146,7 @@ internal static class Report
             Console.WriteLine($"native requested bytes: {snapshot.NativeBytes}; selected world: {snapshot.WorldBytes}; shared arenas + stamps: {snapshot.SharedBytes}");
             Console.WriteLine($"grids: {snapshot.GridBytes}; layers: {snapshot.LayerBytes}; sources: {snapshot.SourceBytes}; scratch: {snapshot.ScratchBytes}");
             Console.WriteLine($"dirty flags: {snapshot.DirtyFlagBytes}; queues: {snapshot.DirtyQueueBytes}; maps: {snapshot.MapBytes}");
-            Console.WriteLine($"difference arrays: {snapshot.DifferenceBytes}; dense buffers: {snapshot.DenseBytes}; query pages: {snapshot.PageBytes}");
+            Console.WriteLine($"difference arrays: {snapshot.DifferenceBytes}; dense buffers: {snapshot.DenseBytes} ({snapshot.RasterTiles} raster tiles); query pages: {snapshot.PageBytes}; page sums: {snapshot.PageSumBytes}");
             using var process = Process.GetCurrentProcess();
             Console.WriteLine($"managed heap: {GC.GetTotalMemory(false)}; working set: {process.WorkingSet64}; private process: {process.PrivateMemorySize64}");
         }

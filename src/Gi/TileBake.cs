@@ -11,7 +11,7 @@ internal static unsafe class TileBake
 {
     internal const int TileBits = 5;
     internal const int TileSize = 32;
-    internal const int DiffPitch = 48;
+    internal const int DiffPitch = 33;
     internal const int DiffRows = 33;
 
 #if NET
@@ -41,6 +41,9 @@ internal static unsafe class TileBake
         y1 = py + v->Height + (fy != 0 ? 1 : 0);
     }
 
+    #if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    #endif
     internal static void EmitBox(
         int* difference, int tileX0, int tileY0,
         int px, int py, int fx, int fy, StampVariant* v, int gain)
@@ -131,6 +134,9 @@ internal static unsafe class TileBake
         return live;
     }
 
+    #if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    #endif
     internal static void EmitRaster(
         int* dense, int tileX0, int tileY0,
         int px, int py, int fx, int fy, StampVariant* v, int gain)
@@ -208,15 +214,20 @@ internal static unsafe class TileBake
         => Vector128.Widen(Vector128.Widen(Vector128.CreateScalarUnsafe(*(int*)p).AsSByte()).Item1).Item1;
 #endif
 
-    internal static bool Resolve(int* difference, int* dense, int* previousRow, short* output)
+    #if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    #endif
+    internal static bool Resolve(int* difference, int* dense, int* previousRow, short* output, long* pageSum)
     {
 #if NET
-        if (Avx2.IsSupported) return Resolve256(difference, dense, previousRow, output);
+        if (Avx2.IsSupported) return Resolve256(difference, dense, previousRow, output, pageSum);
 
         var acc = Vector128<int>.Zero;
+        var sum = Vector128<int>.Zero;
         var vector = Vector;
 #endif
         var any = false;
+        var cellSum = 0L;
         for (var y = 0; y < TileSize; y++)
         {
             var diffRow = difference + y * DiffPitch;
@@ -237,6 +248,7 @@ internal static unsafe class TileBake
                     var total = boxes + Load128(denseRow + x);
                     acc |= total;
                     Pack4(outRow + x, total);
+                    sum += Widened4(total);
                 }
             }
             else
@@ -249,24 +261,36 @@ internal static unsafe class TileBake
                     previousRow[x] = boxes;
                     var total = boxes + denseRow[x];
                     any |= total != 0;
-                    outRow[x] = (short)Math.Clamp(total, short.MinValue, short.MaxValue);
+                    var cell = (short)Math.Clamp(total, short.MinValue, short.MaxValue);
+                    outRow[x] = cell;
+                    cellSum += cell;
                 }
             }
         }
 
 #if NET
-        return vector ? !Vector128.EqualsAll(acc, Vector128<int>.Zero) : any;
-#else
-        return any;
+        if (vector)
+        {
+            *pageSum = sum[0] + sum[1] + sum[2] + sum[3];
+            return !Vector128.EqualsAll(acc, Vector128<int>.Zero);
+        }
 #endif
+
+        *pageSum = cellSum;
+        return any;
     }
 
 #if NET
-    private static bool Resolve256(int* difference, int* dense, int* previousRow, short* output)
+    #if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    #endif
+    private static bool Resolve256(int* difference, int* dense, int* previousRow, short* output, long* pageSum)
     {
         var acc = Vector256<int>.Zero;
         var fourth = Vector256.Create(3);
         var last = Vector256.Create(7);
+        var sumLo = Vector128<int>.Zero;
+        var sumHi = Vector128<int>.Zero;
         for (var y = 0; y < TileSize; y++)
         {
             var diffRow = difference + y * DiffPitch;
@@ -286,11 +310,24 @@ internal static unsafe class TileBake
                 var total = boxes + Avx.LoadVector256(denseRow + x);
                 acc |= total;
                 var packed = Avx2.PackSignedSaturate(total, total);
-                Sse2.Store(outRow + x, Avx2.Permute4x64(packed.AsInt64(), 0xd8).GetLower().AsInt16());
+                var cells = Avx2.Permute4x64(packed.AsInt64(), 0xd8).GetLower().AsInt16();
+                Sse2.Store(outRow + x, cells);
+                var widened = Vector128.Widen(cells);
+                sumLo += widened.Item1;
+                sumHi += widened.Item2;
             }
         }
 
+        *pageSum = (long)sumLo[0] + sumLo[1] + sumLo[2] + sumLo[3] +
+            sumHi[0] + sumHi[1] + sumHi[2] + sumHi[3];
         return !Vector256.EqualsAll(acc, Vector256<int>.Zero);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector128<int> Widened4(Vector128<int> v)
+    {
+        if (Sse2.IsSupported) return Vector128.Widen(Sse2.PackSignedSaturate(v, v)).Item1;
+        return Vector128.Widen(AdvSimd.ExtractNarrowingSaturateLower(v).ToVector128()).Item1;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
