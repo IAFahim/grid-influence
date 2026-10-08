@@ -308,6 +308,7 @@ dotnet run --project benchmarks -c Release --no-build -- --verify
 DOTNET_EnableHWIntrinsic=0 dotnet run --project benchmarks -c Release --no-build -- --verify
 dotnet run --project benchmarks -c Release --no-build -- --compare   # naive grid vs Gi
 dotnet run --project viz -c Release --no-build   # writes viz/out/index.html
+dotnet run --project viz -c Release --no-build -- live   # http://127.0.0.1:8740 — ecosystem field, streamed live
 ```
 
 ## Layout
@@ -317,7 +318,8 @@ dotnet run --project viz -c Release --no-build   # writes viz/out/index.html
   move/remove/setgain exactness, sub-cell, determinism.
 - `benchmarks` — `--verify` receipts plus `--timing` scratch loop.
 - `samples/world` — aggro range, multi-resolution traffic, baked raster stamps.
-- `viz` — HTML field visualizer.
+- `viz` — HTML field visualizer; `-- live` serves a ticking ecosystem field over a WebSocket
+  (`QueryRegion` into a pinned buffer, 0 B managed per tick).
 - `tools/stats` — JSON internal stats, memory accounting, allocation receipts, and Linux perf.
 - `docs/model.md` — semantics, receipts, unsafe proof.
 

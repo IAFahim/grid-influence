@@ -2,6 +2,12 @@ using System.Globalization;
 using System.Text;
 using Gi;
 
+if (args.Length > 0 && args[0] == "live")
+{
+    Live.Run(args);
+    return;
+}
+
 var scenes = new List<Scene>();
 
 Combat();
