@@ -13,11 +13,21 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   `−w/2` cells in Q8). Uniform rasters classify as `ConstantRectangle` and take the
   difference-array path; the rest are `Raster` and deposit with sub-cell bilinear weights.
   Raster storage keeps a one-sample zero border (pitch `w+2`, `(w+2)×(h+2)`) so the deposit loop
-  reads `x−1`/`y−pitch` unconditionally.
+  reads `x−1`/`y−pitch` unconditionally. Every raster stamp also bakes a mip chain: each level
+  halves its predecessor with zero-padded 2×2 box averages (round-half-away-from-zero, divided by
+  four — missing samples count as zero, so the field tapers to zero at the stamp's true extent),
+  bordered identically and packed contiguously.
 - **Sources** are persistent placements: `World.Place(world, layer, x, y, stamp, gain)` returns an
   int id; `Move`/`SetGain`/`Remove`/`Clear` mutate it. `gain` is an integer 0–16. Positions are
   float world units, converted to cell space per grid as `floor((x−ox)·scale·256)` in Q8 — the
-  integer part is the cell, the low byte is the sub-cell phase.
+  integer part is the cell, the low byte is the sub-cell phase. Stamp extents are world-anchored:
+  a `w×h` stamp covers `w×h` world cells at scale 1, and each grid scales the extent by its
+  `ScaleQ8` (truncated integer Q8), so the same source covers the same world rect on every grid.
+  Fractional leading/trailing edges become Q8 band weights (boxes) or bilinear phases (rasters).
+  Grids with `ScaleQ8 == 256` take the native deposit loop, bit-identical to the 0.2 series;
+  finer grids upsample bilinearly at mip level 0, coarser grids select
+  `floor(log2(1/scale))` mip levels and step sample coordinates in Q16.16, so minified deposits
+  are box-filtered rather than aliased.
 - **Deposits are incremental**: each live tile owns a 6,528 B block — a 33×33 `int32` difference
   array padded to 4,384 B, a 32×32 `int16` page, and an `int64` page sum in a padded 64 B slot.
   Raster stamps also need the tile's 32×32 `int32` dense buffer: blocks touched by a raster
@@ -47,7 +57,9 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
 Empty region queries return before iterating tiles; full-grid sums walk allocated map slots and
 add one `int64` page sum per live page, so large sparse grids do not visit every possible tile.
 - **Determinism**: field contents are integer-only; the only float math is the world→cell
-  conversion (`multiply + floor`, correctly rounded IEEE ops). Deposits are commutative integer
+  conversion (`multiply + floor`, correctly rounded IEEE ops) and the grid-scale truncation to
+  integer Q8 at grid creation. Mip baking, band weights, and the Q16.16 sampler are pure integer
+  ops. Deposits are commutative integer
   adds, so pages are bit-identical across runs, machines, and resolve scheduling (sequential or
   pooled — tiles are independent and the pooled dead set is determined by page content alone).
 - **Idle process**: an unchanged world drains an empty dirty list and returns immediately —
@@ -93,6 +105,8 @@ world rect at its own cell density; a source deposits into every grid it overlap
 - `page-sum-matches-scan` — the per-page `int64` sums behind full-region reads equal a naive
   per-cell rescan across random place/move/remove churn worlds.
 - `saturated-sum-clamps` — saturation sticks at ±32767 after summation.
+- `cross-grid-sums-conserve-world-integral` — the same box sources summed over four grids at
+  scales 2/1/0.5/0.25 scale exactly by cell area (`full == 4·fine == 16·half == 64·quarter`).
 
 `--timing` adds min-over-20-rep lines for unchanged, incremental, move-200 churn, place-200
 churn, full-grid sum, and 256² region reads (4000 sources, 1024² grid). Timing receipts live in
@@ -131,7 +145,8 @@ pass behind them was `perf`-profile guided, receipts first.
   attaching or growing dense happens only on the serial deposit thread, which republishes the
   block pointer through the map before any later resolve can observe it). The shared zero dense
   page is allocated once with the arenas and never written afterwards.
-  `Stamp` variants are catalog-owned for process lifetime. The resolve pool (background worker
+  `Stamp` variants — base samples, mip chain, and box constants — are catalog-owned for process
+  lifetime. The resolve pool (background worker
   threads, one `Prev`-width scratch slice per worker, the shared dead-tile buffer) is created
   lazily by the first ≥32-dirty-tile `Process` and lives for the process; its native scratch is
   never freed and its threads never terminate. `QueryRegion` writes only the caller's
@@ -185,10 +200,15 @@ pass behind them was `perf`-profile guided, receipts first.
   only originate from creation calls, so no query can observe an uninitialized arena.
   `Query`/`QueryRegion` read resolved pages and page sums only and may run concurrently with
   each other, never with mutation or process.
-- **Bounds**: stamps clip to grid rects before marking; tile-local box corners land in
+- **Bounds**: stamps clip to grid rects before marking (extents clamp to the grid size in Q8;
+  grids whose `ScaleQ8` truncates to 0 are skipped); tile-local box corners land in
   `[0,32]×[0,32]` of the difference array (rows 0–32 exist for the exclusive far edge; column 32
   is written but never read, by design of the half-open prefix form). Raster fragments clip to
-  the tile and read only inside the padded stamp allocation.
+  the tile and read only inside the padded stamp allocation: sample coordinates advance by
+  `256·65536/ScaleQ8` per cell in Q16.16 from a phase-derived origin, so at any mip level `L` the
+  integer sample index stays within `[(−1), ceil(w/2^L)]` and every `+1` tap lands on the level's
+  zero border. Level selection stops at the stamp's mip count, so tiny stamps sample level 0 with
+  a wider step rather than reading past the chain.
 
 ## Tool inspection
 

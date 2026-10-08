@@ -27,7 +27,7 @@ internal static unsafe class Receipts
             pending.DifferenceBytes + pending.DenseBytes + pending.DensePointerBytes + pending.PageBytes +
                 pending.PageSumBytes == 2 * World.BlockBytes + World.DenseBytes &&
             pending.RasterTiles == 1 &&
-            pending.StampRasterBytes - empty.StampRasterBytes == 16 && pending.Stamps - empty.Stamps == 2;
+            pending.StampRasterBytes - empty.StampRasterBytes == 25 && pending.Stamps - empty.Stamps == 2;
 
         World.Process(world);
         var processed = Inspection.Read(world);

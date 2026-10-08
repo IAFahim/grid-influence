@@ -53,8 +53,12 @@ and a source deposits into every grid it overlaps, at each grid's own scale.
   an unchanged world costs nothing.
 - **Queries read maintained state.** Cell reads are one page lookup; full-grid sums add one
   `int64` per live page; `QueryRegion` bulk fills use vectorized row copies.
-- **Sub-cell placement.** Positions convert to cell space in Q8; raster stamps deposit with
-  bilinear edge weights, uniform rasters take a difference-array box path.
+- **Sub-cell placement, world-anchored extents.** Positions convert to cell space in Q8; raster
+  stamps deposit with bilinear edge weights, uniform rasters take a difference-array box path.
+  A stamp covers the same world rect on every grid of its world: extents scale with the grid,
+  fractional edges become Q8 band weights, and raster stamps carry baked zero-padded box-average
+  mip chains so coarse grids minify without aliasing (scale-1 grids keep the bit-identical 0.2
+  deposit loop).
 - **Deterministic.** Integer-only field math; deposits are commutative adds, so pages are
   bit-identical across runs and machines, with or without SIMD.
 
@@ -84,6 +88,7 @@ bash tools/stats/perf.sh stat --iterations 12000
 | `query-region-matches-cells` | bulk fill equals per-cell reads across tile boundaries, 0 B warm |
 | `page-sum-matches-scan` | per-page sums equal a naive per-cell rescan across churn worlds |
 | `saturated-sum-clamps` | saturation sticks at ±32767 after summation |
+| `cross-grid-sums-conserve-world-integral` | the same sources summed over four grid scales conserve the world integral exactly |
 
 The same suite passes with `DOTNET_EnableHWIntrinsic=0` (scalar fallback).
 

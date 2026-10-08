@@ -16,6 +16,8 @@ internal unsafe struct StampVariant
     public int OriginQ8Y;
     public sbyte Constant;
     public sbyte* Data;
+    public sbyte* Mips;
+    public int MipCount;
 }
 
 internal static unsafe class StampCatalog
@@ -63,8 +65,67 @@ internal static unsafe class StampCatalog
         v->OriginQ8X = -(width * 128);
         v->OriginQ8Y = -(height * 128);
         v->Data = basePtr + pitch + 1;
+        BakeMips(v, basePtr);
         return (byte)id;
     }
+
+    private static void BakeMips(StampVariant* v, sbyte* basePtr)
+    {
+        var levels = stackalloc int[8];
+        var count = 0;
+        var w = v->Width;
+        var h = v->Height;
+        while (w > 1 || h > 1)
+        {
+            w = (w + 1) >> 1;
+            h = (h + 1) >> 1;
+            levels[count++] = (w + 2) * (h + 2);
+        }
+
+        v->MipCount = count;
+        if (count == 0) return;
+
+        var total = 0L;
+        for (var i = 0; i < count; i++) total += levels[i];
+        var mips = (sbyte*)NativeHeap.AllocZeroed((nuint)total);
+        var cursor = mips;
+        var source = basePtr;
+        var sourceWidth = v->Width;
+        var sourceHeight = v->Height;
+        var sourcePitch = v->Pitch;
+        for (var i = 0; i < count; i++)
+        {
+            var downWidth = (sourceWidth + 1) >> 1;
+            var downHeight = (sourceHeight + 1) >> 1;
+            var downPitch = downWidth + 2;
+            for (var y = 0; y < downHeight; y++)
+            for (var x = 0; x < downWidth; x++)
+            {
+                var sum = 0;
+                for (var dy = 0; dy < 2; dy++)
+                for (var dx = 0; dx < 2; dx++)
+                {
+                    var sx = x * 2 + dx;
+                    var sy = y * 2 + dy;
+                    if (sx < sourceWidth && sy < sourceHeight)
+                        sum += source[(sy + 1) * sourcePitch + sx + 1];
+                }
+
+                cursor[(y + 1) * downPitch + x + 1] = Average(sum, 4);
+            }
+
+            source = cursor;
+            sourceWidth = downWidth;
+            sourceHeight = downHeight;
+            sourcePitch = downPitch;
+            cursor += downPitch * (downHeight + 2);
+        }
+
+        v->Mips = mips;
+    }
+
+    private static sbyte Average(int sum, int n)
+        => (sbyte)(sum < 0 ? -((-sum + (n >> 1)) / n) : (sum + (n >> 1)) / n);
 
     public static byte Box(int width, int height, sbyte value)
     {

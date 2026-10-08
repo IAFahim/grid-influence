@@ -12,20 +12,37 @@ public sealed class EngineTests
         public readonly int Start = start, End = end, W = w;
     }
 
-    private static Band[] Bands(int length, int phase)
+    private static Band[] Bands(long phase, long extent)
     {
-        if (phase == 0) return [new Band(0, length, 256)];
-        if (length == 1) return [new Band(0, 1, 256 - phase), new Band(1, 2, phase)];
-        return [new Band(0, 1, 256 - phase), new Band(1, length, 256), new Band(length, length + 1, phase)];
+        var end = phase + extent;
+        var full = (int)(end >> 8);
+        var tail = (int)(end & 255);
+        var bands = new List<Band>();
+        if (phase == 0) bands.Add(new Band(0, full, 256));
+        else
+        {
+            bands.Add(new Band(0, 1, 256 - (int)phase));
+            bands.Add(new Band(1, full, 256));
+        }
+
+        if (tail != 0) bands.Add(new Band(full, full + 1, tail));
+        bands.RemoveAll(b => b.End <= b.Start);
+        return [.. bands];
     }
+
+    private static sbyte Average(int sum, int n)
+        => (sbyte)(sum < 0 ? -((-sum + (n >> 1)) / n) : (sum + (n >> 1)) / n);
 
     private sealed class Oracle
     {
-        private int _x, _y, _px, _py, _fx, _fy, _gain;
+        private int _px, _py, _fx, _fy, _gain;
         private sbyte[]? _samples;
         private int _w, _h;
         private sbyte _constant;
         private bool _raster;
+        private int _scaleQ8 = 256;
+        private long _extX, _extY;
+        private List<(int w, int h, sbyte[] data)> _mips = [];
 
         public static Oracle Box(float wx, float wy, float ox, float oy, float scale,
             int w, int h, sbyte value, int gain)
@@ -40,17 +57,53 @@ public sealed class EngineTests
         {
             var o = new Oracle { _w = w, _h = h, _samples = samples, _gain = gain, _raster = true };
             o.Position(wx, wy, ox, oy, scale);
+            o.BuildMips();
             return o;
         }
 
         private void Position(float wx, float wy, float ox, float oy, float scale)
         {
-            _x = (int)MathF.Floor((wx - ox) * scale * 256f) - (_w * 128);
-            _y = (int)MathF.Floor((wy - oy) * scale * 256f) - (_h * 128);
-            _px = _x >> 8;
-            _py = _y >> 8;
-            _fx = _x & 255;
-            _fy = _y & 255;
+            _scaleQ8 = (int)(scale * 256f);
+            var leadX = (long)(int)MathF.Floor((wx - ox) * _scaleQ8) + ((long)-(_w * 128) * _scaleQ8 >> 8);
+            var leadY = (long)(int)MathF.Floor((wy - oy) * _scaleQ8) + ((long)-(_h * 128) * _scaleQ8 >> 8);
+            _px = (int)(leadX >> 8);
+            _py = (int)(leadY >> 8);
+            _fx = (int)(leadX & 255);
+            _fy = (int)(leadY & 255);
+            _extX = (long)_w * _scaleQ8;
+            _extY = (long)_h * _scaleQ8;
+        }
+
+        private void BuildMips()
+        {
+            var sw = _w;
+            var sh = _h;
+            var source = _samples!;
+            while (sw > 1 || sh > 1)
+            {
+                var dw = (sw + 1) >> 1;
+                var dh = (sh + 1) >> 1;
+                var down = new sbyte[dw * dh];
+                for (var y = 0; y < dh; y++)
+                for (var x = 0; x < dw; x++)
+                {
+                    var sum = 0;
+                    for (var dy = 0; dy < 2; dy++)
+                    for (var dx = 0; dx < 2; dx++)
+                    {
+                        var sx = x * 2 + dx;
+                        var sy = y * 2 + dy;
+                        if (sx < sw && sy < sh) sum += source[sy * sw + sx];
+                    }
+
+                    down[y * dw + x] = Average(sum, 4);
+                }
+
+                _mips.Add((dw, dh, down));
+                source = down;
+                sw = dw;
+                sh = dh;
+            }
         }
 
         private int Sample(int ix, int iy)
@@ -60,9 +113,26 @@ public sealed class EngineTests
         {
             var sx = cx - _px;
             var sy = cy - _py;
-            if (_raster)
+            if (_raster) return RasterContribution(sx, sy);
+
+            var xw = 0;
+            foreach (var b in Bands(_fx, _extX))
+                if (sx >= b.Start && sx < b.End) { xw = b.W; break; }
+            var yw = 0;
+            foreach (var b in Bands(_fy, _extY))
+                if (sy >= b.Start && sy < b.End) { yw = b.W; break; }
+            if (xw == 0 || yw == 0) return 0;
+            return (long)RoundQ16(_constant * xw * yw) * _gain;
+        }
+
+        private long RasterContribution(int sx, int sy)
+        {
+            var spanX = (int)((_fx + _extX + 255) >> 8);
+            var spanY = (int)((_fy + _extY + 255) >> 8);
+            if ((uint)sx >= (uint)spanX || (uint)sy >= (uint)spanY) return 0;
+
+            if (_scaleQ8 == 256)
             {
-                if (sx < 0 || sx > _w || sy < 0 || sy > _h) return 0;
                 var w00 = (256 - _fx) * (256 - _fy);
                 var w10 = _fx * (256 - _fy);
                 var w01 = (256 - _fx) * _fy;
@@ -72,14 +142,34 @@ public sealed class EngineTests
                     Sample(sx, sy - 1) * w01 + Sample(sx - 1, sy - 1) * w11) * _gain;
             }
 
-            var xw = 0;
-            foreach (var b in Bands(_w, _fx))
-                if (sx >= b.Start && sx < b.End) { xw = b.W; break; }
-            var yw = 0;
-            foreach (var b in Bands(_h, _fy))
-                if (sy >= b.Start && sy < b.End) { yw = b.W; break; }
-            if (xw == 0 || yw == 0) return 0;
-            return (long)RoundQ16(_constant * xw * yw) * _gain;
+            var step = 256L * 65536 / _scaleQ8;
+            var level = 0;
+            while (level < _mips.Count && (step >> (level + 1)) >= 65536) level++;
+            int w, h;
+            sbyte[] data;
+            if (level == 0)
+            {
+                w = _w;
+                h = _h;
+                data = _samples!;
+            }
+            else
+            {
+                (w, h, data) = _mips[level - 1];
+            }
+
+            int Tap(int ix, int iy)
+                => (uint)ix < (uint)w && (uint)iy < (uint)h ? data[iy * w + ix] : 0;
+
+            var uq = (-(long)_fx * 65536 / _scaleQ8 + (long)sx * step) >> level;
+            var vq = (-(long)_fy * 65536 / _scaleQ8 + (long)sy * step) >> level;
+            var ix = (int)(uq >> 16);
+            var iy = (int)(vq >> 16);
+            var fx2 = (int)((uq >> 8) & 255);
+            var fy2 = (int)((vq >> 8) & 255);
+            var top = Tap(ix, iy) * (256 - fx2) + Tap(ix + 1, iy) * fx2;
+            var bottom = Tap(ix, iy + 1) * (256 - fx2) + Tap(ix + 1, iy + 1) * fx2;
+            return (long)RoundQ16(top * (256 - fy2) + bottom * fy2) * _gain;
         }
     }
 
@@ -206,6 +296,100 @@ public sealed class EngineTests
             var cy = rng.Next(32);
             Assert.Equal(Expected(coarse, cx, cy), World.Query(w, gCoarse, l, cx, cy));
         }
+    }
+
+    [Fact]
+    public void RasterStamps_MatchOracle_AcrossGridScales()
+    {
+        var w = World.New();
+        var gOne = Grid.New(w, power: 8, x: 0f, y: 0f, size: 256f);
+        var gDouble = Grid.New(w, power: 9, x: 0f, y: 0f, size: 256f);
+        var gHalf = Grid.New(w, power: 7, x: 0f, y: 0f, size: 256f);
+        var gQuarter = Grid.New(w, power: 6, x: 0f, y: 0f, size: 256f);
+        var l = Layer.New(w);
+        var samples = new sbyte[9 * 7];
+        for (var i = 0; i < samples.Length; i++) samples[i] = (sbyte)((i * 29 % 37) - 18);
+        var stamp = Stamp.New(samples, 9, 7);
+
+        var one = new List<Oracle>();
+        var dbl = new List<Oracle>();
+        var half = new List<Oracle>();
+        var quarter = new List<Oracle>();
+        float[] xs = [100.3f, 13.9f, 247.6f];
+        float[] ys = [88.7f, 201.4f, 5.2f];
+        for (var i = 0; i < 3; i++)
+        {
+            World.Place(w, l, xs[i], ys[i], stamp, 5);
+            one.Add(Oracle.Rast(xs[i], ys[i], 0f, 0f, 1f, samples, 9, 7, 5));
+            dbl.Add(Oracle.Rast(xs[i], ys[i], 0f, 0f, 2f, samples, 9, 7, 5));
+            half.Add(Oracle.Rast(xs[i], ys[i], 0f, 0f, 0.5f, samples, 9, 7, 5));
+            quarter.Add(Oracle.Rast(xs[i], ys[i], 0f, 0f, 0.25f, samples, 9, 7, 5));
+        }
+
+        World.Process(w);
+        var rng = new Random(29);
+        for (var q = 0; q < 4; q++)
+        {
+            var size = q == 0 ? 256 : q == 1 ? 512 : q == 2 ? 128 : 64;
+            var grid = q == 0 ? gOne : q == 1 ? gDouble : q == 2 ? gHalf : gQuarter;
+            var list = q == 0 ? one : q == 1 ? dbl : q == 2 ? half : quarter;
+            for (var i = 0; i < 400; i++)
+            {
+                var cx = rng.Next(size);
+                var cy = rng.Next(size);
+                var expected = Expected(list, cx, cy);
+                var actual = World.Query(w, grid, l, cx, cy);
+                Assert.True(expected == actual, $"grid{q} size={size} cell=({cx},{cy}) expected={expected} actual={actual}");
+            }
+
+            for (var cy = 0; cy < size; cy++)
+            for (var cx = 0; cx < size; cx++)
+            {
+                var expected = Expected(list, cx, cy);
+                var actual = World.Query(w, grid, l, cx, cy);
+                Assert.True(expected == actual, $"grid{q} size={size} cell=({cx},{cy}) expected={expected} actual={actual}");
+            }
+        }
+    }
+
+    [Fact]
+    public void BoxStamps_CrossGridSums_ConserveWorldIntegral()
+    {
+        var w = World.New();
+        var gFine = Grid.New(w, power: 8, x: 0f, y: 0f, size: 256f);
+        var gHalf = Grid.New(w, power: 7, x: 0f, y: 0f, size: 256f);
+        var gQuarter = Grid.New(w, power: 6, x: 0f, y: 0f, size: 256f);
+        var l = Layer.New(w);
+        var stamp = Stamp.Box(16, 16, 100);
+        for (var i = 0; i < 12; i++)
+            World.Place(w, l, 20f + i * 16, 24f + (i % 5) * 32, stamp, 8);
+
+        World.Process(w);
+        var fine = World.Query(w, gFine, l, 0, 0, 256, 256);
+        var half = World.Query(w, gHalf, l, 0, 0, 128, 128);
+        var quarter = World.Query(w, gQuarter, l, 0, 0, 64, 64);
+        Assert.Equal(fine / 4, half);
+        Assert.Equal(fine / 16, quarter);
+    }
+
+    [Fact]
+    public unsafe void StampMips_BuildBoxAverages()
+    {
+        var samples = new sbyte[4 * 4]
+        {
+            100, 60, 20, -20,
+            60, 20, -20, -60,
+            20, -20, -60, -100,
+            -20, -60, -100, 127,
+        };
+        var stamp = Stamp.New(samples, 4, 4);
+        var v = StampCatalog.Get(stamp);
+        Assert.Equal(2, v->MipCount);
+        Assert.Equal((sbyte)60, v->Mips[5]);
+        Assert.Equal((sbyte)-20, v->Mips[6]);
+        Assert.Equal((sbyte)-20, v->Mips[9]);
+        Assert.Equal((sbyte)-33, v->Mips[10]);
+        Assert.Equal((sbyte)-3, v->Mips[20]);
     }
 
     [Fact]

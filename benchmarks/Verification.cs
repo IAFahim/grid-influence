@@ -19,6 +19,7 @@ internal static class Verification
         Check("query-region-matches-cells", QueryRegionMatchesCells());
         Check("page-sum-matches-scan", PageSumMatchesScan());
         Check("saturated-sum-clamps", SaturatedSumClamps());
+        Check("cross-grid-sums-conserve-world-integral", CrossGridSumsConserve());
 
         Console.WriteLine(failures == 0 ? "verification: all receipts green" : $"verification: {failures} failures");
         return failures == 0 ? 0 : 1;
@@ -260,6 +261,27 @@ internal static class Verification
         for (var i = 0; i < 120; i++) Gi.World.Place(w, l, 32f, 32f, stamp, 16);
         Gi.World.Process(w);
         return Gi.World.Query(w, g, l, 32, 32) == 32767;
+    }
+
+    private static bool CrossGridSumsConserve()
+    {
+        var w = Gi.World.New();
+        var gFull = Gi.Grid.New(w, 9, 0f, 0f, 256f);
+        var gFine = Gi.Grid.New(w, 8, 0f, 0f, 256f);
+        var gHalf = Gi.Grid.New(w, 7, 0f, 0f, 256f);
+        var gQuarter = Gi.Grid.New(w, 6, 0f, 0f, 256f);
+        var l = Gi.Layer.New(w);
+        var box = Gi.Stamp.Box(16, 16, 90);
+        var rng = new Random(53);
+        for (var i = 0; i < 40; i++)
+            Gi.World.Place(w, l, (rng.Next(54) + 4) * 4, (rng.Next(54) + 4) * 4, box, 4 + i % 5);
+        Gi.World.Process(w);
+
+        var full = Gi.World.Query(w, gFull, l, 0, 0, 512, 512);
+        var fine = Gi.World.Query(w, gFine, l, 0, 0, 256, 256);
+        var half = Gi.World.Query(w, gHalf, l, 0, 0, 128, 128);
+        var quarter = Gi.World.Query(w, gQuarter, l, 0, 0, 64, 64);
+        return full == 4 * fine && fine == 4 * half && half == 4 * quarter && fine > 0;
     }
 
     private static bool PageSumMatchesScan()

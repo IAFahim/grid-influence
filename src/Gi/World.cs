@@ -31,7 +31,7 @@ internal unsafe struct GridCtx
     public float OriginX;
     public float OriginY;
     public float Scale;
-    public float ScaleQ8;
+    public int ScaleQ8;
     public int TilesPerSide;
     public int TileCount;
     public LayerData* Layers;
@@ -97,7 +97,7 @@ public static unsafe class World
         g->OriginX = x;
         g->OriginY = y;
         g->Scale = g->Size / size;
-        g->ScaleQ8 = g->Scale * 256f;
+        g->ScaleQ8 = (int)(g->Scale * 256f);
         g->TilesPerSide = g->Size >> TileBake.TileBits;
         g->TileCount = g->TilesPerSide * g->TilesPerSide;
         g->Layers = (LayerData*)NativeHeap.AllocZeroed((nuint)(MaxLayers * sizeof(LayerData)));
@@ -217,8 +217,11 @@ public static unsafe class World
         for (var gi = 0; gi < w->GridCount; gi++)
         {
             var g = w->Grids + gi;
-            TileBake.Footprint(x, y, g->OriginX, g->OriginY, g->ScaleQ8, v,
+            if (g->ScaleQ8 == 0) continue;
+
+            TileBake.Footprint(x, y, g->OriginX, g->OriginY, g->ScaleQ8, g->Size << 8, v,
                 out var px, out var py, out var fx, out var fy,
+                out var extentX, out var extentY,
                 out var x0, out var y0, out var x1, out var y1);
 
             var cx0 = Math.Max(x0, 0);
@@ -243,12 +246,12 @@ public static unsafe class World
                 var tileX0 = tx * TileBake.TileSize;
                 var tileY0 = ty * TileBake.TileSize;
                 if (v->Kind == StampKind.ConstantRectangle)
-                    TileBake.EmitBox((int*)block, tileX0, tileY0, px, py, fx, fy, v, gain);
+                    TileBake.EmitBox((int*)block, tileX0, tileY0, px, py, fx, fy, extentX, extentY, v, gain);
                 else
                 {
                     var dense = *(byte**)(block + DensePtrOffset);
                     if (dense == null) dense = (byte*)EnsureDense(ld, tile, block);
-                    TileBake.EmitRaster((int*)dense, tileX0, tileY0, px, py, fx, fy, v, gain);
+                    TileBake.EmitRaster((int*)dense, tileX0, tileY0, px, py, fx, fy, x1, y1, g->ScaleQ8, v, gain);
                 }
 
                 MarkDirty(ld, tile);

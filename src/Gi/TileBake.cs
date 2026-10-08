@@ -24,21 +24,24 @@ internal static unsafe class TileBake
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static void Footprint(
-        float wx, float wy, float originX, float originY, float scaleQ8,
+        float wx, float wy, float originX, float originY, int scaleQ8, int sizeQ8,
         StampVariant* v,
         out int px, out int py, out int fx, out int fy,
+        out int extentX, out int extentY,
         out int x0, out int y0, out int x1, out int y1)
     {
-        var qx = (int)MathF.Floor((wx - originX) * scaleQ8) + v->OriginQ8X;
-        var qy = (int)MathF.Floor((wy - originY) * scaleQ8) + v->OriginQ8Y;
-        px = qx >> 8;
-        py = qy >> 8;
-        fx = qx & 255;
-        fy = qy & 255;
+        var leadX = (long)(int)MathF.Floor((wx - originX) * scaleQ8) + ((long)v->OriginQ8X * scaleQ8 >> 8);
+        var leadY = (long)(int)MathF.Floor((wy - originY) * scaleQ8) + ((long)v->OriginQ8Y * scaleQ8 >> 8);
+        px = (int)(leadX >> 8);
+        py = (int)(leadY >> 8);
+        fx = (int)(leadX & 255);
+        fy = (int)(leadY & 255);
+        extentX = (int)Math.Min((long)v->Width * scaleQ8, sizeQ8);
+        extentY = (int)Math.Min((long)v->Height * scaleQ8, sizeQ8);
         x0 = px;
         y0 = py;
-        x1 = px + v->Width + (fx != 0 ? 1 : 0);
-        y1 = py + v->Height + (fy != 0 ? 1 : 0);
+        x1 = px + (int)((fx + extentX + 255) >> 8);
+        y1 = py + (int)((fy + extentY + 255) >> 8);
     }
 
     #if NET
@@ -46,7 +49,7 @@ internal static unsafe class TileBake
     #endif
     internal static void EmitBox(
         int* difference, int tileX0, int tileY0,
-        int px, int py, int fx, int fy, StampVariant* v, int gain)
+        int px, int py, int fx, int fy, int extentX, int extentY, StampVariant* v, int gain)
     {
         if (gain == 0) return;
 
@@ -56,12 +59,12 @@ internal static unsafe class TileBake
         var bxLo = stackalloc int[3];
         var bxHi = stackalloc int[3];
         var bxWeight = stackalloc int[3];
-        var liveX = ClipBands(px, v->Width, fx, tileX0, tx1, bxLo, bxHi, bxWeight);
+        var liveX = ClipBands(px, fx, extentX, tileX0, tx1, bxLo, bxHi, bxWeight);
 
         var byLo = stackalloc int[3];
         var byHi = stackalloc int[3];
         var byWeight = stackalloc int[3];
-        var liveY = ClipBands(py, v->Height, fy, tileY0, ty1, byLo, byHi, byWeight);
+        var liveY = ClipBands(py, fy, extentY, tileY0, ty1, byLo, byHi, byWeight);
 
         var constant = v->Constant;
         for (var y = 0; y < liveY; y++)
@@ -84,54 +87,42 @@ internal static unsafe class TileBake
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int ClipBands(
-        int origin, int length, int phase, int tileLo, int tileHi,
+        int origin, int phase, int extent, int tileLo, int tileHi,
         int* bandLo, int* bandHi, int* bandWeight)
     {
-        if (phase == 0)
-        {
-            bandLo[0] = Math.Max(origin, tileLo) - tileLo;
-            bandHi[0] = Math.Min(origin + length, tileHi) - tileLo;
-            bandWeight[0] = 256;
-            return bandHi[0] > bandLo[0] ? 1 : 0;
-        }
-
+        var end = phase + extent;
+        var full = end >> 8;
+        var tail = end & 255;
         var live = 0;
-        var lo = Math.Max(origin, tileLo) - tileLo;
-        var hi = Math.Min(origin + 1, tileHi) - tileLo;
-        if (hi > lo)
+        if (phase == 0)
+            live = Band(origin, 0, full, 256, tileLo, tileHi, bandLo, bandHi, bandWeight, live);
+        else
         {
-            bandLo[live] = lo;
-            bandHi[live] = hi;
-            bandWeight[live] = 256 - phase;
-            live++;
+            live = Band(origin, 0, 1, 256 - phase, tileLo, tileHi, bandLo, bandHi, bandWeight, live);
+            live = Band(origin, 1, full, 256, tileLo, tileHi, bandLo, bandHi, bandWeight, live);
         }
 
-        lo = Math.Max(origin + 1, tileLo) - tileLo;
-        hi = Math.Min(origin + (length == 1 ? 2 : length), tileHi) - tileLo;
-        if (hi > lo)
-        {
-            bandLo[live] = lo;
-            bandHi[live] = hi;
-            bandWeight[live] = length == 1 ? phase : 256;
-            live++;
-        }
-
-        if (length > 1)
-        {
-            lo = Math.Max(origin + length, tileLo) - tileLo;
-            hi = Math.Min(origin + length + 1, tileHi) - tileLo;
-            if (hi > lo)
-            {
-                bandLo[live] = lo;
-                bandHi[live] = hi;
-                bandWeight[live] = phase;
-                live++;
-            }
-        }
-
+        if (tail != 0)
+            live = Band(origin, full, full + 1, tail, tileLo, tileHi, bandLo, bandHi, bandWeight, live);
         return live;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int Band(
+        int origin, int start, int end, int weight, int tileLo, int tileHi,
+        int* bandLo, int* bandHi, int* bandWeight, int live)
+    {
+        if (end <= start) return live;
+
+        var lo = Math.Max(origin + start, tileLo) - tileLo;
+        var hi = Math.Min(origin + end, tileHi) - tileLo;
+        if (hi <= lo) return live;
+
+        bandLo[live] = lo;
+        bandHi[live] = hi;
+        bandWeight[live] = weight;
+        return live + 1;
     }
 
     #if NET
@@ -139,7 +130,8 @@ internal static unsafe class TileBake
     #endif
     internal static void EmitRaster(
         int* dense, int tileX0, int tileY0,
-        int px, int py, int fx, int fy, StampVariant* v, int gain)
+        int px, int py, int fx, int fy, int x1, int y1, int scaleQ8,
+        StampVariant* v, int gain)
     {
         if (gain == 0) return;
 
@@ -147,10 +139,62 @@ internal static unsafe class TileBake
         var ty1 = tileY0 + TileSize;
         var gx0 = Math.Max(px, tileX0);
         var gy0 = Math.Max(py, tileY0);
-        var gx1 = Math.Min(px + v->Width + 1, tx1);
-        var gy1 = Math.Min(py + v->Height + 1, ty1);
+        var gx1 = Math.Min(x1, tx1);
+        var gy1 = Math.Min(y1, ty1);
         if (gx1 <= gx0 || gy1 <= gy0) return;
 
+        if (scaleQ8 == 256)
+        {
+            EmitRasterNative(dense, tileX0, tileY0, px, py, fx, fy, gx0, gy0, gx1, gy1, v, gain);
+            return;
+        }
+
+        var step = 256L * 65536 / scaleQ8;
+        var level = 0;
+        while (level < v->MipCount && (step >> (level + 1)) >= 65536) level++;
+        var data = v->Data;
+        var w = v->Width;
+        var h = v->Height;
+        if (level > 0)
+        {
+            var block = v->Mips;
+            for (var i = 0; i < level; i++)
+            {
+                w = (w + 1) >> 1;
+                h = (h + 1) >> 1;
+                data = block + (w + 2) + 1;
+                block += (w + 2) * (h + 2);
+            }
+        }
+
+        var pitch = w + 2;
+        var u0 = -(long)fx * 65536 / scaleQ8;
+        var v0 = -(long)fy * 65536 / scaleQ8;
+        for (var gy = gy0; gy < gy1; gy++)
+        {
+            var vq = (v0 + (gy - py) * step) >> level;
+            var iy = (int)(vq >> 16);
+            var fy2 = (int)((vq >> 8) & 255);
+            var row0 = data + iy * pitch;
+            var row1 = row0 + pitch;
+            var dst = dense + (gy - tileY0) * TileSize + (gx0 - tileX0);
+            for (var gx = gx0; gx < gx1; gx++)
+            {
+                var uq = (u0 + (gx - px) * step) >> level;
+                var ix = (int)(uq >> 16);
+                var fx2 = (int)((uq >> 8) & 255);
+                var top = row0[ix] * (256 - fx2) + row0[ix + 1] * fx2;
+                var bottom = row1[ix] * (256 - fx2) + row1[ix + 1] * fx2;
+                dst[gx - gx0] += RoundQ16(top * (256 - fy2) + bottom * fy2) * gain;
+            }
+        }
+    }
+
+    private static void EmitRasterNative(
+        int* dense, int tileX0, int tileY0,
+        int px, int py, int fx, int fy, int gx0, int gy0, int gx1, int gy1,
+        StampVariant* v, int gain)
+    {
         var w00 = (256 - fx) * (256 - fy);
         var w10 = fx * (256 - fy);
         var w01 = (256 - fx) * fy;

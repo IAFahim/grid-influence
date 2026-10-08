@@ -108,6 +108,14 @@ internal static unsafe class Inspection
             if (v->Kind != StampKind.Raster) continue;
             result.RasterStamps++;
             result.StampRasterBytes += (long)v->Pitch * (v->Height + 2);
+            var mw = v->Width;
+            var mh = v->Height;
+            for (var level = 0; level < v->MipCount; level++)
+            {
+                mw = (mw + 1) >> 1;
+                mh = (mh + 1) >> 1;
+                result.StampRasterBytes += (long)(mw + 2) * (mh + 2);
+            }
         }
 
         return result;
