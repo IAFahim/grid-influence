@@ -107,6 +107,9 @@ world rect at its own cell density; a source deposits into every grid it overlap
 - `saturated-sum-clamps` — saturation sticks at ±32767 after summation.
 - `cross-grid-sums-conserve-world-integral` — the same box sources summed over four grids at
   scales 2/1/0.5/0.25 scale exactly by cell area (`full == 4·fine == 16·half == 64·quarter`).
+- `naive-grid-matches-gi` (+ `naive-grid-matches-gi-after-churn`, under `benchmarks --compare`)
+  — a managed dense-grid reference rebuild (clear + redraw every source, clamp on read) produces
+  bit-identical output to Gi before and after churn; the same command then times both.
 
 `--timing` adds min-over-20-rep lines for unchanged, incremental, move-200 churn, place-200
 churn, full-grid sum, and 256² region reads (4000 sources, 1024² grid). Timing receipts live in

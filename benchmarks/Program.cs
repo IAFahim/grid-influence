@@ -1,4 +1,5 @@
-var timing = args.Length > 0 && args[0] == "--timing";
+var mode = args.Length > 0 ? args[0] : "";
 var result = Verification.Run();
-if (timing) Verification.Timing();
+if (mode == "--timing") Verification.Timing();
+if (mode == "--compare") Verification.Compare();
 return result;

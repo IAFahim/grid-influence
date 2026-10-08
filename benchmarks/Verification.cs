@@ -329,6 +329,112 @@ internal static class Verification
         return true;
     }
 
+    public static void Compare()
+    {
+        const int cells = 1024;
+        const int sources = 4000;
+        var w = Gi.World.New();
+        var g = Gi.Grid.New(w, 10, 0f, 0f, 1024f);
+        var l = Gi.Layer.New(w);
+        var stamp = Gi.Stamp.Box(16, 16, 60);
+        var naive = new NaiveGrid(cells);
+        var rng = new Random(31);
+        var ids = new int[sources];
+        for (var i = 0; i < ids.Length; i++)
+        {
+            var x = 8 + rng.Next(cells - 16);
+            var y = 8 + rng.Next(cells - 16);
+            ids[i] = Gi.World.Place(w, l, x, y, stamp, 8);
+            naive.Add(x, y, 16, 16, 60, 8);
+        }
+
+        Gi.World.Process(w);
+        naive.Rebuild();
+
+        var matches = naive.Sum() == Gi.World.Query(w, g, l, 0, 0, cells, cells);
+        for (var i = 0; i < 2000 && matches; i++)
+        {
+            var cx = rng.Next(cells);
+            var cy = rng.Next(cells);
+            matches = naive.Query(cx, cy) == Gi.World.Query(w, g, l, cx, cy);
+        }
+
+        Console.WriteLine($"{(matches ? "PASS" : "FAIL")} naive-grid-matches-gi (full sum + 2000 sampled cells)");
+
+        var best = double.MaxValue;
+        for (var r = 0; r < 20; r++)
+        {
+            var t = Stopwatch.GetTimestamp();
+            naive.Rebuild();
+            var el = Stopwatch.GetElapsedTime(t).TotalMicroseconds;
+            if (el < best) best = el;
+        }
+        Console.WriteLine($"naive static frame (clear + {sources} sources): {best:F0} us");
+
+        best = double.MaxValue;
+        for (var r = 0; r < 20; r++)
+        {
+            var t = Stopwatch.GetTimestamp();
+            Gi.World.Process(w);
+            var el = Stopwatch.GetElapsedTime(t).TotalMicroseconds;
+            if (el < best) best = el;
+        }
+        Console.WriteLine($"Gi unchanged process: {best:F0} us");
+
+        var movers = new int[200];
+        for (var i = 0; i < movers.Length; i++) movers[i] = i * 19 % sources;
+        var naiveBest = double.MaxValue;
+        var giBest = double.MaxValue;
+        for (var r = -1; r < 20; r++)
+        {
+            var x = new int[200];
+            var y = new int[200];
+            for (var i = 0; i < movers.Length; i++)
+            {
+                x[i] = (movers[i] * 5 + (r + 1) * 37) % 1000 + 12;
+                y[i] = (movers[i] * 7 + (r + 1) * 11) % 1000 + 12;
+            }
+
+            var t = Stopwatch.GetTimestamp();
+            for (var i = 0; i < movers.Length; i++) naive.Move(movers[i], x[i], y[i]);
+            naive.Rebuild();
+            var el = Stopwatch.GetElapsedTime(t).TotalMicroseconds;
+            if (r >= 0 && el < naiveBest) naiveBest = el;
+
+            t = Stopwatch.GetTimestamp();
+            for (var i = 0; i < movers.Length; i++) Gi.World.Move(w, ids[movers[i]], x[i], y[i]);
+            Gi.World.Process(w);
+            el = Stopwatch.GetElapsedTime(t).TotalMicroseconds;
+            if (r >= 0 && el < giBest) giBest = el;
+        }
+
+        matches = naive.Sum() == Gi.World.Query(w, g, l, 0, 0, cells, cells);
+        Console.WriteLine($"{(matches ? "PASS" : "FAIL")} naive-grid-matches-gi-after-churn");
+        Console.WriteLine($"naive move-200 churn rebuild: {naiveBest:F0} us");
+        Console.WriteLine($"Gi move-200 churn process: {giBest:F0} us");
+
+        best = double.MaxValue;
+        long acc = 0;
+        for (var r = 0; r < 20; r++)
+        {
+            var t = Stopwatch.GetTimestamp();
+            acc += naive.Sum();
+            var el = Stopwatch.GetElapsedTime(t).TotalMicroseconds;
+            if (el < best) best = el;
+        }
+        Console.WriteLine($"naive full-grid sum (1M cells): {best:F0} us");
+
+        best = double.MaxValue;
+        for (var r = 0; r < 20; r++)
+        {
+            var t = Stopwatch.GetTimestamp();
+            acc += Gi.World.Query(w, g, l, 0, 0, cells, cells);
+            var el = Stopwatch.GetElapsedTime(t).TotalMicroseconds;
+            if (el < best) best = el;
+        }
+        Console.WriteLine($"Gi full-grid sum: {best:F1} us (checksum {acc})");
+    }
+
     public static void Timing()
     {
         var w = Gi.World.New();
