@@ -2,8 +2,10 @@ using System;
 using System.Globalization;
 using Gi;
 using UnityEngine;
+using Grid = Gi.Grid;
 
-namespace GiDemo;
+namespace GiDemo
+{
 
 public sealed class GiEcosystemDemo : MonoBehaviour
 {
@@ -37,7 +39,7 @@ public sealed class GiEcosystemDemo : MonoBehaviour
     private int _frames;
     private int _fps;
     private float _statClock;
-    private long _gcMark = GC.GetTotalAllocatedBytes();
+    private long _gcMark;
     private long _gcPerSecond;
     private long _queriesPerSecond;
     private long _queriesAtStat;
@@ -60,7 +62,7 @@ public sealed class GiEcosystemDemo : MonoBehaviour
         }
 
         _ = GiDemoStamps.WolfAura;
-        _gcMark = GC.GetTotalAllocatedBytes();
+        _gcMark = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong();
         BuildScene();
         SpawnFood();
         SpawnAgents();
@@ -192,7 +194,7 @@ public sealed class GiEcosystemDemo : MonoBehaviour
             _fps = _frames;
             _frames = 0;
             _statClock = 0f;
-            var gc = GC.GetTotalAllocatedBytes();
+            var gc = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong();
             _gcPerSecond = gc - _gcMark;
             _gcMark = gc;
             _queriesPerSecond = Queries - _queriesAtStat;
@@ -323,9 +325,10 @@ public sealed class GiEcosystemDemo : MonoBehaviour
             + "   sim+queries " + _frameMs.ToString("F2", CultureInfo.InvariantCulture) + " ms"
             + "   field queries/s " + _queriesPerSecond.ToString("N0", CultureInfo.InvariantCulture)
             + "\nwolves " + WolfCount + "   sheep " + SheepCount + "   eaten " + _eaten.ToString(CultureInfo.InvariantCulture)
-            + "\nmanaged alloc/s (incl UI) " + _gcPerSecond.ToString("N0", CultureInfo.InvariantCulture) + " B"
+            + "\nmanaged heap delta/s " + _gcPerSecond.ToString("N0", CultureInfo.InvariantCulture) + " B"
             + "\n" + _conservation
             + "\nhold LMB: fear brush chases the cursor   hold RMB: paint food";
         GUI.Label(new Rect(14f, 14f, 940f, 140f), stats);
     }
+}
 }

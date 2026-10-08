@@ -5,7 +5,8 @@ using UnityEditor.Build.Reporting;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 
-namespace GiDemo.Editor;
+namespace GiDemo.Editor
+{
 
 public static class GiDemoBuild
 {
@@ -49,4 +50,5 @@ public static class GiDemoBuild
             EditorApplication.Exit(1);
         }
     }
+}
 }

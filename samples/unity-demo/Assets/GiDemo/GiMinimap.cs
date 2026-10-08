@@ -1,6 +1,7 @@
 using UnityEngine;
 
-namespace GiDemo;
+namespace GiDemo
+{
 
 internal sealed class GiMinimap
 {
@@ -58,4 +59,5 @@ internal sealed class GiMinimap
         _texture.SetPixels32(_pixels);
         _texture.Apply(false);
     }
+}
 }

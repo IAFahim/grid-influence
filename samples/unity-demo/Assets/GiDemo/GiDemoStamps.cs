@@ -1,7 +1,8 @@
 using System;
 using Gi;
 
-namespace GiDemo;
+namespace GiDemo
+{
 
 internal static class GiDemoStamps
 {
@@ -9,7 +10,7 @@ internal static class GiDemoStamps
     internal static readonly byte WolfAura = Gaussian(17, 110);
     internal static readonly byte FearBrush = Gaussian(15, 140);
 
-    private static byte Gaussian(int size, int peak)
+    private static unsafe byte Gaussian(int size, int peak)
     {
         var samples = new sbyte[size * size];
         double c = (size - 1) / 2.0, sigma = size / 5.0;
@@ -20,6 +21,7 @@ internal static class GiDemoStamps
             var v = peak * Math.Exp(-(dx * dx + dy * dy) / (2 * sigma * sigma));
             samples[y * size + x] = (sbyte)Math.Clamp((int)Math.Round(v), -128, 127);
         }
-        return Stamp.New(samples, size, size);
+        fixed (sbyte* p = samples) return Stamp.New(p, size, size);
     }
+}
 }

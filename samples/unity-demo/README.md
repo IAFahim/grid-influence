@@ -30,12 +30,27 @@ sheep; sheep steer entirely by field queries; you paint fear and food with the m
 
 ## The Gi assembly
 
-`Assets/GiDemo/Plugins/Gi.dll` is a stock `net10.0` build (0.3.0-alpha.1). Refresh it with:
+`Assets/GiDemo/Plugins/Gi.dll` is the `netstandard2.1` build of Gi (the csproj
+multi-targets `net10.0;netstandard2.1`). WebGL is IL2CPP in this editor cycle and
+compiles scripts against the netstandard profile; a net10.0 dll cannot unify there
+(CS1705). Editor/standalone CoreCLR targets can swap in the net10.0 build. Refresh with:
 
 ```sh
 dotnet build src/Gi/Gi.csproj -c Release
-cp src/Gi/bin/Release/net10.0/Gi.dll samples/unity-demo/Assets/GiDemo/Plugins/
+cp src/Gi/bin/Release/netstandard2.1/Gi.dll samples/unity-demo/Assets/GiDemo/Plugins/
 ```
 
-The demo uses only the public surface: `World`, `Grid`, `Layer`, `Stamp`. No unsafe code,
-no wrappers — the same calls the console samples and benchmarks make.
+## Web build from the CLI
+
+Requires the `webgl` module for the editor (`unity install-modules -e 7000.0.0a7 -m webgl`):
+
+```sh
+cd samples/unity-demo
+unity build . --target WebGL --execute-method GiDemo.Editor.GiDemoBuild.BuildWeb -o Build/WebGL
+cd Build/WebGL && python3 -m http.server 8735
+```
+
+The build method sets compression to Disabled so a plain static server works; wasm
+players do not run from `file://`. The demo uses only the public surface: `World`,
+`Grid`, `Layer`, `Stamp`. No wrappers — the same calls the console samples and
+benchmarks make.

@@ -2,7 +2,8 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEditor;
 
-namespace GiDemo.Editor;
+namespace GiDemo.Editor
+{
 
 public static class GiDemoMenu
 {
@@ -16,4 +17,5 @@ public static class GiDemoMenu
         Selection.activeGameObject = host;
         Debug.Log("Gi demo scene saved to Assets/GiDemo/GiDemoScene.unity — press Play");
     }
+}
 }

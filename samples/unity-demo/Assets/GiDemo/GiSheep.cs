@@ -1,7 +1,8 @@
 using Gi;
 using UnityEngine;
 
-namespace GiDemo;
+namespace GiDemo
+{
 
 internal sealed class GiSheep
 {
@@ -68,4 +69,5 @@ internal sealed class GiSheep
         Pos = new Vector2(8f + (float)rng.NextDouble() * 240f, 8f + (float)rng.NextDouble() * 240f);
         Vel = Vector2.zero;
     }
+}
 }

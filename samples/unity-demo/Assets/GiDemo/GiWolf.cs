@@ -1,6 +1,7 @@
 using UnityEngine;
 
-namespace GiDemo;
+namespace GiDemo
+{
 
 internal sealed class GiWolf
 {
@@ -18,4 +19,5 @@ internal sealed class GiWolf
         if (Vel.sqrMagnitude > 0.02f)
             Body.rotation = Quaternion.LookRotation(new Vector3(Vel.x, 0f, Vel.y), Vector3.up);
     }
+}
 }
