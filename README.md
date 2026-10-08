@@ -11,7 +11,7 @@ pages. The re-emitted design was measured and retired — see [Receipts](#receip
 ## Get started
 
 ```sh
-dotnet add package Gi.Influence --version 0.2.0-alpha.1
+dotnet add package Gi.Influence --version 0.3.0-alpha.1
 ```
 
 ```csharp
@@ -37,6 +37,113 @@ World.Clear(world);                      // frees every live tile block
 
 A world mixes resolutions freely — e.g. a 1024² grid near the camera and 64² grids far away —
 and a source deposits into every grid it overlaps, at each grid's own scale.
+
+## Use cases
+
+**Threat maps for AI.** Stamp every enemy's reach once; score candidate positions with page
+reads. Placement never rescales — the field is always query-ready after `Process`.
+
+```csharp
+byte threats = Layer.New(world);
+foreach (var enemy in enemies)
+    World.Place(world, threats, enemy.X, enemy.Y, enemy.Reach, enemy.IsElite ? 12 : 6);
+World.Process(world);
+
+var safest = candidates.MinBy(c => World.QueryAt(world, grid, threats, c.X, c.Y));
+```
+
+**Teams and auras as layers.** Layers are independent channels on every grid, so opposing
+fields coexist and comparisons are two reads.
+
+```csharp
+byte red = Layer.New(world);
+byte blue = Layer.New(world);
+var balance = World.Query(world, grid, red, x, y) - World.Query(world, grid, blue, x, y);
+var redDominates = World.Query(world, grid, red, x, y, w, h) >
+                   World.Query(world, grid, blue, x, y, w, h);   // O(tiles), not O(cells)
+```
+
+**One world, two LODs.** The same sources feed a detail grid for pathing and a coarse grid for
+the strategic view — world-anchored extents and mip chains keep both exact and anti-aliased.
+
+```csharp
+byte detail   = Grid.New(world, power: 11, 0f, 0f, 2048f);   // 2048² for steering
+byte overview = Grid.New(world, power: 7, 0f, 0f, 2048f);    // 128² for the UI minimap
+```
+
+**Rendering a field.** `QueryRegion` fills your pixel buffer directly — row-major, clipped,
+zero allocation:
+
+```csharp
+fixed (short* dst = tile)
+    World.QueryRegion(world, grid, threats, viewX, viewY, viewW, viewH, dst);
+```
+
+### Bézier curves: roads, patrols, brush strokes
+
+Gi is unusually well suited to spline-shaped influence. A cubic evaluation is all you need:
+
+```csharp
+static (float X, float Y) Bezier(
+    (float X, float Y) a, (float X, float Y) b,
+    (float X, float Y) c, (float X, float Y) d, float t)
+{
+    var u = 1f - t;
+    return (u * u * u * a.X + 3f * u * u * t * b.X + 3f * u * t * t * c.X + t * t * t * d.X,
+            u * u * u * a.Y + 3f * u * u * t * b.Y + 3f * u * t * t * c.Y + t * t * t * d.Y);
+}
+```
+
+**A static corridor** — river current, road speed bonus, wind shear — is one pass of placements
+with gain shaped by the parameter. Rule of thumb: sample at about half the stamp width so
+neighbors overlap. Static fields cost nothing per frame afterwards (idle `Process` is 0 µs).
+
+```csharp
+byte slow = Stamp.Box(12, 12, 45);
+for (var i = 0; i <= 96; i++)
+{
+    var t = i / 96f;
+    var (x, y) = Bezier(p0, p1, p2, p3, t);
+    World.Place(world, slowZone, x, y, slow, 4 + (int)(6f * MathF.Sin(MathF.PI * t)));
+}
+World.Process(world);
+```
+
+**A source gliding along the curve** — patrol drone, escort buff, tethered effect — is the
+cheapest mutation Gi has: `Move` negates the old deposit and writes the new one as a handful of
+difference-array corners, then `Process` resolves the one or two tiles crossed.
+
+```csharp
+var t = clock.Elapsed.TotalSeconds % 1.0;
+var (x, y) = Bezier(p0, p1, p2, p3, (float)t);
+World.Move(world, source, x, y);
+World.Process(world);
+```
+
+**Brush strokes.** Bake a smooth falloff as a raster stamp and draw it along the curve: Q8
+sub-cell placement makes consecutive samples blend without banding, and the baked mip chain
+keeps the stroke anti-aliased when a coarser grid minifies it — the same technology image
+editors use for brush tips.
+
+```csharp
+var falloff = new sbyte[16 * 16];
+for (var y = 0; y < 16; y++)
+for (var x = 0; x < 16; x++)
+{
+    var d = MathF.Sqrt((x - 7.5f) * (x - 7.5f) + (y - 7.5f) * (y - 7.5f)) / 8f;
+    falloff[y * 16 + x] = (sbyte)(100f * MathF.Max(0f, 1f - d));
+}
+byte brush = Stamp.New(falloff, 16, 16);     // mip chain baked here, once
+```
+
+**Asking the curve questions.** Sampling density is a free parameter — deposits are commutative
+integer adds, so refine or coarsen without changing results. Region reads score exposure in
+O(tiles): "how much slow-zone does this detour cross", "total threat under this spline segment".
+
+```csharp
+long crossing = World.Query(world, grid, slowZone, clipX, clipY, clipW, clipH);
+short  along  = World.QueryAt(world, grid, slowZone, x, y);
+```
 
 ## How it works
 
