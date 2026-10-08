@@ -57,16 +57,22 @@ benchmarks make.
 
 ## Known 7000.0.0a7 player-export bugs
 
-Both bugs are engine-side; the demo and Gi are unaffected (the same scene runs in the
-editor and the web player until the trap below fires).
-
 - **WebGL traps mid-run**: `RuntimeError: function signature mismatch` from
   `StaticContentLoadUpdate` invoking `Unity.Loading.ContentLoadingSystem.ProcessResults`
   (symbolicated via `debugSymbolMode: External`). The method is compiled in, the
   engine's lookup misses, a fallback invoke traps. Timing is nondeterministic; disabling
   engine code stripping does not fix it — that only trades the trap for a hang at 90%
   load. Re-test on newer editors.
-- **Linux player renders solid black**: `StandaloneLinux64` (CoreCLRShared variation)
-  boots clean, presents nothing — reproduced with an empty project containing only the
-  default camera and one cube, zero demo code. `GiDemoBuild.BuildLinux` is kept for
-  re-testing when the editor is updated.
+- **Built-in Render Pipeline renders solid black on the Linux CoreCLR player**: the
+  demo therefore ships URP (`com.unity.render-pipelines.universal` 17.7.0, Linear color
+  space, pipeline assets under `Assets/GiDemo/Settings`). Verified working: a URP
+  camera+cube control project renders; the same scene on the Built-in pipeline presents
+  nothing. The CoreCLR player itself is healthy — keep the Unity 7 (.NET 10) story.
+
+## Linux build from the CLI
+
+```sh
+unity build samples/unity-demo --target StandaloneLinux64 \
+  --execute-method GiDemo.Editor.GiDemoBuild.BuildLinux -o samples/unity-demo/Build/Linux64
+samples/unity-demo/Build/Linux64/unity-demo -screen-fullscreen 0 -screen-width 1280 -screen-height 720
+```
