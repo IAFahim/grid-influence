@@ -42,7 +42,7 @@ cp src/Gi/bin/Release/netstandard2.1/Gi.dll samples/unity-demo/Assets/GiDemo/Plu
 
 ## Web build from the CLI
 
-Requires the `webgl` module for the editor (`unity install-modules -e 7000.0.0a7 -m webgl`):
+Requires the `webgl` module for the editor (`unity install-modules -e 7000.0.0a8 -m webgl`):
 
 ```sh
 cd samples/unity-demo
@@ -55,19 +55,24 @@ players do not run from `file://`. The demo uses only the public surface: `World
 `Grid`, `Layer`, `Stamp`. No wrappers — the same calls the console samples and
 benchmarks make.
 
-## Known 7000.0.0a7 player-export bugs
+## Editor version notes
 
-- **WebGL traps mid-run**: `RuntimeError: function signature mismatch` from
+- **7000.0.0a8** is the build editor (project pin). Verified: the WebGL player survives
+  long soak plus heavy fear-brush stress with zero console errors and live conservation
+  receipts; the Linux CoreCLR player renders under URP.
+- **7000.0.0a7 had two player bugs**, kept here for the record: the WebGL player
+  trapped mid-run with `RuntimeError: function signature mismatch` from
   `StaticContentLoadUpdate` invoking `Unity.Loading.ContentLoadingSystem.ProcessResults`
-  (symbolicated via `debugSymbolMode: External`). The method is compiled in, the
-  engine's lookup misses, a fallback invoke traps. Timing is nondeterministic; disabling
-  engine code stripping does not fix it — that only trades the trap for a hang at 90%
-  load. Re-test on newer editors.
-- **Built-in Render Pipeline renders solid black on the Linux CoreCLR player**: the
-  demo therefore ships URP (`com.unity.render-pipelines.universal` 17.7.0, Linear color
-  space, pipeline assets under `Assets/GiDemo/Settings`). Verified working: a URP
-  camera+cube control project renders; the same scene on the Built-in pipeline presents
-  nothing. The CoreCLR player itself is healthy — keep the Unity 7 (.NET 10) story.
+  (symbolicated via `debugSymbolMode: External`; the method is compiled in, the
+  engine's lookup misses, a fallback invoke traps — disabling engine code stripping
+  only trades the trap for a hang at 90% load); and the Linux CoreCLR player presented
+  solid black for Built-in Render Pipeline scenes, which is why this demo ships URP.
+- The Hub CLI occasionally installs the WebGL module double-nested
+  (`WebGLSupport/Editor/Data/PlaybackEngines/WebGLSupport/*`); the build then fails with
+  `Build target 'WebGL' not supported` — move the inner directory's contents up to
+  `PlaybackEngines/WebGLSupport/` and delete the scaffolding.
+- 6000.6.5f1 cannot build this project as-is: the URP 17.7 pipeline assets are newer
+  than the URP that editor resolves (17.6), and its preprocessor rejects them.
 
 ## Linux build from the CLI
 
