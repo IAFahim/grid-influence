@@ -87,6 +87,7 @@ internal static unsafe class TileBake
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int ClipBands(
         int origin, int phase, int extent, int tileLo, int tileHi,
         int* bandLo, int* bandHi, int* bandWeight)
