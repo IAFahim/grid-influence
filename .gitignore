@@ -6,3 +6,13 @@ artifacts/
 viz/out/
 tools/stats/out/
 samples/scene/frames/
+samples/unity-demo/Library/
+samples/unity-demo/Temp/
+samples/unity-demo/Logs/
+samples/unity-demo/Obj/
+samples/unity-demo/obj/
+samples/unity-demo/UserSettings/
+samples/unity-demo/Build/
+samples/unity-demo/*.csproj
+samples/unity-demo/*.sln
+samples/unity-demo/Assets/GiDemo/Plugins/*.pdb
