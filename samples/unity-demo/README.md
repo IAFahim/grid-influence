@@ -54,3 +54,19 @@ The build method sets compression to Disabled so a plain static server works; wa
 players do not run from `file://`. The demo uses only the public surface: `World`,
 `Grid`, `Layer`, `Stamp`. No wrappers — the same calls the console samples and
 benchmarks make.
+
+## Known 7000.0.0a7 player-export bugs
+
+Both bugs are engine-side; the demo and Gi are unaffected (the same scene runs in the
+editor and the web player until the trap below fires).
+
+- **WebGL traps mid-run**: `RuntimeError: function signature mismatch` from
+  `StaticContentLoadUpdate` invoking `Unity.Loading.ContentLoadingSystem.ProcessResults`
+  (symbolicated via `debugSymbolMode: External`). The method is compiled in, the
+  engine's lookup misses, a fallback invoke traps. Timing is nondeterministic; disabling
+  engine code stripping does not fix it — that only trades the trap for a hang at 90%
+  load. Re-test on newer editors.
+- **Linux player renders solid black**: `StandaloneLinux64` (CoreCLRShared variation)
+  boots clean, presents nothing — reproduced with an empty project containing only the
+  default camera and one cube, zero demo code. `GiDemoBuild.BuildLinux` is kept for
+  re-testing when the editor is updated.

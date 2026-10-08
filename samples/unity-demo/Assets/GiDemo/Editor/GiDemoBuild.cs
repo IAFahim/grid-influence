@@ -12,15 +12,23 @@ public static class GiDemoBuild
 {
     private const string ScenePath = "Assets/GiDemo/GiDemoScene.unity";
 
-    public static void BuildWeb()
+    public static void BuildWeb() => Build(BuildTarget.WebGL, "Build/WebGL", "");
+
+    public static void BuildLinux() => Build(BuildTarget.StandaloneLinux64, "Build/Linux64", "unity-demo");
+
+    private static void Build(BuildTarget target, string defaultOutput, string executable)
     {
         try
         {
-            PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Disabled;
+            if (target == BuildTarget.WebGL)
+            {
+                PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Disabled;
+                PlayerSettings.WebGL.debugSymbolMode = WebGLDebugSymbolMode.External;
+            }
 
             if (!File.Exists(ScenePath)) GiDemoMenu.CreateDemoScene();
 
-            var output = "Build/WebGL";
+            var output = defaultOutput;
             var args = Environment.GetCommandLineArgs();
             for (var i = 0; i < args.Length - 1; i++)
                 if (args[i] == "-buildOutput") output = args[i + 1];
@@ -32,13 +40,13 @@ public static class GiDemoBuild
             var report = BuildPipeline.BuildPlayer(new BuildPlayerOptions
             {
                 scenes = new[] { ScenePath },
-                locationPathName = location,
-                target = BuildTarget.WebGL,
+                locationPathName = executable.Length == 0 ? location : Path.Combine(location, executable),
+                target = target,
                 options = BuildOptions.None
             });
 
             var summary = report.summary;
-            Debug.Log("GiDemo WebGL build " + summary.result + " size " + summary.totalSize + " errors " + summary.totalErrors);
+            Debug.Log("GiDemo " + target + " build " + summary.result + " size " + summary.totalSize + " errors " + summary.totalErrors);
             if (summary.result != BuildResult.Succeeded || summary.totalErrors > 0)
                 EditorApplication.Exit(1);
             else

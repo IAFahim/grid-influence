@@ -16,3 +16,4 @@ samples/unity-demo/Build/
 samples/unity-demo/*.csproj
 samples/unity-demo/*.sln
 samples/unity-demo/Assets/GiDemo/Plugins/*.pdb
+scratch/
