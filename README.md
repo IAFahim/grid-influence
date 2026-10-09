@@ -11,7 +11,7 @@ pages. The re-emitted design was measured and retired — see [Receipts](#receip
 ## Get started
 
 ```sh
-dotnet add package Gi.Influence --version 0.3.0-alpha.1
+dotnet add package Gi.Influence --version 0.4.0-alpha.1
 ```
 
 ```csharp
@@ -148,18 +148,23 @@ short  along  = World.QueryAt(world, grid, slowZone, x, y);
 ## How it works
 
 - **Handles, not objects.** `World`, `Grid`, `Layer`, `Stamp` return `byte` ids into static
-  unmanaged arenas; `Place` returns an `int` source id. No managed allocation anywhere on the
+  unmanaged arenas; `Place` returns an `int` source id that packs a generation above the slot
+  index — removed slots recycle through a free list, and a stale id is an inert no-op. No managed
+  allocation anywhere on the
   data path.
 - **Deposits are incremental.** Each live tile owns one 6,528 B block (difference array + `int16`
   page + `int64` page sum); raster deposits attach a dense buffer once, growing the block to
   10,624 B — box-only tiles never carry it. `Place`/`Move`/`SetGain`/`Remove` apply exact integer
-  deltas immediately — moving a source never rescans the field.
+  deltas immediately — moving a source never rescans the field. Gain is signed (−16–16), so one
+  layer can hold opposing pressures.
 - **`Process` touches only dirty tiles.** A 2D prefix sum resolves each dirty difference array,
   saturates to `short` after summation (so cancellation is preserved), records the page sum, and
-  frees tiles that resolve to zero. Layers with ≥32 dirty tiles resolve on a small worker pool;
+  frees tiles that resolve to zero. A world with ≥32 dirty tiles in total fans the whole drain
+  over a small worker pool — one flattened queue across grids and layers;
   an unchanged world costs nothing.
-- **Queries read maintained state.** Cell reads are one page lookup; full-grid sums add one
-  `int64` per live page; `QueryRegion` bulk fills use vectorized row copies.
+- **Queries read maintained state.** Cell reads are one page lookup; region sums read one
+  `int64` per fully covered tile and scan only the clipped edge strips; `QueryRegion` bulk fills
+  use vectorized row copies.
 - **Sub-cell placement, world-anchored extents.** Positions convert to cell space in Q8; raster
   stamps deposit with bilinear edge weights, uniform rasters take a difference-array box path.
   A stamp covers the same world rect on every grid of its world: extents scale with the grid,
@@ -274,9 +279,10 @@ long total = World.Query(world, grid, layer, 0, 0, 1024, 1024); // one int64 per
 
 The gap is structural, not tuning. Deposits write difference-array corners (four `int` writes
 per clipped stamp band); `Process` resolves each dirty 32×32 tile once through a 2D prefix sum
-— fanned across a worker pool past 32 dirty tiles — saturating to `short` exactly once;
+— fanned across a worker pool past 32 total dirty tiles — saturating to `short` exactly once;
 `Query` is a hash lookup plus page read; region sums read per-page `int64` accumulators
-maintained at resolve. Sparse worlds also flip the memory story: the naive grid allocates N²
+maintained at resolve, scanning only edge strips that clip a tile boundary. Sparse worlds also
+flip the memory story: the naive grid allocates N²
 ints per layer up front (67 MB for a 4096² layer, 1 GB at 16384²), while Gi allocates ~6.5 KB
 per live tile — an empty 16384² world costs zero.
 
@@ -297,6 +303,22 @@ Parallel resolve scales with the dirty-list size and the memory ceiling, not cor
 shrank 12,480 → 10,624 B (difference-array pitch 48 → 33 ints) and then to 6,528 B for box-only
 tiles (dense buffers attach lazily per raster tile; a 9,267-tile box scene dropped from ~98.5 MB
 to ~61 MB). Pages are bit-identical pooled or sequential.
+
+Measured-fixes pass (i9-14900K, .NET 10, interleaved A/B against `2aba36d`, min over reps;
+same scenes, bit-identical output):
+
+| scene | before | after | change |
+| --- | ---: | ---: | --- |
+| region sum 1022² of 1024² (4000 sources) | 391 µs | 15 µs | per-tile `int64` sums + vectorized edge strips (~25×) |
+| region sum 4094² of 4096² (dense) | 8,074 µs | 206 µs | same (~39×) |
+| tile-aligned region 960² of 1024² | 348 µs | 6.4 µs | sums only (~54×) |
+| move-400 process, 16 layers × ~25 dirty | 93 µs | 64 µs | world-total pooled fan-out |
+| move-200 churn process | 116–121 µs | 68–81 µs | pooled fan-out + fewer per-layer decisions |
+
+The same pass fixed `QueryAt` to use the deposits' truncated `ScaleQ8` mapping (on a
+2^14-cells-over-10000-units grid the float mapping read the wrong cell at 199 of 200 sampled
+source positions), made source ids recycle through a free list with generation bits (2M
+place/remove pairs used to leave the last id at 1,999,999), and made gain signed.
 
 ## Run the full thing
 

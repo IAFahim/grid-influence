@@ -18,6 +18,11 @@ internal static class Verification
         Check("warm-query-allocates-0-bytes", WarmQueryAllocationFree());
         Check("query-region-matches-cells", QueryRegionMatchesCells());
         Check("page-sum-matches-scan", PageSumMatchesScan());
+        Check("region-sum-matches-cell-scans", RegionSumMatchesCellScans());
+        Check("query-at-matches-deposits", QueryAtMatchesDeposits());
+        Check("source-slots-reuse-and-stale-handles-inert", SourceSlotsReuseAndStaleInert());
+        Check("signed-gain-exact", SignedGainExact());
+        Check("multi-layer-pooled-matches-scans", MultiLayerPooledMatchesScans());
         Check("saturated-sum-clamps", SaturatedSumClamps());
         Check("cross-grid-sums-conserve-world-integral", CrossGridSumsConserve());
 
@@ -323,6 +328,221 @@ internal static class Verification
                 for (var cx = 0; cx < 256; cx++)
                     scan += Gi.World.Query(w, g, l, cx, cy);
                 if (sum != scan) return false;
+
+                var partial = Gi.World.Query(w, g, l, 1, 1, 254, 254);
+                var partialScan = 0L;
+                for (var cy = 1; cy < 255; cy++)
+                for (var cx = 1; cx < 255; cx++)
+                    partialScan += Gi.World.Query(w, g, l, cx, cy);
+                if (partial != partialScan) return false;
+
+                var strip = Gi.World.Query(w, g, l, 30, 0, 190, 256);
+                var stripScan = 0L;
+                for (var cy = 0; cy < 256; cy++)
+                for (var cx = 30; cx < 220; cx++)
+                    stripScan += Gi.World.Query(w, g, l, cx, cy);
+                if (strip != stripScan) return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool RegionSumMatchesCellScans()
+    {
+        var w = Gi.World.New();
+        var g = Gi.Grid.New(w, 9, 0f, 0f, 512f);
+        var l = Gi.Layer.New(w);
+        var box = Gi.Stamp.Box(14, 14, 80);
+        var samples = new sbyte[6 * 9];
+        for (var i = 0; i < samples.Length; i++) samples[i] = (sbyte)(i * 17 % 40 - 20);
+        var raster = Gi.Stamp.New(samples, 6, 9);
+        var rng = new Random(77);
+        for (var i = 0; i < 400; i++)
+            Gi.World.Place(w, l, (float)(rng.NextDouble() * 512), (float)(rng.NextDouble() * 512),
+                rng.Next(2) == 0 ? box : raster, 4 + rng.Next(13));
+        Gi.World.Process(w);
+
+        (int x, int y, int width, int height)[] regions =
+        {
+            (0, 0, 512, 512),
+            (1, 1, 510, 510),
+            (0, 0, 511, 512),
+            (17, 0, 478, 512),
+            (63, 129, 130, 127),
+            (33, 65, 1, 1),
+            (5, 500, 200, 40),
+            (-10, -10, 540, 540),
+            (502, 502, 20, 20),
+        };
+
+        foreach (var (x, y, width, height) in regions)
+        {
+            var scan = 0L;
+            for (var row = 0; row < height; row++)
+            for (var col = 0; col < width; col++)
+            {
+                var cy = y + row;
+                var cx = x + col;
+                if ((uint)cx < 512 && (uint)cy < 512) scan += Gi.World.Query(w, g, l, cx, cy);
+            }
+
+            if (Gi.World.Query(w, g, l, x, y, width, height) != scan) return false;
+        }
+
+        return true;
+    }
+
+    private static bool QueryAtMatchesDeposits()
+    {
+        var w = Gi.World.New();
+        var g = Gi.Grid.New(w, 14, 0f, 0f, 10000f);
+        var l = Gi.Layer.New(w);
+        var stamp = Gi.Stamp.Box(4, 4, 60);
+        var scale = 16384f / 10000f;
+        var scaleQ8 = (int)(scale * 256f);
+        var rng = new Random(97);
+        var xs = new float[200];
+        var ys = new float[200];
+        var diverged = 0;
+        for (var i = 0; i < 200; i++)
+        {
+            xs[i] = (float)(rng.NextDouble() * 9800 + 100);
+            ys[i] = (float)(rng.NextDouble() * 9800 + 100);
+            Gi.World.Place(w, l, xs[i], ys[i], stamp, 6);
+            var cx = (int)MathF.Floor(xs[i] * scaleQ8) >> 8;
+            var cy = (int)MathF.Floor(ys[i] * scaleQ8) >> 8;
+            var floatCx = (int)MathF.Floor(xs[i] * scale);
+            var floatCy = (int)MathF.Floor(ys[i] * scale);
+            if (cx != floatCx || cy != floatCy) diverged++;
+        }
+
+        Gi.World.Process(w);
+        if (diverged == 0) return false;
+        for (var i = 0; i < 200; i++)
+        {
+            var cx = (int)MathF.Floor(xs[i] * scaleQ8) >> 8;
+            var cy = (int)MathF.Floor(ys[i] * scaleQ8) >> 8;
+            if (Gi.World.Query(w, g, l, cx, cy) != Gi.World.QueryAt(w, g, l, xs[i], ys[i])) return false;
+        }
+
+        return true;
+    }
+
+    private static bool SourceSlotsReuseAndStaleInert()
+    {
+        var w = Gi.World.New();
+        var g = Gi.Grid.New(w, 6, 0f, 0f, 64f);
+        var l = Gi.Layer.New(w);
+        var stamp = Gi.Stamp.Box(4, 4, 40);
+        var survivor = Gi.World.Place(w, l, 12f, 12f, stamp, 5);
+        var first = -1;
+        for (var i = 0; i < 2000; i++)
+        {
+            var id = Gi.World.Place(w, l, 40f, 40f, stamp, 3);
+            if (i == 0) first = id;
+            Gi.World.Remove(w, id);
+        }
+
+        var reused = Gi.World.Place(w, l, 40f, 40f, stamp, 3);
+        if (reused == first) return false;
+        Gi.World.Process(w);
+        if (Gi.World.Query(w, g, l, 0, 0, 64, 64) != 5 * 40 * 16 + 3 * 40 * 16) return false;
+
+        Gi.World.Move(w, first, 8f, 8f);
+        Gi.World.SetGain(w, first, 1);
+        Gi.World.Remove(w, first);
+        Gi.World.Process(w);
+        if (Gi.World.Query(w, g, l, 0, 0, 64, 64) != 5 * 40 * 16 + 3 * 40 * 16) return false;
+
+        Gi.World.Move(w, survivor, 20f, 20f);
+        Gi.World.Process(w);
+        if (Gi.World.Query(w, g, l, 20, 20) != 5 * 40) return false;
+        return Gi.World.Query(w, g, l, 12, 12) == 0;
+    }
+
+    private static bool SignedGainExact()
+    {
+        var w = Gi.World.New();
+        var g = Gi.Grid.New(w, 6, 0f, 0f, 64f);
+        var l = Gi.Layer.New(w);
+        var stamp = Gi.Stamp.Box(8, 8, 50);
+        var plus = Gi.World.Place(w, l, 32f, 32f, stamp, 8);
+        var minus = Gi.World.Place(w, l, 32f, 32f, stamp, -3);
+        Gi.World.Process(w);
+        if (Gi.World.Query(w, g, l, 32, 32) != 8 * 50 - 3 * 50) return false;
+        if (Gi.World.Query(w, g, l, 0, 0, 64, 64) != (8 * 50 - 3 * 50) * 64) return false;
+
+        Gi.World.SetGain(w, plus, -8);
+        Gi.World.SetGain(w, minus, 3);
+        Gi.World.Process(w);
+        if (Gi.World.Query(w, g, l, 32, 32) != -8 * 50 + 3 * 50) return false;
+
+        Gi.World.SetGain(w, plus, 20);
+        Gi.World.SetGain(w, minus, -20);
+        Gi.World.Process(w);
+        if (Gi.World.Query(w, g, l, 32, 32) != 16 * 50 - 16 * 50) return false;
+
+        Gi.World.Remove(w, plus);
+        Gi.World.Remove(w, minus);
+        Gi.World.Process(w);
+        return Gi.World.Query(w, g, l, 0, 0, 64, 64) == 0;
+    }
+
+    private static bool MultiLayerPooledMatchesScans()
+    {
+        var w = Gi.World.New();
+        var g = Gi.Grid.New(w, 8, 0f, 0f, 256f);
+        var stamp = Gi.Stamp.Box(10, 10, 70);
+        var rng = new Random(101);
+        const int layers = 16;
+        var layerIds = new byte[layers];
+        for (var l = 0; l < layers; l++) layerIds[l] = Gi.Layer.New(w);
+        var sources = new int[layers][];
+
+        for (var churn = 0; churn < 3; churn++)
+        {
+            for (var l = 0; l < layers; l++)
+            {
+                sources[l] = new int[30];
+                for (var i = 0; i < 30; i++)
+                    sources[l][i] = Gi.World.Place(w, layerIds[l],
+                        (float)(rng.NextDouble() * 256), (float)(rng.NextDouble() * 256), stamp, 1 + rng.Next(16));
+            }
+
+            if (churn > 0)
+                for (var l = 0; l < layers; l++)
+                    for (var i = 0; i < 10; i++)
+                        Gi.World.Remove(w, sources[l][rng.Next(30)]);
+
+            Gi.World.Process(w);
+            for (var l = 0; l < layers; l++)
+            {
+                var sum = Gi.World.Query(w, g, layerIds[l], 0, 0, 256, 256);
+                var scan = 0L;
+                for (var cy = 0; cy < 256; cy++)
+                for (var cx = 0; cx < 256; cx++)
+                    scan += Gi.World.Query(w, g, layerIds[l], cx, cy);
+                if (sum != scan) return false;
+
+                var partial = Gi.World.Query(w, g, layerIds[l], 1, 1, 254, 254);
+                var partialScan = 0L;
+                for (var cy = 1; cy < 255; cy++)
+                for (var cx = 1; cx < 255; cx++)
+                    partialScan += Gi.World.Query(w, g, layerIds[l], cx, cy);
+                if (partial != partialScan) return false;
+
+                for (var row = 0; row < 4; row++)
+                {
+                    var y = rng.Next(240);
+                    var x = rng.Next(240);
+                    var region = Gi.World.Query(w, g, layerIds[l], x, y, 16, 16);
+                    var rectScan = 0L;
+                    for (var cy = y; cy < y + 16; cy++)
+                    for (var cx = x; cx < x + 16; cx++)
+                        rectScan += Gi.World.Query(w, g, layerIds[l], cx, cy);
+                    if (region != rectScan) return false;
+                }
             }
         }
 
@@ -442,8 +662,9 @@ internal static class Verification
         var l = Gi.Layer.New(w);
         var stamp = Gi.Stamp.Box(16, 16, 60);
         var rng = new Random(17);
+        var ids = new int[4000];
         for (var i = 0; i < 4000; i++)
-            Gi.World.Place(w, l, (float)(rng.NextDouble() * 1024), (float)(rng.NextDouble() * 1024), stamp, 8);
+            ids[i] = Gi.World.Place(w, l, (float)(rng.NextDouble() * 1024), (float)(rng.NextDouble() * 1024), stamp, 8);
         Gi.World.Process(w);
 
         var best = double.MaxValue;
@@ -480,7 +701,7 @@ internal static class Verification
         Console.WriteLine($"query: {best / 10:F2} us per 1k cells ({acc})");
 
         var movers = new int[200];
-        for (var i = 0; i < movers.Length; i++) movers[i] = i * 19 % 4000;
+        for (var i = 0; i < movers.Length; i++) movers[i] = ids[i * 19 % 4000];
         best = double.MaxValue;
         for (var r = -1; r < 20; r++)
         {
@@ -522,6 +743,46 @@ internal static class Verification
             if (el < best) best = el;
         }
         Console.WriteLine($"full-grid sum (1024-grid): {best:F1} us ({total})");
+
+        best = double.MaxValue;
+        total = 0;
+        for (var r = 0; r < 20; r++)
+        {
+            var t = Stopwatch.GetTimestamp();
+            total += Gi.World.Query(w, g, l, 1, 1, 1022, 1022);
+            var el = Stopwatch.GetElapsedTime(t).TotalMicroseconds;
+            if (el < best) best = el;
+        }
+        Console.WriteLine($"partial-region sum (1022x1022 of 1024): {best:F1} us ({total})");
+
+        var mw = Gi.World.New();
+        var mg = Gi.Grid.New(mw, 8, 0f, 0f, 256f);
+        var mStamp = Gi.Stamp.Box(10, 10, 70);
+        var mLayers = new byte[16];
+        var mIds = new int[16][];
+        for (var li = 0; li < 16; li++)
+        {
+            mLayers[li] = Gi.Layer.New(mw);
+            mIds[li] = new int[25];
+            for (var i = 0; i < 25; i++)
+                mIds[li][i] = Gi.World.Place(mw, mLayers[li], (float)(rng.NextDouble() * 256), (float)(rng.NextDouble() * 256), mStamp, 8);
+        }
+
+        Gi.World.Process(mw);
+        best = double.MaxValue;
+        for (var r = -1; r < 20; r++)
+        {
+            var t = Stopwatch.GetTimestamp();
+            for (var li = 0; li < 16; li++)
+                for (var i = 0; i < 25; i++)
+                    Gi.World.Move(mw, mIds[li][i],
+                        (mIds[li][i] * 3.13f + (r + 1) * 17.7f) % 256f,
+                        (mIds[li][i] * 5.29f + (r + 1) * 13.3f) % 256f);
+            Gi.World.Process(mw);
+            var el = Stopwatch.GetElapsedTime(t).TotalMicroseconds;
+            if (r >= 0 && el < best) best = el;
+        }
+        Console.WriteLine($"move-400 across 16 layers process (~25 dirty each): {best:F0} us");
 
         var region = new short[256 * 256];
         best = double.MaxValue;

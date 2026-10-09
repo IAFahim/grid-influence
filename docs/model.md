@@ -18,7 +18,14 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   four — missing samples count as zero, so the field tapers to zero at the stamp's true extent),
   bordered identically and packed contiguously.
 - **Sources** are persistent placements: `World.Place(world, layer, x, y, stamp, gain)` returns an
-  int id; `Move`/`SetGain`/`Remove`/`Clear` mutate it. `gain` is an integer 0–16. Positions are
+  int id; `Move`/`SetGain`/`Remove`/`Clear` mutate it. `gain` is an integer −16–16 (stored as one
+  `sbyte`-ranged byte; deltas deposit exactly, so a negative gain subtracts). The id packs a
+  7-bit generation above a 24-bit slot index; `Remove` recycles the slot through a per-world free
+  list and the next fill of that slot bumps its generation, so a stale id (dead slot, recycled
+  slot, or out-of-range) is an inert no-op for `Move`/`SetGain`/`Remove`. Generations wrap after
+  128 fills of one slot, and `Place` returns `-1` once 2^24 slots are live. `Clear` empties every
+  slot and resets the free list but keeps the generation bytes, so pre-clear ids stay stale.
+  Positions are
   float world units, converted to cell space per grid as `floor((x−ox)·scale·256)` in Q8 — the
   integer part is the cell, the low byte is the sub-cell phase. Stamp extents are world-anchored:
   a `w×h` stamp covers `w×h` world cells at scale 1, and each grid scales the extent by its
@@ -36,16 +43,22 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   contribution into every touched tile immediately;
   `Move`/`Remove` deposit the exact negation at the stored position and `SetGain` the gain delta
   (integer adds invert perfectly — no rebuild, no source scan).
-- **Process** drains the per-(grid,layer) dirty list: each dirty tile resolves its difference
+- **Process** drains the per-(grid,layer) dirty lists: each dirty tile resolves its difference
   array through a 2D prefix sum (horizontal inclusive prefix + previous-row carry), adds dense,
   saturates to `short` **after** summation so cancellation is preserved, and writes the page's
   cell total into its `int64` sum slot (the widened saturated cells — exact integer adds, so the
   slot is bit-identical across resolve paths). A tile that resolves to all-zero frees its block
-  and leaves the map — a missing page reads as 0. Layers with at least 32 dirty tiles fan the
-  resolve out over a fixed worker pool; smaller lists and contended pools resolve sequentially.
+  and leaves the map — a missing page reads as 0. A world holding at least 32 dirty tiles across
+  all its (grid, layer) pairs fans the whole drain over a fixed worker pool — one flattened
+  queue, chunks of eight tiles crossing layer boundaries freely; smaller totals and contended
+  pools resolve sequentially.
 - **Query**: `World.Query(world, grid, layer, x, y)` is one hash lookup + page read;
   `(x, y, w, h)` sums a rect tile-wise — full-grid reads sum one `int64` per live page, partial
-  regions scan page rows; `QueryAt` takes world-space floats;
+  regions sum the same `int64` slot for every tile the rect fully covers and scan only the
+  clipped edge strips (rows widened to `int32` vectors, one horizontal add per tile — 15 µs for
+  a 1022² rect on a 1024² grid that page-cell scanning cost ~390 µs);
+  `QueryAt` takes world-space floats and maps them with the deposits' own truncated
+  `ScaleQ8` product, so the cell it reads is the cell the deposit wrote;
   `QueryRegion(world, grid, layer, x, y, w, h, short* dst)` fills `w×h` cells row-major with
   exactly the per-cell `Query` values, copying row segments per tile with vector stores where
   intrinsics allow (page rows are 64 B aligned by construction; the destination is written with
@@ -102,8 +115,20 @@ world rect at its own cell density; a source deposits into every grid it overlap
 - `warm-query-allocates-0-bytes` — 200k cell reads, 0 B.
 - `query-region-matches-cells` — bulk fill equals per-cell reads across tile boundaries,
   clipped and negative-offset regions, 0 B warm.
-- `page-sum-matches-scan` — the per-page `int64` sums behind full-region reads equal a naive
-  per-cell rescan across random place/move/remove churn worlds.
+- `page-sum-matches-scan` — the per-page `int64` sums behind full-region and partial-region
+  reads equal a naive per-cell rescan across random place/move/remove churn worlds.
+- `region-sum-matches-cell-scans` — nine rect shapes (tile-aligned, one-off, clipped,
+  negative-offset, 1×1) sum identically to per-cell scans on a 512² mixed box/raster field.
+- `query-at-matches-deposits` — on a 2^14-over-10000 grid (truncated `ScaleQ8` 419 vs float
+  1.6384), `QueryAt` at 200 source positions reads exactly the cell the deposit mapping wrote;
+  the float mapping diverges on a measurable subset of them.
+- `source-slots-reuse-and-stale-handles-inert` — 2000 place/remove pairs keep slots bounded,
+  the recycled id differs from the stale one, and stale `Move`/`SetGain`/`Remove` leave the
+  field bit-identical.
+- `signed-gain-exact` — ± gains add and subtract exactly, `SetGain` crosses zero and clamps at
+  ±16, and removing a signed pair restores the zero baseline.
+- `multi-layer-pooled-matches-scans` — 16 layers × 30 sources through three churn rounds
+  (world-total fan-out) match full, partial, and random-rect scans per layer.
 - `saturated-sum-clamps` — saturation sticks at ±32767 after summation.
 - `cross-grid-sums-conserve-world-integral` — the same box sources summed over four grids at
   scales 2/1/0.5/0.25 scale exactly by cell area (`full == 4·fine == 16·half == 64·quarter`).
@@ -112,7 +137,8 @@ world rect at its own cell density; a source deposits into every grid it overlap
   bit-identical output to Gi before and after churn; the same command then times both.
 
 `--timing` adds min-over-20-rep lines for unchanged, incremental, move-200 churn, place-200
-churn, full-grid sum, and 256² region reads (4000 sources, 1024² grid). Timing receipts live in
+churn, full-grid sum, a 1022² partial-region sum, a 16-layer × 25-dirty move-400 process, and
+256² region reads (4000 sources, 1024² grid). Timing receipts live in
 the README (deposit vs re-emitted marks, i9-14900K; perf-pass deltas, Ryzen 5 8500G); the perf
 pass behind them was `perf`-profile guided, receipts first.
 
@@ -126,6 +152,10 @@ pass behind them was `perf`-profile guided, receipts first.
   same binary. The engine's hot methods carry
   `MethodImplOptions.AggressiveOptimization` (under `NET`) so they never run tier-0; when timing
   a change that predates that, set `DOTNET_TieredCompilation=0` or the baseline may be garbage.
+  The same trap bites callees too large to inline into an optimized caller: the partial-region
+  sum's edge scanner measured 700 µs stuck in tier-0 and 12 µs once it carried
+  `AggressiveOptimization` itself — audit any new standalone hot helper against
+  `DOTNET_TieredCompilation=0` before trusting a number.
 - Resolve is memory-bound at scale: 2,400 dirty tiles stream ~25 MB per frame, past L3. Worker
   scaling tops out at the memory controller, not at core count — expect ~1.5× frame time on
   such scenes, not core-count multiples, and measure before promising.
@@ -141,7 +171,8 @@ pass behind them was `perf`-profile guided, receipts first.
   `Stamp.Box`) — never by static construction, so no static constructor on the assembly performs
   calls and Burst can compile `Query`/`QueryRegion` call graphs; world contents are
   `NativeHeap` blocks owned by the context (grid array, `LayerData` array,
-  `InDirty`/`Dirty` per layer, `Prev` scratch, `SourceColumns` buffers) or by a `PageMap` (each
+  `InDirty`/`Dirty` per layer, `Prev` scratch, `SourceColumns` buffers — positions, stamp,
+  layer, gain, liveness, the free-slot chain, and the generation bytes) or by a `PageMap` (each
   tile block — 6,528 B, or 10,624 B once a raster deposit attached the dense buffer at its tail —
   is owned by its slot and
   freed exactly when the tile resolves to zero, the world is cleared, or the map is disposed;
@@ -150,7 +181,8 @@ pass behind them was `perf`-profile guided, receipts first.
   page is allocated once with the arenas and never written afterwards.
   `Stamp` variants — base samples, mip chain, and box constants — are catalog-owned for process
   lifetime. The resolve pool (background worker
-  threads, one `Prev`-width scratch slice per worker, the shared dead-tile buffer) is created
+  threads, one `Prev`-width scratch slice per worker, the shared dead-index buffer, and the
+  1024-entry task buffer sized to 32 grids × 32 layers) is created
   lazily by the first ≥32-dirty-tile `Process` and lives for the process; its native scratch is
   never freed and its threads never terminate. `QueryRegion` writes only the caller's
   destination. No `World.Free` exists: worlds are process-lifetime
@@ -160,7 +192,8 @@ pass behind them was `perf`-profile guided, receipts first.
   disjoint and `previousRow` is one slice per participant (the caller's `Prev` for the main
   thread, a pool slice per worker), cleared per tile before use; sources are read-only during
   deposits of other sources. `PageMap` mutation happens only through its owning `LayerData`
-  pointer on the thread that called `Process`.
+  pointer on the thread that called `Process`. The partial-region sum reads page rows only
+  inside `[0,32)×[0,32)` of a live block and writes nothing.
 - **Alignment**: tile blocks, native buffers, page-map arrays, pool scratch, and prefix scratch
   use 64-byte aligned allocations. World/grid/layer/catalog metadata uses `AllocZeroed` with
   natural alignment; raster samples require only byte alignment. SIMD accesses use unaligned
@@ -172,7 +205,11 @@ pass behind them was `perf`-profile guided, receipts first.
   beyond the 32-cell scratch/page rows. Raster taps widen unaligned 4-byte sample reads within
   the padded allocation. Page rows (`PageOffset` is a multiple of 32) are
   32 B aligned, and `QueryRegion`'s vectorized copy/zero fills use unaligned-safe 256-bit (or
-  128-bit) stores with scalar tails, so any caller destination alignment is correct. The sum
+  128-bit) stores with scalar tails, so any caller destination alignment is correct. Partial
+  region sums widen page rows to `int32` vectors with the same unaligned-safe loads and scalar
+  tails; a strip is at most 32 shorts per row, so the `int32` row accumulators and per-tile
+  horizontal add cannot overflow (32 · 32768 < 2^20), and the result joins the `int64` region
+  total. The sum
   slot sits at a 64 B block offset and is written as one naturally aligned `int64`. The dense
   tail of a raster block starts at `BlockBytes` — a multiple of 64 — so its rows are 64 B
   aligned; tiles without dense read the shared zero page, itself a 64 B aligned allocation. On
@@ -181,23 +218,31 @@ pass behind them was `perf`-profile guided, receipts first.
   every access in that build is a naturally aligned scalar load or store, so the weaker
   alignment guarantee cannot be observed.
 - **Concurrency**: `Place`/`Move`/`SetGain`/`Remove`/`Process` are serial per world; different
-  worlds may run on different threads. `Process` fans a layer's dirty list out when it holds at
-  least 32 tiles: a fixed pool of `min(cores−1, 4)` background workers, created once and parked
+  worlds may run on different threads. `Process` fans the whole world drain out when its grids
+  and layers hold at least 32 dirty tiles in total:
+  a fixed pool of `min(cores−1, 4)` background workers, created once and parked
   between calls. Pool ownership is a compare-and-swap flag; a second world whose `Process`
   overlaps a pooled phase runs its own layers sequentially, so pooled and sequential resolves
-  never interleave. A phase publishes its descriptor (dirty pointer/count, `InDirty`, page map)
+  never interleave. A phase builds a task list — one entry per (grid, layer) with dirty tiles,
+  each owning a contiguous base-offset range of a global index space whose size is the summed
+  dirty counts — and publishes it, the dead-index buffer, the cursor, and the task count
   before signalling the worker events; wait-handle set/wait are full fences, so workers observe
-  the published state. Work is claimed in 8-tile chunks through one atomic cursor — each tile is
-  resolved by exactly one participant, and every block write during the phase is tile-local.
+  the published state. Work is claimed in 8-index chunks through one atomic cursor; because
+  claims interleave, a participant's chunks are descending but not contiguous, so each claim
+  locates its starting task by binary search over task bases and advances only within the
+  claim's contiguous index run — every global index resolves exactly one tile, and every block
+  write during the phase is tile-local.
   `InDirty` clears are disjoint single bytes. Workers only read the page map (lookups); tiles
-  that resolve to zero are appended to a pre-sized shared buffer through an atomic index, and
-  the owning thread performs every `Remove`, `AlignedFree`, and dirty-list resize after joining
+  that resolve to zero append their global index to a pre-sized shared buffer through an atomic
+  index, and
+  the owning thread maps each dead index back to its task (the same binary search), performs
+  every `Remove`, `AlignedFree`, and dirty-list resize after joining
   the phase (a spin-join: the phase is µs-scale, so no worker ever sleeps mid-phase; parked
   workers block on their events between phases). Determinism is unaffected: tiles are
   independent, arithmetic is integer-exact, the dead set is a pure function of page content, and
   the order of removals has no observable effect on map contents. Warm pooled `Process`
-  allocates 0 B: the pool, its scratch, and the dead buffer are sized at creation and by
-  grow-to-max before steady state. World creation and stamp catalog mutation are also serialized
+  allocates 0 B: the pool, its scratch, the task buffer, and the dead buffer are sized at
+  creation and by grow-to-max before steady state. World creation and stamp catalog mutation are also serialized
   across worlds because their arenas and counts are process-wide. Pool initialization rides the
   same rule: the first creation call allocates both arenas before any handle exists, and handles
   only originate from creation calls, so no query can observe an uninitialized arena.

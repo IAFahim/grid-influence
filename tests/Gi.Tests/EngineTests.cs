@@ -714,7 +714,7 @@ public sealed class EngineTests
         Assert.Equal(1, pending.LiveSources);
         Assert.Equal(1, pending.LiveTiles);
         Assert.Equal(1, pending.DirtyTiles);
-        Assert.Equal(64 * 12, pending.SourceBytes);
+        Assert.Equal(64 * 17, pending.SourceBytes);
         Assert.Equal(World.BlockBytes, pending.DifferenceBytes + pending.DenseBytes + pending.DensePointerBytes + pending.PageBytes + pending.PageSumBytes);
         Assert.Equal(World.BlockBytes, 6528);
         Assert.Equal(4, pending.DirtyFlagBytes);
@@ -727,7 +727,7 @@ public sealed class EngineTests
         Assert.Equal(64, cleared.SourceCapacity);
         Assert.Equal(0, cleared.LiveTiles);
         Assert.Equal(0, cleared.MapBytes);
-        Assert.Equal(empty.WorldBytes + 64 * 12 + 4 + 64, cleared.WorldBytes);
+        Assert.Equal(empty.WorldBytes + 64 * 17 + 4 + 64, cleared.WorldBytes);
     }
 
     [Fact]
@@ -840,5 +840,149 @@ public sealed class EngineTests
         var freed = new short[64 * 64];
         fixed (short* p = freed) World.QueryRegion(w, g, l, 0, 0, 64, 64, p);
         Assert.All(freed, v => Assert.Equal(0, v));
+    }
+
+    [Fact]
+    public void RegionQuery_PartialSumsMatchCellScan()
+    {
+        var w = World.New();
+        var g = Grid.New(w, power: 8, x: 0f, y: 0f, size: 256f);
+        var l = Layer.New(w);
+        var box = Stamp.Box(14, 14, 80);
+        var samples = new sbyte[6 * 9];
+        for (var i = 0; i < samples.Length; i++) samples[i] = (sbyte)(i * 17 % 40 - 20);
+        var raster = Stamp.New(samples, 6, 9);
+        var rng = new Random(63);
+        for (var i = 0; i < 300; i++)
+        {
+            var x = (float)(rng.NextDouble() * 256);
+            var y = (float)(rng.NextDouble() * 256);
+            World.Place(w, l, x, y, rng.Next(2) == 0 ? box : raster, 4 + rng.Next(13));
+        }
+
+        World.Process(w);
+        (int x, int y, int width, int height)[] regions =
+        {
+            (0, 0, 256, 256),
+            (1, 1, 254, 254),
+            (0, 0, 255, 256),
+            (17, 0, 222, 256),
+            (31, 33, 130, 127),
+            (33, 65, 1, 1),
+            (5, 250, 200, 10),
+            (-10, -10, 300, 300),
+            (250, 250, 10, 10),
+        };
+
+        foreach (var (x, y, width, height) in regions)
+        {
+            var scan = 0L;
+            for (var row = 0; row < height; row++)
+            for (var col = 0; col < width; col++)
+            {
+                var cy = y + row;
+                var cx = x + col;
+                if ((uint)cx < 256 && (uint)cy < 256) scan += World.Query(w, g, l, cx, cy);
+            }
+
+            Assert.Equal(scan, World.Query(w, g, l, x, y, width, height));
+        }
+    }
+
+    [Fact]
+    public void QueryAt_MatchesDepositMappingAtNonPowerOfTwoScale()
+    {
+        var w = World.New();
+        var g = Grid.New(w, 14, 0f, 0f, 10000f);
+        var l = Layer.New(w);
+        var stamp = Stamp.Box(4, 4, 60);
+        var scale = 16384f / 10000f;
+        var scaleQ8 = (int)(scale * 256f);
+        var rng = new Random(97);
+        var xs = new float[200];
+        var ys = new float[200];
+        var diverged = 0;
+        for (var i = 0; i < 200; i++)
+        {
+            xs[i] = (float)(rng.NextDouble() * 9800 + 100);
+            ys[i] = (float)(rng.NextDouble() * 9800 + 100);
+            World.Place(w, l, xs[i], ys[i], stamp, 6);
+            var cx = (int)MathF.Floor(xs[i] * scaleQ8) >> 8;
+            var cy = (int)MathF.Floor(ys[i] * scaleQ8) >> 8;
+            var floatCx = (int)MathF.Floor(xs[i] * scale);
+            var floatCy = (int)MathF.Floor(ys[i] * scale);
+            if (cx != floatCx || cy != floatCy) diverged++;
+        }
+
+        World.Process(w);
+        Assert.True(diverged > 0);
+        for (var i = 0; i < 200; i++)
+        {
+            var cx = (int)MathF.Floor(xs[i] * scaleQ8) >> 8;
+            var cy = (int)MathF.Floor(ys[i] * scaleQ8) >> 8;
+            Assert.Equal(World.Query(w, g, l, cx, cy), World.QueryAt(w, g, l, xs[i], ys[i]));
+        }
+    }
+
+    [Fact]
+    public void SignedGain_SubtractsExactly()
+    {
+        var w = World.New();
+        var g = Grid.New(w, 6, 0f, 0f, 64f);
+        var red = Layer.New(w);
+        var blue = Layer.New(w);
+        var stamp = Stamp.Box(8, 8, 50);
+        var pos = World.Place(w, red, 32f, 32f, stamp, 8);
+        var neg = World.Place(w, blue, 32f, 32f, stamp, -3);
+        World.Process(w);
+        Assert.Equal(400, World.Query(w, g, red, 32, 32));
+        Assert.Equal(-150, World.Query(w, g, blue, 32, 32));
+        Assert.Equal(-150 * 64, World.Query(w, g, blue, 0, 0, 64, 64));
+
+        World.SetGain(w, pos, -8);
+        World.SetGain(w, neg, 3);
+        World.Process(w);
+        Assert.Equal(-400, World.Query(w, g, red, 32, 32));
+        Assert.Equal(150, World.Query(w, g, blue, 32, 32));
+
+        World.SetGain(w, pos, 20);
+        World.SetGain(w, neg, -20);
+        World.Process(w);
+        Assert.Equal(16 * 50, World.Query(w, g, red, 32, 32));
+        Assert.Equal(-16 * 50, World.Query(w, g, blue, 32, 32));
+    }
+
+    [Fact]
+    public void SourceIds_ReuseSlotsAndRejectStaleHandles()
+    {
+        var w = World.New();
+        var g = Grid.New(w, 6, 0f, 0f, 64f);
+        var l = Layer.New(w);
+        var stamp = Stamp.Box(4, 4, 40);
+        var survivor = World.Place(w, l, 12f, 12f, stamp, 5);
+        var first = -1;
+        for (var i = 0; i < 500; i++)
+        {
+            var id = World.Place(w, l, 40f, 40f, stamp, 3);
+            if (i == 0) first = id;
+            World.Remove(w, id);
+        }
+
+        Assert.InRange(Stats.Inspection.Read(w).SourceSlots, 1, 8);
+        var reused = World.Place(w, l, 40f, 40f, stamp, 3);
+        Assert.NotEqual(first, reused);
+        World.Process(w);
+        Assert.Equal(5 * 40 * 16 + 3 * 40 * 16, World.Query(w, g, l, 0, 0, 64, 64));
+
+        World.Move(w, first, 8f, 8f);
+        World.SetGain(w, first, 1);
+        World.Remove(w, first);
+        World.Process(w);
+        Assert.Equal(5 * 40 * 16 + 3 * 40 * 16, World.Query(w, g, l, 0, 0, 64, 64));
+
+        World.Move(w, survivor, 20f, 20f);
+        World.Process(w);
+        Assert.Equal(5 * 40, World.Query(w, g, l, 20, 20));
+        Assert.Equal(0, World.Query(w, g, l, 12, 12));
     }
 }

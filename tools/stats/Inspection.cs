@@ -59,7 +59,8 @@ internal static unsafe class Inspection
             GridBytes = World.MaxGrids * sizeof(GridCtx),
             ScratchBytes = TileBake.TileSize * sizeof(int),
             SourceBytes = (long)s->X.Capacity * sizeof(float) + (long)s->Y.Capacity * sizeof(float) +
-                s->Stamp.Capacity + s->Layer.Capacity + s->Gain.Capacity + s->Alive.Capacity,
+                s->Stamp.Capacity + s->Layer.Capacity + s->Gain.Capacity + s->Alive.Capacity +
+                (long)s->Free.Capacity * sizeof(int) + s->Gen.Capacity,
             WorldArenaBytes = World.MaxWorlds * sizeof(WorldCtx),
             StampArenaBytes = StampCatalog.MaxStamps * sizeof(StampVariant),
             Stamps = StampCatalog.Count - 1,
