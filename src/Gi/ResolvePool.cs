@@ -6,6 +6,7 @@ namespace Gi;
 
 internal unsafe struct ResolveTask
 {
+    public GridCtx* Grid;
     public LayerData* Layer;
     public int Base;
     public int Count;
@@ -72,7 +73,7 @@ internal static unsafe class ResolvePool
                 var count = ld->Dirty.Length;
                 if (count == 0) continue;
 
-                tasks[taskCount] = new ResolveTask { Layer = ld, Base = taskBase, Count = count };
+                tasks[taskCount] = new ResolveTask { Grid = g, Layer = ld, Base = taskBase, Count = count };
                 taskCount++;
                 taskBase += count;
             }
@@ -105,7 +106,21 @@ internal static unsafe class ResolvePool
             World.FreeBlock(block);
         }
 
-        for (var t = 0; t < taskCount; t++) tasks[t].Layer->Dirty.Resize(0);
+        for (var t = 0; t < taskCount; t++)
+        {
+            var task = tasks + t;
+            var ld = task->Layer;
+            var pages = &ld->Pages;
+            var dirty = ld->Dirty.Pointer;
+            for (var i = 0; i < task->Count; i++)
+            {
+                var tile = dirty[i];
+                var max = pages->TryGet(tile, out var block) ? *(short*)(block + World.MaxOffset) : (short)0;
+                ld->Max.Update(task->Grid->TilesPerSide, tile, max);
+            }
+
+            ld->Dirty.Resize(0);
+        }
     }
 
     private static int TaskOf(int index)
@@ -159,7 +174,7 @@ internal static unsafe class ResolvePool
 
                 new Span<int>(prev, TileBake.TileSize).Clear();
                 if (!TileBake.Resolve((int*)block, World.DenseOf(block), prev,
-                    (short*)(block + World.PageOffset), (long*)(block + World.SumOffset)))
+                    (short*)(block + World.PageOffset), (long*)(block + World.SumOffset), (short*)(block + World.MaxOffset)))
                     _dead.Pointer[Interlocked.Increment(ref _deadCount) - 1] = i;
             }
         }

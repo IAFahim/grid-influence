@@ -27,6 +27,7 @@ internal struct Snapshot
     public long DensePointerBytes;
     public long PageBytes;
     public long PageSumBytes;
+    public long PyramidBytes;
     public long RasterTiles;
     public long WorldArenaBytes;
     public long StampArenaBytes;
@@ -34,7 +35,7 @@ internal struct Snapshot
 
     public readonly long WorldBytes => GridBytes + LayerBytes + SourceBytes + ScratchBytes +
         DirtyFlagBytes + DirtyQueueBytes + MapBytes + DifferenceBytes + DenseBytes + DensePointerBytes +
-        PageBytes + PageSumBytes;
+        PageBytes + PageSumBytes + PyramidBytes;
 
     public readonly long SharedBytes => WorldArenaBytes + StampArenaBytes + StampRasterBytes;
 
@@ -83,6 +84,7 @@ internal static unsafe class Inspection
                 result.Tombstones += ld->Pages.TombstoneCount;
                 result.MapBytes += (long)ld->Pages.SlotCount * (sizeof(int) + sizeof(byte*) + sizeof(byte));
                 result.DirtyQueueBytes += (long)ld->Dirty.Capacity * sizeof(int);
+                result.PyramidBytes += ld->Max.Bytes;
                 if (ld->InDirty != null) result.DirtyFlagBytes += g->TileCount;
 
                 var used = ld->Pages.Used;

@@ -20,6 +20,7 @@ internal static class Verification
         Check("page-sum-matches-scan", PageSumMatchesScan());
         Check("region-sum-matches-cell-scans", RegionSumMatchesCellScans());
         Check("query-at-matches-deposits", QueryAtMatchesDeposits());
+        Check("query-max-matches-full-scan", QueryMaxMatchesFullScan());
         Check("source-slots-reuse-and-stale-handles-inert", SourceSlotsReuseAndStaleInert());
         Check("signed-gain-exact", SignedGainExact());
         Check("multi-layer-pooled-matches-scans", MultiLayerPooledMatchesScans());
@@ -429,6 +430,84 @@ internal static class Verification
         return true;
     }
 
+    private static bool QueryMaxMatchesFullScan()
+    {
+        var w = Gi.World.New();
+        var g = Gi.Grid.New(w, 10, 0f, 0f, 1024f);
+        var busy = Gi.Layer.New(w);
+        var quiet = Gi.Layer.New(w);
+        var stamp = Gi.Stamp.Box(20, 20, 25);
+        var rng = new Random(211);
+        var field = new short[1024 * 1024];
+
+        short ScanMax(byte layer)
+        {
+            unsafe
+            {
+                fixed (short* p = field) Gi.World.QueryRegion(w, g, layer, 0, 0, 1024, 1024, p);
+            }
+
+            var max = short.MinValue;
+            for (var i = 0; i < field.Length; i++)
+                if (field[i] > max) max = field[i];
+            return max;
+        }
+
+        bool LayerOk(byte layer)
+        {
+            var expected = ScanMax(layer);
+            var first = Gi.World.QueryMax(w, g, layer, out var x, out var y);
+            var repeat = Gi.World.QueryMax(w, g, layer, out var x2, out var y2);
+            return first == expected && first == Gi.World.Query(w, g, layer, x, y) &&
+                repeat == first && x == x2 && y == y2;
+        }
+
+        if (Gi.World.QueryMax(w, g, busy, out var ex, out var ey) != 0 || ex != 0 || ey != 0) return false;
+
+        var ids = new int[140];
+        for (var round = 0; round < 3; round++)
+        {
+            for (var i = 0; i < ids.Length; i++)
+            {
+                var layer = (i & 3) == 0 && round == 0 ? quiet : busy;
+                if (round > 0 && rng.Next(5) == 0)
+                {
+                    Gi.World.Remove(w, ids[i]);
+                    ids[i] = Gi.World.Place(w, layer,
+                        (float)(rng.NextDouble() * 1000 + 12), (float)(rng.NextDouble() * 1000 + 12),
+                        stamp, rng.Next(-8, 17));
+                }
+                else if (round > 0)
+                {
+                    Gi.World.Move(w, ids[i],
+                        (float)(rng.NextDouble() * 1000 + 12), (float)(rng.NextDouble() * 1000 + 12));
+                }
+                else
+                {
+                    ids[i] = Gi.World.Place(w, layer,
+                        (float)(rng.NextDouble() * 1000 + 12), (float)(rng.NextDouble() * 1000 + 12),
+                        stamp, rng.Next(-8, 17));
+                }
+            }
+
+            Gi.World.Process(w);
+            if (!LayerOk(busy) || !LayerOk(quiet)) return false;
+        }
+
+        var cover = Gi.Layer.New(w);
+        for (var cy = 0; cy < 64; cy++)
+        for (var cx = 0; cx < 64; cx++)
+            Gi.World.Place(w, cover, 8f + cx * 16, 8f + cy * 16, stamp, -4);
+        Gi.World.Process(w);
+        if (!LayerOk(cover)) return false;
+        if (Gi.World.QueryMax(w, g, cover, out _, out _) >= 0) return false;
+
+        for (var i = 0; i < 90; i++) Gi.World.Place(w, cover, 512f, 512f, stamp, 16);
+        Gi.World.Process(w);
+        if (!LayerOk(cover)) return false;
+        return Gi.World.QueryMax(w, g, cover, out _, out _) == short.MaxValue;
+    }
+
     private static bool SourceSlotsReuseAndStaleInert()
     {
         var w = Gi.World.New();
@@ -754,6 +833,34 @@ internal static class Verification
             if (el < best) best = el;
         }
         Console.WriteLine($"partial-region sum (1022x1022 of 1024): {best:F1} us ({total})");
+
+        best = double.MaxValue;
+        short bestCell = 0;
+        for (var r = 0; r < 20; r++)
+        {
+            var t = Stopwatch.GetTimestamp();
+            bestCell = Gi.World.QueryMax(w, g, l, out _, out _);
+            var el = Stopwatch.GetElapsedTime(t).TotalMicroseconds;
+            if (el < best) best = el;
+        }
+        Console.WriteLine($"best-cell query (argmax over 1024x1024): {best:F2} us ({bestCell})");
+
+        best = double.MaxValue;
+        short naiveCell = 0;
+        for (var r = 0; r < 3; r++)
+        {
+            var t = Stopwatch.GetTimestamp();
+            naiveCell = short.MinValue;
+            for (var y = 0; y < 1024; y++)
+            for (var x = 0; x < 1024; x++)
+            {
+                var v = Gi.World.Query(w, g, l, x, y);
+                if (v > naiveCell) naiveCell = v;
+            }
+            var el = Stopwatch.GetElapsedTime(t).TotalMicroseconds;
+            if (el < best) best = el;
+        }
+        Console.WriteLine($"naive best-cell (1M Query calls): {best:F0} us ({naiveCell})");
 
         var mw = Gi.World.New();
         var mg = Gi.Grid.New(mw, 8, 0f, 0f, 256f);

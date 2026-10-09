@@ -25,6 +25,7 @@ internal unsafe struct LayerData
     public PageMap Pages;
     public byte* InDirty;
     public NativeBuffer<int> Dirty;
+    public MaxPyramid Max;
 }
 
 internal unsafe struct GridCtx
@@ -51,7 +52,7 @@ internal unsafe struct WorldCtx
 
 public static unsafe class World
 {
-    internal const int MaxWorlds = 32;
+    internal const int MaxWorlds = 64;
     internal const int MaxGrids = 32;
     internal const int MaxLayers = 32;
     private const int MinPower = 5;
@@ -68,6 +69,7 @@ public static unsafe class World
     internal const int DensePtrSlot = 8;
     internal const int SumOffset = (DensePtrOffset + DensePtrSlot + 63) & ~63;
     internal const int SumSlotBytes = 64;
+    internal const int MaxOffset = SumOffset + 8;
     internal const int BlockBytes = SumOffset + SumSlotBytes;
 
     private static int _worldCount;
@@ -216,6 +218,7 @@ public static unsafe class World
                 for (var i = 0; i < slots; i++)
                     if (used[i] == PageMap.Live) FreeBlock(blocks[i]);
                 pages->Reset();
+                ld->Max.Reset();
             }
         }
     }
@@ -379,10 +382,15 @@ public static unsafe class World
 
                     new Span<int>(w->Prev, TileBake.TileSize).Clear();
                     if (!TileBake.Resolve((int*)block, DenseOf(block), w->Prev,
-                        (short*)(block + PageOffset), (long*)(block + SumOffset)))
+                        (short*)(block + PageOffset), (long*)(block + SumOffset), (short*)(block + MaxOffset)))
                     {
                         pages->Remove(tile);
                         FreeBlock(block);
+                        ld->Max.Update(g->TilesPerSide, tile, 0);
+                    }
+                    else
+                    {
+                        ld->Max.Update(g->TilesPerSide, tile, *(short*)(block + MaxOffset));
                     }
                 }
 
@@ -394,6 +402,7 @@ public static unsafe class World
     private static void GrowSources(SourceColumns* s)
     {
         var capacity = Math.Max(64, s->X.Length * 2);
+        var live = s->Count;
         s->X.Resize(capacity);
         s->Y.Resize(capacity);
         s->Stamp.Resize(capacity);
@@ -402,6 +411,7 @@ public static unsafe class World
         s->Alive.Resize(capacity);
         s->Free.Resize(capacity);
         s->Gen.Resize(capacity);
+        new Span<byte>(s->Gen.Pointer + live, capacity - live).Clear();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -657,5 +667,17 @@ public static unsafe class World
         var cx = (int)MathF.Floor((x - g->OriginX) * g->ScaleQ8) >> 8;
         var cy = (int)MathF.Floor((y - g->OriginY) * g->ScaleQ8) >> 8;
         return Query(world, grid, layer, cx, cy);
+    }
+
+    public static short QueryMax(byte world, byte grid, byte layer, out int x, out int y)
+    {
+        x = 0;
+        y = 0;
+        var w = GetContext(world);
+        if (w == null || grid >= w->GridCount || layer >= w->LayerCount) return 0;
+
+        var g = w->Grids + grid;
+        var ld = g->Layers + layer;
+        return ld->Max.Best(g->TilesPerSide, &ld->Pages, out x, out y);
     }
 }

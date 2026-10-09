@@ -4,7 +4,7 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
 
 ## Model
 
-- A **world** (`World.New`, up to 32) owns **grids** and **layers**. A grid
+- A **world** (`World.New`, up to 64) owns **grids** and **layers**. A grid
   (`Grid.New(world, power, x, y, size)`, up to 32 per world) is a power-of-two cell grid,
   `2^power` cells per side (power 5–14), laid over a world-space rect `x,y,size`. A layer
   (`Layer.New(world)`, up to 32 per world) is an independent field channel present on every grid.
@@ -25,6 +25,7 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   slot, or out-of-range) is an inert no-op for `Move`/`SetGain`/`Remove`. Generations wrap after
   128 fills of one slot, and `Place` returns `-1` once 2^24 slots are live. `Clear` empties every
   slot and resets the free list but keeps the generation bytes, so pre-clear ids stay stale.
+  Column growth zeroes the new generation bytes, so returned ids are deterministic across runs.
   Positions are
   float world units, converted to cell space per grid as `floor((x−ox)·scale·256)` in Q8 — the
   integer part is the cell, the low byte is the sub-cell phase. Stamp extents are world-anchored:
@@ -36,22 +37,28 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   `floor(log2(1/scale))` mip levels and step sample coordinates in Q16.16, so minified deposits
   are box-filtered rather than aliased.
 - **Deposits are incremental**: each live tile owns a 6,528 B block — a 33×33 `int32` difference
-  array padded to 4,384 B, a 32×32 `int16` page, and an `int64` page sum in a padded 64 B slot.
-  Raster stamps also need the tile's 32×32 `int32` dense buffer: blocks touched by a raster
-  deposit allocate it once (block grows to 10,624 B, dense pinned at the block tail) and box-only
-  tiles never carry it — resolve reads a shared zero page instead. `Place` deposits the stamp's
-  contribution into every touched tile immediately;
+  array padded to 4,384 B, a 32×32 `int16` page, an `int64` page sum, and an `int16` page max in
+  the padded 64 B sum slot. Raster stamps also need the tile's 32×32 `int32` dense buffer: blocks
+  touched by a raster deposit allocate it once (block grows to 10,624 B, dense pinned at the block
+  tail) and box-only tiles never carry it — resolve reads a shared zero page instead. `Place`
+  deposits the stamp's contribution into every touched tile immediately;
   `Move`/`Remove` deposit the exact negation at the stored position and `SetGain` the gain delta
   (integer adds invert perfectly — no rebuild, no source scan).
 - **Process** drains the per-(grid,layer) dirty lists: each dirty tile resolves its difference
   array through a 2D prefix sum (horizontal inclusive prefix + previous-row carry), adds dense,
   saturates to `short` **after** summation so cancellation is preserved, and writes the page's
-  cell total into its `int64` sum slot (the widened saturated cells — exact integer adds, so the
-  slot is bit-identical across resolve paths). A tile that resolves to all-zero frees its block
+  cell total into its `int64` sum slot and the page's maximum cell into its `int16` max slot
+  (both bit-identical across resolve paths). A tile that resolves to all-zero frees its block
   and leaves the map — a missing page reads as 0. A world holding at least 32 dirty tiles across
   all its (grid, layer) pairs fans the whole drain over a fixed worker pool — one flattened
   queue, chunks of eight tiles crossing layer boundaries freely; smaller totals and contended
-  pools resolve sequentially.
+  pools resolve sequentially. After the drain (and, for pooled phases, strictly after the join),
+  every dirty tile pushes its new page max — 0 for a dead tile — into its layer's **max
+  pyramid**: level 0 groups 8×8 tile maxes per node, each higher level groups 8×8 child-node
+  maxes, stopping at a single root. A tile write updates the cached node max in its parent slot
+  and propagates only when it must: a value above the cached max replaces it without a scan, an
+  unchanged slot stops the walk, and only a falling former maximum rescans its 64-slot node
+  (vectorized for full nodes) before continuing upward.
 - **Query**: `World.Query(world, grid, layer, x, y)` is one hash lookup + page read;
   `(x, y, w, h)` sums a rect tile-wise — full-grid reads sum one `int64` per live page, partial
   regions sum the same `int64` slot for every tile the rect fully covers and scan only the
@@ -59,6 +66,16 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   a 1022² rect on a 1024² grid that page-cell scanning cost ~390 µs);
   `QueryAt` takes world-space floats and maps them with the deposits' own truncated
   `ScaleQ8` product, so the cell it reads is the cell the deposit wrote;
+  `QueryMax(world, grid, layer, out x, out y)` walks the max pyramid root-down — each node's
+  cached max is matched against its valid child rectangle (edge nodes cover fewer than 8×8
+  children; slots beyond the grid never enter a max or a match), then the winning tile scans its
+  page for the first cell equal to the recorded maximum. The returned value is the layer's exact
+  maximum over all cells — absent tiles count as 0, so the maximum is never negative unless every
+  cell of the grid is covered by live negative pages — and the returned position is one cell
+  holding that maximum, fixed deterministically by the descent (block children in one row band
+  interleave in scan order, so the descent's choice is deterministic but is not guaranteed to be
+  the row-major-first maximum; verify with `Query` at the returned cell). An empty layer reports
+  0 at (0,0). 0.1 µs for a 1024² layer where one million `Query` scans cost ~5,600 µs;
   `QueryRegion(world, grid, layer, x, y, w, h, short* dst)` fills `w×h` cells row-major with
   exactly the per-cell `Query` values, copying row segments per tile with vector stores where
   intrinsics allow (page rows are 64 B aligned by construction; the destination is written with
@@ -98,6 +115,7 @@ World.Process(world);                      // resolves dirty tiles once
 short v = World.Query(world, grid, layer, 64, 32);      // cell read
 long  t = World.Query(world, grid, layer, 0, 0, 32, 32); // region sum
 short p = World.QueryAt(world, grid, layer, 128f, 64f);  // world-space point
+short m = World.QueryMax(world, grid, layer, out var mx, out var my); // best cell
 World.Remove(world, source);
 ```
 
@@ -122,6 +140,10 @@ world rect at its own cell density; a source deposits into every grid it overlap
 - `query-at-matches-deposits` — on a 2^14-over-10000 grid (truncated `ScaleQ8` 419 vs float
   1.6384), `QueryAt` at 200 source positions reads exactly the cell the deposit mapping wrote;
   the float mapping diverges on a measurable subset of them.
+- `query-max-matches-full-scan` — across three churn rounds on a 1024² field (two layers, one
+  left empty), then a fully covered negative layer, then the same layer pushed to saturation,
+  `QueryMax` equals a full `QueryRegion` rescan of the layer, `Query` at the returned cell
+  returns the maximum, and repeated calls return the identical value and position.
 - `source-slots-reuse-and-stale-handles-inert` — 2000 place/remove pairs keep slots bounded,
   the recycled id differs from the stale one, and stale `Move`/`SetGain`/`Remove` leave the
   field bit-identical.
@@ -137,7 +159,8 @@ world rect at its own cell density; a source deposits into every grid it overlap
   bit-identical output to Gi before and after churn; the same command then times both.
 
 `--timing` adds min-over-20-rep lines for unchanged, incremental, move-200 churn, place-200
-churn, full-grid sum, a 1022² partial-region sum, a 16-layer × 25-dirty move-400 process, and
+churn, full-grid sum, a 1022² partial-region sum, the best-cell query against a one-million-call
+naive scan (0.1 µs vs ~5,600 µs on a 1024² layer), a 16-layer × 25-dirty move-400 process, and
 256² region reads (4000 sources, 1024² grid). Timing receipts live in
 the README (deposit vs re-emitted marks, i9-14900K; perf-pass deltas, Ryzen 5 8500G); the perf
 pass behind them was `perf`-profile guided, receipts first.
@@ -172,9 +195,11 @@ pass behind them was `perf`-profile guided, receipts first.
   calls and Burst can compile `Query`/`QueryRegion` call graphs; world contents are
   `NativeHeap` blocks owned by the context (grid array, `LayerData` array,
   `InDirty`/`Dirty` per layer, `Prev` scratch, `SourceColumns` buffers — positions, stamp,
-  layer, gain, liveness, the free-slot chain, and the generation bytes) or by a `PageMap` (each
-  tile block — 6,528 B, or 10,624 B once a raster deposit attached the dense buffer at its tail —
-  is owned by its slot and
+  layer, gain, liveness, the free-slot chain, and the generation bytes — and, per (grid, layer),
+  the max pyramid: a flat `int16` slot array plus per-level offset and side tables, allocated
+  zeroed by the layer's first resolved tile and freed only by `World.Clear`) or by a `PageMap`
+  (each tile block — 6,528 B, or 10,624 B once a raster deposit attached the dense buffer at its
+  tail — is owned by its slot and
   freed exactly when the tile resolves to zero, the world is cleared, or the map is disposed;
   attaching or growing dense happens only on the serial deposit thread, which republishes the
   block pointer through the map before any later resolve can observe it). The shared zero dense
@@ -193,7 +218,13 @@ pass behind them was `perf`-profile guided, receipts first.
   thread, a pool slice per worker), cleared per tile before use; sources are read-only during
   deposits of other sources. `PageMap` mutation happens only through its owning `LayerData`
   pointer on the thread that called `Process`. The partial-region sum reads page rows only
-  inside `[0,32)×[0,32)` of a live block and writes nothing.
+  inside `[0,32)×[0,32)` of a live block and writes nothing. Pyramid updates alias nothing
+  outside their owning `LayerData`: each dirty tile touches exactly its own level-0 slot, and
+  the propagation walk reads one 64-slot node plus one parent slot per level; `QueryMax` reads
+  pyramid slots, page maps, and live pages only. Node scans honor the node's valid child
+  rectangle, so no slot past the grid's tile count is read as data; the SSE2 row compare in the
+  descent may load past the valid prefix of a row but masks those lanes out of the match, and
+  the loaded bytes stay inside the 128 B node.
 - **Alignment**: tile blocks, native buffers, page-map arrays, pool scratch, and prefix scratch
   use 64-byte aligned allocations. World/grid/layer/catalog metadata uses `AllocZeroed` with
   natural alignment; raster samples require only byte alignment. SIMD accesses use unaligned
@@ -210,7 +241,11 @@ pass behind them was `perf`-profile guided, receipts first.
   tails; a strip is at most 32 shorts per row, so the `int32` row accumulators and per-tile
   horizontal add cannot overflow (32 · 32768 < 2^20), and the result joins the `int64` region
   total. The sum
-  slot sits at a 64 B block offset and is written as one naturally aligned `int64`. The dense
+  slot sits at a 64 B block offset and is written as one naturally aligned `int64`; the page max
+  sits at `SumOffset + 8` as one naturally aligned `int16` inside the same padded slot. Max
+  pyramid nodes are 64 `int16` values at 128 B offsets inside a 64 B aligned buffer, so the
+  full-node AVX2 max loads stay inside the allocation; partial nodes scan scalar. The
+  dense
   tail of a raster block starts at `BlockBytes` — a multiple of 64 — so its rows are 64 B
   aligned; tiles without dense read the shared zero page, itself a 64 B aligned allocation. On
   netstandard2.1 (Unity) `NativeHeap` backs onto `Marshal.AllocHGlobal`
@@ -238,7 +273,9 @@ pass behind them was `perf`-profile guided, receipts first.
   the owning thread maps each dead index back to its task (the same binary search), performs
   every `Remove`, `AlignedFree`, and dirty-list resize after joining
   the phase (a spin-join: the phase is µs-scale, so no worker ever sleeps mid-phase; parked
-  workers block on their events between phases). Determinism is unaffected: tiles are
+  workers block on their events between phases), and only then walks the dirty lists again, on
+  the owning thread alone, to fold each tile's page max into its max pyramid — pyramid slots are
+  never touched by pool workers, so no pyramid write races a resolve. Determinism is unaffected: tiles are
   independent, arithmetic is integer-exact, the dead set is a pure function of page content, and
   the order of removals has no observable effect on map contents. Warm pooled `Process`
   allocates 0 B: the pool, its scratch, the task buffer, and the dead buffer are sized at
@@ -246,8 +283,8 @@ pass behind them was `perf`-profile guided, receipts first.
   across worlds because their arenas and counts are process-wide. Pool initialization rides the
   same rule: the first creation call allocates both arenas before any handle exists, and handles
   only originate from creation calls, so no query can observe an uninitialized arena.
-  `Query`/`QueryRegion` read resolved pages and page sums only and may run concurrently with
-  each other, never with mutation or process.
+  `Query`/`QueryRegion`/`QueryMax` read resolved pages, page sums, and pyramid slots only and
+  may run concurrently with each other, never with mutation or process.
 - **Bounds**: stamps clip to grid rects before marking (extents clamp to the grid size in Q8;
   grids whose `ScaleQ8` truncates to 0 are skipped); tile-local box corners land in
   `[0,32]×[0,32]` of the difference array (rows 0–32 exist for the exclusive far edge; column 32
@@ -266,7 +303,8 @@ source liveness and grid/layer metadata, walks live page-map slots to count rast
 buffers, and returns a pointer-free value snapshot. Its cost
 is O(source slots + grids × layers + map slots + catalog stamps); it does not scan cells.
 Memory includes allocated capacity, retained source/dirty buffers after `Clear`, every live tile
-block plus its dense buffer where one exists, and shared world/stamp arenas plus padded rasters. The selected world and
+block plus its dense buffer where one exists, the per-(grid, layer) max pyramids, and shared
+world/stamp arenas plus padded rasters. The selected world and
 process-wide shared allocations are reported separately; allocator metadata, alignment slack,
 other worlds, and the runtime are excluded from native totals. GC heap and process memory are
 separate runtime observations.
