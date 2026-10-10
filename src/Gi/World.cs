@@ -25,6 +25,7 @@ internal unsafe struct LayerData
     public PageMap Pages;
     public byte* InDirty;
     public NativeBuffer<int> Dirty;
+    public NativeBuffer<int> Changed;
     public MaxPyramid Max;
 }
 
@@ -210,6 +211,7 @@ public static unsafe class World
                 var span = ld->Dirty.Span;
                 foreach (var tile in span) ld->InDirty[tile] = 0;
                 ld->Dirty.Resize(0);
+                ld->Changed.Resize(0);
 
                 var pages = &ld->Pages;
                 var used = pages->Used;
@@ -364,7 +366,37 @@ public static unsafe class World
         {
             ResolvePool.ResolveWorld(w, total);
             ResolvePool.Release();
-            return;
+        }
+        else
+        {
+            for (var gi = 0; gi < w->GridCount; gi++)
+            {
+                var g = w->Grids + gi;
+                for (var l = 0; l < w->LayerCount; l++)
+                {
+                    var ld = g->Layers + l;
+                    var span = ld->Dirty.Span;
+                    var pages = &ld->Pages;
+                    foreach (var tile in span)
+                    {
+                        ld->InDirty[tile] = 0;
+                        if (!pages->TryGet(tile, out var block)) continue;
+
+                        new Span<int>(w->Prev, TileBake.TileSize).Clear();
+                        if (!TileBake.Resolve((int*)block, DenseOf(block), w->Prev,
+                            (short*)(block + PageOffset), (long*)(block + SumOffset), (short*)(block + MaxOffset)))
+                        {
+                            pages->Remove(tile);
+                            FreeBlock(block);
+                            ld->Max.Update(g->TilesPerSide, tile, 0);
+                        }
+                        else
+                        {
+                            ld->Max.Update(g->TilesPerSide, tile, *(short*)(block + MaxOffset));
+                        }
+                    }
+                }
+            }
         }
 
         for (var gi = 0; gi < w->GridCount; gi++)
@@ -373,28 +405,10 @@ public static unsafe class World
             for (var l = 0; l < w->LayerCount; l++)
             {
                 var ld = g->Layers + l;
-                var span = ld->Dirty.Span;
-                var pages = &ld->Pages;
-                foreach (var tile in span)
-                {
-                    ld->InDirty[tile] = 0;
-                    if (!pages->TryGet(tile, out var block)) continue;
-
-                    new Span<int>(w->Prev, TileBake.TileSize).Clear();
-                    if (!TileBake.Resolve((int*)block, DenseOf(block), w->Prev,
-                        (short*)(block + PageOffset), (long*)(block + SumOffset), (short*)(block + MaxOffset)))
-                    {
-                        pages->Remove(tile);
-                        FreeBlock(block);
-                        ld->Max.Update(g->TilesPerSide, tile, 0);
-                    }
-                    else
-                    {
-                        ld->Max.Update(g->TilesPerSide, tile, *(short*)(block + MaxOffset));
-                    }
-                }
-
+                var changed = ld->Dirty;
+                ld->Dirty = ld->Changed;
                 ld->Dirty.Resize(0);
+                ld->Changed = changed;
             }
         }
     }
@@ -679,5 +693,31 @@ public static unsafe class World
         var g = w->Grids + grid;
         var ld = g->Layers + layer;
         return ld->Max.Best(g->TilesPerSide, &ld->Pages, out x, out y);
+    }
+
+    public static void QueryGradient(byte world, byte grid, byte layer, float x, float y, out int gx, out int gy)
+    {
+        gx = 0;
+        gy = 0;
+        var w = GetContext(world);
+        if (w == null || grid >= w->GridCount || layer >= w->LayerCount) return;
+
+        var g = w->Grids + grid;
+        var cx = (int)MathF.Floor((x - g->OriginX) * g->ScaleQ8) >> 8;
+        var cy = (int)MathF.Floor((y - g->OriginY) * g->ScaleQ8) >> 8;
+        gx = Query(world, grid, layer, cx + 1, cy) - Query(world, grid, layer, cx - 1, cy);
+        gy = Query(world, grid, layer, cx, cy + 1) - Query(world, grid, layer, cx, cy - 1);
+    }
+
+    public static int ChangedTiles(byte world, byte grid, byte layer, int* destination)
+    {
+        var w = GetContext(world);
+        if (w == null || grid >= w->GridCount || layer >= w->LayerCount) return 0;
+
+        var changed = w->Grids[grid].Layers[layer].Changed;
+        var count = changed.Length;
+        if (destination != null && count > 0)
+            Buffer.MemoryCopy(changed.Pointer, destination, (long)count * sizeof(int), (long)count * sizeof(int));
+        return count;
     }
 }

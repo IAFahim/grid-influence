@@ -43,7 +43,7 @@ internal static unsafe class Receipts
         World.Process(world);
         var removed = Inspection.Read(world);
         var removalOk = removed.LiveSources == 1 && removed.SourceSlots == 2 && removed.LiveTiles == 1 &&
-            removed.Tombstones == 1 && processed.WorldBytes - removed.WorldBytes == World.BlockBytes &&
+            removed.Tombstones == 1 && processed.WorldBytes - removed.WorldBytes == World.BlockBytes - 64 &&
             World.Query(world, grid, layer, 0, 0, 64, 64) == 0;
 
         World.Move(world, b, 16f, 16f);
@@ -82,7 +82,7 @@ internal static unsafe class Receipts
         var clearOk = cleared.LiveSources == 0 && cleared.SourceSlots == 0 && cleared.SourceCapacity == 64 &&
             cleared.LiveTiles == 0 && cleared.DirtyTiles == 0 && cleared.MapSlots == 0 &&
             cleared.MapBytes == 0 && cleared.PyramidBytes == 0 &&
-            cleared.WorldBytes == empty.WorldBytes + 64 * 17 + 8 + 128 &&
+            cleared.WorldBytes == empty.WorldBytes + 64 * 17 + 8 + 256 &&
             World.Query(world, grid, other, 0, 0, 64, 64) == 0;
 
         return

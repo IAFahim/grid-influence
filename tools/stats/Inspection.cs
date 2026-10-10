@@ -83,7 +83,7 @@ internal static unsafe class Inspection
                 result.MapSlots += ld->Pages.SlotCount;
                 result.Tombstones += ld->Pages.TombstoneCount;
                 result.MapBytes += (long)ld->Pages.SlotCount * (sizeof(int) + sizeof(byte*) + sizeof(byte));
-                result.DirtyQueueBytes += (long)ld->Dirty.Capacity * sizeof(int);
+                result.DirtyQueueBytes += (long)(ld->Dirty.Capacity + ld->Changed.Capacity) * sizeof(int);
                 result.PyramidBytes += ld->Max.Bytes;
                 if (ld->InDirty != null) result.DirtyFlagBytes += g->TileCount;
 

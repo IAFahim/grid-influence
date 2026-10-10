@@ -58,7 +58,9 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   maxes, stopping at a single root. A tile write updates the cached node max in its parent slot
   and propagates only when it must: a value above the cached max replaces it without a scan, an
   unchanged slot stops the walk, and only a falling former maximum rescans its 64-slot node
-  (vectorized for full nodes) before continuing upward.
+  (vectorized for full nodes) before continuing upward. Each `Process` then rotates every
+  (grid, layer) dirty list into its **changed list** — a zero-copy buffer swap, so the tiles the
+  call resolved stay readable until the next `Process` overwrites them.
 - **Query**: `World.Query(world, grid, layer, x, y)` is one hash lookup + page read;
   `(x, y, w, h)` sums a rect tile-wise — full-grid reads sum one `int64` per live page, partial
   regions sum the same `int64` slot for every tile the rect fully covers and scan only the
@@ -76,6 +78,17 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   interleave in scan order, so the descent's choice is deterministic but is not guaranteed to be
   the row-major-first maximum; verify with `Query` at the returned cell). An empty layer reports
   0 at (0,0). 0.1 µs for a 1024² layer where one million `Query` scans cost ~5,600 µs;
+  `QueryGradient(world, grid, layer, x, y, out gx, out gy)` maps a world-space point with the
+  same truncated `ScaleQ8` product as `QueryAt` and returns the central difference over resolved
+  page cells — `Q(cx±1, cy)` and `Q(cx, cy±1)` as two ints; out-of-grid neighbors read 0, so
+  gradients at the border measure the drop toward empty space. ~5 ns per point;
+  `ChangedTiles(world, grid, layer, int* dst)` returns how many tiles the most recent
+  `Process` resolved on that (grid, layer) and copies the tile ids to `dst` when it is not
+  null — repainting, incremental network sync, and dirty-rect presentation read one call
+  instead of diffing pages. The list includes tiles that resolved to zero and left the map;
+  it is empty before the first `Process`, after a `Process` with nothing dirty on that pair,
+  and after `Clear`. The caller's buffer must hold the grid's tile count; passing null fetches
+  only the count. Buffers swap, so the feed allocates nothing warm;
   `QueryRegion(world, grid, layer, x, y, w, h, short* dst)` fills `w×h` cells row-major with
   exactly the per-cell `Query` values, copying row segments per tile with vector stores where
   intrinsics allow (page rows are 64 B aligned by construction; the destination is written with
@@ -116,6 +129,7 @@ short v = World.Query(world, grid, layer, 64, 32);      // cell read
 long  t = World.Query(world, grid, layer, 0, 0, 32, 32); // region sum
 short p = World.QueryAt(world, grid, layer, 128f, 64f);  // world-space point
 short m = World.QueryMax(world, grid, layer, out var mx, out var my); // best cell
+World.QueryGradient(world, grid, layer, 128f, 64f, out var gx, out var gy); // ±1-cell slope
 World.Remove(world, source);
 ```
 
@@ -144,6 +158,13 @@ world rect at its own cell density; a source deposits into every grid it overlap
   left empty), then a fully covered negative layer, then the same layer pushed to saturation,
   `QueryMax` equals a full `QueryRegion` rescan of the layer, `Query` at the returned cell
   returns the maximum, and repeated calls return the identical value and position.
+- `gradient-matches-central-differences` — through three churn rounds on a two-grid world
+  (native and 2× scales), `QueryGradient` at random points equals the ±1-cell `Query`
+  differences on both grids' own cell mappings.
+- `changed-tiles-match-drain` — on a 64² grid, the changed-tile set after each `Process`
+  equals the tile footprints of that window's place/move/remove operations exactly (count,
+  membership, no duplicates), stays layer-isolated, empties on idle `Process` and `Clear`, and
+  includes tiles that resolved to zero and left the map.
 - `source-slots-reuse-and-stale-handles-inert` — 2000 place/remove pairs keep slots bounded,
   the recycled id differs from the stale one, and stale `Move`/`SetGain`/`Remove` leave the
   field bit-identical.
@@ -160,7 +181,8 @@ world rect at its own cell density; a source deposits into every grid it overlap
 
 `--timing` adds min-over-20-rep lines for unchanged, incremental, move-200 churn, place-200
 churn, full-grid sum, a 1022² partial-region sum, the best-cell query against a one-million-call
-naive scan (0.1 µs vs ~5,600 µs on a 1024² layer), a 16-layer × 25-dirty move-400 process, and
+naive scan (0.1 µs vs ~5,600 µs on a 1024² layer), the gradient query (~5 ns per point), a
+16-layer × 25-dirty move-400 process, and
 256² region reads (4000 sources, 1024² grid). Timing receipts live in
 the README (deposit vs re-emitted marks, i9-14900K; perf-pass deltas, Ryzen 5 8500G); the perf
 pass behind them was `perf`-profile guided, receipts first.
@@ -194,7 +216,7 @@ pass behind them was `perf`-profile guided, receipts first.
   `Stamp.Box`) — never by static construction, so no static constructor on the assembly performs
   calls and Burst can compile `Query`/`QueryRegion` call graphs; world contents are
   `NativeHeap` blocks owned by the context (grid array, `LayerData` array,
-  `InDirty`/`Dirty` per layer, `Prev` scratch, `SourceColumns` buffers — positions, stamp,
+  `InDirty`/`Dirty`/`Changed` per layer, `Prev` scratch, `SourceColumns` buffers — positions, stamp,
   layer, gain, liveness, the free-slot chain, and the generation bytes — and, per (grid, layer),
   the max pyramid: a flat `int16` slot array plus per-level offset and side tables, allocated
   zeroed by the layer's first resolved tile and freed only by `World.Clear`) or by a `PageMap`
@@ -210,7 +232,8 @@ pass behind them was `perf`-profile guided, receipts first.
   1024-entry task buffer sized to 32 grids × 32 layers) is created
   lazily by the first ≥32-dirty-tile `Process` and lives for the process; its native scratch is
   never freed and its threads never terminate. `QueryRegion` writes only the caller's
-  destination. No `World.Free` exists: worlds are process-lifetime
+  destination; `ChangedTiles` copies from the changed list (stable between `Process` calls,
+  swapped — never written in place — on the owning thread) into the caller's buffer. No `World.Free` exists: worlds are process-lifetime
   singletons, so no pointer escapes an owner.
 - **Aliasing**: each block is written by deposits and resolved in place; during a pooled phase
   every tile is claimed by exactly one participant, so difference/dense/page/sum writes are
@@ -283,8 +306,9 @@ pass behind them was `perf`-profile guided, receipts first.
   across worlds because their arenas and counts are process-wide. Pool initialization rides the
   same rule: the first creation call allocates both arenas before any handle exists, and handles
   only originate from creation calls, so no query can observe an uninitialized arena.
-  `Query`/`QueryRegion`/`QueryMax` read resolved pages, page sums, and pyramid slots only and
-  may run concurrently with each other, never with mutation or process.
+  `Query`/`QueryRegion`/`QueryMax`/`QueryGradient`/`ChangedTiles` read resolved pages, page
+  sums, pyramid slots, and changed lists only and may run concurrently with
+  each other, never with mutation or process.
 - **Bounds**: stamps clip to grid rects before marking (extents clamp to the grid size in Q8;
   grids whose `ScaleQ8` truncates to 0 are skipped); tile-local box corners land in
   `[0,32]×[0,32]` of the difference array (rows 0–32 exist for the exclusive far edge; column 32

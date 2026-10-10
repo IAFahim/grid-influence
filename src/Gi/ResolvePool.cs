@@ -118,8 +118,6 @@ internal static unsafe class ResolvePool
                 var max = pages->TryGet(tile, out var block) ? *(short*)(block + World.MaxOffset) : (short)0;
                 ld->Max.Update(task->Grid->TilesPerSide, tile, max);
             }
-
-            ld->Dirty.Resize(0);
         }
     }
 

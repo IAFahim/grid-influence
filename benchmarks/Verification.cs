@@ -21,6 +21,8 @@ internal static class Verification
         Check("region-sum-matches-cell-scans", RegionSumMatchesCellScans());
         Check("query-at-matches-deposits", QueryAtMatchesDeposits());
         Check("query-max-matches-full-scan", QueryMaxMatchesFullScan());
+        Check("gradient-matches-central-differences", GradientMatchesCentralDifferences());
+        Check("changed-tiles-match-drain", ChangedTilesMatchDrain());
         Check("source-slots-reuse-and-stale-handles-inert", SourceSlotsReuseAndStaleInert());
         Check("signed-gain-exact", SignedGainExact());
         Check("multi-layer-pooled-matches-scans", MultiLayerPooledMatchesScans());
@@ -508,6 +510,126 @@ internal static class Verification
         return Gi.World.QueryMax(w, g, cover, out _, out _) == short.MaxValue;
     }
 
+    private static bool GradientMatchesCentralDifferences()
+    {
+        var w = Gi.World.New();
+        var g = Gi.Grid.New(w, 9, 0f, 0f, 512f);
+        var g2 = Gi.Grid.New(w, 7, 128f, 128f, 64f);
+        var l = Gi.Layer.New(w);
+        var stamp = Gi.Stamp.Box(14, 14, 35);
+        var rng = new Random(307);
+        var ids = new int[60];
+        for (var round = 0; round < 3; round++)
+        {
+            for (var i = 0; i < ids.Length; i++)
+            {
+                if (round > 0 && rng.Next(6) == 0)
+                {
+                    Gi.World.Remove(w, ids[i]);
+                    ids[i] = Gi.World.Place(w, l,
+                        (float)(rng.NextDouble() * 500 + 6), (float)(rng.NextDouble() * 500 + 6),
+                        stamp, rng.Next(-8, 17));
+                }
+                else if (round > 0)
+                {
+                    Gi.World.Move(w, ids[i],
+                        (float)(rng.NextDouble() * 500 + 6), (float)(rng.NextDouble() * 500 + 6));
+                }
+                else
+                {
+                    ids[i] = Gi.World.Place(w, l,
+                        (float)(rng.NextDouble() * 500 + 6), (float)(rng.NextDouble() * 500 + 6),
+                        stamp, rng.Next(-8, 17));
+                }
+            }
+
+            Gi.World.Process(w);
+            for (var i = 0; i < 200; i++)
+            {
+                var x = (float)(rng.NextDouble() * 520 - 4);
+                var y = (float)(rng.NextDouble() * 520 - 4);
+                foreach (var grid in new[] { g, g2 })
+                {
+                    var fine = grid == g;
+                    var scale = fine ? 256f : 512f;
+                    var origin = fine ? 0f : 128f;
+                    Gi.World.QueryGradient(w, grid, l, x, y, out var gx, out var gy);
+                    var cx = (int)MathF.Floor((x - origin) * scale) >> 8;
+                    var cy = (int)MathF.Floor((y - origin) * scale) >> 8;
+                    if (gx != Gi.World.Query(w, grid, l, cx + 1, cy) - Gi.World.Query(w, grid, l, cx - 1, cy)) return false;
+                    if (gy != Gi.World.Query(w, grid, l, cx, cy + 1) - Gi.World.Query(w, grid, l, cx, cy - 1)) return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private static unsafe bool ChangedTilesMatchDrain()
+    {
+        var w = Gi.World.New();
+        var g = Gi.Grid.New(w, 6, 0f, 0f, 64f);
+        var red = Gi.Layer.New(w);
+        var blue = Gi.Layer.New(w);
+        var stamp = Gi.Stamp.Box(16, 16, 50);
+        var expected = new HashSet<int>();
+        var buffer = stackalloc int[8];
+
+        void Touch(float x, float y, int width)
+        {
+            var cell = (int)x;
+            var half = width >> 1;
+            for (var ty = (cell - half) >> 5; ty <= (cell + half - 1) >> 5; ty++)
+            for (var tx = (cell - half) >> 5; tx <= (cell + half - 1) >> 5; tx++)
+                expected.Add(ty * 2 + tx);
+        }
+
+        bool DrainMatches(byte layer, HashSet<int> want)
+        {
+            var count = Gi.World.ChangedTiles(w, g, layer, null);
+            if (count != want.Count) return false;
+            if (Gi.World.ChangedTiles(w, g, layer, buffer) != count) return false;
+            var seen = new HashSet<int>();
+            for (var i = 0; i < count; i++)
+                if (!seen.Add(buffer[i]) || !want.Contains(buffer[i])) return false;
+            return true;
+        }
+
+        if (Gi.World.ChangedTiles(w, g, red, null) != 0) return false;
+        var a = Gi.World.Place(w, red, 32f, 32f, stamp, 4);
+        Touch(32, 32, 16);
+        Gi.World.Process(w);
+        if (!DrainMatches(red, expected) || Gi.World.ChangedTiles(w, g, blue, null) != 0) return false;
+
+        expected.Clear();
+        Gi.World.Process(w);
+        if (!DrainMatches(red, expected)) return false;
+
+        Touch(32, 32, 16);
+        Touch(40, 40, 16);
+        Gi.World.Move(w, a, 40f, 40f);
+        Gi.World.Process(w);
+        if (!DrainMatches(red, expected) || Gi.World.ChangedTiles(w, g, blue, null) != 0) return false;
+
+        expected.Clear();
+        Touch(40, 40, 16);
+        var b = Gi.World.Place(w, blue, 8f, 8f, stamp, 2);
+        Gi.World.Remove(w, a);
+        Gi.World.Process(w);
+        if (!DrainMatches(red, expected)) return false;
+        if (Gi.World.ChangedTiles(w, g, blue, buffer) != 1 || buffer[0] != 0) return false;
+
+        expected.Clear();
+        Gi.World.Remove(w, b);
+        Gi.World.Process(w);
+        if (!DrainMatches(red, expected)) return false;
+        if (Gi.World.ChangedTiles(w, g, blue, buffer) != 1 || buffer[0] != 0) return false;
+        if (Gi.World.Query(w, g, red, 0, 0, 64, 64) != 0 || Gi.World.Query(w, g, blue, 0, 0, 64, 64) != 0) return false;
+
+        Gi.World.Clear(w);
+        return Gi.World.ChangedTiles(w, g, red, null) == 0 && Gi.World.ChangedTiles(w, g, blue, null) == 0;
+    }
+
     private static bool SourceSlotsReuseAndStaleInert()
     {
         var w = Gi.World.New();
@@ -844,6 +966,22 @@ internal static class Verification
             if (el < best) best = el;
         }
         Console.WriteLine($"best-cell query (argmax over 1024x1024): {best:F2} us ({bestCell})");
+
+        best = double.MaxValue;
+        long gradientAcc = 0;
+        for (var r = 0; r < 20; r++)
+        {
+            var t = Stopwatch.GetTimestamp();
+            for (var i = 0; i < 1_000; i++)
+            {
+                Gi.World.QueryGradient(w, g, l, (i * 13.37f) % 1024f, (i * 7.77f) % 1024f, out var gx, out var gy);
+                gradientAcc += gx + gy;
+            }
+
+            var el = Stopwatch.GetElapsedTime(t).TotalMicroseconds;
+            if (el < best) best = el;
+        }
+        Console.WriteLine($"gradient query: {best / 10:F2} us per 1k points ({gradientAcc})");
 
         best = double.MaxValue;
         short naiveCell = 0;
