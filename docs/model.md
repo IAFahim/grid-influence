@@ -467,20 +467,68 @@ world rect at its own cell density; a source deposits into every grid it overlap
 - `saturated-sum-clamps` — saturation sticks at ±32767 after summation.
 - `cross-grid-sums-conserve-world-integral` — the same box sources summed over four grids at
   scales 2/1/0.5/0.25 scale exactly by cell area (`full == 4·fine == 16·half == 64·quarter`).
+- `derived-layers-match-cell-formulas` — eleven derived recipes (weighted sums with and without
+  shifts and saturating weights, the one-input form, `Min`, `Max`, two `Mask` bands, and chains
+  of derived inputs) over four grids through five churn rounds of mixed box, raster, tent, and
+  bell sources: every cell equals the formula applied to the inputs' cells, the full and random
+  rect sums equal scans, `QueryMax` (full and rect) equals the scan maximum at a cell holding
+  it, and each derived layer's changed tiles equal the union of its inputs'.
+- `derived-exclude-matches-removal` — 60 trials over five derived layers (including a chain and
+  saturating piles): excluded point, area, and gradient reads equal the reads after
+  `Remove` + `Process`, and `Rewind` restores the originals.
+- `derived-layers-follow-sources-rewind-and-clear` — `Place` on a derived layer returns `-1`;
+  invalid recipes throw; a recorded window rewinds the derived page exactly; `Clear` empties it
+  and keeps the recipe; and derived layers created after their inputs hold pages — one reading
+  another derived layer — equal their formulas after the next `Process`.
+- `turned-and-round-stamps-match-oracle` — 30 turned, scaled, signed sources drawn from a
+  21-stamp palette of turned boxes, rasters, tents, bells, and disks, cones, and domes with
+  arcs, on three grid scales through three churn rounds of turns, scales, moves, gains, and
+  replacements: every cell of every grid equals an oracle that evaluates the spec over the whole
+  grid (so a bounds bug that skips a cell fails it).
+- `round-kernels-share-box-units-and-centre` — disks, cones, and domes of radii 1–128 at gains
+  16 and −7: the centre reads `value·gain` exactly, profiles are symmetric along both axes and
+  diagonals, never rise outward, and stay inside the radius; every stamp frees afterwards.
+- `stamps-turn-and-scale-smoothly` — seven stamp kinds (arcs included) turned through a full
+  revolution in 1/256 steps and scaled from 1 to 2 in 1/64 steps: no cell ever changes by more
+  than the kernel's continuous slope allows.
+- `turn-and-scale-round-trip-exactly` — turning and scaling 24 sources away and back (whole
+  turns read 0) restores the field bit-exactly, and a box, tent, and disk at scale 2 equal the
+  stamps of twice their size.
+- `stamps-wider-than-grid-cover-it` — a box and a raster wider than their grid, near its edge and
+  scaled six times, cover every grid cell with the right value.
+- `turned-exclude-matches-removal` — 50 trials over turned, scaled, and round sources (and a
+  derived layer over them): excluded reads equal removal.
+- `fade-steps-match-schedule` — 140 fades (from −16…16 to −16…16 over 1–100 ticks) read the
+  spec gain at every one of 104 ticks, and the field is idle once they finish.
+- `expire-removes-on-schedule` — expiry on its tick, overrides, cancellation, fade-plus-expire,
+  `SetGain` cancelling only the fade, and a recycled slot surviving its predecessor's timer.
+- `rewind-resumes-schedules` — a world that records, mutates schedules inside a five-tick window,
+  and rewinds stays bit-identical to its twin (which never left the checkpoint) for 45 ticks.
+- `changed-since-matches-epochs` — 60 ticks of mixed mutations on three grids and a derived
+  layer: `Changed` equals an oracle over the disk's tiles for 2,400 probes, `ChangedTiles` with
+  `since` equals the oracle set, and `Clear` reads as a change.
+- `sense-nearest-matches-scan` — 1,200 probes over the four-grid sense world at nine thresholds:
+  value, world position, and completeness equal a full disk scan on the picked grid.
+- `warm-derived-process-allocates-0-bytes`, `warm-turned-process-allocates-0-bytes`,
+  `warm-fade-process-allocates-0-bytes` — steady-state frames with derived layers, turning and
+  scaling sources, and fade/expire/replace churn allocate 0 B.
 - `naive-grid-matches-gi` (+ `naive-grid-matches-gi-after-churn`, under `benchmarks --compare`)
   — a managed dense-grid reference rebuild (clear + redraw every source, clamp on read) produces
   bit-identical output to Gi before and after churn; the same command then times both.
 
 `--timing` adds min-over-20-rep lines for unchanged, incremental, move-200 churn, place-200
-churn, a 200-place window rewound and reprocessed (~100 µs — the inverse window costs the
-same deposits as the forward one), a place+remove-200 collapse window (~10 µs — the mutations
+churn, a 200-place window rewound and reprocessed (~90 µs — the inverse window costs the
+same deposits as the forward one), a place+remove-200 collapse window (~4 µs — the mutations
 apply no deposits), tent-200
-churn (16×16 tents into persistent `int64` sum stores — ~160 µs), bell-200 churn
-(16×16 bells, same stores — ~210 µs), full-grid
+churn (16×16 tents into persistent `int64` sum stores — ~110 µs), bell-200 churn
+(16×16 bells, same stores — ~150–195 µs), full-grid
 sum, a 1022² partial-region sum, the best-cell query against a one-million-call
 naive scan (0.1 µs vs ~5,600 µs on a 1024² layer), the gradient query (~5 ns per point), a
-16-layer × 25-dirty move-400 process, and
-256² region reads (4000 sources, 1024² grid). Timing receipts live in
+16-layer × 25-dirty move-400 process,
+256² region reads (4000 sources, 1024² grid), and the feature rows: the best cell of a derived
+`food − 2·threat` layer against two `QueryRegion` reads plus a scan (asserted equal), derived
+upkeep on a churn frame, turning 200 vision cones, moving 200 domes, scaling 200 tents, 2,000
+fading sources per tick, `TrySenseNearest`, and `Changed`. Timing receipts live in
 the README (deposit vs re-emitted marks, i9-14900K; perf-pass deltas, Ryzen 5 8500G); the perf
 pass behind them was `perf`-profile guided, receipts first.
 
