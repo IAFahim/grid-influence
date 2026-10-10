@@ -7,7 +7,7 @@ using System.Runtime.Intrinsics.X86;
 
 namespace Gi;
 
-internal static unsafe class TileBake
+internal static unsafe partial class TileBake
 {
     internal const int TileBits = 5;
     internal const int TileSize = 32;
@@ -19,11 +19,11 @@ internal static unsafe class TileBake
 #endif
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int RoundQ16(int value)
+    internal static int RoundQ16(int value)
         => (value + 32768 + (value >> 31)) >> 16;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int RoundQ24(long value)
+    internal static int RoundQ24(long value)
         => (int)((value + 8388608 + (value >> 63)) >> 24);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

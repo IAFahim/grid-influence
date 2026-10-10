@@ -1,6 +1,6 @@
 using System.Diagnostics;
 
-internal static class Verification
+internal static partial class Verification
 {
     public static int Run()
     {
@@ -33,6 +33,14 @@ internal static class Verification
         Check("multi-layer-pooled-matches-scans", MultiLayerPooledMatchesScans());
         Check("saturated-sum-clamps", SaturatedSumClamps());
         Check("cross-grid-sums-conserve-world-integral", CrossGridSumsConserve());
+        Check("sense-picks-finest-covering-grid-and-reports-gaps", SensePicksFinestAndReportsGaps());
+        Check("sense-area-matches-disk-scan", SenseAreaMatchesDiskScan());
+        Check("sense-area-conserves-across-grids", SenseAreaConservesAcrossGrids());
+        Check("sense-max-matches-disk-scan", SenseMaxMatchesDiskScan());
+        Check("sense-gradient-per-world-unit", SenseGradientPerWorldUnit());
+        Check("sense-exclude-matches-removal", SenseExcludeMatchesRemoval());
+        Check("sense-exclude-reads-applied-state", SenseExcludeReadsAppliedState());
+        Check("warm-sense-allocates-0-bytes", WarmSenseAllocationFree());
 
         Console.WriteLine(failures == 0 ? "verification: all receipts green" : $"verification: {failures} failures");
         return failures == 0 ? 0 : 1;
@@ -1673,5 +1681,6 @@ internal static class Verification
             }
         }
         Console.WriteLine($"query-region 256x256: {best:F1} us ({checksum})");
+        SenseTiming(w, l, ids[0]);
     }
 }

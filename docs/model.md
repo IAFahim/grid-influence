@@ -185,6 +185,49 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   Grid/layer creation rejects invalid worlds before accessing the arena.
 Empty region queries return before iterating tiles; full-grid sums walk allocated map slots and
 add one `int64` page sum per live page, so large sparse grids do not visit every possible tile.
+- **Sensing (grid-free)**: `TrySense*` answer world-space questions without a grid handle, and
+  every one returns `bool complete` — `true` only when the chosen grid holds the whole query
+  footprint. The grid is chosen by one rule, a pure function of the point, footprint, and grid
+  configuration: among grids whose cell space contains the point (the deposits' own truncated
+  `ScaleQ8` mapping), prefer a grid that contains the whole footprint, then the larger
+  `ScaleQ8` (finer), then the lower grid id. No grid contains the point → `false` with every
+  out value zeroed (`Covers(world, x, y)` tells "not covered" from "covered but clipped"), so an
+  uncovered point never reads as an empty field. A footprint no grid holds whole is answered on
+  the finest grid containing the point, clipped, and reports `false`; answers are never
+  stitched across grids, so a query crossing a fine grid's edge moves to the coarser grid that
+  holds it instead of reading the fine grid's empty outside.
+  `TrySense(world, layer, x, y, out v)` is the chosen grid's cell under the point.
+  `TrySenseArea(world, layer, x, y, reach, out total)` sums the disk of cells whose centres lie
+  within `reach` world units (Q8 integer test `dx²+dy² ≤ ⌊reach·ScaleQ8⌋²` against cell centres
+  `c·256+128`), always including the cell under the point, and normalizes the cell sum to world
+  area — `round(sum·65536 / ScaleQ8²)`, half away from zero — so the same field reads the same
+  total on grids of different resolution (exact for box stamps whose bands align on both grids;
+  receipt below). Fully covered tiles add their `int64` page sum; edge tiles sum masked row
+  spans. `TrySenseMax(world, layer, x, y, reach, out v, out bx, out by)` returns the largest cell
+  in the same disk and the world-space centre of the first such cell in row-major order;
+  absent tiles count as 0; tiles are visited highest page-max first and pruned by page max.
+  `TrySenseGradient(world, layer, x, y, out gx, out gy)` needs the point and its four
+  neighbours in one grid and returns the central difference per world unit,
+  `(Q(c+1) − Q(c−1))·ScaleQ8/512`, so steering speed does not jump at a resolution seam.
+  **Self-exclusion**: `TrySense(..., exclude, out v)` and `TrySenseArea(..., exclude, out t)`
+  answer exactly what the same query would return after `Remove(exclude); Process()` — bit for
+  bit, including saturation and the tent/bell once-per-cell rounding. The excluded source's
+  *applied* state is used: a pending move, gain change, or removal is ignored until `Process`
+  applies it; a source placed this frame excludes nothing; stale, foreign-layer, and invalid ids
+  exclude nothing. Method: a page cell strictly inside `(−32768, 32767)` is the exact
+  unsaturated total `T`; box and raster sources subtract their own integer contribution
+  (`BoxAt` reuses the emitter's band clip on a one-cell window; rasters run `EmitRaster` on a
+  one-cell clip); tent and bell sources replace the rounded sum of their kernel with the
+  rounded sum minus their exact product `value·gain·Wx·Wy` — the impulse chain telescopes to that
+  product — which needs the cell's unrounded kernel sum, recovered as one weighted quadrant sum
+  of the tile's impulse buffer (weights `d+1` for tents, `C(d+2,2)` for bells, the closed form
+  of the resolve prefix chain). Saturated page cells rebuild every component (box prefix,
+  dense, tent, bell) before subtracting. Areas apply the same rule per tile of the source's
+  footprint inside the disk, integrating buffers once per tile up to the needed rows and
+  columns.
+  Sensing reads only resolved state, so it inherits `Query`'s one-frame latency: a source placed
+  or moved this frame is seen after the next `Process`. Values saturate at ±32767 and signed
+  sources cancel; a layer meant to detect presence should hold same-signed sources.
 - **Determinism**: field contents are integer-only; the only float math is the world→cell
   conversion (`multiply + floor`, correctly rounded IEEE ops) and the grid-scale truncation to
   integer Q8 at grid creation. Mip baking, band weights, and the Q16.16 sampler are pure integer
@@ -237,6 +280,21 @@ world rect at its own cell density; a source deposits into every grid it overlap
   reads equal a naive per-cell rescan across random place/move/remove churn worlds.
 - `region-sum-matches-cell-scans` — nine rect shapes (tile-aligned, one-off, clipped,
   negative-offset, 1×1) sum identically to per-cell scans on a 512² mixed box/raster field.
+- `sense-picks-finest-covering-grid-and-reports-gaps` — 4,000 probes (many on grid edges) over
+  four overlapping grids, including two equal-scale grids offset by a fraction of a cell:
+  `TrySense` equals `Query` on the grid the documented rule picks, its `bool` equals
+  completeness, and uncovered points return `false` with 0 and `Covers == false`.
+- `sense-area-matches-disk-scan` — 1,500 disks vs per-cell centre-in-disk scans normalized to
+  world area, including the seam case that must fall back to the coarse grid.
+- `sense-area-conserves-across-grids` — the same aligned box field sensed on a 512² and a 128²
+  world grid gives the identical world-area total, equal to the raw fine-grid sum.
+- `sense-max-matches-disk-scan` — value and row-major-first position of the disk maximum.
+- `sense-gradient-per-world-unit` — central differences per world unit on the chosen grid.
+- `sense-exclude-matches-removal` — 120 trials over box, raster, tent, and bell sources on three
+  grid scales, including saturated positive and negative piles: excluded point and area reads
+  equal the reads after `Remove` + `Process`, and `Rewind` restores the originals.
+- `sense-exclude-reads-applied-state` — pending moves, same-frame places, stale and bogus ids.
+- `warm-sense-allocates-0-bytes` — 20k points × all six sensing calls, 0 B.
 - `query-at-matches-deposits` — on a 2^14-over-10000 grid (truncated `ScaleQ8` 419 vs float
   1.6384), `QueryAt` at 200 source positions reads exactly the cell the deposit mapping wrote;
   the float mapping diverges on a measurable subset of them.
@@ -455,9 +513,13 @@ pass behind them was `perf`-profile guided, receipts first.
   across worlds because their arenas and counts are process-wide. Pool initialization rides the
   same rule: the first creation call allocates both arenas before any handle exists, and handles
   only originate from creation calls, so no query can observe an uninitialized arena.
-  `Query`/`QueryRegion`/`QueryMax`/`QueryGradient`/`ChangedTiles` read resolved pages, page
-  sums, pyramid slots, and changed lists only and may run concurrently with
-  each other, never with mutation or process.
+  `Query`/`QueryRegion`/`QueryMax`/`QueryGradient`/`ChangedTiles`/`Covers`/`TrySense*` read
+  resolved pages, page sums, page maxima, tile impulse buffers, pyramid slots, changed lists,
+  source columns, and the pending op queue only, and may run concurrently with each other,
+  never with mutation or process. Sensing writes nothing outside its own stack frame: each call
+  stackallocs its scratch (span rows, at most 24 KB of per-tile integration arrays for an
+  excluded area, a single cell for an excluded point), so concurrent sensing threads never share
+  scratch.
 - **Bounds**: stamps clip to grid rects before marking (extents clamp to the grid size in Q8;
   grids whose `ScaleQ8` truncates to 0 are skipped); tile-local box corners land in
   `[0,32]×[0,32]` of the difference array (rows 0–32 exist for the exclusive far edge; column 32
@@ -475,6 +537,12 @@ pass behind them was `perf`-profile guided, receipts first.
   integer sample index stays within `[(−1), ceil(w/2^L)]` and every `+1` tap lands on the level's
   zero border. Level selection stops at the stamp's mip count, so tiny stamps sample level 0 with
   a wider step rather than reading past the chain.
+  Sensing clips every disk to `[0, Size)` before touching a tile, computes spans in `int64` Q8
+  (reach clamps to 2^24 Q8 so `reach²` cannot overflow), and reads impulse buffers only at rows
+  `0..31`, columns `0..31` of their 33×33 pitch. One-cell source evaluation writes one `int` on
+  the stack: `EmitRaster` with `x1 = min(x1, cx+1)` clips its loops to that single cell.
+  Weighted quadrant sums accumulate in `int64` with the same wrap-around as the resolve chain,
+  so the closed form equals the chain modulo 2^64 bit for bit.
 
 ## Tool inspection
 

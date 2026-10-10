@@ -46,6 +46,43 @@ World.Process(world);                    // applies the inverse ops — O(change
 A world mixes resolutions freely — e.g. a 1024² grid near the camera and 64² grids far away —
 and a source deposits into every grid it overlaps, at each grid's own scale.
 
+## Sensing without grids
+
+Gameplay code asks about the world, not about grids. `TrySense*` take a world, a layer, and a
+world-space point; the library picks the grid, and the `bool` tells you whether the answer is
+whole:
+
+```csharp
+if (World.TrySense(world, threat, me.X, me.Y, me.Source, out short danger))   // excluding my own aura
+    Flee(danger);
+
+World.TrySenseArea(world, threat, me.X, me.Y, reach: 20f, out long nearby);   // world-area total
+World.TrySenseMax(world, food, me.X, me.Y, reach: 40f, out short best, out float fx, out float fy);
+World.TrySenseGradient(world, food, me.X, me.Y, out float gx, out float gy);    // per world unit
+bool onMap = World.Covers(world, me.X, me.Y);
+```
+
+Each call is built to rule out a failure that the grid-handle API leaves to the caller. These
+are the measured cases, one wolf (6×6 box, gain 8) on a 256² fine grid and a 64² grid over
+1024 units:
+
+| trap | grid-handle read | grid-free read |
+| --- | --- | --- |
+| point outside every grid | `0` — reads as safe | `false`, `Covers == false` |
+| wolf steps just past the fine grid | fine grid reads `0` — enemy vanishes | answered on the grid that covers it |
+| same field, coarse vs fine area sum | raw sums differ by the cell-area ratio (256× here) | totals normalized to world area — identical |
+| agent senses its own aura | reads its own `720` | `exclude: id` → exactly what `Remove`+`Process` would give |
+| source moved this frame | — | exclusion follows the applied position until `Process` |
+
+The grid rule is fixed and deterministic: among grids containing the point, one that holds the
+whole query wins, then the finest, then the lowest id. Answers are never stitched across grids.
+Three rules still apply: reads see the last `Process` (one frame of latency), values saturate at
+±32,767, and presence layers should not mix signs (positive and negative sources cancel).
+
+Costs on a 1024² field with 4,000 sources: point 11 ns, gradient 21 ns, area r=8 260 ns,
+area r=64 2.1 µs, strongest cell r=32 1.1 µs; self-exclusion 40–500 ns for a point and
+2.7–7.4 µs for a radius-24 area around a 24×24 aura (box → bell).
+
 ## Use cases
 
 **Threat maps for AI.** Stamp every enemy's reach once; score candidate positions with page
@@ -242,6 +279,14 @@ bash tools/stats/perf.sh stat --iterations 12000
 | `rewind-restores-recorded-state` | `Rewind` restores the recorded field bit-exactly; revived ids live, rolled-back ids inert |
 | `saturated-sum-clamps` | saturation sticks at ±32767 after summation |
 | `cross-grid-sums-conserve-world-integral` | the same sources summed over four grid scales conserve the world integral exactly |
+| `sense-picks-finest-covering-grid-and-reports-gaps` | grid-free reads use the documented grid rule; uncovered points report `false`, never "safe" |
+| `sense-area-matches-disk-scan` | world-space disk totals equal per-cell scans, including seam fallback to the coarse grid |
+| `sense-area-conserves-across-grids` | one field sensed on two resolutions gives the identical world-area total |
+| `sense-max-matches-disk-scan` | strongest cell near a point equals a disk rescan, value and position |
+| `sense-gradient-per-world-unit` | grid-free gradients are per world unit, so speed does not jump at seams |
+| `sense-exclude-matches-removal` | sensing with `exclude` equals `Remove` + `Process`, bit for bit, for all four kernels and saturation |
+| `sense-exclude-reads-applied-state` | exclusion follows the applied source, not this frame's pending moves |
+| `warm-sense-allocates-0-bytes` | every sensing call, 0 B |
 
 The same suite passes with `DOTNET_EnableHWIntrinsic=0` (scalar fallback).
 

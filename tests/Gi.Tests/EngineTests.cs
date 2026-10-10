@@ -1807,4 +1807,74 @@ public sealed class EngineTests
         Assert.Equal(0, World.Query(w, g, l, 12, 12));
         Assert.NotEqual(0, World.Query(w, g, l, 62, 32));
     }
+
+    [Fact]
+    public void Sense_UncoveredPointReportsFalseNotSafe()
+    {
+        var w = World.New();
+        Grid.New(w, 8, 0f, 0f, 256f);
+        var threat = Layer.New(w);
+        var wolf = Stamp.Box(6, 6, 90);
+        World.Place(w, threat, 300f, 128f, wolf, 8);
+        World.Place(w, threat, 128f, 128f, wolf, 8);
+        World.Process(w);
+
+        Assert.False(World.Covers(w, 300f, 128f));
+        Assert.False(World.TrySense(w, threat, 300f, 128f, out var outside));
+        Assert.Equal(0, outside);
+        Assert.False(World.TrySenseArea(w, threat, 300f, 128f, 10f, out _));
+        Assert.True(World.TrySense(w, threat, 128f, 128f, out var inside));
+        Assert.Equal(720, inside);
+        Assert.False(World.TrySenseArea(w, threat, 250f, 128f, 20f, out var clipped));
+        Assert.Equal(0, clipped);
+    }
+
+    [Fact]
+    public void Sense_SeamFallsBackToCompleteCoarseGrid()
+    {
+        var w = World.New();
+        var coarse = Grid.New(w, 6, 0f, 0f, 1024f);
+        var fine = Grid.New(w, 8, 0f, 0f, 256f);
+        var threat = Layer.New(w);
+        var wolf = Stamp.Box(6, 6, 90);
+        World.Place(w, threat, 262f, 128f, wolf, 8);
+        World.Process(w);
+
+        Assert.Equal(0, World.QueryAt(w, fine, threat, 262f, 128f));
+        Assert.True(World.TrySense(w, threat, 262f, 128f, out var past));
+        Assert.Equal(World.QueryAt(w, coarse, threat, 262f, 128f), past);
+        Assert.NotEqual(0, past);
+
+        Assert.True(World.TrySenseArea(w, threat, 250f, 128f, 20f, out var area));
+        Assert.True(area > 0);
+        Assert.True(World.TrySense(w, threat, 100f, 100f, out _));
+    }
+
+    [Fact]
+    public void Sense_ExcludingSelfHidesOwnAuraExactly()
+    {
+        var w = World.New();
+        Grid.New(w, 8, 0f, 0f, 256f);
+        var threat = Layer.New(w);
+        var aura = Stamp.Bell(20, 20, 100);
+        var me = World.Place(w, threat, 100.4f, 100.7f, aura, 12);
+        World.Process(w);
+
+        Assert.True(World.TrySense(w, threat, 100.4f, 100.7f, out var self));
+        Assert.True(self > 0);
+        Assert.True(World.TrySense(w, threat, 100.4f, 100.7f, me, out var alone));
+        Assert.Equal(0, alone);
+        Assert.True(World.TrySenseArea(w, threat, 100.4f, 100.7f, 30f, me, out var aloneArea));
+        Assert.Equal(0, aloneArea);
+
+        var other = World.Place(w, threat, 108f, 100f, aura, 5);
+        World.Process(w);
+        Assert.True(World.TrySense(w, threat, 100.4f, 100.7f, me, out var withOther));
+        World.Remove(w, me);
+        World.Process(w);
+        Assert.True(World.TrySense(w, threat, 100.4f, 100.7f, out var otherOnly));
+        Assert.Equal(otherOnly, withOther);
+        Assert.True(World.TrySense(w, threat, 100.4f, 100.7f, other, out var nobody));
+        Assert.Equal(0, nobody);
+    }
 }

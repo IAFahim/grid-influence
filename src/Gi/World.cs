@@ -93,7 +93,7 @@ internal unsafe struct WorldCtx
     public int FreeHead;
 }
 
-public static unsafe class World
+public static unsafe partial class World
 {
     internal const int MaxWorlds = 64;
     internal const int MaxGrids = 32;
