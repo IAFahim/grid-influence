@@ -27,6 +27,8 @@ internal struct Snapshot
     public long DensePointerBytes;
     public long PageBytes;
     public long PageSumBytes;
+    public long PyramidBytes;
+    public long DepositQueueBytes;
     public long RasterTiles;
     public long WorldArenaBytes;
     public long StampArenaBytes;
@@ -34,7 +36,7 @@ internal struct Snapshot
 
     public readonly long WorldBytes => GridBytes + LayerBytes + SourceBytes + ScratchBytes +
         DirtyFlagBytes + DirtyQueueBytes + MapBytes + DifferenceBytes + DenseBytes + DensePointerBytes +
-        PageBytes + PageSumBytes;
+        PageBytes + PageSumBytes + PyramidBytes + DepositQueueBytes;
 
     public readonly long SharedBytes => WorldArenaBytes + StampArenaBytes + StampRasterBytes;
 
@@ -59,10 +61,12 @@ internal static unsafe class Inspection
             GridBytes = World.MaxGrids * sizeof(GridCtx),
             ScratchBytes = TileBake.TileSize * sizeof(int),
             SourceBytes = (long)s->X.Capacity * sizeof(float) + (long)s->Y.Capacity * sizeof(float) +
-                s->Stamp.Capacity + s->Layer.Capacity + s->Gain.Capacity + s->Alive.Capacity,
+                s->Stamp.Capacity + s->Layer.Capacity + s->Gain.Capacity + s->Alive.Capacity +
+                (long)s->Free.Capacity * sizeof(int) + s->Gen.Capacity,
             WorldArenaBytes = World.MaxWorlds * sizeof(WorldCtx),
             StampArenaBytes = StampCatalog.MaxStamps * sizeof(StampVariant),
             Stamps = StampCatalog.Count - 1,
+            DepositQueueBytes = (long)w->Ops.Capacity * sizeof(DepositOp) + (long)w->Pending.Capacity * sizeof(int),
         };
 
         for (var i = 0; i < s->Count; i++)
@@ -81,7 +85,8 @@ internal static unsafe class Inspection
                 result.MapSlots += ld->Pages.SlotCount;
                 result.Tombstones += ld->Pages.TombstoneCount;
                 result.MapBytes += (long)ld->Pages.SlotCount * (sizeof(int) + sizeof(byte*) + sizeof(byte));
-                result.DirtyQueueBytes += (long)ld->Dirty.Capacity * sizeof(int);
+                result.DirtyQueueBytes += (long)(ld->Dirty.Capacity + ld->Changed.Capacity) * sizeof(int);
+                result.PyramidBytes += ld->Max.Bytes;
                 if (ld->InDirty != null) result.DirtyFlagBytes += g->TileCount;
 
                 var used = ld->Pages.Used;

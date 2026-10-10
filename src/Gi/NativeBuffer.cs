@@ -47,4 +47,14 @@ internal unsafe struct NativeBuffer<T> where T : unmanaged
         Resize(capacity);
         _length = length;
     }
+
+    public void Free()
+    {
+        if (_pointer == null) return;
+
+        NativeHeap.AlignedFree(_pointer);
+        _pointer = null;
+        _length = 0;
+        _capacity = 0;
+    }
 }

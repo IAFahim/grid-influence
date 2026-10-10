@@ -4,6 +4,14 @@ using System.Runtime.CompilerServices;
 
 namespace Gi;
 
+internal unsafe struct ResolveTask
+{
+    public GridCtx* Grid;
+    public LayerData* Layer;
+    public int Base;
+    public int Count;
+}
+
 internal static unsafe class ResolvePool
 {
     internal const int Threshold = 32;
@@ -14,11 +22,10 @@ internal static unsafe class ResolvePool
     private static bool _created;
     private static AutoResetEvent[] _wake = null!;
     private static int* _prevPool;
-    private static int* _dirty;
-    private static byte* _inDirty;
-    private static PageMap* _pages;
     private static NativeBuffer<int> _dead;
-    private static int _count;
+    private static NativeBuffer<ResolveTask> _tasks;
+    private static int _taskCount;
+    private static int _total;
     private static int _cursor;
     private static int _remaining;
     private static int _deadCount;
@@ -36,6 +43,7 @@ internal static unsafe class ResolvePool
     {
         _workers = Math.Clamp(Environment.ProcessorCount - 1, 1, 4);
         _prevPool = (int*)NativeHeap.AlignedAlloc((nuint)(_workers * TileBake.TileSize * sizeof(int)));
+        _tasks.Ensure(World.MaxGrids * World.MaxLayers);
         _wake = new AutoResetEvent[_workers];
         for (var k = 0; k < _workers; k++)
         {
@@ -50,15 +58,31 @@ internal static unsafe class ResolvePool
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    internal static void ResolveLayer(WorldCtx* w, LayerData* ld, PageMap* pages, int count)
+    internal static void ResolveWorld(WorldCtx* w, int total)
     {
-        _dead.Ensure(count);
-        _dirty = ld->Dirty.Pointer;
-        _inDirty = ld->InDirty;
-        _pages = pages;
-        _count = count;
+        _dead.Ensure(total);
+        var tasks = _tasks.Pointer;
+        var taskCount = 0;
+        var taskBase = 0;
+        for (var gi = 0; gi < w->GridCount; gi++)
+        {
+            var g = w->Grids + gi;
+            for (var l = 0; l < w->LayerCount; l++)
+            {
+                var ld = g->Layers + l;
+                var count = ld->Dirty.Length;
+                if (count == 0) continue;
+
+                tasks[taskCount] = new ResolveTask { Grid = g, Layer = ld, Base = taskBase, Count = count };
+                taskCount++;
+                taskBase += count;
+            }
+        }
+
+        _taskCount = taskCount;
+        _total = total;
         _deadCount = 0;
-        _cursor = count;
+        _cursor = total;
         _remaining = _workers;
         for (var k = 0; k < _workers; k++) _wake[k].Set();
         RunShare(w->Prev);
@@ -72,11 +96,44 @@ internal static unsafe class ResolvePool
         var dead = _dead.Pointer;
         for (var i = 0; i < _deadCount; i++)
         {
-            var tile = dead[i];
+            var index = dead[i];
+            var t = tasks + TaskOf(index);
+            var ld = t->Layer;
+            var pages = &ld->Pages;
+            var tile = ld->Dirty.Pointer[index - t->Base];
             if (!pages->TryGet(tile, out var block)) continue;
             pages->Remove(tile);
             World.FreeBlock(block);
         }
+
+        for (var t = 0; t < taskCount; t++)
+        {
+            var task = tasks + t;
+            var ld = task->Layer;
+            var pages = &ld->Pages;
+            var dirty = ld->Dirty.Pointer;
+            for (var i = 0; i < task->Count; i++)
+            {
+                var tile = dirty[i];
+                var max = pages->TryGet(tile, out var block) ? *(short*)(block + World.MaxOffset) : (short)0;
+                ld->Max.Update(task->Grid->TilesPerSide, tile, max);
+            }
+        }
+    }
+
+    private static int TaskOf(int index)
+    {
+        var tasks = _tasks.Pointer;
+        var lo = 0;
+        var hi = _taskCount - 1;
+        while (lo < hi)
+        {
+            var mid = (lo + hi + 1) >> 1;
+            if (tasks[mid].Base <= index) lo = mid;
+            else hi = mid - 1;
+        }
+
+        return lo;
     }
 
     private static void WorkerLoop(int index)
@@ -95,23 +152,28 @@ internal static unsafe class ResolvePool
     #endif
     private static void RunShare(int* prev)
     {
+        var tasks = _tasks.Pointer;
         while (true)
         {
             var claimed = Interlocked.Add(ref _cursor, -Chunk);
             var hi = claimed + Chunk;
             if (hi <= 0) return;
-            if (hi > _count) hi = _count;
+            if (hi > _total) hi = _total;
             var lo = claimed < 0 ? 0 : claimed;
+            var task = TaskOf(lo);
             for (var i = lo; i < hi; i++)
             {
-                var tile = _dirty[i];
-                _inDirty[tile] = 0;
-                if (!_pages->TryGet(tile, out var block)) continue;
+                while (i >= tasks[task].Base + tasks[task].Count) task++;
+                var ld = tasks[task].Layer;
+                var tile = ld->Dirty.Pointer[i - tasks[task].Base];
+                ld->InDirty[tile] = 0;
+                var pages = &ld->Pages;
+                if (!pages->TryGet(tile, out var block)) continue;
 
                 new Span<int>(prev, TileBake.TileSize).Clear();
                 if (!TileBake.Resolve((int*)block, World.DenseOf(block), prev,
-                    (short*)(block + World.PageOffset), (long*)(block + World.SumOffset)))
-                    _dead.Pointer[Interlocked.Increment(ref _deadCount) - 1] = tile;
+                    (short*)(block + World.PageOffset), (long*)(block + World.SumOffset), (short*)(block + World.MaxOffset)))
+                    _dead.Pointer[Interlocked.Increment(ref _deadCount) - 1] = i;
             }
         }
     }

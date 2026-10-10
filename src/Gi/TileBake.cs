@@ -129,6 +129,78 @@ internal static unsafe class TileBake
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
+    internal static void EmitTent(
+        int* difference, int tileX0, int tileY0,
+        int px, int py, int fx, int fy, int extentX, int extentY, StampVariant* v, int gain)
+    {
+        if (gain == 0) return;
+
+        var tx1 = tileX0 + TileSize;
+        var ty1 = tileY0 + TileSize;
+
+        var bxLo = stackalloc int[MaxTentBands];
+        var bxHi = stackalloc int[MaxTentBands];
+        var bxWeight = stackalloc int[MaxTentBands];
+        var liveX = TentBands(px, fx, extentX, tileX0, tx1, bxLo, bxHi, bxWeight);
+
+        var byLo = stackalloc int[MaxTentBands];
+        var byHi = stackalloc int[MaxTentBands];
+        var byWeight = stackalloc int[MaxTentBands];
+        var liveY = TentBands(py, fy, extentY, tileY0, ty1, byLo, byHi, byWeight);
+
+        var constant = v->Constant;
+        for (var y = 0; y < liveY; y++)
+        {
+            var rowTop = byLo[y] * DiffPitch;
+            var rowBottom = byHi[y] * DiffPitch;
+            var wy = byWeight[y];
+            for (var x = 0; x < liveX; x++)
+            {
+                var value = RoundQ16(constant * bxWeight[x] * wy) * gain;
+                if (value == 0) continue;
+
+                var lx0 = bxLo[x];
+                var lx1 = bxHi[x];
+                difference[rowTop + lx0] += value;
+                difference[rowTop + lx1] -= value;
+                difference[rowBottom + lx0] -= value;
+                difference[rowBottom + lx1] += value;
+            }
+        }
+    }
+
+    private const int MaxTentBands = TileSize;
+
+    private static int TentBands(
+        int origin, int phase, int extent, int tileLo, int tileHi,
+        int* bandLo, int* bandHi, int* bandWeight)
+    {
+        var half = Math.Max(1, extent >> 1);
+        var peak = (origin << 8) + phase + (extent >> 1);
+        var first = (peak - half) >> 8;
+        var last = ((peak + half) >> 8) + 1;
+        var live = 0;
+        for (var c = Math.Max(first, tileLo); c <= Math.Min(last, tileHi - 1); c++)
+        {
+            var distance = c * 256 - peak;
+            if (distance < 0) distance = -distance;
+            if (distance >= half) continue;
+
+            var weight = 256 - 256 * distance / half;
+            if (weight <= 0) continue;
+
+            bandLo[live] = c - tileLo;
+            bandHi[live] = c - tileLo + 1;
+            bandWeight[live] = weight;
+            live++;
+        }
+
+        return live;
+    }
+
+    #if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    #endif
     internal static void EmitRaster(
         int* dense, int tileX0, int tileY0,
         int px, int py, int fx, int fy, int x1, int y1, int scaleQ8,
@@ -262,17 +334,19 @@ internal static unsafe class TileBake
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    internal static bool Resolve(int* difference, int* dense, int* previousRow, short* output, long* pageSum)
+    internal static bool Resolve(int* difference, int* dense, int* previousRow, short* output, long* pageSum, short* pageMax)
     {
 #if NET
-        if (Avx2.IsSupported) return Resolve256(difference, dense, previousRow, output, pageSum);
+        if (Avx2.IsSupported) return Resolve256(difference, dense, previousRow, output, pageSum, pageMax);
 
         var acc = Vector128<int>.Zero;
         var sum = Vector128<int>.Zero;
+        var maximum = Vector128.Create(int.MinValue);
         var vector = Vector;
 #endif
         var any = false;
         var cellSum = 0L;
+        var cellMax = short.MinValue;
         for (var y = 0; y < TileSize; y++)
         {
             var diffRow = difference + y * DiffPitch;
@@ -293,7 +367,9 @@ internal static unsafe class TileBake
                     var total = boxes + Load128(denseRow + x);
                     acc |= total;
                     Pack4(outRow + x, total);
-                    sum += Widened4(total);
+                    var widened4 = Widened4(total);
+                    sum += widened4;
+                    maximum = Vector128.Max(maximum, widened4);
                 }
             }
             else
@@ -308,6 +384,7 @@ internal static unsafe class TileBake
                     any |= total != 0;
                     var cell = (short)Math.Clamp(total, short.MinValue, short.MaxValue);
                     outRow[x] = cell;
+                    if (cell > cellMax) cellMax = cell;
                     cellSum += cell;
                 }
             }
@@ -317,11 +394,13 @@ internal static unsafe class TileBake
         if (vector)
         {
             *pageSum = sum[0] + sum[1] + sum[2] + sum[3];
+            *pageMax = (short)Math.Max(Math.Max(maximum[0], maximum[1]), Math.Max(maximum[2], maximum[3]));
             return !Vector128.EqualsAll(acc, Vector128<int>.Zero);
         }
 #endif
 
         *pageSum = cellSum;
+        *pageMax = cellMax;
         return any;
     }
 
@@ -329,13 +408,14 @@ internal static unsafe class TileBake
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    private static bool Resolve256(int* difference, int* dense, int* previousRow, short* output, long* pageSum)
+    private static bool Resolve256(int* difference, int* dense, int* previousRow, short* output, long* pageSum, short* pageMax)
     {
         var acc = Vector256<int>.Zero;
         var fourth = Vector256.Create(3);
         var last = Vector256.Create(7);
         var sumLo = Vector128<int>.Zero;
         var sumHi = Vector128<int>.Zero;
+        var maximum = Vector128.Create(short.MinValue);
         for (var y = 0; y < TileSize; y++)
         {
             var diffRow = difference + y * DiffPitch;
@@ -357,6 +437,7 @@ internal static unsafe class TileBake
                 var packed = Avx2.PackSignedSaturate(total, total);
                 var cells = Avx2.Permute4x64(packed.AsInt64(), 0xd8).GetLower().AsInt16();
                 Sse2.Store(outRow + x, cells);
+                maximum = Sse2.Max(maximum, cells);
                 var widened = Vector128.Widen(cells);
                 sumLo += widened.Item1;
                 sumHi += widened.Item2;
@@ -365,7 +446,16 @@ internal static unsafe class TileBake
 
         *pageSum = (long)sumLo[0] + sumLo[1] + sumLo[2] + sumLo[3] +
             sumHi[0] + sumHi[1] + sumHi[2] + sumHi[3];
+        *pageMax = HorizontalMax16(maximum);
         return !Vector256.EqualsAll(acc, Vector256<int>.Zero);
+    }
+
+    private static short HorizontalMax16(Vector128<short> v)
+    {
+        var best = v[0];
+        for (var i = 1; i < 8; i++)
+            if (v[i] > best) best = v[i];
+        return best;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

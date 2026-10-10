@@ -4,6 +4,7 @@ internal enum StampKind : byte
 {
     ConstantRectangle,
     Raster,
+    Tent,
 }
 
 internal unsafe struct StampVariant
@@ -143,6 +144,22 @@ internal static unsafe class StampCatalog
         return (byte)id;
     }
 
+    public static byte Tent(int width, int height, sbyte value)
+    {
+        Validate(width, height);
+        Runtime.Ensure();
+
+        var id = Reserve();
+        var v = Runtime.Stamps + id;
+        v->Kind = StampKind.Tent;
+        v->Width = width;
+        v->Height = height;
+        v->OriginQ8X = -(width * 128);
+        v->OriginQ8Y = -(height * 128);
+        v->Constant = value;
+        return (byte)id;
+    }
+
     private static void Validate(int width, int height)
     {
         if (width < 1 || width > MaxAxis) throw new ArgumentOutOfRangeException(nameof(width));
@@ -169,4 +186,7 @@ public static unsafe class Stamp
 
     public static byte Box(int width, int height, sbyte value)
         => StampCatalog.Box(width, height, value);
+
+    public static byte Tent(int width, int height, sbyte value)
+        => StampCatalog.Tent(width, height, value);
 }
