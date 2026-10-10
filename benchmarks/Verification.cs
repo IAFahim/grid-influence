@@ -26,6 +26,7 @@ internal static class Verification
         Check("changed-tiles-match-drain", ChangedTilesMatchDrain());
         Check("deferred-window-matches-stepped-processing", DeferredWindowMatchesSteppedProcessing());
         Check("tent-matches-impulse-oracle", TentMatchesImpulseOracle());
+        Check("bell-matches-paraboloid-oracle", BellMatchesParaboloidOracle());
         Check("source-slots-reuse-and-stale-handles-inert", SourceSlotsReuseAndStaleInert());
         Check("rewind-restores-recorded-state", RewindRestoresRecordedState());
         Check("signed-gain-exact", SignedGainExact());
@@ -964,6 +965,126 @@ internal static class Verification
         return true;
     }
 
+    private static unsafe bool BellMatchesParaboloidOracle()
+    {
+        var w = Gi.World.New();
+        var fine = Gi.Grid.New(w, 8, 0f, 0f, 256f);
+        var coarse = Gi.Grid.New(w, 7, 0f, 0f, 256f);
+        var l = Gi.Layer.New(w);
+        var rng = new Random(613);
+        var widths = new[] { 2, 3, 5, 8, 13, 24, 40 };
+        var bells = new byte[widths.Length];
+        for (var i = 0; i < widths.Length; i++) bells[i] = Gi.Stamp.Bell(widths[i], widths[i], 40);
+        const int count = 90;
+        var ids = new int[count];
+        var sx = new float[count];
+        var sy = new float[count];
+        var ssize = new int[count];
+        var sgain = new int[count];
+        var slive = new bool[count];
+        var fineField = new int[256 * 256];
+        var coarseField = new int[128 * 128];
+
+        int RoundQ24(long value) => (int)((value + 8388608 + (value >> 63)) >> 24);
+
+        (int First, int Last) Axis(int origin, int phase, int extent)
+        {
+            var half = Math.Max(1, extent >> 1);
+            var peak = (origin << 8) + phase + (extent >> 1);
+            var first = ((peak - half) >> 8) + 1;
+            var last = (peak + half - 1) >> 8;
+            if (last < first) { first = peak >> 8; last = first; }
+            return (first, last);
+        }
+
+        int Weight(int cell, int first, int last)
+        {
+            if (cell < first || cell > last) return 0;
+            var h = last - first + 1;
+            var curve = Math.Max(1, 65536 / (h * h));
+            var e = 2 * cell + 1 - first - last;
+            return curve * (h * h - e * e);
+        }
+
+        int CellValue(int cx, int cy, int scaleQ8)
+        {
+            var sum = 0L;
+            for (var i = 0; i < count; i++)
+            {
+                if (!slive[i]) continue;
+                var width = ssize[i];
+                var extent = width * scaleQ8;
+                var leadX = (long)(int)MathF.Floor(sx[i] * scaleQ8) + ((long)-(width * 128) * scaleQ8 >> 8);
+                var leadY = (long)(int)MathF.Floor(sy[i] * scaleQ8) + ((long)-(width * 128) * scaleQ8 >> 8);
+                var gx = Axis((int)(leadX >> 8), (int)(leadX & 255), extent);
+                var gy = Axis((int)(leadY >> 8), (int)(leadY & 255), extent);
+                sum += 40L * sgain[i] * Weight(cx, gx.First, gx.Last) * Weight(cy, gy.First, gy.Last);
+            }
+
+            return RoundQ24(sum);
+        }
+
+        void Rebuild(int[] target, int size, int scaleQ8)
+        {
+            for (var cy = 0; cy < size; cy++)
+            for (var cx = 0; cx < size; cx++)
+                target[cy * size + cx] = CellValue(cx, cy, scaleQ8);
+        }
+
+        bool Compare(byte grid, int size, int scaleQ8, int[] oracle)
+        {
+            var scan = new short[size * size];
+            fixed (short* p = scan)
+            {
+                Gi.World.QueryRegion(w, grid, l, 0, 0, size, size, p);
+                for (var i = 0; i < oracle.Length; i++)
+                    if (p[i] != (short)Math.Clamp(oracle[i], short.MinValue, short.MaxValue))
+                    {
+                        Console.WriteLine($"  first diff grid{size} ({i % size},{i / size}): engine {p[i]} oracle {oracle[i]}");
+                        return false;
+                    }
+            }
+
+            return true;
+        }
+
+        for (var round = 0; round < 3; round++)
+        {
+            for (var i = 0; i < count; i++)
+            {
+                if (round > 0 && rng.Next(5) == 0)
+                {
+                    Gi.World.Remove(w, ids[i]);
+                    slive[i] = false;
+                }
+
+                if (!slive[i])
+                {
+                    var k = rng.Next(widths.Length);
+                    ssize[i] = widths[k];
+                    sx[i] = (float)(rng.NextDouble() * 248 + 4);
+                    sy[i] = (float)(rng.NextDouble() * 248 + 4);
+                    sgain[i] = rng.Next(-8, 15);
+                    ids[i] = Gi.World.Place(w, l, sx[i], sy[i], bells[k], sgain[i]);
+                    slive[i] = true;
+                }
+                else if (round > 0)
+                {
+                    sx[i] = (float)(rng.NextDouble() * 248 + 4);
+                    sy[i] = (float)(rng.NextDouble() * 248 + 4);
+                    Gi.World.Move(w, ids[i], sx[i], sy[i]);
+                }
+            }
+
+            Gi.World.Process(w);
+            Rebuild(fineField, 256, 256);
+            Rebuild(coarseField, 128, 128);
+            if (!Compare(fine, 256, 256, fineField) || !Compare(coarse, 128, 128, coarseField)) return false;
+        }
+
+        return true;
+    }
+
     private static bool SourceSlotsReuseAndStaleInert()
     {
         var w = Gi.World.New();
@@ -1407,6 +1528,24 @@ internal static class Verification
             Gi.World.Process(w);
         }
         Console.WriteLine($"tent-200 churn process (16x16): {best:F0} us");
+
+        var bellStamp = Gi.Stamp.Bell(16, 16, 60);
+        var bellIds = new int[200];
+        best = double.MaxValue;
+        for (var r = -1; r < 20; r++)
+        {
+            var t = Stopwatch.GetTimestamp();
+            for (var i = 0; i < bellIds.Length; i++)
+                bellIds[i] = Gi.World.Place(w, l,
+                    (i * 43.1f + (r + 1) * 19.3f) % 1000f + 12f,
+                    (i * 27.9f + (r + 1) * 21.7f) % 1000f + 12f, bellStamp, 8);
+            Gi.World.Process(w);
+            var el = Stopwatch.GetElapsedTime(t).TotalMicroseconds;
+            if (r >= 0 && el < best) best = el;
+            for (var i = 0; i < bellIds.Length; i++) Gi.World.Remove(w, bellIds[i]);
+            Gi.World.Process(w);
+        }
+        Console.WriteLine($"bell-200 churn process (16x16): {best:F0} us");
 
         best = double.MaxValue;
         long total = 0;

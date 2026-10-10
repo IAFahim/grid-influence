@@ -95,6 +95,16 @@ internal static unsafe class Receipts
         var tentGone = Inspection.Read(world);
         tentOk = tentOk && tentGone.TentTiles == 0 && tentGone.TentBytes == 0;
 
+        var bell = World.Place(world, layer, 64f, 64f, Stamp.Bell(12, 12, 40), 3);
+        World.Process(world);
+        var belled = Inspection.Read(world);
+        var bellOk = belled.BellTiles == 1 && belled.BellBytes == World.BellBytes &&
+            World.Query(world, grid, layer, 64, 64) > 0;
+        World.Remove(world, bell);
+        World.Process(world);
+        var bellGone = Inspection.Read(world);
+        bellOk = bellOk && bellGone.BellTiles == 0 && bellGone.BellBytes == 0;
+
         World.Clear(world);
         var cleared = Inspection.Read(world);
         var clearOk = cleared.LiveSources == 0 && cleared.SourceSlots == 0 && cleared.SourceCapacity == 64 &&
@@ -117,6 +127,7 @@ internal static unsafe class Receipts
             new("warm-query-allocates-0-bytes", queryBytes == 0 && checksum == 100256L * 80, queryBytes),
             new("warm-move-process-allocates-0-bytes", mutationBytes == 0 && mutationOk, mutationBytes),
             new("tent-buffer-accounted", tentOk, tented.TentBytes),
+            new("bell-buffer-accounted", bellOk, belled.BellBytes),
             new("clear-frees-pages-retains-capacity", clearOk, cleared.WorldBytes),
         ];
     }

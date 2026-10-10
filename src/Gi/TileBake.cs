@@ -232,6 +232,124 @@ internal static unsafe class TileBake
         }
     }
 
+    internal const int MaxBellImpulses = 11;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int BellWeight(int cell, int first, int last, int curve, int h2)
+    {
+        if (cell < first || cell > last) return 0;
+        var e = 2 * cell + 1 - first - last;
+        return curve * (h2 - e * e);
+    }
+
+    private static int BellImpulses(
+        int origin, int phase, int extent, int tileLo,
+        int* cells, int* deltas)
+    {
+        TentGeometry(origin, phase, extent, out var first, out _, out var last, out _, out _, out _);
+        var h = last - first + 1;
+        var curve = Math.Max(1, 65536 / (h * h));
+        var h2 = h * h;
+
+        var count = 0;
+        var w0 = BellWeight(tileLo, first, last, curve, h2);
+        var w1 = BellWeight(tileLo + 1, first, last, curve, h2);
+        var w2 = BellWeight(tileLo + 2, first, last, curve, h2);
+        var boundary = stackalloc int[3];
+        boundary[0] = w0;
+        boundary[1] = w1 - 3 * w0;
+        boundary[2] = w2 - 3 * w1 + 3 * w0;
+        for (var i = 0; i < 3; i++)
+        {
+            if (boundary[i] == 0) continue;
+            cells[count] = i;
+            deltas[count] = boundary[i];
+            count++;
+        }
+
+        var need = stackalloc int[12];
+        var vals = stackalloc int[12];
+        var needCount = 0;
+        for (var c = first - 3; c <= first + 2; c++)
+        {
+            need[needCount] = c;
+            vals[needCount] = BellWeight(c, first, last, curve, h2);
+            needCount++;
+        }
+        for (var c = Math.Max(first + 3, last - 2); c <= last + 3; c++)
+        {
+            need[needCount] = c;
+            vals[needCount] = BellWeight(c, first, last, curve, h2);
+            needCount++;
+        }
+
+        var candidates = stackalloc int[6];
+        candidates[0] = first - tileLo;
+        candidates[1] = first + 1 - tileLo;
+        candidates[2] = first + 2 - tileLo;
+        candidates[3] = last + 1 - tileLo;
+        candidates[4] = last + 2 - tileLo;
+        candidates[5] = last + 3 - tileLo;
+        for (var i = 0; i < 6; i++)
+        {
+            var c = candidates[i];
+            if (c < 3 || c >= TileSize) continue;
+            var seen = false;
+            for (var j = 0; j < i; j++) seen |= candidates[j] == c;
+            if (seen) continue;
+
+            var global = tileLo + c;
+            var wc = 0;
+            var wm1 = 0;
+            var wm2 = 0;
+            var wm3 = 0;
+            for (var k = 0; k < needCount; k++)
+            {
+                var d = global - need[k];
+                if (d == 0) wc = vals[k];
+                else if (d == 1) wm1 = vals[k];
+                else if (d == 2) wm2 = vals[k];
+                else if (d == 3) wm3 = vals[k];
+            }
+
+            var delta = wc - 3 * wm1 + 3 * wm2 - wm3;
+            if (delta == 0) continue;
+            cells[count] = c;
+            deltas[count] = delta;
+            count++;
+        }
+
+        return count;
+    }
+
+    internal static void EmitBell(
+        long* bell, int tileX0, int tileY0,
+        int px, int py, int fx, int fy, int extentX, int extentY, StampVariant* v, int gain)
+    {
+        if (gain == 0) return;
+
+        var xCells = stackalloc int[MaxBellImpulses];
+        var xDeltas = stackalloc int[MaxBellImpulses];
+        var yCells = stackalloc int[MaxBellImpulses];
+        var yDeltas = stackalloc int[MaxBellImpulses];
+        var liveX = BellImpulses(px, fx, extentX, tileX0, xCells, xDeltas);
+        var liveY = BellImpulses(py, fy, extentY, tileY0, yCells, yDeltas);
+
+        var scale = (long)v->Constant * gain;
+        for (var y = 0; y < liveY; y++)
+        {
+            var row = yCells[y] * DiffPitch;
+            var dy = yDeltas[y];
+            for (var x = 0; x < liveX; x++)
+            {
+                var value = scale * xDeltas[x] * dy;
+                if (value == 0) continue;
+
+                bell[row + xCells[x]] += value;
+            }
+        }
+    }
+
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
@@ -380,14 +498,36 @@ internal static unsafe class TileBake
         }
     }
 
+    private static void BellRow(long* bell, int y, long* bp, long* bq, long* br, int* bellOut)
+    {
+        var row = bell + y * DiffPitch;
+        var run = 0L;
+        var run2 = 0L;
+        var run3 = 0L;
+        for (var x = 0; x < TileSize; x++)
+        {
+            run += row[x];
+            bp[x] += run;
+            run2 += bp[x];
+            bq[x] += run2;
+            run3 += bq[x];
+            br[x] += run3;
+            bellOut[x] = RoundQ24(br[x]);
+        }
+    }
+
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    internal static bool Resolve(int* difference, int* dense, int* previousRow, long* tent, short* output, long* pageSum, short* pageMax)
+    internal static bool Resolve(int* difference, int* dense, int* previousRow, long* tent, long* bell, short* output, long* pageSum, short* pageMax)
     {
         var tentOut = stackalloc int[TileSize];
+        var bellOut = stackalloc int[TileSize];
         var tp = stackalloc long[TileSize];
         var tq = stackalloc long[TileSize];
+        var bp = stackalloc long[TileSize];
+        var bq = stackalloc long[TileSize];
+        var br = stackalloc long[TileSize];
         if (tent == null)
         {
             new Span<int>(tentOut, TileSize).Clear();
@@ -398,8 +538,19 @@ internal static unsafe class TileBake
             new Span<long>(tq, TileSize).Clear();
         }
 
+        if (bell == null)
+        {
+            new Span<int>(bellOut, TileSize).Clear();
+        }
+        else
+        {
+            new Span<long>(bp, TileSize).Clear();
+            new Span<long>(bq, TileSize).Clear();
+            new Span<long>(br, TileSize).Clear();
+        }
+
 #if NET
-        if (Avx2.IsSupported) return Resolve256(difference, dense, previousRow, tent, tp, tq, tentOut, output, pageSum, pageMax);
+        if (Avx2.IsSupported) return Resolve256(difference, dense, previousRow, tent, bell, tp, tq, bp, bq, br, tentOut, bellOut, output, pageSum, pageMax);
 
         var acc = Vector128<int>.Zero;
         var sum = Vector128<int>.Zero;
@@ -415,6 +566,7 @@ internal static unsafe class TileBake
             var denseRow = dense + y * TileSize;
             var outRow = output + y * TileSize;
             if (tent != null) TentRow(tent, y, tp, tq, tentOut);
+            if (bell != null) BellRow(bell, y, bp, bq, br, bellOut);
             var carry = 0;
             var x = 0;
 #if NET
@@ -427,7 +579,7 @@ internal static unsafe class TileBake
                     carry = h[3];
                     var boxes = h + Load128(previousRow + x);
                     Store128(previousRow + x, boxes);
-                    var total = boxes + Load128(denseRow + x) + Load128(tentOut + x);
+                    var total = boxes + Load128(denseRow + x) + Load128(tentOut + x) + Load128(bellOut + x);
                     acc |= total;
                     Pack4(outRow + x, total);
                     var widened4 = Widened4(total);
@@ -443,7 +595,7 @@ internal static unsafe class TileBake
                     carry += diffRow[x];
                     var boxes = carry + previousRow[x];
                     previousRow[x] = boxes;
-                    var total = boxes + denseRow[x] + tentOut[x];
+                    var total = boxes + denseRow[x] + tentOut[x] + bellOut[x];
                     any |= total != 0;
                     var cell = (short)Math.Clamp(total, short.MinValue, short.MaxValue);
                     outRow[x] = cell;
@@ -471,7 +623,7 @@ internal static unsafe class TileBake
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    private static bool Resolve256(int* difference, int* dense, int* previousRow, long* tent, long* tp, long* tq, int* tentOut, short* output, long* pageSum, short* pageMax)
+    private static bool Resolve256(int* difference, int* dense, int* previousRow, long* tent, long* bell, long* tp, long* tq, long* bp, long* bq, long* br, int* tentOut, int* bellOut, short* output, long* pageSum, short* pageMax)
     {
         var acc = Vector256<int>.Zero;
         var fourth = Vector256.Create(3);
@@ -485,6 +637,7 @@ internal static unsafe class TileBake
             var denseRow = dense + y * TileSize;
             var outRow = output + y * TileSize;
             if (tent != null) TentRow(tent, y, tp, tq, tentOut);
+            if (bell != null) BellRow(bell, y, bp, bq, br, bellOut);
             var carry = Vector256<int>.Zero;
             for (var x = 0; x < TileSize; x += 8)
             {
@@ -496,7 +649,7 @@ internal static unsafe class TileBake
                 carry = Avx2.PermuteVar8x32(h, last);
                 var boxes = h + Avx.LoadVector256(previousRow + x);
                 Avx.Store(previousRow + x, boxes);
-                var total = boxes + Avx.LoadVector256(denseRow + x) + Avx.LoadVector256(tentOut + x);
+                var total = boxes + Avx.LoadVector256(denseRow + x) + Avx.LoadVector256(tentOut + x) + Avx.LoadVector256(bellOut + x);
                 acc |= total;
                 var packed = Avx2.PackSignedSaturate(total, total);
                 var cells = Avx2.Permute4x64(packed.AsInt64(), 0xd8).GetLower().AsInt16();

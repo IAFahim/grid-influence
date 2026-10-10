@@ -20,7 +20,7 @@ using Gi;
 byte world = World.New();
 byte grid   = Grid.New(world, power: 8, x: 0f, y: 0f, size: 256f);  // 256×256 cells
 byte layer  = Layer.New(world);                                      // channel on every grid
-byte stamp  = Stamp.Box(16, 16, 60);                                 // or Stamp.New(samples, w, h) / Stamp.Tent(12, 12, 90)
+byte stamp  = Stamp.Box(16, 16, 60);            // or Stamp.New(samples, w, h) / Stamp.Tent(12, 12, 90) / Stamp.Bell(12, 12, 90)
 
 int source = World.Place(world, layer, 128.5f, 64f, stamp, gain: 8); // persistent source
 World.Move(world, source, 130f, 64f);    // queued — applied at the next Process
@@ -174,8 +174,8 @@ short  along  = World.QueryAt(world, grid, slowZone, x, y);
   data path.
 - **Deposits are incremental and deferred.** Each live tile owns one 6,528 B block (difference
   array + `int16` page + `int64` page sum + `int16` page max); raster deposits attach a dense
-  buffer once, growing the block to 10,624 B — box tiles never carry it, and tent tiles carry
-  their own lazily attached `int64` second-order buffer instead.
+  buffer once, growing the block to 10,624 B — box tiles never carry it, and tent/bell tiles
+  carry their own lazily attached `int64` impulse buffers instead.
   `Place`/`Move`/`SetGain`/`Remove` only merge into a per-world op queue (one op per source per
   window); `Process` applies the net retract-and-apply pairs — both emit paths are per-cell
   linear in gain, so any mutation sequence collapses exactly, and a source placed and removed
@@ -197,8 +197,9 @@ short  along  = World.QueryAt(world, grid, slowZone, x, y);
   `Process` resolved, for repainting or incremental sync.
 - **Sub-cell placement, world-anchored extents.** Positions convert to cell space in Q8; raster
   stamps deposit with bilinear edge weights, uniform rasters take a difference-array box path,
-  and `Stamp.Tent` deposits a piecewise-linear kernel as ≤36 second-order impulses per touched
-  tile — exact at every sub-cell phase, zero outside the support.
+  `Stamp.Tent` deposits a piecewise-linear kernel as ≤36 second-order impulses per touched
+  tile, and `Stamp.Bell` deposits a paraboloid kernel as ≤81 third-order impulses per touched
+  tile — both exact at every sub-cell phase, zero outside the support.
   A stamp covers the same world rect on every grid of its world: extents scale with the grid,
   fractional edges become Q8 band weights, and raster stamps carry baked zero-padded box-average
   mip chains so coarse grids minify without aliasing (scale-1 grids keep the bit-identical 0.2
@@ -237,6 +238,7 @@ bash tools/stats/perf.sh stat --iterations 12000
 | `changed-tiles-match-drain` | the changed-tile feed equals the window's exact tile footprints |
 | `deferred-window-matches-stepped-processing` | batched mutations are bit-identical to per-mutation `Process`; place+remove windows deposit nothing |
 | `tent-matches-impulse-oracle` | tent kernels match a per-cell second-order-impulse oracle on two grid scales |
+| `bell-matches-paraboloid-oracle` | bell kernels match a direct separable-paraboloid oracle on two grid scales |
 | `rewind-restores-recorded-state` | `Rewind` restores the recorded field bit-exactly; revived ids live, rolled-back ids inert |
 | `saturated-sum-clamps` | saturation sticks at ±32767 after summation |
 | `cross-grid-sums-conserve-world-integral` | the same sources summed over four grid scales conserve the world integral exactly |
@@ -369,6 +371,7 @@ receipt-covered):
 | tiles resolved last frame | diff pages yourself | one `ChangedTiles` call — zero-copy list swap |
 | place+remove-200 in one window | ~200 µs — two full churn processes | 5.7 µs — deferred ops collapse, no deposits |
 | tent-200 churn, 16×16 kernels | bake a raster, approximate phases | 288 µs — `Stamp.Tent`, exact at every phase |
+| bell-200 churn, 16×16 kernels | bake a paraboloid raster | ~790 µs — `Stamp.Bell`, exact at every phase |
 
 ## Run the full thing
 

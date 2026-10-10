@@ -111,8 +111,10 @@ public static unsafe class World
     internal const int DensePtrOffset = PageOffset + PageBytes;
     internal const int DensePtrSlot = 8;
     internal const int TentPtrOffset = DensePtrOffset + DensePtrSlot;
+    internal const int BellPtrOffset = TentPtrOffset + 8;
     internal const int TentBytes = TileBake.DiffRows * TileBake.DiffPitch * sizeof(long);
-    internal const int SumOffset = (DensePtrOffset + DensePtrSlot + 63) & ~63;
+    internal const int BellBytes = TentBytes;
+    internal const int SumOffset = (BellPtrOffset + 8 + 63) & ~63;
     internal const int SumSlotBytes = 64;
     internal const int MaxOffset = SumOffset + 8;
     internal const int BlockBytes = SumOffset + SumSlotBytes;
@@ -370,10 +372,11 @@ public static unsafe class World
                 out var extentX, out var extentY,
                 out var x0, out var y0, out var x1, out var y1);
 
+            var bell = v->Kind == StampKind.Bell;
             var cx0 = Math.Max(x0, 0);
             var cy0 = Math.Max(y0, 0);
-            var cx1 = Math.Min(x1, g->Size);
-            var cy1 = Math.Min(y1, g->Size);
+            var cx1 = Math.Min(x1 + (bell ? 2 : 0), g->Size);
+            var cy1 = Math.Min(y1 + (bell ? 2 : 0), g->Size);
             if (cx1 <= cx0 || cy1 <= cy0) continue;
 
             var ld = EnsureDirty(g, layer);
@@ -396,6 +399,8 @@ public static unsafe class World
                     TileBake.EmitBox((int*)block, tileX0, tileY0, px, py, fx, fy, extentX, extentY, v, gain);
                 else if (v->Kind == StampKind.Tent)
                     TileBake.EmitTent((long*)EnsureTent(block), tileX0, tileY0, px, py, fx, fy, extentX, extentY, v, gain);
+                else if (bell)
+                    TileBake.EmitBell((long*)EnsureBell(block), tileX0, tileY0, px, py, fx, fy, extentX, extentY, v, gain);
                 else
                     TileBake.EmitRaster(DenseOf(block), tileX0, tileY0, px, py, fx, fy, x1, y1, g->ScaleQ8, v, gain);
 
@@ -419,10 +424,11 @@ public static unsafe class World
                 out var extentX, out var extentY,
                 out var x0, out var y0, out var x1, out var y1);
 
+            var bell = v->Kind == StampKind.Bell;
             var cx0 = Math.Max(x0, 0);
             var cy0 = Math.Max(y0, 0);
-            var cx1 = Math.Min(x1, g->Size);
-            var cy1 = Math.Min(y1, g->Size);
+            var cx1 = Math.Min(x1 + (bell ? 2 : 0), g->Size);
+            var cy1 = Math.Min(y1 + (bell ? 2 : 0), g->Size);
             if (cx1 <= cx0 || cy1 <= cy0) continue;
 
             var ld = EnsureDirty(g, layer);
@@ -490,6 +496,8 @@ public static unsafe class World
             TileBake.EmitBox((int*)block, tileX0, tileY0, f->Px, f->Py, f->Fx, f->Fy, f->ExtentX, f->ExtentY, v, gain);
         else if (v->Kind == StampKind.Tent)
             TileBake.EmitTent((long*)EnsureTent(block), tileX0, tileY0, f->Px, f->Py, f->Fx, f->Fy, f->ExtentX, f->ExtentY, v, gain);
+        else if (v->Kind == StampKind.Bell)
+            TileBake.EmitBell((long*)EnsureBell(block), tileX0, tileY0, f->Px, f->Py, f->Fx, f->Fy, f->ExtentX, f->ExtentY, v, gain);
         else
             TileBake.EmitRaster(DenseOf(block), tileX0, tileY0, f->Px, f->Py, f->Fx, f->Fy,
                 f->X1, f->Y1, w->Grids[f->Grid].ScaleQ8, v, gain);
@@ -693,6 +701,17 @@ public static unsafe class World
         return tent;
     }
 
+    private static byte* EnsureBell(byte* block)
+    {
+        var bell = *(byte**)(block + BellPtrOffset);
+        if (bell != null) return bell;
+
+        bell = (byte*)NativeHeap.AlignedAlloc((nuint)BellBytes);
+        new Span<byte>(bell, BellBytes).Clear();
+        *(byte**)(block + BellPtrOffset) = bell;
+        return bell;
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static int* DenseOf(byte* block)
     {
@@ -703,12 +722,16 @@ public static unsafe class World
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static long* TentOf(byte* block) => (long*)*(byte**)(block + TentPtrOffset);
 
+    internal static long* BellOf(byte* block) => (long*)*(byte**)(block + BellPtrOffset);
+
     internal static void FreeBlock(byte* block)
     {
         var dense = *(byte**)(block + DensePtrOffset);
         if (dense != null && dense != block + BlockBytes) NativeHeap.AlignedFree(dense);
         var tent = *(byte**)(block + TentPtrOffset);
         if (tent != null) NativeHeap.AlignedFree(tent);
+        var bell = *(byte**)(block + BellPtrOffset);
+        if (bell != null) NativeHeap.AlignedFree(bell);
         NativeHeap.AlignedFree(block);
     }
 
@@ -771,7 +794,7 @@ public static unsafe class World
                             if (!pages->TryGet(tile, out var block)) continue;
 
                             new Span<int>(w->Prev, TileBake.TileSize).Clear();
-                            if (!TileBake.Resolve((int*)block, DenseOf(block), w->Prev, TentOf(block),
+                            if (!TileBake.Resolve((int*)block, DenseOf(block), w->Prev, TentOf(block), BellOf(block),
                                 (short*)(block + PageOffset), (long*)(block + SumOffset), (short*)(block + MaxOffset)))
                             {
                                 pages->Remove(tile);

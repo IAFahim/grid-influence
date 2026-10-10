@@ -32,7 +32,7 @@ internal readonly struct Scene(byte world, byte grid, int cells, int layers, int
             var x = (state >> 8) % (uint)(cells * 4) * 0.25f;
             state = unchecked(state * 1664525u + 1013904223u);
             var y = (state >> 8) % (uint)(cells * 4) * 0.25f;
-            if (Gi.World.Place(world, (byte)(i % options.Layers), x, y, stamp, 8) != i)
+            if ((Gi.World.Place(world, (byte)(i % options.Layers), x, y, stamp, 8) & Gi.World.SourceIndexMask) != i)
                 throw new InvalidOperationException("Scene placement failed.");
         }
         Gi.World.Process(world);

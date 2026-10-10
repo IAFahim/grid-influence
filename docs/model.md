@@ -8,8 +8,8 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   (`Grid.New(world, power, x, y, size)`, up to 32 per world) is a power-of-two cell grid,
   `2^power` cells per side (power 5–14), laid over a world-space rect `x,y,size`. A layer
   (`Layer.New(world)`, up to 32 per world) is an independent field channel present on every grid.
-- **Stamps** (`Stamp.New(sbyte* data, w, h)` / `Stamp.Box(w, h, value)` / `Stamp.Tent(w, h, value)`,
-  up to 255) are baked
+- **Stamps** (`Stamp.New(sbyte* data, w, h)` / `Stamp.Box(w, h, value)` / `Stamp.Tent(w, h, value)` /
+  `Stamp.Bell(w, h, value)`, up to 255) are baked
   cell-space content: `w×h` `sbyte` samples, centered on the placement position (origin offset
   `−w/2` cells in Q8). Uniform rasters classify as `ConstantRectangle` and take the
   difference-array path; the rest are `Raster` and deposit with sub-cell bilinear weights.
@@ -28,6 +28,20 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   between tiles; the deposit is integer-exact at every phase (impulse-oracle receipted),
   never touches a dense buffer, and moves/removes negate the same impulses exactly — the
   buffer is persistent, so retraction returns it to literal zero.
+  `Bell` is a paraboloid kernel: `WX(cx)·WY(cy)` where each axis is the discrete parabola
+  `curve·(h²−e²)` over its support of `h` cells (`e = 2c+1−first−last`, `curve = max(1, 65536/h²)`,
+  zero outside). A parabola has a sparse third derivative: `Δ³w` is nonzero only at the three
+  cells entering the support and the three cells leaving it, so each tile the bell touches keeps
+  its deposits in a lazily attached 33×33 `int64` third-order buffer (8,712 B, held in the
+  block's bell pointer slot). Per axis the emitter writes the three boundary injections at
+  local cells 0–2 (the values a 3-stage prefix needs to reconstruct `w` at the tile edge) plus
+  the `Δ³` deltas at the six support-edge cells — ≤9 impulses per axis, ≤81
+  `value·gain·Δx·Δy` corner writes per tile, stored unrounded so the chain telescopes exactly.
+  Tile coverage extends two cells past the weight footprint because the trailing `Δ³` taps land
+  at `last+1`/`last+2`; the leading taps start at `first ≥ x0` so the footprint's left edge
+  needs no widening. Resolve re-derives each cell as `RoundQ24(Σ value·gain·Wx·Wy)` through a
+  third int64 prefix chain per row, rounding once per cell over all bell sources in the tile.
+  Retraction negates the same impulses and returns the buffer to literal zero.
   Raster storage keeps a one-sample zero border (pitch `w+2`, `(w+2)×(h+2)`) so the deposit loop
   reads `x−1`/`y−pitch` unconditionally. Every raster stamp also bakes a mip chain: each level
   halves its predecessor with zero-padded 2×2 box averages (round-half-away-from-zero, divided by
@@ -59,7 +73,9 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   10,624 B, dense pinned at the block tail) and box-only tiles never carry it — resolve reads a
   shared zero page instead. Tent stamps need a second lazily attached buffer: the 33×33
   `int64` second-order store described above, allocated on the tile's first tent deposit and
-  freed with the block. Mutations do not touch tiles: `Place`/`Move`/`SetGain`/`Remove`
+  freed with the block. Bell stamps need a third: the 33×33 `int64` third-order store
+  described above, allocated on the tile's first bell deposit and freed with the block.
+  Mutations do not touch tiles: `Place`/`Move`/`SetGain`/`Remove`
   update the source columns and merge into a per-world op queue — one op per slot per window,
   carrying the state applied by the previous `Process` (retraction) and the latest state
   (application). `Process` applies the queue first — the retraction negated at its stored
@@ -69,7 +85,7 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   to stepping the same sequence through a `Process` per mutation. A slot placed and removed in
   one window deposits nothing at all — no tiles are marked, no blocks exist.
   Batches whose ops are all `ConstantRectangle` below `ops × grids < 512` emit fused on the
-  calling thread as before; anything larger, or any batch containing a tent or raster stamp,
+  calling thread as before; anything larger, or any batch containing a non-box stamp,
   splits into a serial build phase (footprints, block growth, dirty marking, and per-tile
   fragments that capture the block pointer plus the computed footprint — growth republishes
   to earlier fragments of the same batch by patching the captured pointer) and an apply phase
@@ -88,6 +104,9 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   array through a 2D prefix sum (horizontal inclusive prefix + previous-row carry), adds dense,
   and — for tiles carrying a tent buffer — a scalar second-order prefix chain per row
   (`run`/`run2` × `tp`/`tq` in `int64`, `RoundQ24` once per cell) adds the tent contribution,
+  and — for tiles carrying a bell buffer — a scalar third-order prefix chain per row
+  (`run`/`run2`/`run3` × `bp`/`bq`/`br` in `int64`, `RoundQ24` once per cell) adds the bell
+  contribution,
   saturates to `short` **after** summation so cancellation is preserved, and writes the page's
   cell total into its `int64` sum slot and the page's maximum cell into its `int16` max slot
   (both bit-identical across resolve paths). A tile that resolves to all-zero frees its block
@@ -245,6 +264,11 @@ world rect at its own cell density; a source deposits into every grid it overlap
   second-order-impulse oracle — each source's per-axis slope-break impulses reconstructed to
   `Wx·Wy`, scaled, and rounded once — bit-exactly on two grids at scales 1 and 0.5, including
   exact zero beyond the support inside shared tiles.
+- `bell-matches-paraboloid-oracle` — 90 bell sources of seven support widths through three churn
+  rounds (place/move/remove, signed gains, sub-cell phases) match a direct separable-product
+  oracle — each source's per-axis paraboloid weights `curve·(h²−e²)` multiplied per cell,
+  scaled, and rounded once — bit-exactly on two grids at scales 1 and 0.5, including exact
+  zero beyond the support inside shared tiles.
 - `source-slots-reuse-and-stale-handles-inert` — 2000 place/remove pairs keep slots bounded,
   the recycled id differs from the stale one, and stale `Move`/`SetGain`/`Remove` leave the
   field bit-identical.
@@ -269,7 +293,9 @@ churn, a 200-place window rewound and reprocessed (~100 µs — the inverse wind
 same deposits as the forward one), a place+remove-200 collapse window (~10 µs — the mutations
 apply no deposits), tent-200
 churn (16×16 tents, ≤36 impulse writes per touched tile, persistent `int64` second-order
-buffers — ~170 µs vs the ~295 µs one-band-per-cell form), full-grid
+buffers — ~170 µs vs the ~295 µs one-band-per-cell form), bell-200 churn
+(16×16 bells, ≤81 third-order impulse writes per touched tile plus a third prefix chain —
+~790 µs), full-grid
 sum, a 1022² partial-region sum, the best-cell query against a one-million-call
 naive scan (0.1 µs vs ~5,600 µs on a 1024² layer), the gradient query (~5 ns per point), a
 16-layer × 25-dirty move-400 process, and
@@ -320,10 +346,10 @@ pass behind them was `perf`-profile guided, receipts first.
   freed exactly when the tile resolves to zero, the world is cleared, or the map is disposed;
   attaching or growing dense happens only on the serial deposit thread, which republishes the
   block pointer through the map — and patches the block pointer captured by any earlier
-  fragment of the same batch — before any later resolve can observe it. The 8,712 B tent
-  buffer is a separate allocation referenced from the block's tent pointer slot: created on
-  the tile's first tent deposit by the same serial build thread, owned by the block, and freed
-  with it). The shared zero dense
+  fragment of the same batch — before any later resolve can observe it. The 8,712 B tent and
+  bell buffers are separate allocations referenced from the block's tent and bell pointer
+  slots: each is created on the tile's first deposit of its kind by the same serial build
+  thread, owned by the block, and freed with it). The shared zero dense
   page is allocated once with the arenas and never written afterwards.
   `Stamp` variants — base samples, mip chain, and box constants — are catalog-owned for process
   lifetime. The resolve pool (background worker
@@ -337,11 +363,12 @@ pass behind them was `perf`-profile guided, receipts first.
 - **Aliasing**: each block is written by deposits and resolved in place; during a pooled
   apply phase every (grid, layer, tile) fragment bucket is claimed by exactly one
   participant — the scatter assigns buckets by hash before signalling, so difference, tent,
-  and dense writes are tile-disjoint — and during a pooled resolve phase
+  bell, and dense writes are tile-disjoint — and during a pooled resolve phase
   every tile is claimed by exactly one participant, so difference/dense/page/sum writes are
   disjoint and `previousRow` is one slice per participant (the caller's `Prev` for the main
   thread, a pool slice per worker), cleared per tile before use, with the resolve-time
-  `tp`/`tq`/`tentOut` chain stack-allocated per call; sources are read-only during
+  `tp`/`tq`/`tentOut` and `bp`/`bq`/`br`/`bellOut` chains stack-allocated per call; sources
+  are read-only during
   deposits of other sources. `PageMap` mutation happens only through its owning `LayerData`
   pointer on the thread that called `Process`. The partial-region sum reads page rows only
   inside `[0,32)×[0,32)` of a live block and writes nothing. Pyramid updates alias nothing
@@ -369,8 +396,8 @@ pass behind them was `perf`-profile guided, receipts first.
   total. The sum
   slot sits at a 64 B block offset and is written as one naturally aligned `int64`; the page max
   sits at `SumOffset + 8` as one naturally aligned `int16` inside the same padded slot. The
-  dense and tent pointer slots sit side by side at `DensePtrOffset`/`TentPtrOffset` —
-  8 B each, naturally aligned — inside the pad before `SumOffset`. Max
+  dense, tent, and bell pointer slots sit side by side at `DensePtrOffset`/`TentPtrOffset`/
+  `BellPtrOffset` — 8 B each, naturally aligned — inside the pad before `SumOffset`. Max
   pyramid nodes are 64 `int16` values at 128 B offsets inside a 64 B aligned buffer, so the
   full-node AVX2 max loads stay inside the allocation; partial nodes scan scalar. The
   dense
@@ -378,7 +405,7 @@ pass behind them was `perf`-profile guided, receipts first.
   aligned; tiles without dense read the shared zero page, itself a 64 B aligned allocation.
   The tent buffer is its own 64 B aligned allocation of `int64` cells at a 33-cell pitch, so
   every element is naturally aligned; it is only ever read and written by scalar 8-byte
-  accesses. On
+  accesses. The bell buffer is identical in size, pitch, alignment, and access pattern. On
   netstandard2.1 (Unity) `NativeHeap` backs onto `Marshal.AllocHGlobal`
   with platform-natural alignment instead of 64-byte `AlignedAlloc`, and no SIMD paths compile:
   every access in that build is a naturally aligned scalar load or store, so the weaker
@@ -438,7 +465,11 @@ pass behind them was `perf`-profile guided, receipts first.
   `[0,31]×[0,31]` of the second-order buffer — anchor at local 0, entry at local 1, slope
   changes at `min(last+2, 31)` — with at most six impulses per axis (anchor, entry, and the
   four support breakpoints) against the `MaxTentImpulses` stack slots, and the resolve-time
-  prefix chain reads rows 0–31 and writes `tentOut` 0–31. Raster fragments clip to
+  prefix chain reads rows 0–31 and writes `tentOut` 0–31. Bell impulses land in
+  `[0,31]×[0,31]` of the third-order buffer — boundary injections at local cells 0–2, `Δ³`
+  deltas at the six support-edge cells clipped to `[3,31]` — with at most nine impulses per
+  axis against the `MaxBellImpulses` stack slots (11), and the resolve-time third-order chain
+  reads rows 0–31 and writes `bellOut` 0–31. Raster fragments clip to
   the tile and read only inside the padded stamp allocation: sample coordinates advance by
   `256·65536/ScaleQ8` per cell in Q16.16 from a phase-derived origin, so at any mip level `L` the
   integer sample index stays within `[(−1), ceil(w/2^L)]` and every `+1` tap lands on the level's
@@ -450,10 +481,11 @@ pass behind them was `perf`-profile guided, receipts first.
 `tools/stats` reads internal state through friend access, without reflection, counters on the
 data path, or additional public types. `Inspection.Read` validates the world handle, scans
 source liveness and grid/layer metadata, walks live page-map slots to count raster-tile dense
-buffers, and returns a pointer-free value snapshot. Its cost
+buffers and impulse-tile tent/bell buffers, and returns a pointer-free value snapshot. Its cost
 is O(source slots + grids × layers + map slots + catalog stamps); it does not scan cells.
 Memory includes allocated capacity, retained source/dirty buffers after `Clear`, every live tile
-block plus its dense buffer where one exists, the per-(grid, layer) max pyramids, the deferred
+block plus its dense, tent, and bell buffers where they exist, the per-(grid, layer) max pyramids,
+the deferred
 op queue plus its pending column, and shared
 world/stamp arenas plus padded rasters. The selected world and
 process-wide shared allocations are reported separately; allocator metadata, alignment slack,

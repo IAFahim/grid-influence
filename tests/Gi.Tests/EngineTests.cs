@@ -678,7 +678,7 @@ public sealed class EngineTests
             dense[y * 32 + x] = ((y * 19 + x * 31) % 17 - 8) * 70000;
         }
 
-        Assert.True(TileBake.Resolve(difference, dense, previous, null, output, &pageSum, &pageMax));
+        Assert.True(TileBake.Resolve(difference, dense, previous, null, null, output, &pageSum, &pageMax));
         var expectedSum = 0L;
         var expectedMax = short.MinValue;
         for (var y = 0; y < 32; y++)
@@ -701,7 +701,7 @@ public sealed class EngineTests
         new Span<int>(difference, TileBake.DiffRows * TileBake.DiffPitch).Clear();
         new Span<int>(dense, 32 * 32).Clear();
         new Span<int>(previous, 32).Clear();
-        Assert.False(TileBake.Resolve(difference, dense, previous, null, output, &pageSum, &pageMax));
+        Assert.False(TileBake.Resolve(difference, dense, previous, null, null, output, &pageSum, &pageMax));
         for (var i = 0; i < 32 * 32; i++) Assert.Equal(0, output[i]);
         Assert.Equal(0L, pageSum);
         Assert.Equal((short)0, pageMax);
@@ -1337,6 +1337,126 @@ public sealed class EngineTests
 
         Assert.Equal((short)Math.Clamp(field.Max(), short.MinValue, short.MaxValue), World.QueryMax(w, g, l, out var mx, out var my));
         Assert.Equal(World.Query(w, g, l, mx, my), World.QueryMax(w, g, l, out _, out _));
+    }
+
+    private static int BellAxisWeight(int cell, int first, int last)
+    {
+        if (cell < first || cell > last) return 0;
+        var h = last - first + 1;
+        var curve = Math.Max(1, 65536 / (h * h));
+        var e = 2 * cell + 1 - first - last;
+        return curve * (h * h - e * e);
+    }
+
+    private static (int First, int Last) BellAxis(int origin, int phase, int extent)
+    {
+        var half = Math.Max(1, extent >> 1);
+        var peak = (origin << 8) + phase + (extent >> 1);
+        var first = ((peak - half) >> 8) + 1;
+        var last = (peak + half - 1) >> 8;
+        if (last < first) { first = peak >> 8; last = first; }
+        return (first, last);
+    }
+
+    private static void AccumulateBell(long[] field, int size, float wx, float wy,
+        int width, int height, int constant, int gain)
+    {
+        var lead = TentLead(wx, wy, width, height);
+        var gx = BellAxis(lead.px, lead.fx, width * 256);
+        var gy = BellAxis(lead.py, lead.fy, height * 256);
+        for (var cy = 0; cy < size; cy++)
+        {
+            var wyv = BellAxisWeight(cy, gy.First, gy.Last);
+            if (wyv == 0) continue;
+            for (var cx = 0; cx < size; cx++)
+            {
+                var wxv = BellAxisWeight(cx, gx.First, gx.Last);
+                if (wxv == 0) continue;
+                field[cy * size + cx] += (long)constant * gain * wxv * wyv;
+            }
+        }
+    }
+
+    [Fact]
+    public unsafe void BellDeposits_MatchParaboloidOracle()
+    {
+        var w = World.New();
+        var g = Grid.New(w, 8, 0f, 0f, 256f);
+        var l = Layer.New(w);
+        var rng = new Random(97);
+        var widths = new[] { 2, 3, 5, 8, 13, 24 };
+        const int count = 80;
+        var ids = new int[count];
+        var sx = new float[count];
+        var sy = new float[count];
+        var ssize = new int[count];
+        var sgain = new int[count];
+        var slive = new bool[count];
+
+        var field = new int[256 * 256];
+        var bellField = new long[256 * 256];
+        void RebuildOracle(int[] target)
+        {
+            Array.Clear(bellField);
+            for (var i = 0; i < count; i++)
+            {
+                if (!slive[i]) continue;
+                AccumulateBell(bellField, 256, sx[i], sy[i], ssize[i], ssize[i], 40, sgain[i]);
+            }
+
+            for (var i = 0; i < target.Length; i++) target[i] = RoundQ24Tent(bellField[i]);
+        }
+
+        for (var i = 0; i < count; i++)
+        {
+            ssize[i] = widths[rng.Next(widths.Length)];
+            sx[i] = (float)(rng.NextDouble() * 250 + 3);
+            sy[i] = (float)(rng.NextDouble() * 250 + 3);
+            sgain[i] = rng.Next(-8, 13);
+            ids[i] = World.Place(w, l, sx[i], sy[i], Stamp.Bell(ssize[i], ssize[i], 40), sgain[i]);
+            slive[i] = true;
+        }
+
+        RebuildOracle(field);
+        World.Process(w);
+        var scan = new short[256 * 256];
+        fixed (short* p = scan)
+        {
+            World.QueryRegion(w, g, l, 0, 0, 256, 256, p);
+            for (var i = 0; i < field.Length; i++)
+                Assert.Equal((short)Math.Clamp(field[i], short.MinValue, short.MaxValue), p[i]);
+        }
+
+        for (var round = 0; round < 3; round++)
+        {
+            for (var i = round; i < count; i += 3)
+            {
+                if (rng.Next(3) == 0)
+                {
+                    World.Remove(w, ids[i]);
+                    slive[i] = false;
+                    continue;
+                }
+
+                sx[i] = (float)(rng.NextDouble() * 250 + 3);
+                sy[i] = (float)(rng.NextDouble() * 250 + 3);
+                World.Move(w, ids[i], sx[i], sy[i]);
+                if (rng.Next(4) == 0)
+                {
+                    sgain[i] = rng.Next(-8, 13);
+                    World.SetGain(w, ids[i], sgain[i]);
+                }
+            }
+
+            World.Process(w);
+            RebuildOracle(field);
+            fixed (short* p = scan)
+            {
+                World.QueryRegion(w, g, l, 0, 0, 256, 256, p);
+                for (var i = 0; i < field.Length; i++)
+                    Assert.Equal((short)Math.Clamp(field[i], short.MinValue, short.MaxValue), p[i]);
+            }
+        }
     }
 
     [Fact]
