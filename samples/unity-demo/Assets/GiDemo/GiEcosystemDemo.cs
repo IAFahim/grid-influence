@@ -85,18 +85,30 @@ public sealed class GiEcosystemDemo : MonoBehaviour
         return World.Query(world, grid, layer, x, y);
     }
 
-    internal static void G(byte world, byte grid, byte layer, float x, float y, out int gx, out int gy)
+    internal static short Sense(byte layer, Vector2 p)
     {
         Queries++;
-        World.QueryGradient(world, grid, layer, x, y, out gx, out gy);
+        World.TrySense((byte)WorldId, layer, p.x, p.y, out var value);
+        return value;
     }
 
-    internal static short M(byte world, byte grid, byte layer, int x, int y, int w, int h,
-        out int bx, out int by)
+    internal static Vector2 Gradient(byte layer, Vector2 p, int exclude)
     {
         Queries++;
-        return World.QueryMax(world, grid, layer, x, y, w, h, out bx, out by);
+        World.TrySenseGradient((byte)WorldId, layer, p.x, p.y, exclude, out var gx, out var gy);
+        return new Vector2(gx, gy);
     }
+
+    internal static long Crowd(Vector2 p, int self)
+    {
+        Queries++;
+        World.TrySenseArea((byte)WorldId, Herd, p.x, p.y, CrowdReach, self, out var crowd);
+        return crowd;
+    }
+
+    internal const float CrowdReach = 4f;
+    internal const long Crowded = 4000;
+    internal static int CrowdedSheep;
 
     internal static Vector2 ClampWorld(Vector2 p) =>
         new(Mathf.Clamp(p.x, 3f, WorldUnits - 3f), Mathf.Clamp(p.y, 3f, WorldUnits - 3f));
@@ -212,6 +224,7 @@ public sealed class GiEcosystemDemo : MonoBehaviour
             World.Record((byte)WorldId);
         }
 
+        CrowdedSheep = 0;
         for (var i = 0; i < _sheep.Length; i++) _sheep[i].Update(t);
         for (var i = 0; i < _wolves.Length; i++) _wolves[i].Sync();
 
@@ -275,10 +288,10 @@ public sealed class GiEcosystemDemo : MonoBehaviour
             if (w.RetryClock <= 0f)
             {
                 w.RetryClock = 0.25f;
-                var peak = M((byte)WorldId, GridOne, Herd,
-                    (int)w.Pos.x - 48, (int)w.Pos.y - 48, 96, 96, out var bx, out var by);
+                Queries++;
+                World.TrySenseMax((byte)WorldId, Herd, w.Pos.x, w.Pos.y, 48f, out var peak, out var hx, out var hy);
                 w.Hunting = peak > 0;
-                if (w.Hunting) w.Hunt = new Vector2(bx + 0.5f, by + 0.5f);
+                if (w.Hunting) w.Hunt = new Vector2(hx, hy);
             }
 
             if (w.Hunting)
@@ -395,6 +408,7 @@ public sealed class GiEcosystemDemo : MonoBehaviour
             + "   sim+queries " + _frameMs.ToString("F2", CultureInfo.InvariantCulture) + " ms"
             + "   field queries/s " + _queriesPerSecond.ToString("N0", CultureInfo.InvariantCulture)
             + "\nwolves " + WolfCount + "   sheep " + SheepCount + "   eaten " + _eaten.ToString(CultureInfo.InvariantCulture)
+            + "   crowded sheep " + CrowdedSheep.ToString(CultureInfo.InvariantCulture) + " (herd sensed excluding self)"
             + "\nmanaged heap delta/s " + _gcPerSecond.ToString("N0", CultureInfo.InvariantCulture) + " B"
             + "\n" + _conservation
             + "\nhold LMB: fear brush chases the cursor   hold RMB: paint food   R: rewind to checkpoint";

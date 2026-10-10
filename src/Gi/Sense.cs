@@ -226,6 +226,37 @@ public static unsafe partial class World
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
+    public static bool TrySenseGradient(byte world, byte layer, float x, float y, int exclude, out float gx, out float gy)
+    {
+        gx = 0f;
+        gy = 0f;
+        var w = GetContext(world);
+        if (w == null || layer >= w->LayerCount) return false;
+        if (!Pick(w, x, y, 0f, 1, false, out var gi, out var complete)) return false;
+
+        var g = w->Grids + gi;
+        var cx = (int)(CellQ8(x, g->OriginX, g->ScaleQ8) >> 8);
+        var cy = (int)(CellQ8(y, g->OriginY, g->ScaleQ8) >> 8);
+        var excluding = Applied(w, exclude, layer, out var sx, out var sy, out var stamp, out var gain);
+        var shape = excluding ? ShapeOf(g, sx, sy, stamp, gain) : default;
+        var perUnit = g->ScaleQ8 / 512f;
+        gx = (Others(world, g, (byte)gi, layer, excluding, shape, cx + 1, cy) -
+            Others(world, g, (byte)gi, layer, excluding, shape, cx - 1, cy)) * perUnit;
+        gy = (Others(world, g, (byte)gi, layer, excluding, shape, cx, cy + 1) -
+            Others(world, g, (byte)gi, layer, excluding, shape, cx, cy - 1)) * perUnit;
+        return complete;
+    }
+
+    private static short Others(byte world, GridCtx* g, byte grid, byte layer, bool excluding, in Shape shape, int cx, int cy)
+    {
+        var value = Query(world, grid, layer, cx, cy);
+        if (!excluding || (uint)cx >= (uint)g->Size || (uint)cy >= (uint)g->Size || !shape.Reaches(cx, cy)) return value;
+        return ExcludeCell(g, layer, shape, cx, cy, value);
+    }
+
+    #if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    #endif
     private static bool SenseArea(byte world, byte layer, float x, float y, float reach, int exclude, out long total)
     {
         total = 0;

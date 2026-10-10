@@ -217,7 +217,8 @@ add one `int64` page sum per live page, so large sparse grids do not visit every
   `TrySenseGradient(world, layer, x, y, out gx, out gy)` needs the point and its four
   neighbours in one grid and returns the central difference per world unit,
   `(Q(c+1) − Q(c−1))·ScaleQ8/512`, so steering speed does not jump at a resolution seam.
-  **Self-exclusion**: `TrySense(..., exclude, out v)` and `TrySenseArea(..., exclude, out t)`
+  **Self-exclusion**: `TrySense(..., exclude, out v)`, `TrySenseArea(..., exclude, out t)`, and
+  `TrySenseGradient(..., exclude, out gx, out gy)` (four excluded neighbour reads)
   answer exactly what the same query would return after `Remove(exclude); Process()` — bit for
   bit, including saturation and the tent/bell once-per-cell rounding. The excluded source's
   *applied* state is used: a pending move, gain change, or removal is ignored until `Process`
@@ -305,7 +306,7 @@ world rect at its own cell density; a source deposits into every grid it overlap
 - `sense-max-matches-disk-scan` — value and row-major-first position of the disk maximum.
 - `sense-gradient-per-world-unit` — central differences per world unit on the chosen grid.
 - `sense-exclude-matches-removal` — 120 trials over box, raster, tent, and bell sources on three
-  grid scales, including saturated positive and negative piles: excluded point and area reads
+  grid scales, including saturated positive and negative piles: excluded point, area, and gradient reads
   equal the reads after `Remove` + `Process`, and `Rewind` restores the originals.
 - `sense-exclude-reads-applied-state` — pending moves, same-frame places, stale and bogus ids.
 - `warm-sense-allocates-0-bytes` — 20k points × all six sensing calls, 0 B.

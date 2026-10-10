@@ -117,17 +117,29 @@ internal static class Live
         sim.Join(TimeSpan.FromSeconds(2));
     }
 
-    internal static short Q(byte grid, byte layer, int x, int y)
+    internal static short Sense(byte layer, float x, float y)
     {
         _queries++;
-        return World.Query(WorldId, grid, layer, x, y);
+        World.TrySense(WorldId, layer, x, y, out var value);
+        return value;
     }
 
-    internal static void G(byte grid, byte layer, float x, float y, out int gx, out int gy)
+    internal static void Gradient(byte layer, float x, float y, int exclude, out float gx, out float gy)
     {
         _queries++;
-        World.QueryGradient(WorldId, grid, layer, x, y, out gx, out gy);
+        World.TrySenseGradient(WorldId, layer, x, y, exclude, out gx, out gy);
     }
+
+    internal static long Crowd(float x, float y, int self)
+    {
+        _queries++;
+        World.TrySenseArea(WorldId, Herd, x, y, CrowdReach, self, out var crowd);
+        return crowd;
+    }
+
+    internal const float CrowdReach = 4f;
+    internal const long Crowded = 4000;
+    internal static int CrowdedSheep;
 
     private static void SimLoop()
     {
@@ -158,6 +170,7 @@ internal static class Live
             World.Record(WorldId);
         }
 
+        CrowdedSheep = 0;
         for (var i = 0; i < _sheep.Length; i++) _sheep[i].Update((float)_time);
         _time += TickSeconds;
 
@@ -283,13 +296,12 @@ internal static class Live
             {
                 w.RetryClock = 0.25f;
                 _queries++;
-                var peak = World.QueryMax(WorldId, GridOne, Herd,
-                    (int)w.X - 48, (int)w.Y - 48, 96, 96, out var bx, out var by);
+                World.TrySenseMax(WorldId, Herd, w.X, w.Y, 48f, out var peak, out var hx, out var hy);
                 w.Hunting = peak > 0;
                 if (w.Hunting)
                 {
-                    w.HuntX = bx + 0.5f;
-                    w.HuntY = by + 0.5f;
+                    w.HuntX = hx;
+                    w.HuntY = hy;
                 }
             }
 
@@ -418,6 +430,8 @@ internal static class Live
             .Append(" · eaten ").Append(_eaten.ToString(CultureInfo.InvariantCulture)).Append('\n');
         sb.Append("field queries/s ").Append(queries.ToString("N0", CultureInfo.InvariantCulture))
             .Append(" · tick managed alloc max ").Append(_maxAlloc.ToString("N0", CultureInfo.InvariantCulture)).Append(" B\n");
+        sb.Append("crowded sheep ").Append(CrowdedSheep.ToString(CultureInfo.InvariantCulture))
+            .Append(" · herd sensed excluding self (TrySenseArea exclude)\n");
         sb.Append("—\n");
         sb.Append(conservation).Append('\n');
         sb.Append("stream ").Append(Frame.Length.ToString("N0", CultureInfo.InvariantCulture))
@@ -512,33 +526,41 @@ internal sealed class LiveSheep
 
     public void Update(float t)
     {
-        var grid = Live.GridOne;
-
-        var threat = Live.Q(grid, Live.Threat, (int)X, (int)Y);
-        var food = Live.Q(grid, Live.Food, (int)X, (int)Y);
+        var threat = Live.Sense(Live.Threat, X, Y);
+        var food = Live.Sense(Live.Food, X, Y);
 
         var escapeX = 0f;
         var escapeY = 0f;
         if (threat > 60)
         {
-            Live.G(grid, Live.Threat, X, Y, out var gx, out var gy);
-            escapeX = -gx * 0.14f;
-            escapeY = -gy * 0.14f;
+            Live.Gradient(Live.Threat, X, Y, -1, out var gx, out var gy);
+            escapeX = -gx * 0.28f;
+            escapeY = -gy * 0.28f;
         }
 
         var seekX = 0f;
         var seekY = 0f;
         if (food > 40 && threat < 400)
         {
-            Live.G(grid, Live.Food, X, Y, out var gx, out var gy);
-            seekX = gx * 0.04f;
-            seekY = gy * 0.04f;
+            Live.Gradient(Live.Food, X, Y, -1, out var gx, out var gy);
+            seekX = gx * 0.08f;
+            seekY = gy * 0.08f;
+        }
+
+        var spaceX = 0f;
+        var spaceY = 0f;
+        if (Live.Crowd(X, Y, Source) > Live.Crowded)
+        {
+            Live.CrowdedSheep++;
+            Live.Gradient(Live.Herd, X, Y, Source, out var gx, out var gy);
+            spaceX = -gx * 0.012f;
+            spaceY = -gy * 0.012f;
         }
 
         var wanderX = MathF.Sin(t * 0.7f + Phase) * 0.4f;
         var wanderY = MathF.Cos(t * 0.6f + Phase * 1.3f) * 0.4f;
-        var desiredX = escapeX + seekX + wanderX;
-        var desiredY = escapeY + seekY + wanderY;
+        var desiredX = escapeX + seekX + spaceX + wanderX;
+        var desiredY = escapeY + seekY + spaceY + wanderY;
         var mag2 = desiredX * desiredX + desiredY * desiredY;
         if (mag2 > 1f)
         {

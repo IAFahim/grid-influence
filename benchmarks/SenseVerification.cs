@@ -302,6 +302,8 @@ internal static partial class Verification
         var beforeArea = new long[points.Length];
         var excluded = new short[points.Length];
         var excludedArea = new long[points.Length];
+        var excludedGx = new float[points.Length];
+        var excludedGy = new float[points.Length];
         for (var trial = 0; trial < 120; trial++)
         {
             var id = trial < 16 ? piles[trial < 8 ? trial * 3 : 60 + (trial - 8) * 3] : ids[rng.Next(ids.Count)];
@@ -316,6 +318,7 @@ internal static partial class Verification
                 Gi.World.TrySenseArea(w, l, points[p].x, points[p].y, points[p].r, out beforeArea[p]);
                 Gi.World.TrySense(w, l, points[p].x, points[p].y, id, out excluded[p]);
                 Gi.World.TrySenseArea(w, l, points[p].x, points[p].y, points[p].r, id, out excludedArea[p]);
+                Gi.World.TrySenseGradient(w, l, points[p].x, points[p].y, id, out excludedGx[p], out excludedGy[p]);
             }
 
             Gi.World.Record(w);
@@ -325,7 +328,9 @@ internal static partial class Verification
             {
                 Gi.World.TrySense(w, l, points[p].x, points[p].y, out var removed);
                 Gi.World.TrySenseArea(w, l, points[p].x, points[p].y, points[p].r, out var removedArea);
-                if (removed != excluded[p] || removedArea != excludedArea[p]) return false;
+                Gi.World.TrySenseGradient(w, l, points[p].x, points[p].y, out var removedGx, out var removedGy);
+                if (removed != excluded[p] || removedArea != excludedArea[p] ||
+                    removedGx != excludedGx[p] || removedGy != excludedGy[p]) return false;
             }
 
             Gi.World.Rewind(w);
@@ -397,11 +402,12 @@ internal static partial class Verification
             Gi.World.TrySenseArea(s.World, s.Layer, x, y, 12f, 5, out var te);
             Gi.World.TrySenseMax(s.World, s.Layer, x, y, 12f, out var m, out _, out _);
             Gi.World.TrySenseGradient(s.World, s.Layer, x, y, out var gx, out _);
-            acc += v + e + t + te + m + (long)gx;
+            Gi.World.TrySenseGradient(s.World, s.Layer, x, y, 5, out var ex, out _);
+            acc += v + e + t + te + m + (long)gx + (long)ex;
         }
 
         var allocated = GC.GetAllocatedBytesForCurrentThread() - start;
-        Console.WriteLine($"  warm sense over 20k points x 6 queries: {allocated} B ({acc})");
+        Console.WriteLine($"  warm sense over 20k points x 7 queries: {allocated} B ({acc})");
         return allocated == 0;
     }
 
