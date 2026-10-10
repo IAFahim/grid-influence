@@ -68,12 +68,14 @@ internal static unsafe class Inspection
             ScratchBytes = TileBake.TileSize * sizeof(int),
             SourceBytes = (long)s->X.Capacity * sizeof(float) + (long)s->Y.Capacity * sizeof(float) +
                 s->Stamp.Capacity + s->Layer.Capacity + s->Gain.Capacity + s->Alive.Capacity +
+                ((long)s->Angle.Capacity + s->Scale.Capacity) * sizeof(ushort) +
                 (long)s->Free.Capacity * sizeof(int) + s->Gen.Capacity,
             WorldArenaBytes = World.MaxWorlds * sizeof(WorldCtx),
             StampArenaBytes = StampCatalog.MaxStamps * sizeof(StampVariant),
-            Stamps = StampCatalog.Count - 1,
+
             DepositQueueBytes = (long)w->Ops.Capacity * sizeof(DepositOp) + (long)w->Pending.Capacity * sizeof(int) +
-                (long)w->Fragments.Capacity * sizeof(DepositFragment) + (long)w->Journal.Capacity * sizeof(DepositOp),
+                (long)w->Fragments.Capacity * sizeof(DepositFragment) + (long)w->Placements.Capacity * sizeof(Placement) +
+                (long)w->Journal.Capacity * sizeof(DepositOp),
         };
 
         for (var i = 0; i < s->Count; i++)
@@ -131,7 +133,9 @@ internal static unsafe class Inspection
         for (var i = 1; i < StampCatalog.Count; i++)
         {
             var v = StampCatalog.Get((byte)i);
-            if (v->Kind != StampKind.Raster) continue;
+            if (v->Live == 0) continue;
+            result.Stamps++;
+            if (v->Data == null) continue;
             result.RasterStamps++;
             result.StampRasterBytes += (long)v->Pitch * (v->Height + 2);
             var mw = v->Width;

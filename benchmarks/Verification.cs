@@ -48,6 +48,13 @@ internal static partial class Verification
         Check("derived-exclude-matches-removal", DerivedExcludeMatchesRemoval());
         Check("derived-layers-follow-sources-rewind-and-clear", DerivedLayersFollowSourcesRewindAndClear());
         Check("warm-derived-process-allocates-0-bytes", WarmDerivedProcessAllocationFree());
+        Check("turned-and-round-stamps-match-oracle", TurnedAndRoundStampsMatchOracle());
+        Check("round-kernels-share-box-units-and-centre", RoundKernelsShareBoxUnitsAndCentre());
+        Check("stamps-turn-and-scale-smoothly", StampsTurnAndScaleSmoothly());
+        Check("turn-and-scale-round-trip-exactly", TurnAndScaleRoundTripExactly());
+        Check("stamps-wider-than-grid-cover-it", StampsWiderThanGridCoverIt());
+        Check("turned-exclude-matches-removal", TurnedExcludeMatchesRemoval());
+        Check("warm-turned-process-allocates-0-bytes", WarmTurnedProcessAllocationFree());
 
         Console.WriteLine(failures == 0 ? "verification: all receipts green" : $"verification: {failures} failures");
         return failures == 0 ? 0 : 1;

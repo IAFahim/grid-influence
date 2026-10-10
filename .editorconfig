@@ -27,13 +27,16 @@ indent_size = 4
 # - SkipLocalsInitAttribute.cs: the netstandard2.1 polyfill must be declared in
 #   System.Runtime.CompilerServices — the compiler honors the attribute by its
 #   full name only.
-# - LayerVerification.cs: derived-layer exclusion receipts compare gradients by
-#   == on purpose, like SenseVerification.cs — exclusion must equal removal bit
-#   for bit.
+# - LayerVerification.cs, ShapeVerification.cs: exclusion receipts compare
+#   gradients by == on purpose, like SenseVerification.cs — exclusion must equal
+#   removal bit for bit.
 [benchmarks/SenseVerification.cs]
 resharper_compare_of_floats_by_equality_operator_highlighting = none
 
 [benchmarks/LayerVerification.cs]
+resharper_compare_of_floats_by_equality_operator_highlighting = none
+
+[benchmarks/ShapeVerification.cs]
 resharper_compare_of_floats_by_equality_operator_highlighting = none
 
 [src/Gi/SkipLocalsInitAttribute.cs]

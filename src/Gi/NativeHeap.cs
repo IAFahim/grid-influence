@@ -7,6 +7,8 @@ internal static unsafe class NativeHeap
 #if NET
     public static void* AllocZeroed(nuint bytes) => NativeMemory.AllocZeroed(bytes);
 
+    public static void Free(void* pointer) => NativeMemory.Free(pointer);
+
     public static void* AlignedAlloc(nuint bytes) => NativeMemory.AlignedAlloc(bytes, 64);
 
     public static void AlignedFree(void* pointer) => NativeMemory.AlignedFree(pointer);
@@ -17,6 +19,8 @@ internal static unsafe class NativeHeap
         new Span<byte>(pointer, (int)bytes).Clear();
         return pointer;
     }
+
+    public static void Free(void* pointer) => Marshal.FreeHGlobal((nint)pointer);
 
     public static void* AlignedAlloc(nuint bytes) => (void*)Marshal.AllocHGlobal((nint)bytes);
 

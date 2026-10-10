@@ -26,26 +26,40 @@ internal static unsafe partial class TileBake
     internal static int RoundQ40(long value)
         => (int)((value + 549755813888L + (value >> 63)) >> 40);
 
+    private const long MaxExtent = 1L << 30;
+    private const long MaxTentExtent = (1L << 23) - 2;
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static void Footprint(
-        float wx, float wy, float originX, float originY, int scaleQ8, int sizeQ8,
-        StampVariant* v,
+    private static void Footprint(
+        float wx, float wy, float originX, float originY, int scaleQ8, int sampling, int size,
+        StampVariant* v, bool clip,
         out int px, out int py, out int fx, out int fy,
         out int extentX, out int extentY,
         out int x0, out int y0, out int x1, out int y1)
     {
-        var leadX = (int)MathF.Floor((wx - originX) * scaleQ8) + ((long)v->OriginQ8X * scaleQ8 >> 8);
-        var leadY = (int)MathF.Floor((wy - originY) * scaleQ8) + ((long)v->OriginQ8Y * scaleQ8 >> 8);
-        px = (int)(leadX >> 8);
-        py = (int)(leadY >> 8);
-        fx = (int)(leadX & 255);
-        fy = (int)(leadY & 255);
-        extentX = (int)Math.Min((long)v->Width * scaleQ8, sizeQ8);
-        extentY = (int)Math.Min((long)v->Height * scaleQ8, sizeQ8);
-        x0 = px;
-        y0 = py;
-        x1 = px + ((fx + extentX + 255) >> 8);
-        y1 = py + ((fy + extentY + 255) >> 8);
+        var cap = v->Kind == StampKind.Tent ? MaxTentExtent : MaxExtent;
+        Span((wx - originX) * scaleQ8, v->OriginQ8X, v->Width, sampling, size, clip, cap, out px, out fx, out extentX, out x0, out x1);
+        Span((wy - originY) * scaleQ8, v->OriginQ8Y, v->Height, sampling, size, clip, cap, out py, out fy, out extentY, out y0, out y1);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void Span(float position, int originQ8, int length, int sampling, int size, bool clip, long cap,
+        out int cell, out int phase, out int extent, out int first, out int end)
+    {
+        var lead = (int)MathF.Floor(position) + ((long)originQ8 * sampling >> 8);
+        var full = Math.Min((long)length * sampling, cap);
+        if (clip)
+        {
+            var last = Math.Min(lead + full, ((long)size << 8) + 256);
+            lead = Math.Max(lead, -256);
+            full = Math.Max(last - lead, 0);
+        }
+
+        cell = (int)(lead >> 8);
+        phase = (int)(lead & 255);
+        extent = (int)full;
+        first = cell;
+        end = (int)Math.Min(cell + ((phase + full + 255) >> 8), size + 1L);
     }
 
     #if NET

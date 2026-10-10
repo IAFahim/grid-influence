@@ -22,7 +22,7 @@ internal static unsafe class Receipts
             pending.SourceCapacity == 64 && pending.LiveTiles == 0 && pending.DirtyTiles == 0 &&
             pending.GridBytes == World.MaxGrids * sizeof(GridCtx) &&
             pending.LayerBytes == 2 * World.MaxLayers * sizeof(LayerData) + World.MaxLayers * sizeof(LayerRecipe) &&
-            pending.SourceBytes == 64 * 17 && pending.MapBytes == 0 &&
+            pending.SourceBytes == 64 * 21 && pending.MapBytes == 0 &&
             pending.DirtyFlagBytes == 0 && pending.DirtyQueueBytes == 0 &&
             pending.DifferenceBytes == 0 && pending.DenseBytes == 0 && pending.RasterTiles == 0 &&
             pending.DepositQueueBytes == 16 * sizeof(DepositOp) + 64 * sizeof(int) &&
@@ -42,10 +42,10 @@ internal static unsafe class Receipts
             processed.DifferenceBytes + processed.DenseBytes + processed.DensePointerBytes +
                 processed.PageBytes + processed.PageSumBytes == 2 * World.BlockBytes + World.DenseBytes &&
             processed.PyramidBytes == 2 * (64 * 2 + 2 * 16 * 4) &&
-            processed.DepositQueueBytes == 16 * sizeof(DepositOp) + 64 * sizeof(int) + 16 * sizeof(DepositFragment) &&
+            processed.DepositQueueBytes == 16 * sizeof(DepositOp) + 64 * sizeof(int) + 16 * sizeof(DepositFragment) + 16 * sizeof(Placement) &&
             processed.NativeBytes == pending.NativeBytes + 2 * World.BlockBytes + World.DenseBytes +
                 32 * (sizeof(int) + sizeof(byte*) + 1) + 8 + 128 + processed.PyramidBytes +
-                16 * sizeof(DepositFragment);
+                16 * sizeof(DepositFragment) + 16 * sizeof(Placement);
 
         World.Remove(world, a);
         World.Process(world);
@@ -110,9 +110,9 @@ internal static unsafe class Receipts
         var clearOk = cleared.LiveSources == 0 && cleared.SourceSlots == 0 && cleared.SourceCapacity == 64 &&
             cleared.LiveTiles == 0 && cleared.DirtyTiles == 0 && cleared.MapSlots == 0 &&
             cleared.MapBytes == 0 && cleared.PyramidBytes == 0 && cleared.RasterTiles == 0 &&
-            cleared.DepositQueueBytes == 16 * sizeof(DepositOp) + 64 * sizeof(int) + 16 * sizeof(DepositFragment) &&
-            cleared.WorldBytes == empty.WorldBytes + 64 * 17 + 8 + 256 + 16 * sizeof(DepositOp) +
-                64 * sizeof(int) + 16 * sizeof(DepositFragment) &&
+            cleared.DepositQueueBytes == 16 * sizeof(DepositOp) + 64 * sizeof(int) + 16 * sizeof(DepositFragment) + 16 * sizeof(Placement) &&
+            cleared.WorldBytes == empty.WorldBytes + 64 * 21 + 8 + 256 + 16 * sizeof(DepositOp) +
+                64 * sizeof(int) + 16 * sizeof(DepositFragment) + 16 * sizeof(Placement) &&
             World.Query(world, grid, other, 0, 0, 64, 64) == 0;
 
         return
