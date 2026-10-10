@@ -279,6 +279,7 @@ bash tools/stats/perf.sh stat --iterations 12000
 | `rewind-restores-recorded-state` | `Rewind` restores the recorded field bit-exactly; revived ids live, rolled-back ids inert |
 | `saturated-sum-clamps` | saturation sticks at ±32767 after summation |
 | `cross-grid-sums-conserve-world-integral` | the same sources summed over four grid scales conserve the world integral exactly |
+| `kernels-share-box-units-and-centre` | box, tent, and bell peaks read `value·gain` at every width, symmetric, full support |
 | `sense-picks-finest-covering-grid-and-reports-gaps` | grid-free reads use the documented grid rule; uncovered points report `false`, never "safe" |
 | `sense-area-matches-disk-scan` | world-space disk totals equal per-cell scans, including seam fallback to the coarse grid |
 | `sense-area-conserves-across-grids` | one field sensed on two resolutions gives the identical world-area total |

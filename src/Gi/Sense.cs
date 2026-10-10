@@ -332,6 +332,7 @@ public static unsafe partial class World
         public int Reach;
         public int Gain;
         public int ScaleQ8;
+        public long Curve;
 
         public readonly bool Reaches(int cx, int cy) => cx >= X0 && cy >= Y0 && cx < Reach && cy < Y1 + (Reach - X1);
     }
@@ -350,6 +351,7 @@ public static unsafe partial class World
             V = v, Px = px, Py = py, Fx = fx, Fy = fy, ExtentX = extentX, ExtentY = extentY,
             X0 = x0, Y0 = y0, X1 = x1, Y1 = y1, Reach = x1 + (v->Kind == StampKind.Bell ? 2 : 0),
             Gain = gain, ScaleQ8 = g->ScaleQ8,
+            Curve = v->Kind == StampKind.Bell ? TileBake.BellCurve(px, fx, extentX, py, fy, extentY) : 1,
         };
     }
 
@@ -378,8 +380,8 @@ public static unsafe partial class World
 
         long wx;
         long wy;
-        TileBake.SmoothWeights(v->Kind, s.Px, s.Fx, s.ExtentX, cx, 1, &wx);
-        TileBake.SmoothWeights(v->Kind, s.Py, s.Fy, s.ExtentY, cy, 1, &wy);
+        TileBake.SmoothWeights(v->Kind, s.Px, s.Fx, s.ExtentX, s.Curve, cx, 1, &wx);
+        TileBake.SmoothWeights(v->Kind, s.Py, s.Fy, s.ExtentY, 1, cy, 1, &wy);
         smooth = (long)v->Constant * s.Gain * wx * wy;
     }
 
@@ -402,13 +404,13 @@ public static unsafe partial class World
             if (kind == StampKind.Tent)
             {
                 var tq = tent == null ? 0 : TileBake.Quadrant(tent, lx, ly, 2);
-                return Saturate(page - TileBake.RoundQ24(tq) + TileBake.RoundQ24(tq - smooth));
+                return Saturate(page - TileBake.RoundQ32(tq) + TileBake.RoundQ32(tq - smooth));
             }
 
             if (kind == StampKind.Bell)
             {
                 var br = bell == null ? 0 : TileBake.Quadrant(bell, lx, ly, 3);
-                return Saturate(page - TileBake.RoundQ24(br) + TileBake.RoundQ24(br - smooth));
+                return Saturate(page - TileBake.RoundQ40(br) + TileBake.RoundQ40(br - smooth));
             }
 
             return Saturate(page - core);
@@ -461,8 +463,8 @@ public static unsafe partial class World
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int Absent(int boxes, long tents, long bells, StampKind kind, int core, long smooth)
         => boxes - core +
-            TileBake.RoundQ24(tents - (kind == StampKind.Tent ? smooth : 0)) +
-            TileBake.RoundQ24(bells - (kind == StampKind.Bell ? smooth : 0));
+            TileBake.RoundQ32(tents - (kind == StampKind.Tent ? smooth : 0)) +
+            TileBake.RoundQ40(bells - (kind == StampKind.Bell ? smooth : 0));
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static short Saturate(long value) => (short)Math.Clamp(value, short.MinValue, short.MaxValue);
@@ -532,8 +534,8 @@ public static unsafe partial class World
             }
             else
             {
-                TileBake.SmoothWeights(kind, s.Px, s.Fx, s.ExtentX, tileX, n, wx);
-                TileBake.SmoothWeights(kind, s.Py, s.Fy, s.ExtentY, tileY, n, wy);
+                TileBake.SmoothWeights(kind, s.Px, s.Fx, s.ExtentX, s.Curve, tileX, n, wx);
+                TileBake.SmoothWeights(kind, s.Py, s.Fy, s.ExtentY, 1, tileY, n, wy);
             }
 
             var tentBuffer = live ? TentOf(block) : null;
@@ -564,9 +566,9 @@ public static unsafe partial class World
                     if (saturated && (p == short.MinValue || p == short.MaxValue))
                         absent = Absent(boxes[i], tq, br, kind, smoothKind ? 0 : core[i], smoothKind ? scale * wx[c] * vy : 0);
                     else if (kind == StampKind.Tent)
-                        absent = p - TileBake.RoundQ24(tq) + TileBake.RoundQ24(tq - scale * wx[c] * vy);
+                        absent = p - TileBake.RoundQ32(tq) + TileBake.RoundQ32(tq - scale * wx[c] * vy);
                     else if (kind == StampKind.Bell)
-                        absent = p - TileBake.RoundQ24(br) + TileBake.RoundQ24(br - scale * wx[c] * vy);
+                        absent = p - TileBake.RoundQ40(br) + TileBake.RoundQ40(br - scale * wx[c] * vy);
                     else
                         absent = p - core[i];
 

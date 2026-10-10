@@ -1147,15 +1147,15 @@ public sealed class EngineTests
         Assert.Equal(0, World.ChangedTiles(w, g, l, null));
     }
 
-    private static int RoundQ24Tent(long value)
-        => (int)((value + 8388608 + (value >> 63)) >> 24);
+    private static int RoundQ32Kernel(long value)
+        => (int)((value + 2147483648L + (value >> 63)) >> 32);
 
     private readonly record struct TentAxisGeometry(int First, int Peak, int Last, int Up, int Down, int Tail);
 
     private static TentAxisGeometry TentAxis(int origin, int phase, int extent)
     {
         var half = Math.Max(1, extent >> 1);
-        var peak = (origin << 8) + phase + (extent >> 1);
+        var peak = (origin << 8) + phase + (extent >> 1) - 128;
         var first = ((peak - half) >> 8) + 1;
         var last = (peak + half - 1) >> 8;
         var peakCell = peak >> 8;
@@ -1281,7 +1281,7 @@ public sealed class EngineTests
                 AccumulateTent(tentField, 256, lead.px, lead.py, lead.fx, lead.fy, ssize[i], ssize[i], 40, sgain[i]);
             }
 
-            for (var i = 0; i < target.Length; i++) target[i] = RoundQ24Tent(tentField[i]);
+            for (var i = 0; i < target.Length; i++) target[i] = RoundQ32Kernel(tentField[i]);
         }
 
         for (var i = 0; i < count; i++)
@@ -1339,19 +1339,29 @@ public sealed class EngineTests
         Assert.Equal(World.Query(w, g, l, mx, my), World.QueryMax(w, g, l, out _, out _));
     }
 
-    private static int BellAxisWeight(int cell, int first, int last)
+    private static long BellAxisWeight(int cell, int first, int last)
     {
         if (cell < first || cell > last) return 0;
         var h = last - first + 1;
-        var curve = Math.Max(1, 65536 / (h * h));
-        var e = 2 * cell + 1 - first - last;
-        return curve * (h * h - e * e);
+        var e = 2 * cell - first - last;
+        return h * h - e * e;
     }
+
+    private static long BellNormalizer((int First, int Last) x, (int First, int Last) y)
+    {
+        var hx = (long)(x.Last - x.First + 1);
+        var hy = (long)(y.Last - y.First + 1);
+        var area = hx * hx * hy * hy;
+        return ((1L << 40) + area / 2) / area;
+    }
+
+    private static int RoundQ40Bell(long value)
+        => (int)((value + 549755813888L + (value >> 63)) >> 40);
 
     private static (int First, int Last) BellAxis(int origin, int phase, int extent)
     {
         var half = Math.Max(1, extent >> 1);
-        var peak = (origin << 8) + phase + (extent >> 1);
+        var peak = (origin << 8) + phase + (extent >> 1) - 128;
         var first = ((peak - half) >> 8) + 1;
         var last = (peak + half - 1) >> 8;
         if (last < first) { first = peak >> 8; last = first; }
@@ -1364,6 +1374,7 @@ public sealed class EngineTests
         var lead = TentLead(wx, wy, width, height);
         var gx = BellAxis(lead.px, lead.fx, width * 256);
         var gy = BellAxis(lead.py, lead.fy, height * 256);
+        var curve = BellNormalizer(gx, gy);
         for (var cy = 0; cy < size; cy++)
         {
             var wyv = BellAxisWeight(cy, gy.First, gy.Last);
@@ -1372,7 +1383,7 @@ public sealed class EngineTests
             {
                 var wxv = BellAxisWeight(cx, gx.First, gx.Last);
                 if (wxv == 0) continue;
-                field[cy * size + cx] += (long)constant * gain * wxv * wyv;
+                field[cy * size + cx] += (long)constant * gain * curve * wxv * wyv;
             }
         }
     }
@@ -1404,7 +1415,7 @@ public sealed class EngineTests
                 AccumulateBell(bellField, 256, sx[i], sy[i], ssize[i], ssize[i], 40, sgain[i]);
             }
 
-            for (var i = 0; i < target.Length; i++) target[i] = RoundQ24Tent(bellField[i]);
+            for (var i = 0; i < target.Length; i++) target[i] = RoundQ40Bell(bellField[i]);
         }
 
         for (var i = 0; i < count; i++)

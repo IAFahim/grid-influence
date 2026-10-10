@@ -23,8 +23,12 @@ internal static unsafe partial class TileBake
         => (value + 32768 + (value >> 31)) >> 16;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static int RoundQ24(long value)
-        => (int)((value + 8388608 + (value >> 63)) >> 24);
+    internal static int RoundQ32(long value)
+        => (int)((value + 2147483648L + (value >> 63)) >> 32);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static int RoundQ40(long value)
+        => (int)((value + 549755813888L + (value >> 63)) >> 40);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static void Footprint(
@@ -145,7 +149,7 @@ internal static unsafe partial class TileBake
         out int first, out int peakCell, out int last, out int up, out int down, out int tail)
     {
         var half = Math.Max(1, extent >> 1);
-        var peak = (origin << 8) + phase + (extent >> 1);
+        var peak = (origin << 8) + phase + (extent >> 1) - 128;
         first = ((peak - half) >> 8) + 1;
         last = (peak + half - 1) >> 8;
         peakCell = peak >> 8;
@@ -235,27 +239,40 @@ internal static unsafe partial class TileBake
     internal const int MaxBellImpulses = 11;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int BellWeight(int cell, int first, int last, int curve, int h2)
+    private static long BellWeight(int cell, int first, int last, long curve, int h2)
     {
         if (cell < first || cell > last) return 0;
-        var e = 2 * cell + 1 - first - last;
+        var e = 2 * cell - first - last;
         return curve * (h2 - e * e);
     }
 
+    internal static int BellSupport(int origin, int phase, int extent)
+    {
+        TentGeometry(origin, phase, extent, out var first, out _, out var last, out _, out _, out _);
+        return last - first + 1;
+    }
+
+    internal static long BellCurve(int px, int fx, int extentX, int py, int fy, int extentY)
+    {
+        var hx = (long)BellSupport(px, fx, extentX);
+        var hy = (long)BellSupport(py, fy, extentY);
+        var area = hx * hx * hy * hy;
+        return ((1L << 40) + area / 2) / area;
+    }
+
     private static int BellImpulses(
-        int origin, int phase, int extent, int tileLo,
-        int* cells, int* deltas)
+        int origin, int phase, int extent, int tileLo, long curve,
+        int* cells, long* deltas)
     {
         TentGeometry(origin, phase, extent, out var first, out _, out var last, out _, out _, out _);
         var h = last - first + 1;
-        var curve = Math.Max(1, 65536 / (h * h));
         var h2 = h * h;
 
         var count = 0;
         var w0 = BellWeight(tileLo, first, last, curve, h2);
         var w1 = BellWeight(tileLo + 1, first, last, curve, h2);
         var w2 = BellWeight(tileLo + 2, first, last, curve, h2);
-        var boundary = stackalloc int[3];
+        var boundary = stackalloc long[3];
         boundary[0] = w0;
         boundary[1] = w1 - 3 * w0;
         boundary[2] = w2 - 3 * w1 + 3 * w0;
@@ -268,7 +285,7 @@ internal static unsafe partial class TileBake
         }
 
         var need = stackalloc int[12];
-        var vals = stackalloc int[12];
+        var vals = stackalloc long[12];
         var needCount = 0;
         for (var c = first - 3; c <= first + 2; c++)
         {
@@ -299,10 +316,10 @@ internal static unsafe partial class TileBake
             if (seen) continue;
 
             var global = tileLo + c;
-            var wc = 0;
-            var wm1 = 0;
-            var wm2 = 0;
-            var wm3 = 0;
+            var wc = 0L;
+            var wm1 = 0L;
+            var wm2 = 0L;
+            var wm3 = 0L;
             for (var k = 0; k < needCount; k++)
             {
                 var d = global - need[k];
@@ -329,11 +346,12 @@ internal static unsafe partial class TileBake
         if (gain == 0) return;
 
         var xCells = stackalloc int[MaxBellImpulses];
-        var xDeltas = stackalloc int[MaxBellImpulses];
+        var xDeltas = stackalloc long[MaxBellImpulses];
         var yCells = stackalloc int[MaxBellImpulses];
-        var yDeltas = stackalloc int[MaxBellImpulses];
-        var liveX = BellImpulses(px, fx, extentX, tileX0, xCells, xDeltas);
-        var liveY = BellImpulses(py, fy, extentY, tileY0, yCells, yDeltas);
+        var yDeltas = stackalloc long[MaxBellImpulses];
+        var curve = BellCurve(px, fx, extentX, py, fy, extentY);
+        var liveX = BellImpulses(px, fx, extentX, tileX0, curve, xCells, xDeltas);
+        var liveY = BellImpulses(py, fy, extentY, tileY0, 1, yCells, yDeltas);
 
         var scale = (long)v->Constant * gain;
         for (var y = 0; y < liveY; y++)
@@ -494,7 +512,7 @@ internal static unsafe partial class TileBake
             tp[x] += run;
             run2 += tp[x];
             tq[x] += run2;
-            tentOut[x] = RoundQ24(tq[x]);
+            tentOut[x] = RoundQ32(tq[x]);
         }
     }
 
@@ -512,7 +530,7 @@ internal static unsafe partial class TileBake
             bq[x] += run2;
             run3 += bq[x];
             br[x] += run3;
-            bellOut[x] = RoundQ24(br[x]);
+            bellOut[x] = RoundQ40(br[x]);
         }
     }
 

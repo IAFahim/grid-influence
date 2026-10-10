@@ -15,7 +15,10 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   difference-array path; the rest are `Raster` and deposit with sub-cell bilinear weights.
   `Tent` is a piecewise-linear kernel: `WX(cx)·WY(cy)`, rising `Up` slope per cell to a peak
   then falling `Down` per cell over the support `w×h` cells (exactly the box span), plus a
-  closing `Tail` step that lands the weight on zero at `last+1`. A piecewise-linear signal
+  closing `Tail` step that lands the weight on zero at `last+1`. Weights are sampled at cell
+  centres (the support geometry runs on `peak − 128` in Q8), so a tent placed on a cell centre
+  is symmetric about that cell, and each axis weight is Q16 (`Up·rise ≈ 65536` = 1.0), so the
+  peak cell reads `value·gain` — the same unit as a `Box` cell. A piecewise-linear signal
   has a sparse second derivative, so each tile the tent touches keeps its deposits in a
   lazily attached 33×33 `int64` second-order buffer (8,712 B, held in the block's tent
   pointer slot): per axis the emitter writes the absolute weight at the tile's left edge,
@@ -23,14 +26,19 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   peak, fall end, and the `Tail` zero at `last+2`) — ≤6 impulses per axis, ≤36
   `value·gain·Δx·Δy` corner writes per tile. The products are stored unrounded so the
   impulse chain telescopes exactly: resolve re-derives each cell as
-  `RoundQ24(Σ value·gain·Wx·Wy)` through a second int64 prefix chain per row, rounding once
+  `RoundQ32(Σ value·gain·Wx·Wy)` through a second int64 prefix chain per row, rounding once
   per cell over all tent sources in the tile. Sub-cell phases shift the breakpoints smoothly
   between tiles; the deposit is integer-exact at every phase (impulse-oracle receipted),
   never touches a dense buffer, and moves/removes negate the same impulses exactly — the
   buffer is persistent, so retraction returns it to literal zero.
-  `Bell` is a paraboloid kernel: `WX(cx)·WY(cy)` where each axis is the discrete parabola
-  `curve·(h²−e²)` over its support of `h` cells (`e = 2c+1−first−last`, `curve = max(1, 65536/h²)`,
-  zero outside). A parabola has a sparse third derivative: `Δ³w` is nonzero only at the three
+  `Bell` is a paraboloid kernel: `C·WX(cx)·WY(cy)` where each axis is the discrete parabola
+  `h²−e²` over its support of `h` cells (`e = 2c−first−last`, centred on the support, positive
+  on every support cell, zero outside), and one joint normalizer
+  `C = round(2^40 / (hx²·hy²))` scales the product to Q40, so the peak reads `value·gain` within
+  0.2% at every width (a per-axis integer `curve = 65536/h²` collapses to 1 or 2 for wide
+  supports and left a 200-wide bell at 37% strength). `C ≥ 256` for every stamp size; a
+  source's largest product is `2032·2^40 < 2^51`, so int64 sums stay exact up to 4,096
+  maximum-strength bells stacked on one cell — 256× past int16 saturation. A parabola has a sparse third derivative: `Δ³w` is nonzero only at the three
   cells entering the support and the three cells leaving it, so each tile the bell touches keeps
   its deposits in a lazily attached 33×33 `int64` third-order buffer (8,712 B, held in the
   block's bell pointer slot). Per axis the emitter writes the three boundary injections at
@@ -39,7 +47,7 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   `value·gain·Δx·Δy` corner writes per tile, stored unrounded so the chain telescopes exactly.
   Tile coverage extends two cells past the weight footprint because the trailing `Δ³` taps land
   at `last+1`/`last+2`; the leading taps start at `first ≥ x0` so the footprint's left edge
-  needs no widening. Resolve re-derives each cell as `RoundQ24(Σ value·gain·Wx·Wy)` through a
+  needs no widening. Resolve re-derives each cell as `RoundQ40(Σ value·gain·C·Wx·Wy)` through a
   third int64 prefix chain per row, rounding once per cell over all bell sources in the tile.
   Retraction negates the same impulses and returns the buffer to literal zero.
   Raster storage keeps a one-sample zero border (pitch `w+2`, `(w+2)×(h+2)`) so the deposit loop
@@ -103,9 +111,9 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   dirty tile resolves its difference
   array through a 2D prefix sum (horizontal inclusive prefix + previous-row carry), adds dense,
   and — for tiles carrying a tent buffer — a scalar second-order prefix chain per row
-  (`run`/`run2` × `tp`/`tq` in `int64`, `RoundQ24` once per cell) adds the tent contribution,
+  (`run`/`run2` × `tp`/`tq` in `int64`, `RoundQ32` once per cell) adds the tent contribution,
   and — for tiles carrying a bell buffer — a scalar third-order prefix chain per row
-  (`run`/`run2`/`run3` × `bp`/`bq`/`br` in `int64`, `RoundQ24` once per cell) adds the bell
+  (`run`/`run2`/`run3` × `bp`/`bq`/`br` in `int64`, `RoundQ40` once per cell) adds the bell
   contribution,
   saturates to `short` **after** summation so cancellation is preserved, and writes the page's
   cell total into its `int64` sum slot and the page's maximum cell into its `int16` max slot
@@ -218,7 +226,7 @@ add one `int64` page sum per live page, so large sparse grids do not visit every
   unsaturated total `T`; box and raster sources subtract their own integer contribution
   (`BoxAt` reuses the emitter's band clip on a one-cell window; rasters run `EmitRaster` on a
   one-cell clip); tent and bell sources replace the rounded sum of their kernel with the
-  rounded sum minus their exact product `value·gain·Wx·Wy` — the impulse chain telescopes to that
+  rounded sum minus their exact product `value·gain·Wx·Wy` (times `C` for bells) — the impulse chain telescopes to that
   product — which needs the cell's unrounded kernel sum, recovered as one weighted quadrant sum
   of the tile's impulse buffer (weights `d+1` for tents, `C(d+2,2)` for bells, the closed form
   of the resolve prefix chain). Saturated page cells rebuild every component (box prefix,
@@ -280,6 +288,12 @@ world rect at its own cell density; a source deposits into every grid it overlap
   reads equal a naive per-cell rescan across random place/move/remove churn worlds.
 - `region-sum-matches-cell-scans` — nine rect shapes (tile-aligned, one-off, clipped,
   negative-offset, 1×1) sum identically to per-cell scans on a 512² mixed box/raster field.
+- `kernels-share-box-units-and-centre` — box, tent, and bell stamps of 20 widths (1–255),
+  values ±90 and 1, gain 16, placed on a cell centre: the centre reads `value·gain` within 0.5%,
+  profiles are symmetric along both axes, never exceed the centre, and odd widths cover exactly
+  `w` cells. It shares no kernel formula with the engine and fails on each historical bug —
+  tents/bells at 256× box strength (Q24 rounding of a Q32 product), the vanished last bell
+  cell, left-edge sampling, and the truncated bell curve.
 - `sense-picks-finest-covering-grid-and-reports-gaps` — 4,000 probes (many on grid edges) over
   four overlapping grids, including two equal-scale grids offset by a fraction of a cell:
   `TrySense` equals `Query` on the grid the documented rule picks, its `bool` equals

@@ -56,7 +56,7 @@ internal static unsafe partial class TileBake
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    internal static void SmoothWeights(StampKind kind, int origin, int phase, int extent, int lo, int count, long* weights)
+    internal static void SmoothWeights(StampKind kind, int origin, int phase, int extent, long curve, int lo, int count, long* weights)
     {
         TentGeometry(origin, phase, extent, out var first, out var peakCell, out var last, out var up, out var down, out _);
         if (kind == StampKind.Tent)
@@ -66,7 +66,6 @@ internal static unsafe partial class TileBake
         }
 
         var h = last - first + 1;
-        var curve = Math.Max(1, 65536 / (h * h));
         for (var i = 0; i < count; i++) weights[i] = BellWeight(lo + i, first, last, curve, h * h);
     }
 

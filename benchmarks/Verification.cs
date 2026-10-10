@@ -33,6 +33,7 @@ internal static partial class Verification
         Check("multi-layer-pooled-matches-scans", MultiLayerPooledMatchesScans());
         Check("saturated-sum-clamps", SaturatedSumClamps());
         Check("cross-grid-sums-conserve-world-integral", CrossGridSumsConserve());
+        Check("kernels-share-box-units-and-centre", KernelsShareBoxUnitsAndCentre());
         Check("sense-picks-finest-covering-grid-and-reports-gaps", SensePicksFinestAndReportsGaps());
         Check("sense-area-matches-disk-scan", SenseAreaMatchesDiskScan());
         Check("sense-area-conserves-across-grids", SenseAreaConservesAcrossGrids());
@@ -815,12 +816,12 @@ internal static partial class Verification
         var fineField = new int[256 * 256];
         var coarseField = new int[128 * 128];
 
-        int RoundQ24(long value) => (int)((value + 8388608 + (value >> 63)) >> 24);
+        int RoundQ32(long value) => (int)((value + 2147483648L + (value >> 63)) >> 32);
 
         (int First, int Peak, int Last, int Up, int Down, int Tail) Axis(int origin, int phase, int extent)
         {
             var half = Math.Max(1, extent >> 1);
-            var peak = (origin << 8) + phase + (extent >> 1);
+            var peak = (origin << 8) + phase + (extent >> 1) - 128;
             var first = ((peak - half) >> 8) + 1;
             var last = (peak + half - 1) >> 8;
             var peakCell = peak >> 8;
@@ -906,7 +907,7 @@ internal static partial class Verification
                 sum += 40L * sgain[i] * inner;
             }
 
-            return RoundQ24(sum);
+            return RoundQ32(sum);
         }
 
         void Rebuild(int[] target, int size, int scaleQ8)
@@ -993,25 +994,24 @@ internal static partial class Verification
         var fineField = new int[256 * 256];
         var coarseField = new int[128 * 128];
 
-        int RoundQ24(long value) => (int)((value + 8388608 + (value >> 63)) >> 24);
+        int RoundQ40(long value) => (int)((value + 549755813888L + (value >> 63)) >> 40);
 
         (int First, int Last) Axis(int origin, int phase, int extent)
         {
             var half = Math.Max(1, extent >> 1);
-            var peak = (origin << 8) + phase + (extent >> 1);
+            var peak = (origin << 8) + phase + (extent >> 1) - 128;
             var first = ((peak - half) >> 8) + 1;
             var last = (peak + half - 1) >> 8;
             if (last < first) { first = peak >> 8; last = first; }
             return (first, last);
         }
 
-        int Weight(int cell, int first, int last)
+        long Weight(int cell, int first, int last)
         {
             if (cell < first || cell > last) return 0;
             var h = last - first + 1;
-            var curve = Math.Max(1, 65536 / (h * h));
-            var e = 2 * cell + 1 - first - last;
-            return curve * (h * h - e * e);
+            var e = 2 * cell - first - last;
+            return h * h - e * e;
         }
 
         int CellValue(int cx, int cy, int scaleQ8)
@@ -1026,10 +1026,14 @@ internal static partial class Verification
                 var leadY = (long)(int)MathF.Floor(sy[i] * scaleQ8) + ((long)-(width * 128) * scaleQ8 >> 8);
                 var gx = Axis((int)(leadX >> 8), (int)(leadX & 255), extent);
                 var gy = Axis((int)(leadY >> 8), (int)(leadY & 255), extent);
-                sum += 40L * sgain[i] * Weight(cx, gx.First, gx.Last) * Weight(cy, gy.First, gy.Last);
+                var hx = (long)(gx.Last - gx.First + 1);
+                var hy = (long)(gy.Last - gy.First + 1);
+                var area = hx * hx * hy * hy;
+                var curve = ((1L << 40) + area / 2) / area;
+                sum += 40L * sgain[i] * curve * Weight(cx, gx.First, gx.Last) * Weight(cy, gy.First, gy.Last);
             }
 
-            return RoundQ24(sum);
+            return RoundQ40(sum);
         }
 
         void Rebuild(int[] target, int size, int scaleQ8)
