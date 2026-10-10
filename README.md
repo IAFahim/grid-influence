@@ -1,125 +1,293 @@
 # Gi
 
-Sparse tiled integer influence fields for .NET. One API, byte handles over unmanaged state,
-integer-exact deposits, **0 B** on warm `Process`/`Query`.
-
-This repository previously carried two engines (a rasterized tick field and a re-emitted marks
-engine). It now ships exactly one: the **deposit engine**. Mutations write incrementally into
-per-tile difference arrays; `Process` resolves only dirty tiles; queries read resolved `int16`
-pages. The re-emitted design was measured and retired — see [Receipts](#receipts).
-
-## Get started
+Sparse tiled integer influence fields for .NET. One API — `World`, `Grid`, `Layer`, `Stamp` —
+byte handles over unmanaged state, integer-exact deposits, and **0 B** on warm `Process`/query
+paths. Sources deposit into per-tile difference arrays once; `Process` resolves only dirty
+tiles into `int16` pages; every query reads maintained state. Deterministic across runs,
+machines, and SIMD on or off.
 
 ```sh
-dotnet add package Gi.Influence --version 0.5.0-alpha.1
+dotnet add package Gi.Influence
 ```
+
+## The whole API in one screen
 
 ```csharp
 using Gi;
 
 byte world = World.New();
-byte grid   = Grid.New(world, power: 8, x: 0f, y: 0f, size: 256f);  // 256×256 cells
-byte layer  = Layer.New(world);                                      // channel on every grid
-byte stamp  = Stamp.Box(16, 16, 60);            // or Stamp.New(samples, w, h) / Stamp.Tent(12, 12, 90) / Stamp.Bell(12, 12, 90)
+byte grid   = Grid.New(world, power: 8, x: 0f, y: 0f, size: 256f); // 256² cells over 256² world
+byte layer  = Layer.New(world);                                     // one field channel
+byte stamp  = Stamp.Bell(12, 12, 90);                               // Box / Tent / Bell / New(samples)
 
-int source = World.Place(world, layer, 128.5f, 64f, stamp, gain: 8); // persistent source
-World.Move(world, source, 130f, 64f);    // queued — applied at the next Process
-World.SetGain(world, source, 4);         // gain delta, queued too
-World.Process(world);                    // applies queued ops, resolves dirty tiles once
+int me = World.Place(world, layer, 128.5f, 64f, stamp, gain: 8);    // persistent source
+World.Move(world, me, 130f, 64f);        // queued — nothing touches a tile yet
+World.SetGain(world, me, 4);             // also queued; ops merge per source per window
+World.Process(world);                    // applies the queue, resolves dirty tiles once
 
-short cell = World.Query(world, grid, layer, 64, 32);        // one page read
-long  sum  = World.Query(world, grid, layer, 0, 0, 32, 32);  // region sum
-short at   = World.QueryAt(world, grid, layer, 130f, 64f);   // world-space point
-short best = World.QueryMax(world, grid, layer, out int bx, out int by);  // argmax cell
-short rb   = World.QueryMax(world, grid, layer, 16, 16, 64, 64, out var rx, out var ry); // …in a rect
-World.QueryGradient(world, grid, layer, 130f, 64f, out var gx, out var gy); // ±1-cell slope
+short v    = World.Query(world, grid, layer, 64, 32);                 // one page read
+long  sum  = World.Query(world, grid, layer, 0, 0, 32, 32);           // O(tiles) region sum
+short best = World.QueryMax(world, grid, layer, out int bx, out int by);
+World.QueryGradient(world, grid, layer, 130f, 64f, out int gx, out int gy);
+fixed (short* dst = pixels)
+    World.QueryRegion(world, grid, layer, vx, vy, vw, vh, dst);       // fills your buffer
 
-World.Remove(world, source);             // exact negation — no rebuild
-World.Clear(world);                      // frees every live tile block
+World.Remove(world, me);                 // exact negation — no rebuild, no residue
+World.Clear(world);                      // every live tile freed
 
-World.Record(world);                     // checkpoint — journal every applied op
-// ... mutate + Process to explore ...
-World.Rewind(world);                     // undo the recorded window(s) back to the checkpoint
-World.Process(world);                    // applies the inverse ops — O(changes), not O(field)
+World.Record(world);                     // checkpoint — journal applied ops
+Explore();                               // mutate + Process freely
+World.Rewind(world);                     // inverse ops; field returns bit-exactly
+World.Process(world);                    // costs O(changes), not O(field)
 ```
 
-A world mixes resolutions freely — e.g. a 1024² grid near the camera and 64² grids far away —
-and a source deposits into every grid it overlaps, at each grid's own scale.
+One world can hold many grids and many layers — a 1024² grid for steering plus a 64² grid for
+the minimap, a threat channel next to a food channel. Sources deposit into every grid they
+overlap at each grid's own scale.
 
-## Use cases
+## Four stamp kinds
 
-**Threat maps for AI.** Stamp every enemy's reach once; score candidate positions with page
-reads. Placement never rescales — the field is always query-ready after `Process`.
+These dumps are actual `Query` output — each stamp placed at `(15.5, 15.5)` on a 32² grid with
+`gain: 1`. All four peak at `value·gain` (90 here): the kernels share the box's units, so you
+swap shapes without retuning.
+
+**`Stamp.Box(w, h, value)`** — flat plateau, sharp edges. Threat zones, walls, zones of control.
+Deposits as 4 corner writes per clipped tile band; the cheapest stamp there is.
+
+```
+  .   .   .   .   .   .   .   .   .   .   .   .   .   .   .
+  .   .   .   .   .   .   .   .   .   .   .   .   .   .   .
+  .   .  90  90  90  90  90  90  90  90  90  90  90   .   .
+  .   .  90  90  90  90  90  90  90  90  90  90  90   .   .
+  .   .  90  90  90  90  90  90  90  90  90  90  90   .   .
+  .   .  90  90  90  90  90  90  90  90  90  90  90   .   .
+  .   .  90  90  90  90  90  90  90  90  90  90  90   .   .
+  .   .  90  90  90  90  90  90  90  90  90  90  90   .   .
+  .   .  90  90  90  90  90  90  90  90  90  90  90   .   .
+  .   .  90  90  90  90  90  90  90  90  90  90  90   .   .
+  .   .  90  90  90  90  90  90  90  90  90  90  90   .   .
+  .   .  90  90  90  90  90  90  90  90  90  90  90   .   .
+  .   .  90  90  90  90  90  90  90  90  90  90  90   .   .
+  .   .   .   .   .   .   .   .   .   .   .   .   .   .   .
+  .   .   .   .   .   .   .   .   .   .   .   .   .   .   .
+```
+
+**`Stamp.Tent(w, h, value)`** — piecewise-linear pyramid. Aggro ranges, noise radius, anything
+that should ramp linearly to an edge.
+
+```
+  .   .   .   .   .   .   .   .   .   .   .   .   .   .   .
+  .   .   .   .   .   .   .   .   .   .   .   .   .   .   .
+  .   .   1   2   4   5   7   8   7   5   4   2   1   .   .
+  .   .   2   7  11  16  20  25  20  16  11   7   2   .   .
+  .   .   4  11  19  26  33  41  33  26  19  11   4   .   .
+  .   .   5  16  26  36  47  57  47  36  26  16   5   .   .
+  .   .   7  20  33  47  60  74  60  47  33  20   7   .   .
+  .   .   8  25  41  57  74  90  74  57  41  25   8   .   .
+  .   .   7  20  33  47  60  74  60  47  33  20   7   .   .
+  .   .   5  16  26  36  47  57  47  36  26  16   5   .   .
+  .   .   4  11  19  26  33  41  33  26  19  11   4   .   .
+  .   .   2   7  11  16  20  25  20  16  11   7   2   .   .
+  .   .   1   2   4   5   7   8   7   5   4   2   1   .   .
+  .   .   .   .   .   .   .   .   .   .   .   .   .   .   .
+  .   .   .   .   .   .   .   .   .   .   .   .   .   .   .
+```
+
+**`Stamp.Bell(w, h, value)`** — paraboloid dome. Auras, influence centers, soft gradients —
+the smoothness you used to have to bake by hand.
+
+```
+  .   .   .   .   .   .   .   .   .   .   .   .   .   .   .
+  .   .   .   .   .   .   .   .   .   .   .   .   .   .   .
+  .   .   3   7  11  14  15  16  15  14  11   7   3   .   .
+  .   .   7  20  30  37  41  42  41  37  30  20   7   .   .
+  .   .  11  30  44  55  61  63  61  55  44  30  11   .   .
+  .   .  14  37  55  68  76  78  76  68  55  37  14   .   .
+  .   .  15  41  61  76  84  87  84  76  61  41  15   .   .
+  .   .  16  42  63  78  87  90  87  78  63  42  16   .   .
+  .   .  15  41  61  76  84  87  84  76  61  41  15   .   .
+  .   .  14  37  55  68  76  78  76  68  55  37  14   .   .
+  .   .  11  30  44  55  61  63  61  55  44  30  11   .   .
+  .   .   7  20  30  37  41  42  41  37  30  20   7   .   .
+  .   .   3   7  11  14  15  16  15  14  11   7   3   .   .
+  .   .   .   .   .   .   .   .   .   .   .   .   .   .   .
+  .   .   .   .   .   .   .   .   .   .   .   .   .   .   .
+```
+
+**`Stamp.New(sbyte* samples, w, h)`** — your own w×h shape: rings, walls, sprites, arbitrary
+masks. Bilinear sub-cell placement plus a baked mip chain, so it stays anti-aliased on coarse
+grids. This disc was baked at stamp creation:
+
+```
+  .   .   .   .   .   .   .   .   .   .   .   .   .   .   .
+  .   .   .   .   .   .   .   .   .   .   .   .   .   .   .
+  .   .   .   .   .  10  36  45  36  10   .   .   .   .   .
+  .   .   .   .  45  90  90  90  90  90  45   .   .   .   .
+  .   .   .  45  90  90  90  90  90  90  90  45   .   .   .
+  .   .  10  90  90  90  90  90  90  90  90  90  10   .   .
+  .   .  36  90  90  90  90  90  90  90  90  90  36   .   .
+  .   .  45  90  90  90  90  90  90  90  90  90  45   .   .
+  .   .  36  90  90  90  90  90  90  90  90  90  36   .   .
+  .   .  10  90  90  90  90  90  90  90  90  90  10   .   .
+  .   .   .  45  90  90  90  90  90  90  90  45   .   .   .
+  .   .   .   .  45  90  90  90  90  90  45   .   .   .   .
+  .   .   .   .   .  10  36  45  36  10   .   .   .   .   .
+  .   .   .   .   .   .   .   .   .   .   .   .   .   .   .
+  .   .   .   .   .   .   .   .   .   .   .   .   .   .   .
+```
+
+Tents and bells are true sub-cell kernels — sampled at cell centres against the real kernel
+centre — so a ⅛-cell `Move` glides the whole shape instead of stepping it, and 1-cell-wide
+kernels interpolate between cells instead of vanishing. On grids so fine that a bell's
+half-width reaches 128 cells it deposits through its baked paraboloid raster instead — slower
+per deposit, never invisible.
+
+## Sense the world, not the grids
+
+Gameplay code asks about world coordinates, not grid handles. `TrySense*` pick the right grid
+by one deterministic rule — a grid that holds the whole query wins, then the finest, then the
+lowest id — and the `bool` is `true` only when the answer is complete:
 
 ```csharp
-byte threats = Layer.New(world);
-foreach (var enemy in enemies)
-    World.Place(world, threats, enemy.X, enemy.Y, enemy.Reach, enemy.IsElite ? 12 : 6);
-World.Process(world);
+// "how threatened am I" — excluding my own aura, bit-identical to Remove+Process
+int myAura = World.Place(world, herd, x, y, Stamp.Bell(8, 8, 80), gain: 4);
+if (World.TrySense(world, threat, x, y, exclude: myAura, out short danger))
+    Flee(danger);
 
+World.TrySenseArea(world, threat, x, y, reach: 20f, out long nearby);        // world-area total
+World.TrySenseMax(world, food, x, y, reach: 40f,
+                   out short best, out float fx, out float fy);              // hunt target
+World.TrySenseGradient(world, food, x, y, out float gx, out float gy);       // per-world-unit
+bool onMap = World.Covers(world, x, y);
+```
+
+Every `TrySense` return value rules out a failure the grid-handle API leaves to the caller:
+
+| trap | grid-handle read | grid-free read |
+| --- | --- | --- |
+| point outside every grid | `0` — reads as safe | `false`, `Covers` is `false` |
+| query straddles a fine grid's edge | `0`s outside — sources vanish | answered whole on the grid that holds it |
+| same field, coarse vs fine area sum | raw sums differ by cell-area ratio | totals normalized to world area — identical |
+| agent senses its own aura | reads its own `720` | `exclude: id` → exactly what `Remove`+`Process` gives |
+| source moved this frame | — | exclusion follows the *applied* position until `Process` |
+
+Three rules still apply: reads see the last `Process` (one frame of latency), cells saturate at
+±32,767, and a layer meant to detect presence should hold same-signed sources (opposing signs
+cancel).
+
+## Speed
+
+i9-14900K, .NET 10, Release, min over reps. The workload is 4,000 box sources on a 1024² grid
+unless noted; `process` rows include the mutations.
+
+| operation | cost | note |
+| --- | ---: | --- |
+| idle `Process` | 0 µs | empty dirty list |
+| `Query` per cell | 3.3 ns | one page lookup |
+| `TrySense` point | 11 ns | grid picked for you |
+| `TrySenseGradient` | 20 ns | central difference, per world unit |
+| `TrySenseArea` r=8 / r=64 | 0.26 / 2.0 µs | disk sum, world-area units |
+| `TrySenseMax` r=32 | 1.1 µs | strongest cell + position |
+| `exclude: self` point / area r=24 bell | 0.02–0.10 / 5.3 µs | exact aura removal, no rebuild |
+| place/move 200 boxes + `Process` | ~90–100 µs | deferred ops, pooled resolve |
+| move 200 tents 16×16 + `Process` | ~220 µs | ≤20 impulses per axis per tile |
+| move 200 bells 16×16 + `Process` | ~750 µs | third-order impulse chain |
+| place+remove 200 in one window | 10.5 µs | ops collapse, no deposits at all |
+| `Rewind` a 200-place window + `Process` | ~100 µs | inverse ops, O(changes) |
+| `Query` region sum 1022² of 1024² | 11.2 µs | per-tile sums + edge strips |
+| `Query` full-grid sum 1024² | 0.8 µs | one `int64` per live tile |
+| `QueryMax` over 1024² | 0.6 µs | max-pyramid descent |
+| same via 1M `Query` calls | 4,869 µs | ~8,000× slower |
+| move 400 across 16 layers + `Process` | 93 µs | one flattened worker queue |
+| `QueryRegion` fill 256² | 6.8 µs | straight into your pixel buffer |
+
+Against the naive implementation every field library starts with — a dense `int[]` per layer,
+cleared and redrawn from every source each frame (4000 sources, 200 moves, Ryzen 5 8500G):
+
+| frame work | naive grid | Gi |
+| --- | ---: | ---: |
+| nothing moved | 620–680 µs | 0 µs |
+| 200 moves + process | 625–685 µs | 100–130 µs |
+| full-grid sum | 375–390 µs | 0.9 µs |
+
+The gap is structural: naive pays O(grid + sources×stamp-area) every frame, Gi pays O(what
+changed) and reads maintained state. Memory flips too — the naive grid allocates N² ints per
+layer up front (1 GB at 16384²); Gi allocates ~6.5 KB per live tile, so an empty world of any
+size costs zero.
+
+## How it works
+
+- **Deposits are incremental and deferred.** Each live tile owns one 6,528 B block: a 33×33
+  `int32` difference array, a 32×32 `int16` page, an `int64` page sum, an `int16` page max.
+  `Place`/`Move`/`SetGain`/`Remove` only merge into a per-world op queue — one net op per
+  source per window — and `Process` applies a retract-and-apply pair per op. Integer adds
+  commute, so any mutation sequence collapses exactly, and a source placed and removed inside
+  one window never touches a tile.
+- **Each stamp kind deposits at its own sparsity.** A box is 4 corner writes per tile band. A
+  raster samples bilinearly into the tile's dense buffer (allocated lazily). A tent writes its
+  second derivative's impulses; a bell its third's — ≤20 `int64` impulse writes per axis per
+  touched tile, so a smooth kernel costs a handful of adds per tile instead of O(area) cell
+  writes. Products telescope exactly; one rounding per cell at resolve.
+- **Resolve is per dirty tile.** A 2D prefix sum turns the difference array into cells, the
+  impulse chains add their contribution, the sum saturates to `short` *after* summation (so
+  cancellation stays exact), and the page's sum and max are recorded for queries. Tiles that
+  resolve to zero free their block and leave the map — a missing page reads as 0.
+- **Queries never scan.** Region sums add one `int64` per fully covered tile; `QueryMax`
+  descends a per-(grid,layer) max pyramid; `TrySense*` reuse the same maintained structures.
+- **Big frames fan out.** ≥32 dirty tiles total (across all grids and layers) splits resolve
+  over a fixed worker pool; large mutation batches fragment by tile so no two workers share a
+  tile. Pooled and serial output are bit-identical.
+- **Handles, not objects.** Everything public returns `byte` ids into unmanaged arenas; source
+  ids pack a generation over the slot index, so stale handles are inert no-ops and slots
+  recycle. No managed allocation on the data path.
+- **Deterministic.** Integer-only field math; deposits are commutative adds. Pages are
+  bit-identical across runs and machines, scalar or SIMD.
+
+Full semantics and the unsafe lifetime/aliasing/alignment/concurrency proof live in
+[`docs/model.md`](docs/model.md).
+
+## Receipts
+
+Every claim above is asserted, not documented. `dotnet run --project benchmarks -c Release --
+--verify` runs all 33 receipts before printing a single timing — with and without hardware
+intrinsics:
+
+| receipts | what they pin down |
+| --- | --- |
+| `process-matches-oracle`, `process-deterministic`, `remove-restores-baseline` | deposits equal a per-cell oracle; identical worlds, identical pages; removal is exact |
+| `warm-process-allocates-0-bytes`, `warm-query-allocates-0-bytes`, `warm-sense-allocates-0-bytes` | 0 B on every hot path |
+| `query-region-matches-cells`, `page-sum-matches-scan`, `region-sum-matches-cell-scans`, `query-at-matches-deposits` | every query surface agrees with per-cell truth |
+| `query-max-*`, `gradient-matches-central-differences` | argmax and gradients equal full rescans |
+| `changed-tiles-match-drain`, `deferred-window-matches-stepped-processing` | the changed feed is exact; batched == stepped processing |
+| `tent-matches-impulse-oracle`, `bell-matches-paraboloid-oracle` | both kernels equal independent oracles written from the spec, not the engine |
+| `kernels-share-box-units-and-centre`, `kernels-move-smoothly`, `kernels-hold-strength-at-every-scale` | peaks read `value·gain`; sub-cell glides never step; widths 1–255 hold strength at scales 1/16–32 |
+| `sense-*` (7 receipts) | grid-picking rule, disk scans, cross-grid conservation, exclusion == removal bit-for-bit |
+| `source-slots-reuse-and-stale-handles-inert`, `rewind-restores-recorded-state`, `signed-gain-exact` | handle lifecycle, rewind, signed gains |
+| `saturated-sum-clamps`, `cross-grid-sums-conserve-world-integral`, `multi-layer-pooled-matches-scans` | saturation, scale conservation, pooled determinism |
+
+## Cookbook
+
+**Threat maps.** Stamp every enemy's reach once; score candidates with point reads. Idle
+`Process` costs nothing, so a static field is free every frame it doesn't change:
+
+```csharp
+foreach (var e in enemies)
+    World.Place(world, threats, e.X, e.Y, e.Reach, e.IsElite ? 12 : 6);
+World.Process(world);
 var safest = candidates.MinBy(c => World.QueryAt(world, grid, threats, c.X, c.Y));
 ```
 
-**What-if lookahead and undo.** `Record` journals the ops each `Process` applies; `Rewind`
-replays them inverted — removed sources revive with their original ids, placed sources' ids go
-stale, and the field returns bit-exactly. Rollback, AI branch evaluation, and editor undo all
-cost O(changes in the window).
+**Presence without self.** A sheep senses the herd's aura minus its own — the lone sheep in the
+demo reads 6,430 from itself without `exclude`:
 
 ```csharp
-World.Record(world);
-SimulatePlacements();          // any mutations + Process calls
-score = EvaluateField();
-World.Rewind(world);           // back to the checkpoint; apply with Process
+World.TrySense(world, herd, x, y, exclude: myAura, out short others);
 ```
 
-**Teams and auras as layers.** Layers are independent channels on every grid, so opposing
-fields coexist and comparisons are two reads.
+**Roads and patrols along a spline.** Sample a Bézier at about half the stamp width so
+neighbors overlap; gain shapes the lane profile:
 
 ```csharp
-byte red = Layer.New(world);
-byte blue = Layer.New(world);
-var balance = World.Query(world, grid, red, x, y) - World.Query(world, grid, blue, x, y);
-var redDominates = World.Query(world, grid, red, x, y, w, h) >
-                   World.Query(world, grid, blue, x, y, w, h);   // O(tiles), not O(cells)
-```
-
-**One world, two LODs.** The same sources feed a detail grid for pathing and a coarse grid for
-the strategic view — world-anchored extents and mip chains keep both exact and anti-aliased.
-
-```csharp
-byte detail   = Grid.New(world, power: 11, 0f, 0f, 2048f);   // 2048² for steering
-byte overview = Grid.New(world, power: 7, 0f, 0f, 2048f);    // 128² for the UI minimap
-```
-
-**Rendering a field.** `QueryRegion` fills your pixel buffer directly — row-major, clipped,
-zero allocation:
-
-```csharp
-fixed (short* dst = tile)
-    World.QueryRegion(world, grid, threats, viewX, viewY, viewW, viewH, dst);
-```
-
-### Bézier curves: roads, patrols, brush strokes
-
-Gi is unusually well suited to spline-shaped influence. A cubic evaluation is all you need:
-
-```csharp
-static (float X, float Y) Bezier(
-    (float X, float Y) a, (float X, float Y) b,
-    (float X, float Y) c, (float X, float Y) d, float t)
-{
-    var u = 1f - t;
-    return (u * u * u * a.X + 3f * u * u * t * b.X + 3f * u * t * t * c.X + t * t * t * d.X,
-            u * u * u * a.Y + 3f * u * u * t * b.Y + 3f * u * t * t * c.Y + t * t * t * d.Y);
-}
-```
-
-**A static corridor** — river current, road speed bonus, wind shear — is one pass of placements
-with gain shaped by the parameter. Rule of thumb: sample at about half the stamp width so
-neighbors overlap. Static fields cost nothing per frame afterwards (idle `Process` is 0 µs).
-
-```csharp
-byte slow = Stamp.Box(12, 12, 45);
 for (var i = 0; i <= 96; i++)
 {
     var t = i / 96f;
@@ -129,21 +297,8 @@ for (var i = 0; i <= 96; i++)
 World.Process(world);
 ```
 
-**A source gliding along the curve** — patrol drone, escort buff, tethered effect — is the
-cheapest mutation Gi has: `Move` negates the old deposit and writes the new one as a handful of
-difference-array corners, then `Process` resolves the one or two tiles crossed.
-
-```csharp
-var t = clock.Elapsed.TotalSeconds % 1.0;
-var (x, y) = Bezier(p0, p1, p2, p3, (float)t);
-World.Move(world, source, x, y);
-World.Process(world);
-```
-
-**Brush strokes.** Bake a smooth falloff as a raster stamp and draw it along the curve: Q8
-sub-cell placement makes consecutive samples blend without banding, and the baked mip chain
-keeps the stroke anti-aliased when a coarser grid minifies it — the same technology image
-editors use for brush tips.
+**Brush strokes.** Bake any falloff into a raster stamp once, then draw it along the path —
+the mip chain keeps it smooth on coarse grids:
 
 ```csharp
 var falloff = new sbyte[16 * 16];
@@ -153,227 +308,10 @@ for (var x = 0; x < 16; x++)
     var d = MathF.Sqrt((x - 7.5f) * (x - 7.5f) + (y - 7.5f) * (y - 7.5f)) / 8f;
     falloff[y * 16 + x] = (sbyte)(100f * MathF.Max(0f, 1f - d));
 }
-byte brush = Stamp.New(falloff, 16, 16);     // mip chain baked here, once
+byte brush = Stamp.New(falloff, 16, 16);
 ```
 
-**Asking the curve questions.** Sampling density is a free parameter — deposits are commutative
-integer adds, so refine or coarsen without changing results. Region reads score exposure in
-O(tiles): "how much slow-zone does this detour cross", "total threat under this spline segment".
-
-```csharp
-long crossing = World.Query(world, grid, slowZone, clipX, clipY, clipW, clipH);
-short  along  = World.QueryAt(world, grid, slowZone, x, y);
-```
-
-## How it works
-
-- **Handles, not objects.** `World`, `Grid`, `Layer`, `Stamp` return `byte` ids into static
-  unmanaged arenas; `Place` returns an `int` source id that packs a generation above the slot
-  index — removed slots recycle through a free list, and a stale id is an inert no-op. No managed
-  allocation anywhere on the
-  data path.
-- **Deposits are incremental and deferred.** Each live tile owns one 6,528 B block (difference
-  array + `int16` page + `int64` page sum + `int16` page max); raster deposits attach a dense
-  buffer once, growing the block to 10,624 B — box tiles never carry it, and tent/bell tiles
-  carry their own lazily attached `int64` impulse buffers instead.
-  `Place`/`Move`/`SetGain`/`Remove` only merge into a per-world op queue (one op per source per
-  window); `Process` applies the net retract-and-apply pairs — both emit paths are per-cell
-  linear in gain, so any mutation sequence collapses exactly, and a source placed and removed
-  in one window never touches a tile. Large batches and non-box stamps split into per-tile
-  fragments that apply on the resolve pool. Gain is signed (−16–16), so one layer can hold
-  opposing pressures.
-- **`Process` applies the queue, then touches only dirty tiles.** A 2D prefix sum resolves each
-  dirty difference array, saturates to `short` after summation (so cancellation is preserved),
-  records the page sum and page max, folds the max into a per-(grid, layer) max pyramid, frees
-  tiles that resolve to zero, and rotates the dirty list into the changed-tile feed. A world
-  with ≥32 dirty tiles in total fans the whole drain over a small worker pool — one flattened
-  queue across grids and layers; an unchanged world costs nothing.
-- **Queries read maintained state.** Cell reads are one page lookup; region sums read one
-  `int64` per fully covered tile and scan only the clipped edge strips; `QueryRegion` bulk fills
-  use vectorized row copies; `QueryMax` walks the max pyramid to the best cell (0.1 µs on a
-  1024² layer — ~56,000× faster than scanning a million cells) and scopes the same descent to
-  a rectangle (~0.5 µs for a 128² region); `QueryGradient` is the ±1-cell
-  central difference at a world-space point; `ChangedTiles` hands back the tile ids the last
-  `Process` resolved, for repainting or incremental sync.
-- **Sub-cell placement, world-anchored extents.** Positions convert to cell space in Q8; raster
-  stamps deposit with bilinear edge weights, uniform rasters take a difference-array box path,
-  `Stamp.Tent` deposits a piecewise-linear kernel as ≤36 second-order impulses per touched
-  tile, and `Stamp.Bell` deposits a paraboloid kernel as ≤81 third-order impulses per touched
-  tile — both exact at every sub-cell phase, zero outside the support.
-  A stamp covers the same world rect on every grid of its world: extents scale with the grid,
-  fractional edges become Q8 band weights, and raster stamps carry baked zero-padded box-average
-  mip chains so coarse grids minify without aliasing (scale-1 grids keep the bit-identical 0.2
-  deposit loop).
-- **Deterministic.** Integer-only field math; deposits are commutative adds, so pages are
-  bit-identical across runs and machines, with or without SIMD.
-
-Full semantics and the unsafe lifetime/aliasing/alignment/concurrency proof:
-[`docs/model.md`](docs/model.md). The [`viz`](viz) tool renders a three-layer scene to a
-self-contained HTML page.
-The [`tools/stats`](tools/stats) CLI reports internal statistics, native memory, and timings
-as compact JSON without reflection:
-
-```sh
-dotnet run --project tools/stats -c Release -- stats
-dotnet run --project tools/stats -c Release -- profile
-bash tools/stats/perf.sh stat --iterations 12000
-```
-
-## Receipts
-
-`dotnet run --project benchmarks -c Release -- --verify` asserts, before any timing:
-
-| Receipt | Checks |
-| --- | --- |
-| `process-matches-oracle` | 300 random boxes vs a per-cell band oracle |
-| `process-deterministic` | identical worlds produce identical pages |
-| `remove-restores-baseline` | remove rebuilds tiles without the source |
-| `warm-process-allocates-0-bytes` | unchanged and place/remove churn, 0 B |
-| `warm-query-allocates-0-bytes` | 200k cell reads, 0 B |
-| `query-region-matches-cells` | bulk fill equals per-cell reads across tile boundaries, 0 B warm |
-| `page-sum-matches-scan` | per-page sums equal a naive per-cell rescan across churn worlds |
-| `query-max-matches-full-scan` | `QueryMax` equals a full-field rescan through churn, negative coverage, and saturation |
-| `query-max-region-matches-scan` | region `QueryMax` equals the rect's per-cell rescan; position inside the rect |
-| `gradient-matches-central-differences` | `QueryGradient` equals the ±1-cell `Query` differences on two grids |
-| `changed-tiles-match-drain` | the changed-tile feed equals the window's exact tile footprints |
-| `deferred-window-matches-stepped-processing` | batched mutations are bit-identical to per-mutation `Process`; place+remove windows deposit nothing |
-| `tent-matches-impulse-oracle` | tent kernels match a per-cell second-order-impulse oracle on two grid scales |
-| `bell-matches-paraboloid-oracle` | bell kernels match a direct separable-paraboloid oracle on two grid scales |
-| `rewind-restores-recorded-state` | `Rewind` restores the recorded field bit-exactly; revived ids live, rolled-back ids inert |
-| `saturated-sum-clamps` | saturation sticks at ±32767 after summation |
-| `cross-grid-sums-conserve-world-integral` | the same sources summed over four grid scales conserve the world integral exactly |
-
-The same suite passes with `DOTNET_EnableHWIntrinsic=0` (scalar fallback).
-
-Why the deposit engine replaced the re-emitted marks engine (4,000 sources, 256² grid,
-100k queries/frame; i9-14900K, .NET 10, Release, min over reps):
-
-| per frame | marks (retired) | deposit |
-| --- | ---: | ---: |
-| unchanged `Process` | 41.6 µs | 0.0 µs |
-| move 200 + process | 51.1 µs | 212 µs |
-| single-source change | ~62 µs | 6 µs |
-| cell query | 1,040 ns | 2.9 ns |
-
-The marks engine re-emits every source per frame and scans marks per query; the deposit engine
-pays per mutation and reads a page. Writes are ~7× cheaper in marks, queries ~360× slower — the
-crossover is below ~700 queries/frame at full churn, which game-shaped workloads clear easily.
-
-## Gi vs the naive grid
-
-`dotnet run --project benchmarks -c Release --no-build -- --compare` runs the straightforward
-implementation — a dense array per layer, cleared and redrawn from every source each frame —
-against Gi on the same workload. The naive field doubles as an independent oracle:
-`naive-grid-matches-gi` (and its after-churn twin) assert bit-identical output before any
-timing is printed. 4000 box sources (16×16, gain 8) on a 1024² grid, 200 moves per frame,
-Ryzen 5 8500G, .NET 10, min over 20 reps:
-
-| frame work | naive grid | Gi | why |
-| --- | ---: | ---: | --- |
-| nothing moved | 620–680 µs | 0 µs | naive redraws everything anyway; Gi's dirty list is empty |
-| 200 moves + process | 625–685 µs | 100–130 µs | ~5–6× — Gi touches only the tiles movers left and entered |
-| full-grid sum (1M cells) | 375–390 µs | 0.9 µs | ~420× — one maintained `int64` per live 32×32 tile |
-
-The naive way — O(grid + sources × stamp area) every frame, whether or not anything moved:
-
-```csharp
-class NaiveInfluence
-{
-    private readonly int[] _field = new int[1024 * 1024];
-    private List<Source> _sources = [];
-
-    public void Frame()
-    {
-        Array.Clear(_field);                              // 1M writes even when idle
-        foreach (var s in _sources)                       // every source, every frame
-            for (var y = 0; y < s.Height; y++)
-                for (var x = 0; x < s.Width; x++)
-                    _field[(s.Y + y) * 1024 + s.X + x] += s.Value * s.Gain;
-    }
-
-    public int Value(int x, int y)
-        => Math.Clamp(_field[y * 1024 + x], short.MinValue, short.MaxValue);
-
-    public long Total()
-    {
-        var sum = 0L;
-        foreach (var cell in _field) sum += Math.Clamp(cell, short.MinValue, short.MaxValue);
-        return sum;
-    }
-}
-```
-
-The Gi way — O(what changed), queries read maintained state:
-
-```csharp
-byte world = World.New();
-byte grid  = Grid.New(world, power: 10, x: 0f, y: 0f, size: 1024f);
-byte layer = Layer.New(world);
-byte stamp = Stamp.Box(16, 16, 60);
-
-int id = World.Place(world, layer, x, y, stamp, gain: 8);       // stamp corners, not the field
-World.Move(world, id, newX, newY);                             // exact negation + redeposit
-World.Process(world);                                          // resolves only dirty tiles (pooled)
-short v = World.Query(world, grid, layer, cx, cy);             // one page lookup
-long total = World.Query(world, grid, layer, 0, 0, 1024, 1024); // one int64 per live tile
-```
-
-The gap is structural, not tuning. Deposits write difference-array corners (four `int` writes
-per clipped stamp band); `Process` resolves each dirty 32×32 tile once through a 2D prefix sum
-— fanned across a worker pool past 32 total dirty tiles — saturating to `short` exactly once;
-`Query` is a hash lookup plus page read; region sums read per-page `int64` accumulators
-maintained at resolve, scanning only edge strips that clip a tile boundary. Sparse worlds also
-flip the memory story: the naive grid allocates N²
-ints per layer up front (67 MB for a 4096² layer, 1 GB at 16384²), while Gi allocates ~6.5 KB
-per live tile — an empty 16384² world costs zero.
-
-Perf pass after the VectorCraft review (Ryzen 5 8500G, .NET 10, 4000 sources / 1024² grid,
-min over 20 reps; before = `d90701c` measured with `DOTNET_TieredCompilation=0` to skip a
-tier-0 trap — see measurement hazards in `docs/model.md`):
-
-| `--timing` line | before | after | change |
-| --- | ---: | ---: | --- |
-| `query-region 256x256` | 31–40 µs | 7–15 µs | vectorized row copy/zero fills |
-| `full-grid sum (1024-grid)` | ~330 µs | ~0.8 µs | per-page sums written at resolve |
-| `move-200 churn process` | ~155 µs | 110–132 µs | pooled parallel resolve, slimmer tile blocks |
-| `place-200 churn process` | ~105 µs | 68–82 µs | pooled parallel resolve, slimmer tile blocks |
-
-Parallel resolve scales with the dirty-list size and the memory ceiling, not core count: a
-2048² / 8000-source / 400-move scene (2,400 dirty tiles, ~21 MB streamed per frame) goes
-245–255 → 155–168 µs — six workers measured slower than four (bandwidth-capped). Tile blocks
-shrank 12,480 → 10,624 B (difference-array pitch 48 → 33 ints) and then to 6,528 B for box-only
-tiles (dense buffers attach lazily per raster tile; a 9,267-tile box scene dropped from ~98.5 MB
-to ~61 MB). Pages are bit-identical pooled or sequential.
-
-Measured-fixes pass (i9-14900K, .NET 10, interleaved A/B against `2aba36d`, min over reps;
-same scenes, bit-identical output):
-
-| scene | before | after | change |
-| --- | ---: | ---: | --- |
-| region sum 1022² of 1024² (4000 sources) | 391 µs | 15 µs | per-tile `int64` sums + vectorized edge strips (~25×) |
-| region sum 4094² of 4096² (dense) | 8,074 µs | 206 µs | same (~39×) |
-| tile-aligned region 960² of 1024² | 348 µs | 6.4 µs | sums only (~54×) |
-| move-400 process, 16 layers × ~25 dirty | 93 µs | 64 µs | world-total pooled fan-out |
-| move-200 churn process | 116–121 µs | 68–81 µs | pooled fan-out + fewer per-layer decisions |
-
-The same pass fixed `QueryAt` to use the deposits' truncated `ScaleQ8` mapping (on a
-2^14-cells-over-10000-units grid the float mapping read the wrong cell at 199 of 200 sampled
-source positions), made source ids recycle through a free list with generation bits (2M
-place/remove pairs used to leave the last id at 1,999,999), and made gain signed.
-
-Queries-and-pipeline pass (i9-14900K, .NET 10, same scenes, min over reps; every row
-receipt-covered):
-
-| capability | before | after |
-| --- | ---: | ---: |
-| best cell on a 1024² layer | ~5,600 µs — one million `Query` scans | 0.10 µs — max-pyramid descent (~56,000×) |
-| gradient at a world point | four hand-rolled `Query` calls | ~5 ns — `QueryGradient` |
-| tiles resolved last frame | diff pages yourself | one `ChangedTiles` call — zero-copy list swap |
-| place+remove-200 in one window | ~200 µs — two full churn processes | 5.7 µs — deferred ops collapse, no deposits |
-| tent-200 churn, 16×16 kernels | bake a raster, approximate phases | 288 µs — `Stamp.Tent`, exact at every phase |
-| bell-200 churn, 16×16 kernels | bake a paraboloid raster | ~790 µs — `Stamp.Bell`, exact at every phase |
-
-## Run the full thing
+## Run it
 
 ```sh
 dotnet build Gi.slnx -c Release -m:1
@@ -381,24 +319,14 @@ dotnet test Gi.slnx -c Release --no-build
 dotnet run --project samples/world -c Release --no-build
 dotnet run --project benchmarks -c Release --no-build -- --verify
 DOTNET_EnableHWIntrinsic=0 dotnet run --project benchmarks -c Release --no-build -- --verify
-dotnet run --project benchmarks -c Release --no-build -- --compare   # naive grid vs Gi
-dotnet run --project viz -c Release --no-build   # writes viz/out/index.html
-dotnet run --project viz -c Release --no-build -- live   # http://127.0.0.1:8740 — ecosystem field, streamed live
+dotnet run --project benchmarks -c Release --no-build -- --compare   # Gi vs the naive grid
+dotnet run --project viz -c Release --no-build -- live               # http://127.0.0.1:8740
+dotnet run --project tools/stats -c Release -- stats                 # internals as JSON
 ```
 
-## Layout
-
-- `src/Gi` — the package: `World`, `Grid`, `Layer`, `Stamp`, tile bake, page map.
-- `tests/Gi.Tests` — oracle tests: box/raster deposits, cross-tile, multi-resolution, saturation,
-  move/remove/setgain exactness, sub-cell, determinism.
-- `benchmarks` — `--verify` receipts plus `--timing` scratch loop.
-- `samples/world` — aggro range, multi-resolution traffic, baked raster stamps.
-- `viz` — HTML field visualizer; `-- live` serves a ticking ecosystem field over a WebSocket
-  (`QueryRegion` into a pinned buffer, 0 B managed per tick).
-- `tools/stats` — JSON internal stats, memory accounting, allocation receipts, and Linux perf.
-- `docs/model.md` — semantics, receipts, unsafe proof.
-
-## License
-
-[MIT](LICENSE) — © IAFahim; portions derived from BovineLabs Timeline Grid Influence
-(© BovineLabs, MIT).
+- `src/Gi` — the package (`net10.0` + `netstandard2.1`; Burst-callable query paths)
+- `tests/Gi.Tests` — oracle tests (52)
+- `benchmarks` — the 33 receipts and all the numbers above
+- `samples/world` — console walkthrough; `samples/unity-demo` — sheep/wolf ecosystem on `TrySense`
+- `viz` — static HTML render + live WebSocket ecosystem
+- `tools/stats` — internal statistics and profiling

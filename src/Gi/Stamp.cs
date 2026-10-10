@@ -49,6 +49,13 @@ internal static unsafe class StampCatalog
 
         var id = Reserve();
         var v = Runtime.Stamps + id;
+        v->Kind = StampKind.Raster;
+        StoreRaster(v, data, width, height);
+        return (byte)id;
+    }
+
+    private static void StoreRaster(StampVariant* v, sbyte* data, int width, int height)
+    {
         var pitch = width + 2;
         var basePtr = (sbyte*)NativeHeap.AllocZeroed((nuint)(pitch * (height + 2)));
         for (var y = 0; y < height; y++)
@@ -60,7 +67,6 @@ internal static unsafe class StampCatalog
                 width);
         }
 
-        v->Kind = StampKind.Raster;
         v->Width = width;
         v->Height = height;
         v->Pitch = pitch;
@@ -68,7 +74,6 @@ internal static unsafe class StampCatalog
         v->OriginQ8Y = -(height * 128);
         v->Data = basePtr + pitch + 1;
         BakeMips(v, basePtr);
-        return (byte)id;
     }
 
     private static void BakeMips(StampVariant* v, sbyte* basePtr)
@@ -169,11 +174,11 @@ internal static unsafe class StampCatalog
         var id = Reserve();
         var v = Runtime.Stamps + id;
         v->Kind = StampKind.Bell;
-        v->Width = width;
-        v->Height = height;
-        v->OriginQ8X = -(width * 128);
-        v->OriginQ8Y = -(height * 128);
         v->Constant = value;
+        var samples = (sbyte*)NativeHeap.AlignedAlloc((nuint)(width * height));
+        TileBake.BellSamples(samples, width, height, value);
+        StoreRaster(v, samples, width, height);
+        NativeHeap.AlignedFree(samples);
         return (byte)id;
     }
 

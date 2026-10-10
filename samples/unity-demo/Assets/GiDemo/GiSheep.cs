@@ -14,35 +14,25 @@ internal sealed class GiSheep
 
     public void Update(float t)
     {
-        var world = (byte)GiEcosystemDemo.WorldId;
-        var grid = GiEcosystemDemo.GridOne;
-        var threatLayer = GiEcosystemDemo.Threat;
-        var foodLayer = GiEcosystemDemo.Food;
+        var threat = GiEcosystemDemo.Sense(GiEcosystemDemo.Threat, Pos);
+        var food = GiEcosystemDemo.Sense(GiEcosystemDemo.Food, Pos);
 
-        var threat = GiEcosystemDemo.Q(world, grid, threatLayer, (int)Pos.x, (int)Pos.y);
-        var food = GiEcosystemDemo.Q(world, grid, foodLayer, (int)Pos.x, (int)Pos.y);
+        var escape = Vector2.zero;
+        if (threat > 60) escape = -GiEcosystemDemo.Gradient(GiEcosystemDemo.Threat, Pos, -1) * 0.28f;
 
-        var escapeX = 0f;
-        var escapeY = 0f;
-        if (threat > 60)
+        var seek = Vector2.zero;
+        if (food > 40 && threat < 400) seek = GiEcosystemDemo.Gradient(GiEcosystemDemo.Food, Pos, -1) * 0.08f;
+
+        var space = Vector2.zero;
+        if (GiEcosystemDemo.Crowd(Pos, Source) > GiEcosystemDemo.Crowded)
         {
-            GiEcosystemDemo.G(world, grid, threatLayer, Pos.x, Pos.y, out var gx, out var gy);
-            escapeX = -gx * 0.14f;
-            escapeY = -gy * 0.14f;
-        }
-
-        var seekX = 0f;
-        var seekY = 0f;
-        if (food > 40 && threat < 400)
-        {
-            GiEcosystemDemo.G(world, grid, foodLayer, Pos.x, Pos.y, out var gx, out var gy);
-            seekX = gx * 0.04f;
-            seekY = gy * 0.04f;
+            GiEcosystemDemo.CrowdedSheep++;
+            space = -GiEcosystemDemo.Gradient(GiEcosystemDemo.Herd, Pos, Source) * 0.012f;
         }
 
         var wanderX = Mathf.Sin(t * 0.7f + Phase) * 0.4f;
         var wanderY = Mathf.Cos(t * 0.6f + Phase * 1.3f) * 0.4f;
-        var desired = new Vector2(escapeX + seekX + wanderX, escapeY + seekY + wanderY);
+        var desired = escape + seek + space + new Vector2(wanderX, wanderY);
         if (desired.sqrMagnitude > 1f) desired.Normalize();
 
         var speed = threat > 900 ? 5.6f : 2.1f;
@@ -51,7 +41,7 @@ internal sealed class GiSheep
         Vel = Vector2.Lerp(Vel, desired * speed, 0.09f);
         Pos += Vel * Time.deltaTime;
         Pos = GiEcosystemDemo.ClampWorld(Pos);
-        World.Move(world, Source, Pos.x, Pos.y);
+        World.Move((byte)GiEcosystemDemo.WorldId, Source, Pos.x, Pos.y);
 
         Body.position = new Vector3(Pos.x, 0.5f, Pos.y);
         if (Vel.sqrMagnitude > 0.02f)

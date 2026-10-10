@@ -15,7 +15,7 @@ internal static unsafe class Runtime
 
         Worlds = (WorldCtx*)NativeHeap.AllocZeroed((nuint)(World.MaxWorlds * sizeof(WorldCtx)));
         Stamps = (StampVariant*)NativeHeap.AllocZeroed((nuint)(StampCatalog.MaxStamps * sizeof(StampVariant)));
-        ZeroDense = (byte*)NativeHeap.AlignedAlloc((nuint)World.DenseBytes);
+        ZeroDense = (byte*)NativeHeap.AlignedAlloc(World.DenseBytes);
         new Span<byte>(ZeroDense, World.DenseBytes).Clear();
     }
 }

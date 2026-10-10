@@ -7,7 +7,7 @@ using System.Runtime.Intrinsics.X86;
 
 namespace Gi;
 
-internal static unsafe class TileBake
+internal static unsafe partial class TileBake
 {
     internal const int TileBits = 5;
     internal const int TileSize = 32;
@@ -19,12 +19,16 @@ internal static unsafe class TileBake
 #endif
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int RoundQ16(int value)
+    internal static int RoundQ16(int value)
         => (value + 32768 + (value >> 31)) >> 16;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int RoundQ24(long value)
-        => (int)((value + 8388608 + (value >> 63)) >> 24);
+    internal static int RoundQ32(long value)
+        => (int)((value + 2147483648L + (value >> 63)) >> 32);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static int RoundQ40(long value)
+        => (int)((value + 549755813888L + (value >> 63)) >> 40);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static void Footprint(
@@ -34,8 +38,8 @@ internal static unsafe class TileBake
         out int extentX, out int extentY,
         out int x0, out int y0, out int x1, out int y1)
     {
-        var leadX = (long)(int)MathF.Floor((wx - originX) * scaleQ8) + ((long)v->OriginQ8X * scaleQ8 >> 8);
-        var leadY = (long)(int)MathF.Floor((wy - originY) * scaleQ8) + ((long)v->OriginQ8Y * scaleQ8 >> 8);
+        var leadX = (int)MathF.Floor((wx - originX) * scaleQ8) + ((long)v->OriginQ8X * scaleQ8 >> 8);
+        var leadY = (int)MathF.Floor((wy - originY) * scaleQ8) + ((long)v->OriginQ8Y * scaleQ8 >> 8);
         px = (int)(leadX >> 8);
         py = (int)(leadY >> 8);
         fx = (int)(leadX & 255);
@@ -44,8 +48,8 @@ internal static unsafe class TileBake
         extentY = (int)Math.Min((long)v->Height * scaleQ8, sizeQ8);
         x0 = px;
         y0 = py;
-        x1 = px + (int)((fx + extentX + 255) >> 8);
-        y1 = py + (int)((fy + extentY + 255) >> 8);
+        x1 = px + ((fx + extentX + 255) >> 8);
+        y1 = py + ((fy + extentY + 255) >> 8);
     }
 
     #if NET
@@ -130,225 +134,15 @@ internal static unsafe class TileBake
         return live + 1;
     }
 
-    internal const int MaxTentImpulses = 6;
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int TentWeight(int cell, int first, int peakCell, int last, int up, int down)
-    {
-        if (cell < first || cell > last) return 0;
-        if (cell <= peakCell) return up * (cell - first + 1);
-        return up * (peakCell - first + 1) - down * (cell - peakCell);
-    }
-
-    private static void TentGeometry(
-        int origin, int phase, int extent,
-        out int first, out int peakCell, out int last, out int up, out int down, out int tail)
-    {
-        var half = Math.Max(1, extent >> 1);
-        var peak = (origin << 8) + phase + (extent >> 1);
-        first = ((peak - half) >> 8) + 1;
-        last = (peak + half - 1) >> 8;
-        peakCell = peak >> 8;
-        if (last < first)
-        {
-            first = peakCell;
-            last = peakCell;
-        }
-
-        if (peakCell < first) peakCell = first;
-        if (peakCell > last) peakCell = last;
-        var rise = peakCell - first + 1;
-        var fall = last + 1 - peakCell;
-        up = 65536 / rise;
-        down = up * rise / fall;
-        tail = up * rise - down * (fall - 1);
-    }
-
-    private static int TentSlope(int cell, int first, int peakCell, int last, int up, int down, int tail)
-    {
-        if (cell < first || cell > last + 1) return 0;
-        if (cell <= peakCell) return up;
-        return cell <= last ? -down : -tail;
-    }
-
-    private static int TentImpulses(
-        int origin, int phase, int extent, int tileLo,
-        int* cells, int* deltas)
-    {
-        TentGeometry(origin, phase, extent, out var first, out var peakCell, out var last, out var up, out var down, out var tail);
-        var tileHi = tileLo + TileSize;
-        var anchor = TentWeight(tileLo, first, peakCell, last, up, down);
-        var count = 0;
-        cells[count] = 0;
-        deltas[count] = anchor;
-        count++;
-        var entry = TentSlope(tileLo + 1, first, peakCell, last, up, down, tail) - anchor;
-        if (entry != 0)
-        {
-            cells[count] = 1;
-            deltas[count] = entry;
-            count++;
-        }
-
-        for (var c = tileLo + 2; c <= Math.Min(last + 2, tileHi - 1); c++)
-        {
-            var change = TentSlope(c, first, peakCell, last, up, down, tail) -
-                TentSlope(c - 1, first, peakCell, last, up, down, tail);
-            if (change == 0) continue;
-
-            cells[count] = c - tileLo;
-            deltas[count] = change;
-            count++;
-        }
-
-        return count;
-    }
-
     internal static void EmitTent(
         long* tent, int tileX0, int tileY0,
         int px, int py, int fx, int fy, int extentX, int extentY, StampVariant* v, int gain)
-    {
-        if (gain == 0) return;
-
-        var xCells = stackalloc int[MaxTentImpulses];
-        var xDeltas = stackalloc int[MaxTentImpulses];
-        var yCells = stackalloc int[MaxTentImpulses];
-        var yDeltas = stackalloc int[MaxTentImpulses];
-        var liveX = TentImpulses(px, fx, extentX, tileX0, xCells, xDeltas);
-        var liveY = TentImpulses(py, fy, extentY, tileY0, yCells, yDeltas);
-
-        var scale = (long)v->Constant * gain;
-        for (var y = 0; y < liveY; y++)
-        {
-            var row = yCells[y] * DiffPitch;
-            var dy = yDeltas[y];
-            for (var x = 0; x < liveX; x++)
-            {
-                var value = scale * xDeltas[x] * dy;
-                if (value == 0) continue;
-
-                tent[row + xCells[x]] += value;
-            }
-        }
-    }
-
-    internal const int MaxBellImpulses = 11;
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int BellWeight(int cell, int first, int last, int curve, int h2)
-    {
-        if (cell < first || cell > last) return 0;
-        var e = 2 * cell + 1 - first - last;
-        return curve * (h2 - e * e);
-    }
-
-    private static int BellImpulses(
-        int origin, int phase, int extent, int tileLo,
-        int* cells, int* deltas)
-    {
-        TentGeometry(origin, phase, extent, out var first, out _, out var last, out _, out _, out _);
-        var h = last - first + 1;
-        var curve = Math.Max(1, 65536 / (h * h));
-        var h2 = h * h;
-
-        var count = 0;
-        var w0 = BellWeight(tileLo, first, last, curve, h2);
-        var w1 = BellWeight(tileLo + 1, first, last, curve, h2);
-        var w2 = BellWeight(tileLo + 2, first, last, curve, h2);
-        var boundary = stackalloc int[3];
-        boundary[0] = w0;
-        boundary[1] = w1 - 3 * w0;
-        boundary[2] = w2 - 3 * w1 + 3 * w0;
-        for (var i = 0; i < 3; i++)
-        {
-            if (boundary[i] == 0) continue;
-            cells[count] = i;
-            deltas[count] = boundary[i];
-            count++;
-        }
-
-        var need = stackalloc int[12];
-        var vals = stackalloc int[12];
-        var needCount = 0;
-        for (var c = first - 3; c <= first + 2; c++)
-        {
-            need[needCount] = c;
-            vals[needCount] = BellWeight(c, first, last, curve, h2);
-            needCount++;
-        }
-        for (var c = Math.Max(first + 3, last - 2); c <= last + 3; c++)
-        {
-            need[needCount] = c;
-            vals[needCount] = BellWeight(c, first, last, curve, h2);
-            needCount++;
-        }
-
-        var candidates = stackalloc int[6];
-        candidates[0] = first - tileLo;
-        candidates[1] = first + 1 - tileLo;
-        candidates[2] = first + 2 - tileLo;
-        candidates[3] = last + 1 - tileLo;
-        candidates[4] = last + 2 - tileLo;
-        candidates[5] = last + 3 - tileLo;
-        for (var i = 0; i < 6; i++)
-        {
-            var c = candidates[i];
-            if (c < 3 || c >= TileSize) continue;
-            var seen = false;
-            for (var j = 0; j < i; j++) seen |= candidates[j] == c;
-            if (seen) continue;
-
-            var global = tileLo + c;
-            var wc = 0;
-            var wm1 = 0;
-            var wm2 = 0;
-            var wm3 = 0;
-            for (var k = 0; k < needCount; k++)
-            {
-                var d = global - need[k];
-                if (d == 0) wc = vals[k];
-                else if (d == 1) wm1 = vals[k];
-                else if (d == 2) wm2 = vals[k];
-                else if (d == 3) wm3 = vals[k];
-            }
-
-            var delta = wc - 3 * wm1 + 3 * wm2 - wm3;
-            if (delta == 0) continue;
-            cells[count] = c;
-            deltas[count] = delta;
-            count++;
-        }
-
-        return count;
-    }
+        => EmitSmooth(tent, StampKind.Tent, tileX0, tileY0, px, py, fx, fy, extentX, extentY, v, gain);
 
     internal static void EmitBell(
         long* bell, int tileX0, int tileY0,
         int px, int py, int fx, int fy, int extentX, int extentY, StampVariant* v, int gain)
-    {
-        if (gain == 0) return;
-
-        var xCells = stackalloc int[MaxBellImpulses];
-        var xDeltas = stackalloc int[MaxBellImpulses];
-        var yCells = stackalloc int[MaxBellImpulses];
-        var yDeltas = stackalloc int[MaxBellImpulses];
-        var liveX = BellImpulses(px, fx, extentX, tileX0, xCells, xDeltas);
-        var liveY = BellImpulses(py, fy, extentY, tileY0, yCells, yDeltas);
-
-        var scale = (long)v->Constant * gain;
-        for (var y = 0; y < liveY; y++)
-        {
-            var row = yCells[y] * DiffPitch;
-            var dy = yDeltas[y];
-            for (var x = 0; x < liveX; x++)
-            {
-                var value = scale * xDeltas[x] * dy;
-                if (value == 0) continue;
-
-                bell[row + xCells[x]] += value;
-            }
-        }
-    }
+        => EmitSmooth(bell, StampKind.Bell, tileX0, tileY0, px, py, fx, fy, extentX, extentY, v, gain);
 
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
@@ -494,7 +288,7 @@ internal static unsafe class TileBake
             tp[x] += run;
             run2 += tp[x];
             tq[x] += run2;
-            tentOut[x] = RoundQ24(tq[x]);
+            tentOut[x] = RoundQ40(tq[x]);
         }
     }
 
@@ -512,7 +306,7 @@ internal static unsafe class TileBake
             bq[x] += run2;
             run3 += bq[x];
             br[x] += run3;
-            bellOut[x] = RoundQ24(br[x]);
+            bellOut[x] = RoundQ40(br[x]);
         }
     }
 

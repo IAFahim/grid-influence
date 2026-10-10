@@ -21,5 +21,15 @@ short v = World.Query(world, grid, layer, cx, cy);
 fixed (short* page = destination) World.QueryRegion(world, grid, layer, 0, 0, 256, 256, page);
 ```
 
+Gameplay code can skip grid handles: `TrySense`, `TrySenseArea`, `TrySenseMax`, and
+`TrySenseGradient` take a world-space point, pick the finest grid that holds the whole query,
+return `false` instead of a silent 0 where no grid covers it, normalize area totals to world
+units, and can exclude one source (its own aura) bit-exactly.
+
+```csharp
+if (World.TrySense(world, layer, x, y, exclude: mySource, out short others)) React(others);
+World.TrySenseArea(world, layer, x, y, reach: 20f, out long nearby);
+```
+
 Full semantics, receipts, and the unsafe proof:
 [docs/model.md](https://github.com/IAFahim/grid-influence/blob/main/docs/model.md).

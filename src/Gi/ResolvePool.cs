@@ -71,7 +71,7 @@ internal static unsafe class ResolvePool
         for (var k = 0; k < _workers; k++) _wake[k].Set();
         RunShare(w->Prev);
         Drain();
-        Finish(w);
+        Finish();
     }
 
     internal static void ApplyAndResolveWorld(WorldCtx* w, int fragmentCount, int total)
@@ -85,7 +85,7 @@ internal static unsafe class ResolvePool
         Barrier(ref _applyRemaining);
         RunShare(w->Prev);
         Drain();
-        Finish(w);
+        Finish();
         Volatile.Write(ref _phase, 0);
     }
 
@@ -138,7 +138,7 @@ internal static unsafe class ResolvePool
         _remaining = _workers;
     }
 
-    private static void Finish(WorldCtx* w)
+    private static void Finish()
     {
         var dead = _dead.Pointer;
         var tasks = _tasks.Pointer;
@@ -243,9 +243,6 @@ internal static unsafe class ResolvePool
             {
                 ApplyShare(index + 1);
                 Barrier(ref _applyRemaining);
-                RunShare(prev);
-                Interlocked.Decrement(ref _remaining);
-                continue;
             }
 
             RunShare(prev);

@@ -64,8 +64,8 @@ public sealed class EngineTests
         private void Position(float wx, float wy, float ox, float oy, float scale)
         {
             _scaleQ8 = (int)(scale * 256f);
-            var leadX = (long)(int)MathF.Floor((wx - ox) * _scaleQ8) + ((long)-(_w * 128) * _scaleQ8 >> 8);
-            var leadY = (long)(int)MathF.Floor((wy - oy) * _scaleQ8) + ((long)-(_h * 128) * _scaleQ8 >> 8);
+            var leadX = (int)MathF.Floor((wx - ox) * _scaleQ8) + ((long)-(_w * 128) * _scaleQ8 >> 8);
+            var leadY = (int)MathF.Floor((wy - oy) * _scaleQ8) + ((long)-(_h * 128) * _scaleQ8 >> 8);
             _px = (int)(leadX >> 8);
             _py = (int)(leadY >> 8);
             _fx = (int)(leadX & 255);
@@ -161,8 +161,8 @@ public sealed class EngineTests
             int Tap(int ix, int iy)
                 => (uint)ix < (uint)w && (uint)iy < (uint)h ? data[iy * w + ix] : 0;
 
-            var uq = (-(long)_fx * 65536 / _scaleQ8 + (long)sx * step) >> level;
-            var vq = (-(long)_fy * 65536 / _scaleQ8 + (long)sy * step) >> level;
+            var uq = (-(long)_fx * 65536 / _scaleQ8 + sx * step) >> level;
+            var vq = (-(long)_fy * 65536 / _scaleQ8 + sy * step) >> level;
             var ix = (int)(uq >> 16);
             var iy = (int)(vq >> 16);
             var fx2 = (int)((uq >> 8) & 255);
@@ -375,7 +375,7 @@ public sealed class EngineTests
     [Fact]
     public unsafe void StampMips_BuildBoxAverages()
     {
-        var samples = new sbyte[4 * 4]
+        var samples = new sbyte[]
         {
             100, 60, 20, -20,
             60, 20, -20, -60,
@@ -759,7 +759,7 @@ public sealed class EngineTests
         var processed = Stats.Inspection.Read(w);
         Assert.Equal(2, processed.LiveTiles);
         Assert.Equal(1, processed.RasterTiles);
-        Assert.Equal((long)World.DenseBytes, processed.DenseBytes);
+        Assert.Equal(World.DenseBytes, processed.DenseBytes);
         Assert.Equal(2 * (World.SumOffset - World.DensePtrOffset), processed.DensePointerBytes);
         var expected = 0;
         for (var y = 0; y < 6; y++)
@@ -1147,109 +1147,57 @@ public sealed class EngineTests
         Assert.Equal(0, World.ChangedTiles(w, g, l, null));
     }
 
-    private static int RoundQ24Tent(long value)
-        => (int)((value + 8388608 + (value >> 63)) >> 24);
+    private static int RoundQ40Kernel(long value)
+        => (int)((value + 549755813888L + (value >> 63)) >> 40);
 
-    private readonly record struct TentAxisGeometry(int First, int Peak, int Last, int Up, int Down, int Tail);
-
-    private static TentAxisGeometry TentAxis(int origin, int phase, int extent)
+    private readonly record struct KernelAxis(long Centre, long Half, int Shift, bool Bell)
     {
-        var half = Math.Max(1, extent >> 1);
-        var peak = (origin << 8) + phase + (extent >> 1);
-        var first = ((peak - half) >> 8) + 1;
-        var last = (peak + half - 1) >> 8;
-        var peakCell = peak >> 8;
-        if (last < first)
-        {
-            first = peakCell;
-            last = peakCell;
-        }
+        public long Peak => Bell ? Half * Half : Half;
 
-        if (peakCell < first) peakCell = first;
-        if (peakCell > last) peakCell = last;
-        var rise = peakCell - first + 1;
-        var fall = last + 1 - peakCell;
-        var up = 65536 / rise;
-        var down = up * rise / fall;
-        var tail = up * rise - down * (fall - 1);
-        return new TentAxisGeometry(first, peakCell, last, up, down, tail);
+        public long Weight(int cell)
+        {
+            var d = ((cell * 256L + 128) >> Shift) - (Centre >> Shift);
+            var w = Bell ? Half * Half - d * d : Half - Math.Abs(d);
+            return Math.Max(0, w);
+        }
     }
 
-    private static int TentAxisWeight(int cell, in TentAxisGeometry g)
+    private static KernelAxis KernelAxisOf(bool bell, int origin, int phase, int extent)
     {
-        if (cell < g.First || cell > g.Last) return 0;
-        if (cell <= g.Peak) return g.Up * (cell - g.First + 1);
-        return g.Up * (g.Peak - g.First + 1) - g.Down * (cell - g.Peak);
+        var half = Math.Max(256L, extent >> 1);
+        var bits = 64 - System.Numerics.BitOperations.LeadingZeroCount((ulong)half);
+        var shift = Math.Clamp(bits - (bell ? 8 : 15), 0, 7);
+        return new KernelAxis(((long)origin << 8) + phase + (extent >> 1), half >> shift, shift, bell);
     }
 
-    private static int TentAxisSlope(int cell, in TentAxisGeometry g)
+    private static void AccumulateKernel(long[] field, int size, bool bell, int px, int py, int fx, int fy,
+        int width, int height, int constant, int gain)
     {
-        if (cell < g.First || cell > g.Last + 1) return 0;
-        if (cell <= g.Peak) return g.Up;
-        return cell <= g.Last ? -g.Down : -g.Tail;
-    }
-
-    private static long TentCellValue(int cx, int cy, in TentAxisGeometry gx, in TentAxisGeometry gy)
-    {
-        Span<(int Cell, int Delta)> xs = stackalloc (int, int)[8];
-        Span<(int Cell, int Delta)> ys = stackalloc (int, int)[8];
-        var tx = cx & ~31;
-        var ty = cy & ~31;
-        var liveX = 0;
-        xs[liveX++] = (0, TentAxisWeight(tx, gx));
-        var entryX = TentAxisSlope(tx + 1, gx) - TentAxisWeight(tx, gx);
-        if (entryX != 0) xs[liveX++] = (1, entryX);
-        for (var c = tx + 2; c <= Math.Min(gx.Last + 2, tx + 31); c++)
+        var gx = KernelAxisOf(bell, px, fx, width * 256);
+        var gy = KernelAxisOf(bell, py, fy, height * 256);
+        var peak = gx.Peak * gy.Peak;
+        var normalizer = ((1L << 40) + peak / 2) / peak;
+        for (var cy = 0; cy < size; cy++)
         {
-            var change = TentAxisSlope(c, gx) - TentAxisSlope(c - 1, gx);
-            if (change != 0) xs[liveX++] = (c - tx, change);
-        }
-
-        var liveY = 0;
-        ys[liveY++] = (0, TentAxisWeight(ty, gy));
-        var entryY = TentAxisSlope(ty + 1, gy) - TentAxisWeight(ty, gy);
-        if (entryY != 0) ys[liveY++] = (1, entryY);
-        for (var c = ty + 2; c <= Math.Min(gy.Last + 2, ty + 31); c++)
-        {
-            var change = TentAxisSlope(c, gy) - TentAxisSlope(c - 1, gy);
-            if (change != 0) ys[liveY++] = (c - ty, change);
-        }
-
-        var lx = cx - tx;
-        var ly = cy - ty;
-        var sum = 0L;
-        for (var y = 0; y < liveY; y++)
-        {
-            if (ys[y].Cell > ly) continue;
-            var countY = ly - ys[y].Cell + 1;
-            for (var x = 0; x < liveX; x++)
+            var wy = gy.Weight(cy);
+            if (wy == 0) continue;
+            for (var cx = 0; cx < size; cx++)
             {
-                if (xs[x].Cell > lx) continue;
-                sum += (long)xs[x].Delta * ys[y].Delta * (lx - xs[x].Cell + 1) * countY;
+                var wx = gx.Weight(cx);
+                if (wx == 0) continue;
+                field[cy * size + cx] += (long)constant * gain * normalizer * wx * wy;
             }
         }
-
-        return sum;
     }
 
     private static void AccumulateTent(long[] field, int size, int px, int py, int fx, int fy,
         int width, int height, int constant, int gain)
-    {
-        var gx = TentAxis(px, fx, width * 256);
-        var gy = TentAxis(py, fy, height * 256);
-        var x0 = Math.Max((gx.First - 1) & ~31, 0);
-        var x1 = Math.Min((gx.Last + 1) | 31, size - 1);
-        var y0 = Math.Max((gy.First - 1) & ~31, 0);
-        var y1 = Math.Min((gy.Last + 1) | 31, size - 1);
-        for (var cy = y0; cy <= y1; cy++)
-        for (var cx = x0; cx <= x1; cx++)
-            field[cy * size + cx] += (long)constant * gain * TentCellValue(cx, cy, gx, gy);
-    }
+        => AccumulateKernel(field, size, false, px, py, fx, fy, width, height, constant, gain);
 
     private static (int px, int py, int fx, int fy) TentLead(float wx, float wy, int width, int height)
     {
-        var leadX = (long)(int)MathF.Floor(wx * 256f) + ((long)-(width * 128) * 256 >> 8);
-        var leadY = (long)(int)MathF.Floor(wy * 256f) + ((long)-(height * 128) * 256 >> 8);
+        var leadX = (int)MathF.Floor(wx * 256f) + ((long)-(width * 128) * 256 >> 8);
+        var leadY = (int)MathF.Floor(wy * 256f) + ((long)-(height * 128) * 256 >> 8);
         return ((int)(leadX >> 8), (int)(leadY >> 8), (int)(leadX & 255), (int)(leadY & 255));
     }
 
@@ -1281,7 +1229,7 @@ public sealed class EngineTests
                 AccumulateTent(tentField, 256, lead.px, lead.py, lead.fx, lead.fy, ssize[i], ssize[i], 40, sgain[i]);
             }
 
-            for (var i = 0; i < target.Length; i++) target[i] = RoundQ24Tent(tentField[i]);
+            for (var i = 0; i < target.Length; i++) target[i] = RoundQ40Kernel(tentField[i]);
         }
 
         for (var i = 0; i < count; i++)
@@ -1339,42 +1287,11 @@ public sealed class EngineTests
         Assert.Equal(World.Query(w, g, l, mx, my), World.QueryMax(w, g, l, out _, out _));
     }
 
-    private static int BellAxisWeight(int cell, int first, int last)
-    {
-        if (cell < first || cell > last) return 0;
-        var h = last - first + 1;
-        var curve = Math.Max(1, 65536 / (h * h));
-        var e = 2 * cell + 1 - first - last;
-        return curve * (h * h - e * e);
-    }
-
-    private static (int First, int Last) BellAxis(int origin, int phase, int extent)
-    {
-        var half = Math.Max(1, extent >> 1);
-        var peak = (origin << 8) + phase + (extent >> 1);
-        var first = ((peak - half) >> 8) + 1;
-        var last = (peak + half - 1) >> 8;
-        if (last < first) { first = peak >> 8; last = first; }
-        return (first, last);
-    }
-
     private static void AccumulateBell(long[] field, int size, float wx, float wy,
         int width, int height, int constant, int gain)
     {
         var lead = TentLead(wx, wy, width, height);
-        var gx = BellAxis(lead.px, lead.fx, width * 256);
-        var gy = BellAxis(lead.py, lead.fy, height * 256);
-        for (var cy = 0; cy < size; cy++)
-        {
-            var wyv = BellAxisWeight(cy, gy.First, gy.Last);
-            if (wyv == 0) continue;
-            for (var cx = 0; cx < size; cx++)
-            {
-                var wxv = BellAxisWeight(cx, gx.First, gx.Last);
-                if (wxv == 0) continue;
-                field[cy * size + cx] += (long)constant * gain * wxv * wyv;
-            }
-        }
+        AccumulateKernel(field, size, true, lead.px, lead.py, lead.fx, lead.fy, width, height, constant, gain);
     }
 
     [Fact]
@@ -1404,7 +1321,7 @@ public sealed class EngineTests
                 AccumulateBell(bellField, 256, sx[i], sy[i], ssize[i], ssize[i], 40, sgain[i]);
             }
 
-            for (var i = 0; i < target.Length; i++) target[i] = RoundQ24Tent(bellField[i]);
+            for (var i = 0; i < target.Length; i++) target[i] = RoundQ40Kernel(bellField[i]);
         }
 
         for (var i = 0; i < count; i++)
@@ -1693,7 +1610,7 @@ public sealed class EngineTests
     }
 
     [Fact]
-    public unsafe void Rewind_RestoresFieldAndSources()
+    public void Rewind_RestoresFieldAndSources()
     {
         var w = World.New();
         var g = Grid.New(w, 8, 0f, 0f, 256f);
@@ -1728,7 +1645,7 @@ public sealed class EngineTests
     }
 
     [Fact]
-    public unsafe void Rewind_MultiWindow()
+    public void Rewind_MultiWindow()
     {
         var w = World.New();
         var g = Grid.New(w, 8, 0f, 0f, 256f);
@@ -1759,7 +1676,7 @@ public sealed class EngineTests
     }
 
     [Fact]
-    public unsafe void Rewind_DropsPendingMutations()
+    public void Rewind_DropsPendingMutations()
     {
         var w = World.New();
         var g = Grid.New(w, 8, 0f, 0f, 256f);
@@ -1780,7 +1697,7 @@ public sealed class EngineTests
     }
 
     [Fact]
-    public unsafe void Rewind_ReplacesOccupiedSlot()
+    public void Rewind_ReplacesOccupiedSlot()
     {
         var w = World.New();
         var g = Grid.New(w, 8, 0f, 0f, 256f);
@@ -1806,5 +1723,75 @@ public sealed class EngineTests
         World.Process(w);
         Assert.Equal(0, World.Query(w, g, l, 12, 12));
         Assert.NotEqual(0, World.Query(w, g, l, 62, 32));
+    }
+
+    [Fact]
+    public void Sense_UncoveredPointReportsFalseNotSafe()
+    {
+        var w = World.New();
+        Grid.New(w, 8, 0f, 0f, 256f);
+        var threat = Layer.New(w);
+        var wolf = Stamp.Box(6, 6, 90);
+        World.Place(w, threat, 300f, 128f, wolf, 8);
+        World.Place(w, threat, 128f, 128f, wolf, 8);
+        World.Process(w);
+
+        Assert.False(World.Covers(w, 300f, 128f));
+        Assert.False(World.TrySense(w, threat, 300f, 128f, out var outside));
+        Assert.Equal(0, outside);
+        Assert.False(World.TrySenseArea(w, threat, 300f, 128f, 10f, out _));
+        Assert.True(World.TrySense(w, threat, 128f, 128f, out var inside));
+        Assert.Equal(720, inside);
+        Assert.False(World.TrySenseArea(w, threat, 250f, 128f, 20f, out var clipped));
+        Assert.Equal(0, clipped);
+    }
+
+    [Fact]
+    public void Sense_SeamFallsBackToCompleteCoarseGrid()
+    {
+        var w = World.New();
+        var coarse = Grid.New(w, 6, 0f, 0f, 1024f);
+        var fine = Grid.New(w, 8, 0f, 0f, 256f);
+        var threat = Layer.New(w);
+        var wolf = Stamp.Box(6, 6, 90);
+        World.Place(w, threat, 262f, 128f, wolf, 8);
+        World.Process(w);
+
+        Assert.Equal(0, World.QueryAt(w, fine, threat, 262f, 128f));
+        Assert.True(World.TrySense(w, threat, 262f, 128f, out var past));
+        Assert.Equal(World.QueryAt(w, coarse, threat, 262f, 128f), past);
+        Assert.NotEqual(0, past);
+
+        Assert.True(World.TrySenseArea(w, threat, 250f, 128f, 20f, out var area));
+        Assert.True(area > 0);
+        Assert.True(World.TrySense(w, threat, 100f, 100f, out _));
+    }
+
+    [Fact]
+    public void Sense_ExcludingSelfHidesOwnAuraExactly()
+    {
+        var w = World.New();
+        Grid.New(w, 8, 0f, 0f, 256f);
+        var threat = Layer.New(w);
+        var aura = Stamp.Bell(20, 20, 100);
+        var me = World.Place(w, threat, 100.4f, 100.7f, aura, 12);
+        World.Process(w);
+
+        Assert.True(World.TrySense(w, threat, 100.4f, 100.7f, out var self));
+        Assert.True(self > 0);
+        Assert.True(World.TrySense(w, threat, 100.4f, 100.7f, me, out var alone));
+        Assert.Equal(0, alone);
+        Assert.True(World.TrySenseArea(w, threat, 100.4f, 100.7f, 30f, me, out var aloneArea));
+        Assert.Equal(0, aloneArea);
+
+        var other = World.Place(w, threat, 108f, 100f, aura, 5);
+        World.Process(w);
+        Assert.True(World.TrySense(w, threat, 100.4f, 100.7f, me, out var withOther));
+        World.Remove(w, me);
+        World.Process(w);
+        Assert.True(World.TrySense(w, threat, 100.4f, 100.7f, out var otherOnly));
+        Assert.Equal(otherOnly, withOther);
+        Assert.True(World.TrySense(w, threat, 100.4f, 100.7f, other, out var nobody));
+        Assert.Equal(0, nobody);
     }
 }

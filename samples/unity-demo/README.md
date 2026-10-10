@@ -21,8 +21,14 @@ sheep; sheep steer entirely by field queries; you paint fear and food with the m
 
 - Wolves are moving sources (`World.Place` + `World.Move` each frame, `World.SetGain`
   when hunting), resolved once per frame by a single `World.Process`.
-- Every sheep reads the field with ten `World.Query` calls per frame — no sheep knows
-  anything about the wolves directly.
+- Sheep never touch a grid handle: `World.TrySense` reads threat and food at their own
+  position, `World.TrySenseGradient` steers them (per world unit, so speed does not jump
+  between the 256² and 128² grids), and personal space comes from
+  `World.TrySenseArea(..., exclude: self)` on the herd layer — each sheep stamps its own
+  tent there, and exclusion removes exactly its own contribution, so a lone sheep reads 0
+  instead of its own aura. No sheep knows anything about the wolves directly.
+- Wolves hunt with `World.TrySenseMax` over a 48-unit radius and get the strongest herd
+  point back in world coordinates.
 - The HUD shows live field queries/s and managed alloc/s (the engine's warm path
   allocates 0 B; what you see is IMGUI and demo UI).
 - `food 1x == 4 × half` recomputes every second: the 256² and 128² grids over the same
