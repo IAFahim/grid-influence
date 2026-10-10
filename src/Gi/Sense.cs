@@ -123,6 +123,114 @@ public static unsafe partial class World
         return complete;
     }
 
+    public static bool Changed(byte world, byte layer, float x, float y, float reach, int since)
+    {
+        var w = GetContext(world);
+        if (w == null || layer >= w->LayerCount || !Pick(w, x, y, reach, 0, true, out var gi, out _)) return false;
+
+        var g = w->Grids + gi;
+        var epochs = g->Layers[layer].Epochs;
+        if (epochs == null) return false;
+
+        var disk = Disk(g, x, y, reach);
+        for (var ty = disk.Y0 >> TileBake.TileBits; ty <= disk.Y1 >> TileBake.TileBits; ty++)
+        for (var tx = disk.X0 >> TileBake.TileBits; tx <= disk.X1 >> TileBake.TileBits; tx++)
+            if (epochs[ty * g->TilesPerSide + tx] - since > 0 && HoldsDiskCell(disk, tx, ty)) return true;
+        return false;
+    }
+
+    private static bool HoldsDiskCell(in Circle disk, int tx, int ty)
+    {
+        if (Outside(disk, tx, ty)) return false;
+
+        var tileX = tx << TileBake.TileBits;
+        var tileY = ty << TileBake.TileBits;
+        var rowEnd = Math.Min(tileY + TileBake.TileSize - 1, disk.Y1);
+        for (var cy = Math.Max(tileY, disk.Y0); cy <= rowEnd; cy++)
+            if (Span(disk, cy, out var lo, out var hi) && Math.Max(lo, tileX) < Math.Min(hi, tileX + TileBake.TileSize)) return true;
+        return false;
+    }
+
+    #if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    #endif
+    public static bool TrySenseNearest(byte world, byte layer, float x, float y, float reach, short threshold,
+        out short value, out float nearestX, out float nearestY)
+    {
+        value = short.MinValue;
+        nearestX = x;
+        nearestY = y;
+        var w = GetContext(world);
+        if (w == null || layer >= w->LayerCount) return false;
+        if (!Pick(w, x, y, reach, 0, true, out var gi, out var complete)) return false;
+
+        var g = w->Grids + gi;
+        var disk = Disk(g, x, y, reach);
+        var pages = &g->Layers[layer].Pages;
+        var tps = g->TilesPerSide;
+        var originX = disk.Cx >> TileBake.TileBits;
+        var originY = disk.Cy >> TileBake.TileBits;
+        var reachTiles = Math.Max(Math.Max(originX - (disk.X0 >> TileBake.TileBits), (disk.X1 >> TileBake.TileBits) - originX),
+            Math.Max(originY - (disk.Y0 >> TileBake.TileBits), (disk.Y1 >> TileBake.TileBits) - originY));
+        var best = long.MaxValue;
+        var bx = 0;
+        var by = 0;
+        for (var ring = 0; ring <= reachTiles; ring++)
+        {
+            var gap = (long)Math.Max(ring - 1, 0) << (TileBake.TileBits + 8);
+            if (gap * gap > best) break;
+
+            for (var ty = originY - ring; ty <= originY + ring; ty++)
+            {
+                if (ty < disk.Y0 >> TileBake.TileBits || ty > disk.Y1 >> TileBake.TileBits) continue;
+
+                var edge = ty == originY - ring || ty == originY + ring;
+                for (var tx = originX - ring; tx <= originX + ring; tx += edge ? 1 : 2 * Math.Max(ring, 1))
+                {
+                    if (tx < disk.X0 >> TileBake.TileBits || tx > disk.X1 >> TileBake.TileBits || Outside(disk, tx, ty)) continue;
+
+                    var live = pages->TryGet(ty * tps + tx, out var block);
+                    if ((live ? *(short*)(block + MaxOffset) : 0) < threshold) continue;
+                    NearestInTile(disk, live ? (short*)(block + PageOffset) : null, tx, ty, threshold, ref best, ref bx, ref by);
+                }
+            }
+        }
+
+        if (best == long.MaxValue) return complete;
+
+        value = Cell(g, layer, bx, by);
+        nearestX = g->OriginX + ((bx << 8) + 128) / (float)g->ScaleQ8;
+        nearestY = g->OriginY + ((by << 8) + 128) / (float)g->ScaleQ8;
+        return complete;
+    }
+
+    private static void NearestInTile(in Circle disk, short* page, int tx, int ty, short threshold, ref long best, ref int bx, ref int by)
+    {
+        var tileX = tx << TileBake.TileBits;
+        var tileY = ty << TileBake.TileBits;
+        var rowEnd = Math.Min(tileY + TileBake.TileSize - 1, disk.Y1);
+        for (var cy = Math.Max(tileY, disk.Y0); cy <= rowEnd; cy++)
+        {
+            var dy = ((long)cy << 8) + 128 - disk.Py;
+            if (dy * dy > best || !Span(disk, cy, out var lo, out var hi)) continue;
+
+            var end = Math.Min(hi, tileX + TileBake.TileSize);
+            var row = page == null ? null : page + (cy - tileY) * TileBake.TileSize - tileX;
+            for (var cx = Math.Max(lo, tileX); cx < end; cx++)
+            {
+                if (row != null && row[cx] < threshold) continue;
+
+                var dx = ((long)cx << 8) + 128 - disk.Px;
+                var d = dx * dx + dy * dy;
+                if (d > best || (d == best && (cy > by || (cy == by && cx >= bx)))) continue;
+
+                best = d;
+                bx = cx;
+                by = cy;
+            }
+        }
+    }
+
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif

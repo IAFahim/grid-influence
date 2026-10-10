@@ -55,6 +55,12 @@ internal static partial class Verification
         Check("stamps-wider-than-grid-cover-it", StampsWiderThanGridCoverIt());
         Check("turned-exclude-matches-removal", TurnedExcludeMatchesRemoval());
         Check("warm-turned-process-allocates-0-bytes", WarmTurnedProcessAllocationFree());
+        Check("fade-steps-match-schedule", FadeStepsMatchSchedule());
+        Check("expire-removes-on-schedule", ExpireRemovesOnSchedule());
+        Check("rewind-resumes-schedules", RewindResumesSchedules());
+        Check("warm-fade-process-allocates-0-bytes", WarmFadeProcessAllocationFree());
+        Check("changed-since-matches-epochs", ChangedSinceMatchesEpochs());
+        Check("sense-nearest-matches-scan", SenseNearestMatchesScan());
 
         Console.WriteLine(failures == 0 ? "verification: all receipts green" : $"verification: {failures} failures");
         return failures == 0 ? 0 : 1;

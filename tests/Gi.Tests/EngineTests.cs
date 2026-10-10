@@ -719,7 +719,7 @@ public sealed class EngineTests
         Assert.Equal(1, pending.LiveSources);
         Assert.Equal(0, pending.LiveTiles);
         Assert.Equal(0, pending.DirtyTiles);
-        Assert.Equal(64 * 21, pending.SourceBytes);
+        Assert.Equal(64 * 40, pending.SourceBytes);
         Assert.Equal(0, pending.MapBytes + pending.DifferenceBytes + pending.DenseBytes + pending.PageBytes);
         World.Process(w);
         var processed = Stats.Inspection.Read(w);
@@ -727,7 +727,7 @@ public sealed class EngineTests
         Assert.Equal(0, processed.DirtyTiles);
         Assert.Equal(World.BlockBytes, 6528);
         Assert.Equal(World.BlockBytes, processed.DifferenceBytes + processed.DenseBytes + processed.DensePointerBytes + processed.PageBytes + processed.PageSumBytes);
-        Assert.Equal(4, processed.DirtyFlagBytes);
+        Assert.Equal(20, processed.DirtyFlagBytes);
         Assert.Equal(1920, World.Query(w, g, l, 0, 0, 64, 64));
         World.Clear(w);
         var cleared = Stats.Inspection.Read(w);
@@ -735,7 +735,7 @@ public sealed class EngineTests
         Assert.Equal(64, cleared.SourceCapacity);
         Assert.Equal(0, cleared.LiveTiles);
         Assert.Equal(0, cleared.MapBytes);
-        Assert.Equal(empty.WorldBytes + 64 * 21 + 4 + 64 + 16 * sizeof(DepositOp) + 64 * sizeof(int), cleared.WorldBytes);
+        Assert.Equal(empty.WorldBytes + 64 * 40 + 20 + 64 + 16 * sizeof(DepositOp) + 64 * sizeof(int), cleared.WorldBytes);
     }
 
     [Fact]

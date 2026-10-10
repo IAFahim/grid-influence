@@ -69,13 +69,16 @@ internal static unsafe class Inspection
             SourceBytes = (long)s->X.Capacity * sizeof(float) + (long)s->Y.Capacity * sizeof(float) +
                 s->Stamp.Capacity + s->Layer.Capacity + s->Gain.Capacity + s->Alive.Capacity +
                 ((long)s->Angle.Capacity + s->Scale.Capacity) * sizeof(ushort) +
+                s->Timed.Capacity + s->FadeFrom.Capacity + s->FadeTo.Capacity +
+                ((long)s->FadeStart.Capacity + s->FadeTicks.Capacity + s->ExpireAt.Capacity + s->Due.Capacity) * sizeof(int) +
                 (long)s->Free.Capacity * sizeof(int) + s->Gen.Capacity,
             WorldArenaBytes = World.MaxWorlds * sizeof(WorldCtx),
             StampArenaBytes = StampCatalog.MaxStamps * sizeof(StampVariant),
 
             DepositQueueBytes = (long)w->Ops.Capacity * sizeof(DepositOp) + (long)w->Pending.Capacity * sizeof(int) +
                 (long)w->Fragments.Capacity * sizeof(DepositFragment) + (long)w->Placements.Capacity * sizeof(Placement) +
-                (long)w->Journal.Capacity * sizeof(DepositOp),
+                (long)w->Journal.Capacity * sizeof(DepositOp) + (long)w->ScheduleJournal.Capacity * sizeof(ScheduleRecord) +
+                (long)w->Timers.Capacity * sizeof(Alarm),
         };
 
         for (var i = 0; i < s->Count; i++)
@@ -97,7 +100,7 @@ internal static unsafe class Inspection
                 result.MapBytes += (long)ld->Pages.SlotCount * (sizeof(int) + sizeof(byte*) + sizeof(byte));
                 result.DirtyQueueBytes += (long)(ld->Dirty.Capacity + ld->Changed.Capacity) * sizeof(int);
                 result.PyramidBytes += ld->Max.Bytes;
-                if (ld->InDirty != null) result.DirtyFlagBytes += g->TileCount;
+                if (ld->InDirty != null) result.DirtyFlagBytes += (long)g->TileCount * (1 + sizeof(int));
 
                 var used = ld->Pages.Used;
                 var blocks = ld->Pages.Blocks;

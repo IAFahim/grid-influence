@@ -16,6 +16,13 @@ internal struct SourceColumns
     public NativeBuffer<byte> Gain;
     public NativeBuffer<ushort> Angle;
     public NativeBuffer<ushort> Scale;
+    public NativeBuffer<byte> Timed;
+    public NativeBuffer<sbyte> FadeFrom;
+    public NativeBuffer<sbyte> FadeTo;
+    public NativeBuffer<int> FadeStart;
+    public NativeBuffer<int> FadeTicks;
+    public NativeBuffer<int> ExpireAt;
+    public NativeBuffer<int> Due;
     public NativeBuffer<byte> Alive;
     public NativeBuffer<int> Free;
     public NativeBuffer<byte> Gen;
@@ -26,6 +33,7 @@ internal unsafe struct LayerData
 {
     public PageMap Pages;
     public byte* InDirty;
+    public int* Epochs;
     public NativeBuffer<int> Dirty;
     public NativeBuffer<int> Changed;
     public MaxPyramid Max;
@@ -88,6 +96,10 @@ internal unsafe struct WorldCtx
     public NativeBuffer<DepositFragment> Fragments;
     public NativeBuffer<Placement> Placements;
     public NativeBuffer<DepositOp> Journal;
+    public NativeBuffer<ScheduleRecord> ScheduleJournal;
+    public NativeBuffer<Alarm> Timers;
+    public int Tick;
+    public int RecordTick;
     public byte Recording;
     public int* Prev;
     public int FreeHead;
@@ -201,6 +213,8 @@ public static unsafe partial class World
         s->Gain.Pointer[i] = g;
         s->Angle.Pointer[i] = 0;
         s->Scale.Pointer[i] = UnitScale;
+        JournalSchedule(w, s, i);
+        s->Timed.Pointer[i] = 0;
         s->Alive.Pointer[i] = 1;
         EnqueuePlace(w, i, x, y, stamp, layer, (sbyte)g);
         return (gen << 24) | i;
@@ -223,8 +237,13 @@ public static unsafe partial class World
         if (!TrySource(world, source, out var w, out var s, out var i)) return;
 
         var next = (byte)Math.Clamp(gain, -MaxGain, MaxGain);
-        var current = s->Gain.Pointer[i];
-        if (next == current) return;
+        if ((s->Timed.Pointer[i] & Fading) != 0)
+        {
+            JournalSchedule(w, s, i);
+            s->Timed.Pointer[i] &= unchecked((byte)~Fading);
+        }
+
+        if (next == s->Gain.Pointer[i]) return;
 
         EnqueueMutation(w, s, i, s->X.Pointer[i], s->Y.Pointer[i], (sbyte)next, s->Angle.Pointer[i], s->Scale.Pointer[i], true);
         s->Gain.Pointer[i] = next;
@@ -260,6 +279,12 @@ public static unsafe partial class World
         if (!TrySource(world, source, out var w, out var s, out var i)) return;
 
         EnqueueMutation(w, s, i, s->X.Pointer[i], s->Y.Pointer[i], 0, s->Angle.Pointer[i], s->Scale.Pointer[i], false);
+        if (s->Timed.Pointer[i] != 0)
+        {
+            JournalSchedule(w, s, i);
+            s->Timed.Pointer[i] = 0;
+        }
+
         s->Alive.Pointer[i] = 0;
         s->Free.Pointer[i] = w->FreeHead;
         w->FreeHead = i;
@@ -555,6 +580,8 @@ public static unsafe partial class World
         w->Fragments.Resize(0);
         w->Placements.Resize(0);
         w->Journal.Resize(0);
+        w->ScheduleJournal.Resize(0);
+        w->Timers.Resize(0);
         w->Recording = 0;
         new Span<int>(w->Pending.Pointer, w->Pending.Capacity).Clear();
 
@@ -573,8 +600,14 @@ public static unsafe partial class World
                 var used = pages->Used;
                 var blocks = pages->Blocks;
                 var slots = pages->SlotCount;
+                var keys = pages->Keys;
                 for (var i = 0; i < slots; i++)
-                    if (used[i] == PageMap.Live) FreeBlock(blocks[i]);
+                {
+                    if (used[i] != PageMap.Live) continue;
+                    FreeBlock(blocks[i]);
+                    ld->Epochs[keys[i]] = w->Tick + 1;
+                }
+
                 pages->Reset();
                 ld->Max.Reset();
             }
@@ -586,6 +619,8 @@ public static unsafe partial class World
         var w = GetContext(world);
         if (w == null) return;
         w->Journal.Resize(0);
+        w->ScheduleJournal.Resize(0);
+        w->RecordTick = w->Tick;
         w->Recording = 1;
     }
 
@@ -594,6 +629,7 @@ public static unsafe partial class World
         var w = GetContext(world);
         if (w == null) return;
         w->Journal.Resize(0);
+        w->ScheduleJournal.Resize(0);
         w->Recording = 0;
     }
 
@@ -621,7 +657,10 @@ public static unsafe partial class World
         }
 
         w->Journal.Resize(0);
+        RestoreSchedules(w, s);
+        if (w->Recording != 0) ShiftSchedules(s, w->Tick - w->RecordTick);
         w->Recording = 0;
+        RebuildTimers(w);
 
         w->FreeHead = -1;
         for (var i = s->Count - 1; i >= 0; i--)
@@ -720,8 +759,10 @@ public static unsafe partial class World
     private static LayerData* EnsureDirty(GridCtx* g, byte layer)
     {
         var ld = g->Layers + layer;
-        if (ld->InDirty == null)
-            ld->InDirty = (byte*)NativeHeap.AllocZeroed((nuint)g->TileCount);
+        if (ld->InDirty != null) return ld;
+
+        ld->InDirty = (byte*)NativeHeap.AllocZeroed((nuint)g->TileCount);
+        ld->Epochs = (int*)NativeHeap.AllocZeroed((nuint)g->TileCount * sizeof(int));
         return ld;
     }
 
@@ -819,6 +860,8 @@ public static unsafe partial class World
         var w = GetContext(world);
         if (w == null) return;
 
+        w->Tick++;
+        if (w->Timers.Length != 0) RunTimers(w);
         var fragmentCount = ApplyDeposits(w);
 
         var total = 0;
@@ -884,6 +927,8 @@ public static unsafe partial class World
             for (var l = 0; l < w->LayerCount; l++)
             {
                 var ld = g->Layers + l;
+                var dirty = ld->Dirty.Pointer;
+                for (var i = 0; i < ld->Dirty.Length; i++) ld->Epochs[dirty[i]] = w->Tick;
                 var changed = ld->Dirty;
                 ld->Dirty = ld->Changed;
                 ld->Dirty.Resize(0);
@@ -903,11 +948,19 @@ public static unsafe partial class World
         s->Gain.Resize(capacity);
         s->Angle.Resize(capacity);
         s->Scale.Resize(capacity);
+        s->Timed.Resize(capacity);
+        s->FadeFrom.Resize(capacity);
+        s->FadeTo.Resize(capacity);
+        s->FadeStart.Resize(capacity);
+        s->FadeTicks.Resize(capacity);
+        s->ExpireAt.Resize(capacity);
+        s->Due.Resize(capacity);
         s->Alive.Resize(capacity);
         s->Free.Resize(capacity);
         s->Gen.Resize(capacity);
         w->Pending.Resize(capacity);
         new Span<byte>(s->Gen.Pointer + live, capacity - live).Clear();
+        new Span<byte>(s->Timed.Pointer + live, capacity - live).Clear();
         new Span<int>(w->Pending.Pointer + live, capacity - live).Clear();
     }
 
@@ -1209,6 +1262,26 @@ public static unsafe partial class World
         var cy = (int)MathF.Floor((y - g->OriginY) * g->ScaleQ8) >> 8;
         gx = Query(world, grid, layer, cx + 1, cy) - Query(world, grid, layer, cx - 1, cy);
         gy = Query(world, grid, layer, cx, cy + 1) - Query(world, grid, layer, cx, cy - 1);
+    }
+
+    public static int ChangedTiles(byte world, byte grid, byte layer, int since, int* destination)
+    {
+        var w = GetContext(world);
+        if (w == null || grid >= w->GridCount || layer >= w->LayerCount) return 0;
+
+        var g = w->Grids + grid;
+        var epochs = g->Layers[layer].Epochs;
+        if (epochs == null) return 0;
+
+        var count = 0;
+        for (var tile = 0; tile < g->TileCount; tile++)
+        {
+            if (epochs[tile] - since <= 0) continue;
+            if (destination != null) destination[count] = tile;
+            count++;
+        }
+
+        return count;
     }
 
     public static int ChangedTiles(byte world, byte grid, byte layer, int* destination)

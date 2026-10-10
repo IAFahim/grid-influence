@@ -182,6 +182,24 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   any layer, so every query works on derived layers. `Place` on a derived layer returns `-1`.
   Recipes belong to the world's layer table and survive `Clear`; pages follow their inputs
   through `Rewind` and `Clear`.
+- **Time**: `World.Tick(world)` counts the world's `Process` calls (it advances at the start of
+  each one and wraps at 2^32; every tick comparison is wrap-safe within 2^31 ticks).
+  `World.Fade(world, id, gain, ticks)` ramps a source's gain linearly from its current gain to
+  `gain` over the next `ticks` `Process` calls: the call at elapsed tick `k` applies
+  `from + sign(Δ)·⌊(|Δ|·k + ⌊ticks/2⌋) / ticks⌋`, so a fade changes the field at exactly the
+  `|Δ| ≤ 32` ticks where that integer gain steps — `⌈((j+1)·ticks − ⌊ticks/2⌋) / |Δ|⌉` for step
+  `j + 1` — and costs nothing in between; `ticks ≤ 0` or an unchanged gain is an immediate
+  `SetGain`. `World.Expire(world, id, ticks)` removes the source in the `ticks`-th `Process` from
+  now (`ticks ≤ 0` cancels a pending expiry); a source both fading and expiring on one tick is
+  removed. `SetGain` cancels a fade, `Remove` cancels both, `Move`/`Turn`/`Scale` keep them, and
+  a fresh `Place` on a recycled slot starts unscheduled. Schedules live in per-slot source
+  columns; a per-world binary min-heap keyed by (due tick, slot) holds each scheduled slot's next
+  event, entries made stale by later calls are skipped when popped (the slot's recorded due tick
+  no longer matches), and the heap is rebuilt from the columns once it outgrows twice the slot
+  count. At the start of `Process`, after the tick advances, every due event becomes an ordinary
+  queued gain change or removal — applied, journaled, and merged exactly like the API calls —
+  so scheduled and manual mutations are indistinguishable downstream, and determinism follows
+  from the (due, slot) order. Ticks count `Process` calls, not time: Gi has no clock.
 - **Rewind**: `Record` drops any prior journal and starts appending a copy of every op the
   world's `Process` calls apply — the op already stores the applied-from and applied-to states
   plus the slot's generation, so the journal is an undo log costing one 32 B unmanaged append
@@ -200,6 +218,14 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   same as the window it undoes — O(changes), never O(field). `StopRecording` discards the
   journal without restoring; `Record` again re-anchors the checkpoint; `Clear` resets both.
   With no journal there is no checkpoint and `Rewind` only cancels pending mutations.
+  Schedules rewind too: while recording, every API change to a slot's schedule (`Fade`,
+  `Expire`, a fade-cancelling `SetGain`, `Remove`, `Place`) appends the slot's prior schedule to
+  a schedule journal, and scheduled events are ordinary ops already in the op journal. `Rewind`
+  restores the schedule journal in reverse, then shifts every live schedule by the ticks elapsed
+  since `Record` — the tick itself never runs backwards, so change epochs stay monotonic — and
+  rebuilds the heap: pending fades and expiries resume with exactly the remaining time they had
+  at the checkpoint, and a rewound world re-simulates tick for tick like a twin that never left
+  it.
 - **Query**: `World.Query(world, grid, layer, x, y)` is one hash lookup + page read;
   `(x, y, w, h)` sums a rect tile-wise — full-grid reads sum one `int64` per live page, partial
   regions sum the same `int64` slot for every tile the rect fully covers and scan only the
@@ -234,7 +260,13 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   instead of diffing pages. The list includes tiles that resolved to zero and left the map;
   it is empty before the first `Process`, after a `Process` with nothing dirty on that pair,
   and after `Clear`. The caller's buffer must hold the grid's tile count; passing null fetches
-  only the count. Buffers swap, so the feed allocates nothing warm;
+  only the count. Buffers swap, so the feed allocates nothing warm.
+  `ChangedTiles(world, grid, layer, since, int* dst)` serves consumers that read at their own
+  cadence: every (grid, layer) keeps an `int32` **epoch** per tile — the tick of the last
+  `Process` that resolved it, written for every dirty tile (base and derived, including tiles
+  that resolved to zero) after the drain — and the overload returns, ascending, every tile whose
+  epoch is after `since`. `Clear` stamps every tile it frees with the next tick, so a consumer
+  polling with the current tick sees the cleared tiles;
   `QueryRegion(world, grid, layer, x, y, w, h, short* dst)` fills `w×h` cells row-major with
   exactly the per-cell `Query` values, copying row segments per tile with vector stores where
   intrinsics allow (page rows are 64 B aligned by construction; the destination is written with
@@ -287,6 +319,16 @@ add one `int64` page sum per live page, so large sparse grids do not visit every
   component (box prefix, dense, tent, bell) before subtracting. Areas apply the same rule per
   cell of the source's footprint inside the disk, reading the stores directly and integrating
   the difference array only for tiles that hold a saturated cell.
+  `World.Changed(world, layer, x, y, reach, since)` answers whether any tile holding a cell of
+  the same disk (on the grid `TrySenseArea` would pick) has an epoch after `since` — an agent
+  can skip re-deciding while its neighbourhood is unchanged. `TrySenseNearest(world, layer, x,
+  y, reach, threshold, out value, out nx, out ny)` returns the disk cell with `value ≥
+  threshold` nearest to the point (squared Q8 distance between the point and cell centres, ties
+  to the row-major-first cell) and its world centre, or `short.MinValue` and the point itself
+  when no cell qualifies — so `value ≥ threshold` tells found from not found. It visits tiles in
+  rings of growing Chebyshev distance from the point's tile, skips tiles whose page max (0 for
+  an absent tile) is below the threshold, scans only rows that can still beat the best
+  distance, and stops at the first ring that cannot.
   Sensing reads only resolved state, so it inherits `Query`'s one-frame latency: a source placed
   or moved this frame is seen after the next `Process`. Values saturate at ±32767 and signed
   sources cancel; a layer meant to detect presence should hold same-signed sources.
@@ -468,7 +510,10 @@ pass behind them was `perf`-profile guided, receipts first.
   `Clear`, with the pending tail
   zeroed at column growth so fresh slots read "no op" and the whole column wiped by `Clear` —
   and `SourceColumns` buffers — positions, stamp,
-  layer, gain, liveness, the free-slot chain, and the generation bytes — and, per (grid, layer),
+  layer, gain, angle, scale, schedule columns, liveness, the free-slot chain, and the generation
+  bytes — the timer heap and schedule journal (reset by `Clear`, capacity retained), and, per
+  (grid, layer), the dirty flags and tile epochs (allocated together by the layer's first marked
+  tile on that grid and kept for the process), and
   the max pyramid: a flat `int16` slot array plus per-level offset and side tables, allocated
   zeroed by the layer's first resolved tile and freed only by `World.Clear`) or by a `PageMap`
   (each tile block — 6,528 B, or 10,624 B once a raster deposit attached the dense buffer at its
@@ -598,9 +643,12 @@ pass behind them was `perf`-profile guided, receipts first.
   overlap any world's mutation or `Process`. Pool initialization rides the
   same rule: the first creation call allocates both arenas before any handle exists, and handles
   only originate from creation calls, so no query can observe an uninitialized arena.
-  `Query`/`QueryRegion`/`QueryMax`/`QueryGradient`/`ChangedTiles`/`Covers`/`TrySense*` read
-  resolved pages, page sums, page maxima, tile sum stores, pyramid slots, changed lists,
-  source columns, and the pending op queue only, and may run concurrently with each other,
+  `Fade`/`Expire`/`Turn`/`Scale` are mutations like `Move`; timers run on the owning thread at
+  the start of `Process`, and epochs are written on that thread after the drain (after the
+  pool's join). `Query`/`QueryRegion`/`QueryMax`/`QueryGradient`/`ChangedTiles`/`Changed`/
+  `Covers`/`Tick`/`TrySense*` read resolved pages, page sums, page maxima, tile sum stores,
+  pyramid slots, changed lists, tile epochs, source columns, and the pending op queue only, and
+  may run concurrently with each other,
   never with mutation or process. Sensing writes nothing outside its own stack frame: each call
   stackallocs its scratch (span rows, under 9 KB of per-tile arrays for an excluded area,
   a single cell for an excluded point), so concurrent sensing threads never share scratch. The
