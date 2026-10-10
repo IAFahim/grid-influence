@@ -21,6 +21,7 @@ internal static class Verification
         Check("region-sum-matches-cell-scans", RegionSumMatchesCellScans());
         Check("query-at-matches-deposits", QueryAtMatchesDeposits());
         Check("query-max-matches-full-scan", QueryMaxMatchesFullScan());
+        Check("query-max-region-matches-scan", QueryMaxRegionMatchesScan());
         Check("gradient-matches-central-differences", GradientMatchesCentralDifferences());
         Check("changed-tiles-match-drain", ChangedTilesMatchDrain());
         Check("deferred-window-matches-stepped-processing", DeferredWindowMatchesSteppedProcessing());
@@ -510,6 +511,83 @@ internal static class Verification
         Gi.World.Process(w);
         if (!LayerOk(cover)) return false;
         return Gi.World.QueryMax(w, g, cover, out _, out _) == short.MaxValue;
+    }
+
+    private static unsafe bool QueryMaxRegionMatchesScan()
+    {
+        var w = Gi.World.New();
+        var g = Gi.Grid.New(w, 8, 0f, 0f, 256f);
+        var busy = Gi.Layer.New(w);
+        var stamp = Gi.Stamp.Box(20, 20, 25);
+        var rng = new Random(307);
+        var field = new short[256 * 256];
+
+        int ScanMax(int x0, int y0, int x1, int y1)
+        {
+            var best = short.MinValue;
+            for (var cy = y0; cy < y1; cy++)
+            for (var cx = x0; cx < x1; cx++)
+                if (field[cy * 256 + cx] > best) best = field[cy * 256 + cx];
+            return best;
+        }
+
+        bool RegionOk(int x, int y, int rw, int rh)
+        {
+            var expected = ScanMax(x, y, x + rw, y + rh);
+            var first = Gi.World.QueryMax(w, g, busy, x, y, rw, rh, out var bx, out var by);
+            var repeat = Gi.World.QueryMax(w, g, busy, x, y, rw, rh, out var rx, out var ry);
+            if (first != expected || repeat != first || bx != rx || by != ry) return false;
+            if (bx < x || bx >= x + rw || by < y || by >= y + rh) return false;
+            return Gi.World.Query(w, g, busy, bx, by) == first;
+        }
+
+        if (Gi.World.QueryMax(w, g, busy, 0, 0, 256, 256, out var ex, out var ey) != 0 ||
+            ex != 0 || ey != 0) return false;
+        if (Gi.World.QueryMax(w, g, busy, 400, 400, 10, 10, out _, out _) != 0) return false;
+        if (Gi.World.QueryMax(w, g, busy, 5, 5, 0, 8, out _, out _) != 0) return false;
+
+        var ids = new int[120];
+        for (var round = 0; round < 3; round++)
+        {
+            for (var i = 0; i < ids.Length; i++)
+            {
+                if (round > 0 && rng.Next(5) == 0)
+                {
+                    Gi.World.Remove(w, ids[i]);
+                    ids[i] = Gi.World.Place(w, busy,
+                        (float)(rng.NextDouble() * 240 + 8), (float)(rng.NextDouble() * 240 + 8),
+                        stamp, rng.Next(-8, 17));
+                }
+                else if (round > 0)
+                {
+                    Gi.World.Move(w, ids[i],
+                        (float)(rng.NextDouble() * 240 + 8), (float)(rng.NextDouble() * 240 + 8));
+                }
+                else
+                {
+                    ids[i] = Gi.World.Place(w, busy,
+                        (float)(rng.NextDouble() * 240 + 8), (float)(rng.NextDouble() * 240 + 8),
+                        stamp, rng.Next(-8, 17));
+                }
+            }
+
+            Gi.World.Process(w);
+            fixed (short* p = field) Gi.World.QueryRegion(w, g, busy, 0, 0, 256, 256, p);
+
+            for (var q = 0; q < 40; q++)
+            {
+                var rw = rng.Next(1, 80);
+                var rh = rng.Next(1, 80);
+                if (!RegionOk(rng.Next(257 - rw), rng.Next(257 - rh), rw, rh)) return false;
+            }
+
+            if (!RegionOk(0, 0, 256, 256)) return false;
+            if (!RegionOk(31, 31, 2, 2)) return false;
+            if (!RegionOk(30, 30, 5, 5)) return false;
+        }
+
+        return Gi.World.QueryMax(w, g, busy, 64, 64, 64, 64, out _, out _) ==
+            Gi.World.QueryMax(w, g, busy, 64, 64, 64, 64, out _, out _);
     }
 
     private static bool GradientMatchesCentralDifferences()
@@ -1255,6 +1333,19 @@ internal static class Verification
             if (el < best) best = el;
         }
         Console.WriteLine($"best-cell query (argmax over 1024x1024): {best:F2} us ({bestCell})");
+
+        best = double.MaxValue;
+        short bestRegion = 0;
+        for (var r = 0; r < 20; r++)
+        {
+            var t = Stopwatch.GetTimestamp();
+            for (var i = 0; i < 1_000; i++)
+                bestRegion = Gi.World.QueryMax(w, g, l,
+                    (i * 61) % 900, (i * 37) % 900, 128, 128, out _, out _);
+            var el = Stopwatch.GetElapsedTime(t).TotalMicroseconds;
+            if (el < best) best = el;
+        }
+        Console.WriteLine($"best-cell-in-128x128-region query: {best / 10:F2} us per 1k ({bestRegion})");
 
         best = double.MaxValue;
         long gradientAcc = 0;

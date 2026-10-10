@@ -983,6 +983,25 @@ public static unsafe class World
         return ld->Max.Best(g->TilesPerSide, &ld->Pages, out x, out y);
     }
 
+    public static short QueryMax(byte world, byte grid, byte layer,
+        int x, int y, int width, int height, out int bestX, out int bestY)
+    {
+        bestX = 0;
+        bestY = 0;
+        var w = GetContext(world);
+        if (w == null || grid >= w->GridCount || layer >= w->LayerCount) return 0;
+
+        var g = w->Grids + grid;
+        var x0 = Math.Max(x, 0);
+        var y0 = Math.Max(y, 0);
+        var x1 = Math.Min((long)x + width, (long)g->Size);
+        var y1 = Math.Min((long)y + height, (long)g->Size);
+        if (x1 <= x0 || y1 <= y0) return 0;
+
+        var ld = g->Layers + layer;
+        return ld->Max.Best(g->TilesPerSide, &ld->Pages, x0, y0, (int)x1, (int)y1, out bestX, out bestY);
+    }
+
     public static void QueryGradient(byte world, byte grid, byte layer, float x, float y, out int gx, out int gy)
     {
         gx = 0;

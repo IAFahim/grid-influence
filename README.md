@@ -31,6 +31,7 @@ short cell = World.Query(world, grid, layer, 64, 32);        // one page read
 long  sum  = World.Query(world, grid, layer, 0, 0, 32, 32);  // region sum
 short at   = World.QueryAt(world, grid, layer, 130f, 64f);   // world-space point
 short best = World.QueryMax(world, grid, layer, out int bx, out int by);  // argmax cell
+short rb   = World.QueryMax(world, grid, layer, 16, 16, 64, 64, out var rx, out var ry); // …in a rect
 World.QueryGradient(world, grid, layer, 130f, 64f, out var gx, out var gy); // ±1-cell slope
 
 World.Remove(world, source);             // exact negation — no rebuild
@@ -156,12 +157,14 @@ short  along  = World.QueryAt(world, grid, slowZone, x, y);
   data path.
 - **Deposits are incremental and deferred.** Each live tile owns one 6,528 B block (difference
   array + `int16` page + `int64` page sum + `int16` page max); raster deposits attach a dense
-  buffer once, growing the block to 10,624 B — box and tent tiles never carry it.
+  buffer once, growing the block to 10,624 B — box tiles never carry it, and tent tiles carry
+  their own lazily attached `int64` second-order buffer instead.
   `Place`/`Move`/`SetGain`/`Remove` only merge into a per-world op queue (one op per source per
   window); `Process` applies the net retract-and-apply pairs — both emit paths are per-cell
   linear in gain, so any mutation sequence collapses exactly, and a source placed and removed
-  in one window never touches a tile. Gain is signed (−16–16), so one layer can hold opposing
-  pressures.
+  in one window never touches a tile. Large batches and non-box stamps split into per-tile
+  fragments that apply on the resolve pool. Gain is signed (−16–16), so one layer can hold
+  opposing pressures.
 - **`Process` applies the queue, then touches only dirty tiles.** A 2D prefix sum resolves each
   dirty difference array, saturates to `short` after summation (so cancellation is preserved),
   records the page sum and page max, folds the max into a per-(grid, layer) max pyramid, frees
@@ -171,13 +174,14 @@ short  along  = World.QueryAt(world, grid, slowZone, x, y);
 - **Queries read maintained state.** Cell reads are one page lookup; region sums read one
   `int64` per fully covered tile and scan only the clipped edge strips; `QueryRegion` bulk fills
   use vectorized row copies; `QueryMax` walks the max pyramid to the best cell (0.1 µs on a
-  1024² layer — ~56,000× faster than scanning a million cells); `QueryGradient` is the ±1-cell
+  1024² layer — ~56,000× faster than scanning a million cells) and scopes the same descent to
+  a rectangle (~0.5 µs for a 128² region); `QueryGradient` is the ±1-cell
   central difference at a world-space point; `ChangedTiles` hands back the tile ids the last
   `Process` resolved, for repainting or incremental sync.
 - **Sub-cell placement, world-anchored extents.** Positions convert to cell space in Q8; raster
   stamps deposit with bilinear edge weights, uniform rasters take a difference-array box path,
-  and `Stamp.Tent` deposits a smooth linear falloff through the same difference-array corners —
-  exact at every sub-cell phase, no dense buffer.
+  and `Stamp.Tent` deposits a piecewise-linear kernel as ≤36 second-order impulses per touched
+  tile — exact at every sub-cell phase, zero outside the support.
   A stamp covers the same world rect on every grid of its world: extents scale with the grid,
   fractional edges become Q8 band weights, and raster stamps carry baked zero-padded box-average
   mip chains so coarse grids minify without aliasing (scale-1 grids keep the bit-identical 0.2
@@ -211,6 +215,7 @@ bash tools/stats/perf.sh stat --iterations 12000
 | `query-region-matches-cells` | bulk fill equals per-cell reads across tile boundaries, 0 B warm |
 | `page-sum-matches-scan` | per-page sums equal a naive per-cell rescan across churn worlds |
 | `query-max-matches-full-scan` | `QueryMax` equals a full-field rescan through churn, negative coverage, and saturation |
+| `query-max-region-matches-scan` | region `QueryMax` equals the rect's per-cell rescan; position inside the rect |
 | `gradient-matches-central-differences` | `QueryGradient` equals the ±1-cell `Query` differences on two grids |
 | `changed-tiles-match-drain` | the changed-tile feed equals the window's exact tile footprints |
 | `deferred-window-matches-stepped-processing` | batched mutations are bit-identical to per-mutation `Process`; place+remove windows deposit nothing |

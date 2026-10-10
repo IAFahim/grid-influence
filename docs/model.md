@@ -118,6 +118,13 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   interleave in scan order, so the descent's choice is deterministic but is not guaranteed to be
   the row-major-first maximum; verify with `Query` at the returned cell). An empty layer reports
   0 at (0,0). 0.1 µs for a 1024² layer where one million `Query` scans cost ~5,600 µs;
+  `QueryMax(world, grid, layer, x, y, w, h, out bx, out by)` scopes the same descent to a
+  cell-space rectangle: at every level only children whose tile range overlaps the rect are
+  visited, any node whose cached max is no better than the running best is skipped outright,
+  and only tiles that can still improve get their overlap cells scanned — ~0.5 µs for a
+  128×128 rect on a 1024² layer where the naive rescan reads 16k cells. Missing pages count
+  as 0, the returned position is the first cell in descent order holding the maximum inside
+  the rect, and an empty or out-of-range rect reports 0 at the clipped origin;
   `QueryGradient(world, grid, layer, x, y, out gx, out gy)` maps a world-space point with the
   same truncated `ScaleQ8` product as `QueryAt` and returns the central difference over resolved
   page cells — `Q(cx±1, cy)` and `Q(cx, cy±1)` as two ints; out-of-grid neighbors read 0, so
@@ -198,6 +205,10 @@ world rect at its own cell density; a source deposits into every grid it overlap
   left empty), then a fully covered negative layer, then the same layer pushed to saturation,
   `QueryMax` equals a full `QueryRegion` rescan of the layer, `Query` at the returned cell
   returns the maximum, and repeated calls return the identical value and position.
+- `query-max-region-matches-scan` — through three churn rounds on a 256² field, 40 random
+  rectangles per round plus full-grid, tile-straddling, single-cell, empty, and out-of-range
+  rects: the region `QueryMax` equals the per-cell rescan of the rect, the returned position
+  lies inside the rect, `Query` there returns the maximum, and repeated calls are identical.
 - `gradient-matches-central-differences` — through three churn rounds on a two-grid world
   (native and 2× scales), `QueryGradient` at random points equals the ±1-cell `Query`
   differences on both grids' own cell mappings.
