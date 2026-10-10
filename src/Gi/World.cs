@@ -868,7 +868,8 @@ public static unsafe partial class World
         for (var gi = 0; gi < w->GridCount; gi++)
         {
             var g = w->Grids + gi;
-            for (var l = 0; l < w->LayerCount; l++) total += g->Layers[l].Dirty.Length;
+            for (var l = 0; l < w->LayerCount; l++)
+                if (!IsDerived(w, l)) total += g->Layers[l].Dirty.Length;
         }
 
         var pooled = total >= ResolvePool.Threshold && ResolvePool.TryAcquire();
@@ -894,6 +895,8 @@ public static unsafe partial class World
                     var g = w->Grids + gi;
                     for (var l = 0; l < w->LayerCount; l++)
                     {
+                        if (IsDerived(w, l)) continue;
+
                         var ld = g->Layers + l;
                         var span = ld->Dirty.Span;
                         var pages = &ld->Pages;

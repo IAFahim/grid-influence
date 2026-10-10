@@ -1584,5 +1584,6 @@ internal static partial class Verification
         }
         Console.WriteLine($"query-region 256x256: {best:F1} us ({checksum})");
         SenseTiming(w, l, ids[0]);
+        FeatureTiming();
     }
 }

@@ -36,12 +36,22 @@ internal unsafe struct Placement
     public long SupportV;
     public long Reach;
     public long ReachSquared;
+    public long Inner;
+    public long Outer;
+    public long Inverse;
+    public int Reduce;
     public long Bound;
     public long Curve;
     public long HalfU;
     public long HalfV;
     public int ShiftU;
     public int ShiftV;
+    public long SampleUx;
+    public long SampleUy;
+    public long SampleU0;
+    public long SampleVx;
+    public long SampleVy;
+    public long SampleV0;
     public sbyte* Data;
     public int Width;
     public int Height;
@@ -113,10 +123,30 @@ internal static unsafe partial class TileBake
             p.Reach = p.Kind == StampKind.Disk ? p.ExtentX : Math.Max(p.ExtentX, CellHalf);
             p.ReachSquared = p.Reach * p.Reach;
             p.Bound = p.Kind == StampKind.Disk ? p.Reach + CellHalf / 2 : p.Reach;
+            if (p.Kind == StampKind.Disk)
+            {
+                p.Inner = p.Reach > CellHalf / 2 - 1 ? (p.Reach - (CellHalf / 2 - 1)) * (p.Reach - (CellHalf / 2 - 1)) : 0;
+                p.Outer = p.Bound * p.Bound;
+            }
+            else if (p.Kind == StampKind.Cone)
+            {
+                p.Inverse = ((1L << 48) + p.Reach - 1) / p.Reach;
+            }
+            else
+            {
+                p.Reduce = Math.Max(0, BitLength(p.ReachSquared) - 46);
+                var reduced = p.ReachSquared >> p.Reduce;
+                p.Inverse = ((1L << 62) - 1) / reduced + 1;
+            }
+
             long x0, y0, x1, y1;
             if (p.Arc)
             {
                 SectorBounds(p.CentreX, p.CentreY, p.Bound, angle, v->Arc, out x0, out y0, out x1, out y1);
+                x0 -= CellHalf;
+                y0 -= CellHalf;
+                x1 += CellHalf;
+                y1 += CellHalf;
             }
             else
             {
@@ -126,8 +156,8 @@ internal static unsafe partial class TileBake
                 y1 = p.CentreY + p.Bound;
             }
 
-            Cells(x0 - CellHalf, x1 + CellHalf, size, out p.X0, out p.X1);
-            Cells(y0 - CellHalf, y1 + CellHalf, size, out p.Y0, out p.Y1);
+            Cells(x0, x1, size, out p.X0, out p.X1);
+            Cells(y0, y1, size, out p.Y0, out p.Y1);
             return true;
         }
 
@@ -169,6 +199,12 @@ internal static unsafe partial class TileBake
             p.Pitch = w + 2;
             p.SupportU += 2L * sampling + CellHalf / 2;
             p.SupportV += 2L * sampling + CellHalf / 2;
+            p.SampleUx = FloorDiv((long)p.Cos << 33, sampling);
+            p.SampleUy = FloorDiv((long)p.Sin << 33, sampling);
+            p.SampleU0 = ((long)v->Width << 47) - FloorDiv(1L << 55, sampling);
+            p.SampleVx = FloorDiv(-(long)p.Sin << 33, sampling);
+            p.SampleVy = FloorDiv((long)p.Cos << 33, sampling);
+            p.SampleV0 = ((long)v->Height << 47) - FloorDiv(1L << 55, sampling);
         }
 
         var c = Math.Abs((long)p.Cos);
@@ -301,12 +337,11 @@ internal static unsafe partial class TileBake
     private static int DenseAt(Placement* p, long dx, long dy)
     {
         if (p->Kind >= StampKind.Disk) return RoundAt(p, dx, dy);
+        if (p->Kind != StampKind.ConstantRectangle) return SampleAt(p, dx, dy);
 
         var u = (dx * p->Cos + dy * p->Sin) >> 14;
         var v = (dy * p->Cos - dx * p->Sin) >> 14;
-        if (p->Kind == StampKind.ConstantRectangle)
-            return RoundQ16(p->V->Constant * Overlap(u, p->ExtentX) * Overlap(v, p->ExtentY));
-        return SampleAt(p, u, v);
+        return RoundQ16(p->V->Constant * Overlap(u, p->ExtentX) * Overlap(v, p->ExtentY));
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -316,10 +351,11 @@ internal static unsafe partial class TileBake
         return (int)(Math.Clamp(covered, 0, CellHalf) >> 1);
     }
 
-    private static int SampleAt(Placement* p, long u, long v)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int SampleAt(Placement* p, long dx, long dy)
     {
-        var tx = FloorDiv((u + p->ExtentX - CellHalf / 2) * 32768, p->Sampling) >> p->Level;
-        var ty = FloorDiv((v + p->ExtentY - CellHalf / 2) * 32768, p->Sampling) >> p->Level;
+        var tx = ((dx * p->SampleUx + dy * p->SampleUy + p->SampleU0) >> 32) >> p->Level;
+        var ty = ((dx * p->SampleVx + dy * p->SampleVy + p->SampleV0) >> 32) >> p->Level;
         var ix = tx >> 16;
         var iy = ty >> 16;
         if (ix < -1 || iy < -1 || ix >= p->Width || iy >= p->Height) return 0;
@@ -333,32 +369,40 @@ internal static unsafe partial class TileBake
         return RoundQ16(top * (256 - fy) + bottom * fy);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int RoundAt(Placement* p, long dx, long dy)
     {
-        var distance = dx * dx + dy * dy;
-        long weight;
-        if (p->Kind == StampKind.Disk)
-        {
-            var edge = p->Reach - Root(distance) + CellHalf / 2;
-            if (edge <= 0) return 0;
-            weight = Math.Min(Math.Min(edge, CellHalf), 2 * p->Reach) << 7;
-        }
-        else
-        {
-            if (distance >= p->ReachSquared) return 0;
-            weight = p->Kind == StampKind.Cone
-                ? ((p->Reach - Root(distance)) << 16) / p->Reach
-                : Fraction(p->ReachSquared - distance, p->ReachSquared);
-        }
-
         var cover = 256L;
         if (p->Arc)
         {
             var along = (dx * p->Cos + dy * p->Sin) >> 14;
             var across = Math.Abs((dy * p->Cos - dx * p->Sin) >> 14);
             var outside = (across * p->V->ArcCos - along * p->V->ArcSin) >> 14;
-            cover = Math.Clamp(CellHalf / 2 - outside, 0, CellHalf) >> 1;
-            if (cover == 0) return 0;
+            if (outside >= CellHalf / 2) return 0;
+            cover = Math.Min(CellHalf / 2 - outside, CellHalf) >> 1;
+        }
+
+        var distance = dx * dx + dy * dy;
+        long weight;
+        if (p->Kind == StampKind.Disk)
+        {
+            if (distance >= p->Outer) return 0;
+            if (distance < p->Inner)
+            {
+                weight = Math.Min(CellHalf, 2 * p->Reach) << 7;
+            }
+            else
+            {
+                var edge = p->Reach - Root(distance) + CellHalf / 2;
+                weight = Math.Min(Math.Min(edge, CellHalf), 2 * p->Reach) << 7;
+            }
+        }
+        else
+        {
+            if (distance >= p->ReachSquared) return 0;
+            weight = p->Kind == StampKind.Cone
+                ? ((p->Reach - Root(distance)) * p->Inverse) >> 32
+                : (((p->ReachSquared - distance) >> p->Reduce) * p->Inverse) >> 46;
         }
 
         return RoundQ24(p->V->Constant * weight * cover);
@@ -389,9 +433,6 @@ internal static unsafe partial class TileBake
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int RoundQ24(long value) => (int)((value + (1L << 23) + (value >> 63)) >> 24);
 
-    private static long Fraction(long numerator, long denominator)
-        => denominator < 1L << 47 ? (numerator << 16) / denominator : numerator / (denominator >> 16);
-
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static long FloorDiv(long value, long divisor)
     {
@@ -399,11 +440,11 @@ internal static unsafe partial class TileBake
         return q * divisor > value ? q - 1 : q;
     }
 
-    internal static long Root(long value)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static long Root(long value)
     {
         var root = (long)Math.Sqrt(value);
-        while (root * root > value) root--;
-        while ((root + 1) * (root + 1) <= value) root++;
-        return root;
+        if (root * root > value) return root - 1;
+        return (root + 1) * (root + 1) <= value ? root + 1 : root;
     }
 }

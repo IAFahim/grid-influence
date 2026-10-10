@@ -208,27 +208,57 @@ public static unsafe partial class World
     {
         var tileX = tx << TileBake.TileBits;
         var tileY = ty << TileBake.TileBits;
-        var rowEnd = Math.Min(tileY + TileBake.TileSize - 1, disk.Y1);
-        for (var cy = Math.Max(tileY, disk.Y0); cy <= rowEnd; cy++)
+        var top = Math.Max(tileY, disk.Y0);
+        var bottom = Math.Min(tileY + TileBake.TileSize - 1, disk.Y1);
+        if (bottom < top) return;
+
+        var start = Math.Clamp(disk.Cy, top, bottom);
+        for (var step = 0; start - step >= top || start + step <= bottom; step++)
         {
-            var dy = ((long)cy << 8) + 128 - disk.Py;
-            if (dy * dy > best || !Span(disk, cy, out var lo, out var hi)) continue;
-
-            var end = Math.Min(hi, tileX + TileBake.TileSize);
-            var row = page == null ? null : page + (cy - tileY) * TileBake.TileSize - tileX;
-            for (var cx = Math.Max(lo, tileX); cx < end; cx++)
-            {
-                if (row != null && row[cx] < threshold) continue;
-
-                var dx = ((long)cx << 8) + 128 - disk.Px;
-                var d = dx * dx + dy * dy;
-                if (d > best || (d == best && (cy > by || (cy == by && cx >= bx)))) continue;
-
-                best = d;
-                bx = cx;
-                by = cy;
-            }
+            var above = start - step;
+            var below = start + step;
+            var reachable = false;
+            if (above >= top) reachable |= NearestInRow(disk, page, tileX, tileY, above, threshold, ref best, ref bx, ref by);
+            if (step > 0 && below <= bottom) reachable |= NearestInRow(disk, page, tileX, tileY, below, threshold, ref best, ref bx, ref by);
+            if (!reachable) return;
         }
+    }
+
+    private static bool NearestInRow(in Circle disk, short* page, int tileX, int tileY, int cy, short threshold,
+        ref long best, ref int bx, ref int by)
+    {
+        var dy = ((long)cy << 8) + 128 - disk.Py;
+        var dy2 = dy * dy;
+        if (dy2 > best) return false;
+        if (!Span(disk, cy, out var lo, out var hi)) return true;
+
+        var first = Math.Max(lo, tileX);
+        var end = Math.Min(hi, tileX + TileBake.TileSize);
+        if (end <= first) return true;
+
+        var row = page == null ? null : page + (cy - tileY) * TileBake.TileSize - tileX;
+        var middle = Math.Clamp(disk.Cx, first, end - 1);
+        for (var cx = middle; cx >= first; cx--)
+            if (!NearestCell(disk, row, cx, cy, dy2, threshold, ref best, ref bx, ref by)) break;
+        for (var cx = middle + 1; cx < end; cx++)
+            if (!NearestCell(disk, row, cx, cy, dy2, threshold, ref best, ref bx, ref by)) break;
+        return true;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool NearestCell(in Circle disk, short* row, int cx, int cy, long dy2, short threshold,
+        ref long best, ref int bx, ref int by)
+    {
+        var dx = ((long)cx << 8) + 128 - disk.Px;
+        var d = dx * dx + dy2;
+        if (d > best) return false;
+        if (row != null && row[cx] < threshold) return true;
+        if (d == best && (cy > by || (cy == by && cx >= bx))) return true;
+
+        best = d;
+        bx = cx;
+        by = cy;
+        return true;
     }
 
     #if NET

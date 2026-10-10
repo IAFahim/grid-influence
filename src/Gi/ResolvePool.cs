@@ -123,7 +123,7 @@ internal static unsafe class ResolvePool
             {
                 var ld = g->Layers + l;
                 var count = ld->Dirty.Length;
-                if (count == 0) continue;
+                if (count == 0 || World.IsDerived(w, l)) continue;
 
                 tasks[taskCount] = new ResolveTask { Grid = g, Layer = ld, Base = taskBase, Count = count };
                 taskCount++;

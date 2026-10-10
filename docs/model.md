@@ -59,7 +59,11 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   for cones and domes so narrow kernels interpolate instead of vanishing — all three read
   `value·gain` at a centred cell, the box unit. Distances run in half-Q8 (1/512 cell, so
   `centre = 2·lead + extent` is exact), `r = ⌊√(dx² + dy²)⌋` is an exact integer root, and the
-  weight is a Q16 fraction. An arc below 360° keeps the sector of half-angle `arc/2` around the
+  weight is a Q16 fraction with no per-cell division: a cone weighs `((R − r)·⌈2^48/R⌉) >> 32`,
+  a dome `(((R² − d²) >> q)·⌈2^62/(R² >> q)⌉) >> 46` (`q` keeps the reduced square below 2^46),
+  so a centred cell weighs exactly 1, and a disk takes its root only inside its one-cell edge
+  band (`(R − 255)² ≤ d² < (R + 256)²` in half-Q8 — outside it the weight is exactly full or
+  zero). An arc below 360° keeps the sector of half-angle `arc/2` around the
   source's facing (below), with a one-cell anti-aliased edge: the coverage is
   `clamp(½ − s, 0, 1)` for `s` the signed cell distance to the sector's edge lines. A cell
   deposits `RoundQ24(value · weight_Q16 · coverage_Q8) · gain` into the dense buffer.
@@ -98,8 +102,11 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   rotated bounds: boxes weigh the product of their two one-cell anti-aliased edge coverages
   along the turned axes, tents and bells add `value·gain·C·Wu·Wv` with the same per-axis units
   and normalizer as unturned kernels into the same sum stores, and rasters sample bilinearly at
-  the turned cell centre (sample index clamped to the padded border, mip level chosen as for
-  unturned rasters). Every turned or round weight is a pure function of the cell, the
+  the turned cell centre — its Q16.16 sample coordinates are `(dx·Ux + dy·Uy + U0) >> 32` with
+  `Ux = ⌊cos·2^33/S⌋`, `Uy = ⌊sin·2^33/S⌋`, `U0 = w·2^47 − ⌊2^55/S⌋` (and `−sin`, `cos`, `h` for
+  the other axis), folding the turn and the sampling rate `S` into fixed-point coefficients;
+  sample indices are bounded to the padded border and the mip level is chosen as for unturned
+  rasters. Every turned or round weight is a pure function of the cell, the
   placement, and the stamp, computed in integers, so retraction cancels it exactly.
   Footprints never clamp a stamp to the grid size: an unturned box clips its edges to the grid
   window (one cell of margin) without moving its interior, a stamp wider than its grid covers
@@ -181,7 +188,9 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   to the scalar loop). All-zero results free the tile; pyramids and changed lists update as for
   any layer, so every query works on derived layers. `Place` on a derived layer returns `-1`.
   Recipes belong to the world's layer table and survive `Clear`; pages follow their inputs
-  through `Rewind` and `Clear`.
+  through `Rewind` and `Clear`. A derived layer created while its inputs already hold pages
+  marks every live input tile, so the next `Process` fills it completely; resolve skips derived
+  layers, whose dirty lists only recombination drains.
 - **Time**: `World.Tick(world)` counts the world's `Process` calls (it advances at the start of
   each one and wraps at 2^32; every tick comparison is wrap-safe within 2^31 ticks).
   `World.Fade(world, id, gain, ticks)` ramps a source's gain linearly from its current gain to

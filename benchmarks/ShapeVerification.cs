@@ -45,6 +45,8 @@ internal static partial class Verification
 
     private static long OracleFloorDiv(long a, long b) => (long)Math.Floor((decimal)a / b);
 
+    private static long OracleCeilDiv(long a, long b) => (long)Math.Ceiling((decimal)a / b);
+
     private static int OracleRoundShift(long value, int bits) => (int)((value + (1L << (bits - 1)) + (value >> 63)) >> bits);
 
     private static (long lead, long extent) OracleAxis(float position, float origin, int scaleQ8, int sampling, int length)
@@ -102,8 +104,14 @@ internal static partial class Verification
                 }
                 case KindRaster:
                 {
-                    var tx = OracleFloorDiv((u + extentX - 256) * 32768, sampling);
-                    var ty = OracleFloorDiv((v + extentY - 256) * 32768, sampling);
+                    var ux = OracleFloorDiv(cos << 33, sampling);
+                    var uy = OracleFloorDiv(sin << 33, sampling);
+                    var vx = OracleFloorDiv(-sin << 33, sampling);
+                    var vy = OracleFloorDiv(cos << 33, sampling);
+                    var u0 = ((long)s.Width << 47) - OracleFloorDiv(1L << 55, sampling);
+                    var v0 = ((long)s.Height << 47) - OracleFloorDiv(1L << 55, sampling);
+                    var tx = (dx * ux + dy * uy + u0) >> 32;
+                    var ty = (dx * vx + dy * vy + v0) >> 32;
                     var ix = (int)(tx >> 16);
                     var iy = (int)(ty >> 16);
                     if (ix < -1 || iy < -1 || ix >= s.Width || iy >= s.Height) break;
@@ -140,11 +148,12 @@ internal static partial class Verification
                     else
                     {
                         if (d2 >= reach * reach) break;
-                        if (s.Kind == KindCone) weight = ((reach - OracleRoot(d2)) << 16) / reach;
+                        if (s.Kind == KindCone) weight = ((reach - OracleRoot(d2)) * OracleCeilDiv(1L << 48, reach)) >> 32;
                         else
                         {
                             var r2 = reach * reach;
-                            weight = r2 < 1L << 47 ? ((r2 - d2) << 16) / r2 : (r2 - d2) / (r2 >> 16);
+                            var reduce = Math.Max(0, 64 - System.Numerics.BitOperations.LeadingZeroCount((ulong)r2) - 46);
+                            weight = (((r2 - d2) >> reduce) * OracleCeilDiv(1L << 62, r2 >> reduce)) >> 46;
                         }
                     }
 

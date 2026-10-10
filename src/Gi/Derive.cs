@@ -45,6 +45,13 @@ public static unsafe partial class World
 
         var reads = w->Recipes[a].Reads | w->Recipes[b].Reads;
         var id = AddLayer(world);
+        for (var gi = 0; gi < w->GridCount; gi++)
+        {
+            var g = w->Grids + gi;
+            MarkLive(g, id, g->Layers + a);
+            if (b != a) MarkLive(g, id, g->Layers + b);
+        }
+
         w->Recipes[id] = new LayerRecipe
         {
             Op = op,
@@ -79,7 +86,8 @@ public static unsafe partial class World
                 var g = w->Grids + gi;
                 var la = g->Layers + r->A;
                 var lb = g->Layers + r->B;
-                if (la->Dirty.Length == 0 && lb->Dirty.Length == 0) continue;
+                var own = g->Layers + d;
+                if (la->Dirty.Length == 0 && lb->Dirty.Length == 0 && own->Dirty.Length == 0) continue;
 
                 var ld = EnsureDirty(g, (byte)d);
                 MarkAll(ld, la);
@@ -119,6 +127,18 @@ public static unsafe partial class World
                 }
             }
         }
+    }
+
+    private static void MarkLive(GridCtx* g, byte layer, LayerData* source)
+    {
+        var pages = &source->Pages;
+        if (pages->Count == 0) return;
+
+        var target = EnsureDirty(g, layer);
+        var used = pages->Used;
+        var keys = pages->Keys;
+        for (var i = 0; i < pages->SlotCount; i++)
+            if (used[i] == PageMap.Live) MarkDirty(target, keys[i]);
     }
 
     private static void MarkAll(LayerData* target, LayerData* source)

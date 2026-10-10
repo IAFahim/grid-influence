@@ -301,7 +301,24 @@ internal static partial class Verification
         var rb = Read(w, g, b, 256);
         for (var c = 0; c < sums.Length; c++)
             if (sums[c] != Math.Clamp(ra[c] + rb[c], short.MinValue, short.MaxValue)) return false;
-        return Gi.World.Query(w, g, d, 64, 64) == 250;
+        if (Gi.World.Query(w, g, d, 64, 64) != 250) return false;
+
+        for (var i = 0; i < 40; i++) Gi.World.Place(w, i % 2 == 0 ? a : b, 10f + i * 6.1f, 200f - i * 4.3f, i % 3 == 0 ? tent : box, 2 + i % 7);
+        Gi.World.Process(w);
+        var late = Gi.Layer.Max(w, a, b);
+        var later = Gi.Layer.Sum(w, d, 2, late, -1);
+        Gi.World.Process(w);
+        ra = Read(w, g, a, 256);
+        rb = Read(w, g, b, 256);
+        var max = Read(w, g, late, 256);
+        var mixed = Read(w, g, later, 256);
+        for (var c = 0; c < max.Length; c++)
+        {
+            var sum = Math.Clamp(ra[c] + rb[c], short.MinValue, short.MaxValue);
+            if (max[c] != Math.Max(ra[c], rb[c]) || mixed[c] != Math.Clamp(2 * sum - max[c], short.MinValue, short.MaxValue)) return false;
+        }
+
+        return Gi.World.Query(w, g, late, 0, 0, 256, 256) == max.Sum(v => (long)v);
     }
 
     private static bool WarmDerivedProcessAllocationFree()
