@@ -54,6 +54,27 @@ internal struct DepositOp
     public byte ToLayer;
     public sbyte FromGain;
     public sbyte ToGain;
+    public byte AliveFrom;
+    public byte AliveTo;
+    public byte Fresh;
+}
+
+internal unsafe struct DepositFragment
+{
+    public byte* Block;
+    public int Px;
+    public int Py;
+    public int Fx;
+    public int Fy;
+    public int ExtentX;
+    public int ExtentY;
+    public int X1;
+    public int Y1;
+    public int Gain;
+    public int Tile;
+    public byte Stamp;
+    public byte Grid;
+    public byte Layer;
 }
 
 internal unsafe struct WorldCtx
@@ -64,6 +85,9 @@ internal unsafe struct WorldCtx
     public SourceColumns Sources;
     public NativeBuffer<DepositOp> Ops;
     public NativeBuffer<int> Pending;
+    public NativeBuffer<DepositFragment> Fragments;
+    public NativeBuffer<DepositOp> Journal;
+    public byte Recording;
     public int* Prev;
     public int FreeHead;
 }
@@ -144,8 +168,9 @@ public static unsafe class World
         if (w == null || layer >= w->LayerCount || stamp == 0 || stamp >= StampCatalog.Count) return -1;
 
         var s = &w->Sources;
+        var fresh = w->FreeHead < 0;
         int i;
-        if (w->FreeHead >= 0)
+        if (!fresh)
         {
             i = w->FreeHead;
             w->FreeHead = s->Free.Pointer[i];
@@ -166,7 +191,7 @@ public static unsafe class World
         s->Layer.Pointer[i] = layer;
         s->Gain.Pointer[i] = g;
         s->Alive.Pointer[i] = 1;
-        EnqueuePlace(w, i, x, y, stamp, layer, (sbyte)g);
+        EnqueuePlace(w, i, x, y, stamp, layer, (sbyte)g, fresh);
         return (gen << 24) | i;
     }
 
@@ -178,7 +203,7 @@ public static unsafe class World
         var oldY = s->Y.Pointer[i];
         if (oldX == x && oldY == y) return;
         var gain = (sbyte)s->Gain.Pointer[i];
-        EnqueueMutation(w, s, i, x, y, gain);
+        EnqueueMutation(w, s, i, x, y, gain, true);
         s->X.Pointer[i] = x;
         s->Y.Pointer[i] = y;
     }
@@ -191,7 +216,7 @@ public static unsafe class World
         var current = s->Gain.Pointer[i];
         if (next == current) return;
 
-        EnqueueMutation(w, s, i, s->X.Pointer[i], s->Y.Pointer[i], (sbyte)next);
+        EnqueueMutation(w, s, i, s->X.Pointer[i], s->Y.Pointer[i], (sbyte)next, true);
         s->Gain.Pointer[i] = next;
     }
 
@@ -199,13 +224,14 @@ public static unsafe class World
     {
         if (!TrySource(world, source, out var w, out var s, out var i)) return;
 
-        EnqueueMutation(w, s, i, s->X.Pointer[i], s->Y.Pointer[i], 0);
+        EnqueueMutation(w, s, i, s->X.Pointer[i], s->Y.Pointer[i], 0, false);
         s->Alive.Pointer[i] = 0;
         s->Free.Pointer[i] = w->FreeHead;
         w->FreeHead = i;
     }
 
-    private static void EnqueuePlace(WorldCtx* w, int slot, float x, float y, byte stamp, byte layer, sbyte gain)
+    private static void EnqueuePlace(
+        WorldCtx* w, int slot, float x, float y, byte stamp, byte layer, sbyte gain, bool fresh)
     {
         var pending = w->Pending.Pointer[slot];
         if (pending != 0)
@@ -216,27 +242,32 @@ public static unsafe class World
             op->ToStamp = stamp;
             op->ToLayer = layer;
             op->ToGain = gain;
+            op->AliveTo = 1;
             return;
         }
 
         var n = w->Ops.Length;
         w->Ops.Resize(n + 1);
-        var fresh = w->Ops.Pointer + n;
-        fresh->Slot = slot;
-        fresh->FromGain = 0;
-        fresh->FromX = x;
-        fresh->FromY = y;
-        fresh->FromStamp = stamp;
-        fresh->FromLayer = layer;
-        fresh->ToX = x;
-        fresh->ToY = y;
-        fresh->ToStamp = stamp;
-        fresh->ToLayer = layer;
-        fresh->ToGain = gain;
+        var freshOp = w->Ops.Pointer + n;
+        freshOp->Slot = slot;
+        freshOp->FromGain = 0;
+        freshOp->FromX = x;
+        freshOp->FromY = y;
+        freshOp->FromStamp = stamp;
+        freshOp->FromLayer = layer;
+        freshOp->ToX = x;
+        freshOp->ToY = y;
+        freshOp->ToStamp = stamp;
+        freshOp->ToLayer = layer;
+        freshOp->ToGain = gain;
+        freshOp->AliveFrom = 0;
+        freshOp->AliveTo = 1;
+        freshOp->Fresh = (byte)(fresh ? 1 : 0);
         w->Pending.Pointer[slot] = n + 1;
     }
 
-    private static void EnqueueMutation(WorldCtx* w, SourceColumns* s, int slot, float x, float y, sbyte gain)
+    private static void EnqueueMutation(
+        WorldCtx* w, SourceColumns* s, int slot, float x, float y, sbyte gain, bool alive)
     {
         var pending = w->Pending.Pointer[slot];
         if (pending != 0)
@@ -245,6 +276,7 @@ public static unsafe class World
             op->ToX = x;
             op->ToY = y;
             op->ToGain = gain;
+            op->AliveTo = (byte)(alive ? 1 : 0);
             return;
         }
 
@@ -264,70 +296,56 @@ public static unsafe class World
         op2->ToStamp = stamp;
         op2->ToLayer = layer;
         op2->ToGain = gain;
+        op2->AliveFrom = 1;
+        op2->AliveTo = (byte)(alive ? 1 : 0);
+        op2->Fresh = 0;
         w->Pending.Pointer[slot] = n + 1;
     }
 
-    private static void ApplyDeposits(WorldCtx* w)
+    private static int ApplyDeposits(WorldCtx* w)
     {
         var count = w->Ops.Length;
-        if (count == 0) return;
+        if (count == 0) return 0;
 
         var ops = w->Ops.Pointer;
+        var deferred = count * Math.Max(1, w->GridCount) >= DeferredOps;
+        for (var i = 0; i < count && !deferred; i++)
+        {
+            var probe = ops + i;
+            if (probe->FromGain != 0 && StampCatalog.Get(probe->FromStamp)->Kind != StampKind.ConstantRectangle) deferred = true;
+            else if (probe->ToGain != 0 && StampCatalog.Get(probe->ToStamp)->Kind != StampKind.ConstantRectangle) deferred = true;
+        }
+
+        w->Fragments.Resize(0);
         for (var i = 0; i < count; i++)
         {
             var op = ops + i;
             w->Pending.Pointer[op->Slot] = 0;
-            if (op->FromGain != 0)
-                Deposit(w, op->FromX, op->FromY, op->FromStamp, op->FromLayer, -op->FromGain);
-            if (op->ToGain != 0)
-                Deposit(w, op->ToX, op->ToY, op->ToStamp, op->ToLayer, op->ToGain);
-        }
-
-        w->Ops.Resize(0);
-    }
-
-    public static void Clear(byte world)
-    {
-        var w = GetContext(world);
-        if (w == null) return;
-        var s = &w->Sources;
-        new Span<byte>(s->Alive.Pointer, s->Count).Clear();
-        s->Count = 0;
-        w->FreeHead = -1;
-        w->Ops.Resize(0);
-        new Span<int>(w->Pending.Pointer, w->Pending.Capacity).Clear();
-
-        for (var gi = 0; gi < w->GridCount; gi++)
-        {
-            var g = w->Grids + gi;
-            for (var l = 0; l < w->LayerCount; l++)
+            if (w->Recording != 0)
             {
-                var ld = g->Layers + l;
-                var span = ld->Dirty.Span;
-                foreach (var tile in span) ld->InDirty[tile] = 0;
-                ld->Dirty.Resize(0);
-                ld->Changed.Resize(0);
+                var journalIndex = w->Journal.Length;
+                w->Journal.Resize(journalIndex + 1);
+                w->Journal.Pointer[journalIndex] = *op;
+            }
 
-                var pages = &ld->Pages;
-                var used = pages->Used;
-                var blocks = pages->Blocks;
-                var slots = pages->SlotCount;
-                for (var i = 0; i < slots; i++)
-                    if (used[i] == PageMap.Live) FreeBlock(blocks[i]);
-                pages->Reset();
-                ld->Max.Reset();
+            if (op->FromGain != 0)
+            {
+                if (deferred) BuildDeposits(w, op->FromX, op->FromY, op->FromStamp, op->FromLayer, -op->FromGain);
+                else Deposit(w, op->FromX, op->FromY, op->FromStamp, op->FromLayer, -op->FromGain);
+            }
+
+            if (op->ToGain != 0)
+            {
+                if (deferred) BuildDeposits(w, op->ToX, op->ToY, op->ToStamp, op->ToLayer, op->ToGain);
+                else Deposit(w, op->ToX, op->ToY, op->ToStamp, op->ToLayer, op->ToGain);
             }
         }
+
+        w->Ops.Resize(0);
+        return w->Fragments.Length;
     }
 
-    private static bool TrySource(byte world, int source, out WorldCtx* w, out SourceColumns* s, out int index)
-    {
-        w = GetContext(world);
-        s = w == null ? null : &w->Sources;
-        index = source & SourceIndexMask;
-        return s != null && (uint)index < (uint)s->Count && s->Alive.Pointer[index] != 0 &&
-            (source & ~SourceIndexMask) == (s->Gen.Pointer[index] << 24);
-    }
+    private const int DeferredOps = 512;
 
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
@@ -365,6 +383,7 @@ public static unsafe class World
             {
                 var tile = ty * tps + tx;
                 var block = TileBlock(ld, tile, raster);
+                if (raster) block = EnsureDense(ld, tile, block);
 
                 var tileX0 = tx * TileBake.TileSize;
                 var tileY0 = ty * TileBake.TileSize;
@@ -373,15 +392,153 @@ public static unsafe class World
                 else if (v->Kind == StampKind.Tent)
                     TileBake.EmitTent((int*)block, tileX0, tileY0, px, py, fx, fy, extentX, extentY, v, gain);
                 else
-                {
-                    var dense = *(byte**)(block + DensePtrOffset);
-                    if (dense == null) dense = (byte*)EnsureDense(ld, tile, block);
-                    TileBake.EmitRaster((int*)dense, tileX0, tileY0, px, py, fx, fy, x1, y1, g->ScaleQ8, v, gain);
-                }
+                    TileBake.EmitRaster(DenseOf(block), tileX0, tileY0, px, py, fx, fy, x1, y1, g->ScaleQ8, v, gain);
 
                 MarkDirty(ld, tile);
             }
         }
+    }
+
+    private static void BuildDeposits(WorldCtx* w, float x, float y, byte stampId, byte layer, int gain)
+    {
+        if (gain == 0) return;
+
+        var v = StampCatalog.Get(stampId);
+        for (var gi = 0; gi < w->GridCount; gi++)
+        {
+            var g = w->Grids + gi;
+            if (g->ScaleQ8 == 0) continue;
+
+            TileBake.Footprint(x, y, g->OriginX, g->OriginY, g->ScaleQ8, g->Size << 8, v,
+                out var px, out var py, out var fx, out var fy,
+                out var extentX, out var extentY,
+                out var x0, out var y0, out var x1, out var y1);
+
+            var cx0 = Math.Max(x0, 0);
+            var cy0 = Math.Max(y0, 0);
+            var cx1 = Math.Min(x1, g->Size);
+            var cy1 = Math.Min(y1, g->Size);
+            if (cx1 <= cx0 || cy1 <= cy0) continue;
+
+            var ld = EnsureDirty(g, layer);
+            var raster = v->Kind == StampKind.Raster;
+            var tps = g->TilesPerSide;
+            var tx0 = cx0 >> TileBake.TileBits;
+            var tx1 = (cx1 - 1) >> TileBake.TileBits;
+            var ty0 = cy0 >> TileBake.TileBits;
+            var ty1 = (cy1 - 1) >> TileBake.TileBits;
+            for (var ty = ty0; ty <= ty1; ty++)
+            for (var tx = tx0; tx <= tx1; tx++)
+            {
+                var tile = ty * tps + tx;
+                var block = TileBlock(ld, tile, raster);
+                if (raster)
+                {
+                    var grown = EnsureDense(ld, tile, block);
+                    if (grown != block)
+                    {
+                        var built = w->Fragments.Pointer;
+                        for (var k = 0; k < w->Fragments.Length; k++)
+                            if (built[k].Block == block) built[k].Block = grown;
+                        block = grown;
+                    }
+                }
+
+                MarkDirty(ld, tile);
+                var n = w->Fragments.Length;
+                w->Fragments.Resize(n + 1);
+                w->Fragments.Pointer[n] = new DepositFragment
+                {
+                    Block = block,
+                    Px = px,
+                    Py = py,
+                    Fx = fx,
+                    Fy = fy,
+                    ExtentX = extentX,
+                    ExtentY = extentY,
+                    X1 = x1,
+                    Y1 = y1,
+                    Gain = gain,
+                    Tile = tile,
+                    Stamp = stampId,
+                    Grid = (byte)gi,
+                    Layer = layer,
+                };
+            }
+        }
+    }
+
+    #if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    #endif
+    internal static void ApplyFragment(WorldCtx* w, DepositFragment* f)
+    {
+        var gain = f->Gain;
+        if (gain == 0) return;
+
+        var v = StampCatalog.Get(f->Stamp);
+        var block = f->Block;
+        var tps = w->Grids[f->Grid].TilesPerSide;
+        var tileX0 = (f->Tile % tps) << TileBake.TileBits;
+        var tileY0 = (f->Tile / tps) << TileBake.TileBits;
+        if (v->Kind == StampKind.ConstantRectangle)
+            TileBake.EmitBox((int*)block, tileX0, tileY0, f->Px, f->Py, f->Fx, f->Fy, f->ExtentX, f->ExtentY, v, gain);
+        else if (v->Kind == StampKind.Tent)
+            TileBake.EmitTent((int*)block, tileX0, tileY0, f->Px, f->Py, f->Fx, f->Fy, f->ExtentX, f->ExtentY, v, gain);
+        else
+            TileBake.EmitRaster(DenseOf(block), tileX0, tileY0, f->Px, f->Py, f->Fx, f->Fy,
+                f->X1, f->Y1, w->Grids[f->Grid].ScaleQ8, v, gain);
+    }
+
+    private static void ApplyFragments(WorldCtx* w, int count)
+    {
+        var fragments = w->Fragments.Pointer;
+        for (var i = 0; i < count; i++) ApplyFragment(w, fragments + i);
+    }
+
+    public static void Clear(byte world)
+    {
+        var w = GetContext(world);
+        if (w == null) return;
+        var s = &w->Sources;
+        new Span<byte>(s->Alive.Pointer, s->Count).Clear();
+        s->Count = 0;
+        w->FreeHead = -1;
+        w->Ops.Resize(0);
+        w->Fragments.Resize(0);
+        w->Journal.Resize(0);
+        new Span<int>(w->Pending.Pointer, w->Pending.Capacity).Clear();
+
+        for (var gi = 0; gi < w->GridCount; gi++)
+        {
+            var g = w->Grids + gi;
+            for (var l = 0; l < w->LayerCount; l++)
+            {
+                var ld = g->Layers + l;
+                var span = ld->Dirty.Span;
+                foreach (var tile in span) ld->InDirty[tile] = 0;
+                ld->Dirty.Resize(0);
+                ld->Changed.Resize(0);
+
+                var pages = &ld->Pages;
+                var used = pages->Used;
+                var blocks = pages->Blocks;
+                var slots = pages->SlotCount;
+                for (var i = 0; i < slots; i++)
+                    if (used[i] == PageMap.Live) FreeBlock(blocks[i]);
+                pages->Reset();
+                ld->Max.Reset();
+            }
+        }
+    }
+
+    private static bool TrySource(byte world, int source, out WorldCtx* w, out SourceColumns* s, out int index)
+    {
+        w = GetContext(world);
+        s = w == null ? null : &w->Sources;
+        index = source & SourceIndexMask;
+        return s != null && (uint)index < (uint)s->Count && s->Alive.Pointer[index] != 0 &&
+            (source & ~SourceIndexMask) == (s->Gen.Pointer[index] << 24);
     }
 
     private static LayerData* EnsureDirty(GridCtx* g, byte layer)
@@ -405,10 +562,10 @@ public static unsafe class World
         return block;
     }
 
-    private static int* EnsureDense(LayerData* ld, int tile, byte* block)
+    private static byte* EnsureDense(LayerData* ld, int tile, byte* block)
     {
         var dense = *(byte**)(block + DensePtrOffset);
-        if (dense != null) return (int*)dense;
+        if (dense != null) return block;
 
         var grown = (byte*)NativeHeap.AlignedAlloc((nuint)(BlockBytes + DenseBytes));
         new Span<byte>(block, BlockBytes).CopyTo(new Span<byte>(grown, BlockBytes));
@@ -417,7 +574,7 @@ public static unsafe class World
         new Span<byte>(dense, DenseBytes).Clear();
         *(byte**)(grown + DensePtrOffset) = dense;
         ld->Pages.Put(tile, grown);
-        return (int*)dense;
+        return grown;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -452,7 +609,7 @@ public static unsafe class World
         var w = GetContext(world);
         if (w == null) return;
 
-        ApplyDeposits(w);
+        var fragmentCount = ApplyDeposits(w);
 
         var total = 0;
         for (var gi = 0; gi < w->GridCount; gi++)
@@ -461,37 +618,49 @@ public static unsafe class World
             for (var l = 0; l < w->LayerCount; l++) total += g->Layers[l].Dirty.Length;
         }
 
-        if (total >= ResolvePool.Threshold && ResolvePool.TryAcquire())
+        var pooled = total >= ResolvePool.Threshold && ResolvePool.TryAcquire();
+        if (pooled && fragmentCount >= ResolvePool.ApplyThreshold)
         {
-            ResolvePool.ResolveWorld(w, total);
+            ResolvePool.ApplyAndResolveWorld(w, fragmentCount, total);
             ResolvePool.Release();
         }
         else
         {
-            for (var gi = 0; gi < w->GridCount; gi++)
-            {
-                var g = w->Grids + gi;
-                for (var l = 0; l < w->LayerCount; l++)
-                {
-                    var ld = g->Layers + l;
-                    var span = ld->Dirty.Span;
-                    var pages = &ld->Pages;
-                    foreach (var tile in span)
-                    {
-                        ld->InDirty[tile] = 0;
-                        if (!pages->TryGet(tile, out var block)) continue;
+            ApplyFragments(w, fragmentCount);
+            w->Fragments.Resize(0);
 
-                        new Span<int>(w->Prev, TileBake.TileSize).Clear();
-                        if (!TileBake.Resolve((int*)block, DenseOf(block), w->Prev,
-                            (short*)(block + PageOffset), (long*)(block + SumOffset), (short*)(block + MaxOffset)))
+            if (pooled)
+            {
+                ResolvePool.ResolveWorld(w, total);
+                ResolvePool.Release();
+            }
+            else
+            {
+                for (var gi = 0; gi < w->GridCount; gi++)
+                {
+                    var g = w->Grids + gi;
+                    for (var l = 0; l < w->LayerCount; l++)
+                    {
+                        var ld = g->Layers + l;
+                        var span = ld->Dirty.Span;
+                        var pages = &ld->Pages;
+                        foreach (var tile in span)
                         {
-                            pages->Remove(tile);
-                            FreeBlock(block);
-                            ld->Max.Update(g->TilesPerSide, tile, 0);
-                        }
-                        else
-                        {
-                            ld->Max.Update(g->TilesPerSide, tile, *(short*)(block + MaxOffset));
+                            ld->InDirty[tile] = 0;
+                            if (!pages->TryGet(tile, out var block)) continue;
+
+                            new Span<int>(w->Prev, TileBake.TileSize).Clear();
+                            if (!TileBake.Resolve((int*)block, DenseOf(block), w->Prev,
+                                (short*)(block + PageOffset), (long*)(block + SumOffset), (short*)(block + MaxOffset)))
+                            {
+                                pages->Remove(tile);
+                                FreeBlock(block);
+                                ld->Max.Update(g->TilesPerSide, tile, 0);
+                            }
+                            else
+                            {
+                                ld->Max.Update(g->TilesPerSide, tile, *(short*)(block + MaxOffset));
+                            }
                         }
                     }
                 }

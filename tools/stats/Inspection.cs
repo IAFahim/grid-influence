@@ -66,7 +66,8 @@ internal static unsafe class Inspection
             WorldArenaBytes = World.MaxWorlds * sizeof(WorldCtx),
             StampArenaBytes = StampCatalog.MaxStamps * sizeof(StampVariant),
             Stamps = StampCatalog.Count - 1,
-            DepositQueueBytes = (long)w->Ops.Capacity * sizeof(DepositOp) + (long)w->Pending.Capacity * sizeof(int),
+            DepositQueueBytes = (long)w->Ops.Capacity * sizeof(DepositOp) + (long)w->Pending.Capacity * sizeof(int) +
+                (long)w->Fragments.Capacity * sizeof(DepositFragment) + (long)w->Journal.Capacity * sizeof(DepositOp),
         };
 
         for (var i = 0; i < s->Count; i++)
