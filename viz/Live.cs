@@ -44,12 +44,12 @@ internal static class Live
     private static double _simMs;
     private static long _maxAlloc;
     private static volatile bool _running = true;
-    private static readonly Stopwatch _watch = new();
+    private static readonly Stopwatch Watch = new();
     private static int _recordTicks;
     private static int _snapTicks;
     private static int _snapSlot;
-    private static readonly float[] _sheepSnaps = new float[6 * SheepCount * 2];
-    private static readonly float[] _wolfSnaps = new float[6 * WolfCount * 2];
+    private static readonly float[] SheepSnaps = new float[6 * SheepCount * 2];
+    private static readonly float[] WolfSnaps = new float[6 * WolfCount * 2];
 
     private static readonly ConcurrentQueue<ClientOp> Ops = new();
     private static readonly List<WebSocket> Sockets = [];
@@ -80,7 +80,7 @@ internal static class Live
         var app = builder.Build();
         app.UseWebSockets();
         app.MapGet("/", () => Results.Content(LiveTemplate.Html, "text/html; charset=utf-8"));
-        app.MapGet("/ws", async (HttpContext ctx) =>
+        app.MapGet("/ws", async ctx =>
         {
             if (!ctx.WebSockets.IsWebSocketRequest)
             {
@@ -104,7 +104,10 @@ internal static class Live
                         BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(buffer.AsSpan(5)))));
                 }
             }
-            catch (Exception)
+            catch (WebSocketException)
+            {
+            }
+            catch (OperationCanceledException)
             {
             }
 
@@ -158,7 +161,7 @@ internal static class Live
     private static void Tick()
     {
         var gc0 = GC.GetAllocatedBytesForCurrentThread();
-        _watch.Restart();
+        Watch.Restart();
 
         UpdateWolves();
         DrainOps();
@@ -180,20 +183,20 @@ internal static class Live
             _snapSlot = (_snapSlot + 1) % 6;
             for (var i = 0; i < _sheep.Length; i++)
             {
-                _sheepSnaps[_snapSlot * SheepCount * 2 + i * 2] = _sheep[i].X;
-                _sheepSnaps[_snapSlot * SheepCount * 2 + i * 2 + 1] = _sheep[i].Y;
+                SheepSnaps[_snapSlot * SheepCount * 2 + i * 2] = _sheep[i].X;
+                SheepSnaps[_snapSlot * SheepCount * 2 + i * 2 + 1] = _sheep[i].Y;
             }
 
             for (var i = 0; i < _wolves.Length; i++)
             {
-                _wolfSnaps[_snapSlot * WolfCount * 2 + i * 2] = _wolves[i].X;
-                _wolfSnaps[_snapSlot * WolfCount * 2 + i * 2 + 1] = _wolves[i].Y;
+                WolfSnaps[_snapSlot * WolfCount * 2 + i * 2] = _wolves[i].X;
+                WolfSnaps[_snapSlot * WolfCount * 2 + i * 2 + 1] = _wolves[i].Y;
             }
         }
 
         PackFrame();
         _tick++;
-        _simMs = _simMs * 0.9 + _watch.Elapsed.TotalMilliseconds * 0.1;
+        _simMs = _simMs * 0.9 + Watch.Elapsed.TotalMilliseconds * 0.1;
         var alloc = GC.GetAllocatedBytesForCurrentThread() - gc0;
         if (alloc > _maxAlloc) _maxAlloc = alloc;
 
@@ -251,8 +254,8 @@ internal static class Live
         var slot = (_snapSlot + 1) % 6;
         for (var i = 0; i < _sheep.Length; i++)
         {
-            var sx = _sheepSnaps[slot * SheepCount * 2 + i * 2];
-            var sy = _sheepSnaps[slot * SheepCount * 2 + i * 2 + 1];
+            var sx = SheepSnaps[slot * SheepCount * 2 + i * 2];
+            var sy = SheepSnaps[slot * SheepCount * 2 + i * 2 + 1];
             if (sx < 0.01f && sy < 0.01f) { _sheep[i].Respawn(_rng); continue; }
             _sheep[i].X = sx;
             _sheep[i].Y = sy;
@@ -262,8 +265,8 @@ internal static class Live
 
         for (var i = 0; i < _wolves.Length; i++)
         {
-            var wx = _wolfSnaps[slot * WolfCount * 2 + i * 2];
-            var wy = _wolfSnaps[slot * WolfCount * 2 + i * 2 + 1];
+            var wx = WolfSnaps[slot * WolfCount * 2 + i * 2];
+            var wy = WolfSnaps[slot * WolfCount * 2 + i * 2 + 1];
             if (wx < 0.01f && wy < 0.01f)
             {
                 wx = 24f + (float)_rng.NextDouble() * 208f;
@@ -449,8 +452,8 @@ internal static class Live
         _recordTicks = 0;
         _snapTicks = 0;
         _snapSlot = 0;
-        Array.Clear(_sheepSnaps);
-        Array.Clear(_wolfSnaps);
+        Array.Clear(SheepSnaps);
+        Array.Clear(WolfSnaps);
         _rng = new Random(42);
         SpawnFood();
         SpawnAgents();

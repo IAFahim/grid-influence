@@ -680,7 +680,7 @@ public static unsafe partial class World
         var dense = *(byte**)(block + DensePtrOffset);
         if (dense != null) return block;
 
-        var grown = (byte*)NativeHeap.AlignedAlloc((nuint)(BlockBytes + DenseBytes));
+        var grown = (byte*)NativeHeap.AlignedAlloc(BlockBytes + DenseBytes);
         new Span<byte>(block, BlockBytes).CopyTo(new Span<byte>(grown, BlockBytes));
         NativeHeap.AlignedFree(block);
         dense = grown + BlockBytes;
@@ -695,7 +695,7 @@ public static unsafe partial class World
         var tent = *(byte**)(block + TentPtrOffset);
         if (tent != null) return tent;
 
-        tent = (byte*)NativeHeap.AlignedAlloc((nuint)TentBytes);
+        tent = (byte*)NativeHeap.AlignedAlloc(TentBytes);
         new Span<byte>(tent, TentBytes).Clear();
         *(byte**)(block + TentPtrOffset) = tent;
         return tent;
@@ -706,7 +706,7 @@ public static unsafe partial class World
         var bell = *(byte**)(block + BellPtrOffset);
         if (bell != null) return bell;
 
-        bell = (byte*)NativeHeap.AlignedAlloc((nuint)BellBytes);
+        bell = (byte*)NativeHeap.AlignedAlloc(BellBytes);
         new Span<byte>(bell, BellBytes).Clear();
         *(byte**)(block + BellPtrOffset) = bell;
         return bell;
@@ -1120,8 +1120,8 @@ public static unsafe partial class World
         var g = w->Grids + grid;
         var x0 = Math.Max(x, 0);
         var y0 = Math.Max(y, 0);
-        var x1 = Math.Min((long)x + width, (long)g->Size);
-        var y1 = Math.Min((long)y + height, (long)g->Size);
+        var x1 = Math.Min((long)x + width, g->Size);
+        var y1 = Math.Min((long)y + height, g->Size);
         if (x1 <= x0 || y1 <= y0) return 0;
 
         var ld = g->Layers + layer;

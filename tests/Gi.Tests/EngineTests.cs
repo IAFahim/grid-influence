@@ -64,8 +64,8 @@ public sealed class EngineTests
         private void Position(float wx, float wy, float ox, float oy, float scale)
         {
             _scaleQ8 = (int)(scale * 256f);
-            var leadX = (long)(int)MathF.Floor((wx - ox) * _scaleQ8) + ((long)-(_w * 128) * _scaleQ8 >> 8);
-            var leadY = (long)(int)MathF.Floor((wy - oy) * _scaleQ8) + ((long)-(_h * 128) * _scaleQ8 >> 8);
+            var leadX = (int)MathF.Floor((wx - ox) * _scaleQ8) + ((long)-(_w * 128) * _scaleQ8 >> 8);
+            var leadY = (int)MathF.Floor((wy - oy) * _scaleQ8) + ((long)-(_h * 128) * _scaleQ8 >> 8);
             _px = (int)(leadX >> 8);
             _py = (int)(leadY >> 8);
             _fx = (int)(leadX & 255);
@@ -161,8 +161,8 @@ public sealed class EngineTests
             int Tap(int ix, int iy)
                 => (uint)ix < (uint)w && (uint)iy < (uint)h ? data[iy * w + ix] : 0;
 
-            var uq = (-(long)_fx * 65536 / _scaleQ8 + (long)sx * step) >> level;
-            var vq = (-(long)_fy * 65536 / _scaleQ8 + (long)sy * step) >> level;
+            var uq = (-(long)_fx * 65536 / _scaleQ8 + sx * step) >> level;
+            var vq = (-(long)_fy * 65536 / _scaleQ8 + sy * step) >> level;
             var ix = (int)(uq >> 16);
             var iy = (int)(vq >> 16);
             var fx2 = (int)((uq >> 8) & 255);
@@ -375,7 +375,7 @@ public sealed class EngineTests
     [Fact]
     public unsafe void StampMips_BuildBoxAverages()
     {
-        var samples = new sbyte[4 * 4]
+        var samples = new sbyte[]
         {
             100, 60, 20, -20,
             60, 20, -20, -60,
@@ -759,7 +759,7 @@ public sealed class EngineTests
         var processed = Stats.Inspection.Read(w);
         Assert.Equal(2, processed.LiveTiles);
         Assert.Equal(1, processed.RasterTiles);
-        Assert.Equal((long)World.DenseBytes, processed.DenseBytes);
+        Assert.Equal(World.DenseBytes, processed.DenseBytes);
         Assert.Equal(2 * (World.SumOffset - World.DensePtrOffset), processed.DensePointerBytes);
         var expected = 0;
         for (var y = 0; y < 6; y++)
@@ -1248,8 +1248,8 @@ public sealed class EngineTests
 
     private static (int px, int py, int fx, int fy) TentLead(float wx, float wy, int width, int height)
     {
-        var leadX = (long)(int)MathF.Floor(wx * 256f) + ((long)-(width * 128) * 256 >> 8);
-        var leadY = (long)(int)MathF.Floor(wy * 256f) + ((long)-(height * 128) * 256 >> 8);
+        var leadX = (int)MathF.Floor(wx * 256f) + ((long)-(width * 128) * 256 >> 8);
+        var leadY = (int)MathF.Floor(wy * 256f) + ((long)-(height * 128) * 256 >> 8);
         return ((int)(leadX >> 8), (int)(leadY >> 8), (int)(leadX & 255), (int)(leadY & 255));
     }
 
@@ -1704,7 +1704,7 @@ public sealed class EngineTests
     }
 
     [Fact]
-    public unsafe void Rewind_RestoresFieldAndSources()
+    public void Rewind_RestoresFieldAndSources()
     {
         var w = World.New();
         var g = Grid.New(w, 8, 0f, 0f, 256f);
@@ -1739,7 +1739,7 @@ public sealed class EngineTests
     }
 
     [Fact]
-    public unsafe void Rewind_MultiWindow()
+    public void Rewind_MultiWindow()
     {
         var w = World.New();
         var g = Grid.New(w, 8, 0f, 0f, 256f);
@@ -1770,7 +1770,7 @@ public sealed class EngineTests
     }
 
     [Fact]
-    public unsafe void Rewind_DropsPendingMutations()
+    public void Rewind_DropsPendingMutations()
     {
         var w = World.New();
         var g = Grid.New(w, 8, 0f, 0f, 256f);
@@ -1791,7 +1791,7 @@ public sealed class EngineTests
     }
 
     [Fact]
-    public unsafe void Rewind_ReplacesOccupiedSlot()
+    public void Rewind_ReplacesOccupiedSlot()
     {
         var w = World.New();
         var g = Grid.New(w, 8, 0f, 0f, 256f);

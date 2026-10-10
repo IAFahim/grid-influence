@@ -597,8 +597,9 @@ internal static partial class Verification
             if (!RegionOk(30, 30, 5, 5)) return false;
         }
 
-        return Gi.World.QueryMax(w, g, busy, 64, 64, 64, 64, out _, out _) ==
-            Gi.World.QueryMax(w, g, busy, 64, 64, 64, 64, out _, out _);
+        var first = Gi.World.QueryMax(w, g, busy, 64, 64, 64, 64, out var fx, out var fy);
+        var again = Gi.World.QueryMax(w, g, busy, 64, 64, 64, 64, out var ax, out var ay);
+        return first == again && fx == ax && fy == ay;
     }
 
     private static bool GradientMatchesCentralDifferences()
@@ -668,10 +669,11 @@ internal static partial class Verification
 
         void Touch(float x, float y, int width)
         {
-            var cell = (int)x;
+            var cellX = (int)x;
+            var cellY = (int)y;
             var half = width >> 1;
-            for (var ty = (cell - half) >> 5; ty <= (cell + half - 1) >> 5; ty++)
-            for (var tx = (cell - half) >> 5; tx <= (cell + half - 1) >> 5; tx++)
+            for (var ty = (cellY - half) >> 5; ty <= (cellY + half - 1) >> 5; ty++)
+            for (var tx = (cellX - half) >> 5; tx <= (cellX + half - 1) >> 5; tx++)
                 expected.Add(ty * 2 + tx);
         }
 
@@ -864,8 +866,8 @@ internal static partial class Verification
                 if (!slive[i]) continue;
                 var width = ssize[i];
                 var extent = width * scaleQ8;
-                var leadX = (long)(int)MathF.Floor(sx[i] * scaleQ8) + ((long)-(width * 128) * scaleQ8 >> 8);
-                var leadY = (long)(int)MathF.Floor(sy[i] * scaleQ8) + ((long)-(width * 128) * scaleQ8 >> 8);
+                var leadX = (int)MathF.Floor(sx[i] * scaleQ8) + ((long)-(width * 128) * scaleQ8 >> 8);
+                var leadY = (int)MathF.Floor(sy[i] * scaleQ8) + ((long)-(width * 128) * scaleQ8 >> 8);
                 var gx = Axis((int)(leadX >> 8), (int)(leadX & 255), extent);
                 var gy = Axis((int)(leadY >> 8), (int)(leadY & 255), extent);
                 var tx = cx & ~31;
@@ -920,7 +922,7 @@ internal static partial class Verification
                 target[cy * size + cx] += CellValue(cx, cy, scaleQ8, xs, ys);
         }
 
-        bool Compare(byte grid, int size, int scaleQ8, int[] oracle)
+        bool Matches(byte grid, int size, int[] oracle)
         {
             var scan = new short[size * size];
             fixed (short* p = scan)
@@ -968,7 +970,7 @@ internal static partial class Verification
             Gi.World.Process(w);
             Rebuild(fineField, 256, 256);
             Rebuild(coarseField, 128, 128);
-            if (!Compare(fine, 256, 256, fineField) || !Compare(coarse, 128, 128, coarseField)) return false;
+            if (!Matches(fine, 256, fineField) || !Matches(coarse, 128, coarseField)) return false;
         }
 
         return true;
@@ -1022,8 +1024,8 @@ internal static partial class Verification
                 if (!slive[i]) continue;
                 var width = ssize[i];
                 var extent = width * scaleQ8;
-                var leadX = (long)(int)MathF.Floor(sx[i] * scaleQ8) + ((long)-(width * 128) * scaleQ8 >> 8);
-                var leadY = (long)(int)MathF.Floor(sy[i] * scaleQ8) + ((long)-(width * 128) * scaleQ8 >> 8);
+                var leadX = (int)MathF.Floor(sx[i] * scaleQ8) + ((long)-(width * 128) * scaleQ8 >> 8);
+                var leadY = (int)MathF.Floor(sy[i] * scaleQ8) + ((long)-(width * 128) * scaleQ8 >> 8);
                 var gx = Axis((int)(leadX >> 8), (int)(leadX & 255), extent);
                 var gy = Axis((int)(leadY >> 8), (int)(leadY & 255), extent);
                 var hx = (long)(gx.Last - gx.First + 1);
@@ -1043,7 +1045,7 @@ internal static partial class Verification
                 target[cy * size + cx] = CellValue(cx, cy, scaleQ8);
         }
 
-        bool Compare(byte grid, int size, int scaleQ8, int[] oracle)
+        bool Matches(byte grid, int size, int[] oracle)
         {
             var scan = new short[size * size];
             fixed (short* p = scan)
@@ -1091,7 +1093,7 @@ internal static partial class Verification
             Gi.World.Process(w);
             Rebuild(fineField, 256, 256);
             Rebuild(coarseField, 128, 128);
-            if (!Compare(fine, 256, 256, fineField) || !Compare(coarse, 128, 128, coarseField)) return false;
+            if (!Matches(fine, 256, fineField) || !Matches(coarse, 128, coarseField)) return false;
         }
 
         return true;
@@ -1639,7 +1641,7 @@ internal static partial class Verification
         Console.WriteLine($"naive best-cell (1M Query calls): {best:F0} us ({naiveCell})");
 
         var mw = Gi.World.New();
-        var mg = Gi.Grid.New(mw, 8, 0f, 0f, 256f);
+        Gi.Grid.New(mw, 8, 0f, 0f, 256f);
         var mStamp = Gi.Stamp.Box(10, 10, 70);
         var mLayers = new byte[16];
         var mIds = new int[16][];

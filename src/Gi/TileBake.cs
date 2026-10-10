@@ -38,8 +38,8 @@ internal static unsafe partial class TileBake
         out int extentX, out int extentY,
         out int x0, out int y0, out int x1, out int y1)
     {
-        var leadX = (long)(int)MathF.Floor((wx - originX) * scaleQ8) + ((long)v->OriginQ8X * scaleQ8 >> 8);
-        var leadY = (long)(int)MathF.Floor((wy - originY) * scaleQ8) + ((long)v->OriginQ8Y * scaleQ8 >> 8);
+        var leadX = (int)MathF.Floor((wx - originX) * scaleQ8) + ((long)v->OriginQ8X * scaleQ8 >> 8);
+        var leadY = (int)MathF.Floor((wy - originY) * scaleQ8) + ((long)v->OriginQ8Y * scaleQ8 >> 8);
         px = (int)(leadX >> 8);
         py = (int)(leadY >> 8);
         fx = (int)(leadX & 255);
@@ -48,8 +48,8 @@ internal static unsafe partial class TileBake
         extentY = (int)Math.Min((long)v->Height * scaleQ8, sizeQ8);
         x0 = px;
         y0 = py;
-        x1 = px + (int)((fx + extentX + 255) >> 8);
-        y1 = py + (int)((fy + extentY + 255) >> 8);
+        x1 = px + ((fx + extentX + 255) >> 8);
+        y1 = py + ((fy + extentY + 255) >> 8);
     }
 
     #if NET

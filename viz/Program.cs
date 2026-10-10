@@ -373,59 +373,59 @@ int CountNonZero(byte w, byte g, byte layer)
 
 string Serialize(List<Scene> list)
 {
-    var json = new StringBuilder();
-    json.Append("{\"scenes\":[");
+    var builder = new StringBuilder();
+    builder.Append("{\"scenes\":[");
     for (var si = 0; si < list.Count; si++)
     {
         var s = list[si];
-        if (si > 0) json.Append(',');
-        json.Append("{\"name\":\"").Append(s.Name).Append("\",\"caption\":\"").Append(s.Caption)
+        if (si > 0) builder.Append(',');
+        builder.Append("{\"name\":\"").Append(s.Name).Append("\",\"caption\":\"").Append(s.Caption)
             .Append("\",\"layers\":[");
         for (var li = 0; li < s.Layers.Count; li++)
         {
-            if (li > 0) json.Append(',');
-            json.Append("{\"name\":\"").Append(s.Layers[li].name).Append("\",\"color\":\"")
+            if (li > 0) builder.Append(',');
+            builder.Append("{\"name\":\"").Append(s.Layers[li].name).Append("\",\"color\":\"")
                 .Append(s.Layers[li].color).Append("\"}");
         }
-        json.Append("],\"panels\":[");
+        builder.Append("],\"panels\":[");
         for (var pi = 0; pi < s.Panels.Count; pi++)
         {
             var p = s.Panels[pi];
-            if (pi > 0) json.Append(',');
-            json.Append("{\"label\":\"").Append(p.Label).Append("\",\"cells\":").Append(p.Cells)
+            if (pi > 0) builder.Append(',');
+            builder.Append("{\"label\":\"").Append(p.Label).Append("\",\"cells\":").Append(p.Cells)
                 .Append(",\"size\":").Append((int)p.Size).Append(",\"down\":").Append(p.Down)
                 .Append(",\"values\":[");
             for (var li = 0; li < p.Layers.Count; li++)
             {
-                if (li > 0) json.Append(',');
-                json.Append('[');
+                if (li > 0) builder.Append(',');
+                builder.Append('[');
                 var vals = p.Layers[li];
                 for (var i = 0; i < vals.Length; i++)
-                    json.Append(vals[i].ToString(CultureInfo.InvariantCulture)).Append(i == vals.Length - 1 ? "" : ",");
-                json.Append(']');
+                    builder.Append(vals[i].ToString(CultureInfo.InvariantCulture)).Append(i == vals.Length - 1 ? "" : ",");
+                builder.Append(']');
             }
-            json.Append("]}");
+            builder.Append("]}");
         }
-        json.Append("],\"sources\":[");
+        builder.Append("],\"sources\":[");
         for (var i = 0; i < s.Sources.Count; i++)
         {
             var m = s.Sources[i];
-            if (i > 0) json.Append(',');
-            json.Append("{\"x\":").Append(m.x.ToString("F2", CultureInfo.InvariantCulture))
+            if (i > 0) builder.Append(',');
+            builder.Append("{\"x\":").Append(m.x.ToString("F2", CultureInfo.InvariantCulture))
                 .Append(",\"y\":").Append(m.y.ToString("F2", CultureInfo.InvariantCulture))
                 .Append(",\"layer\":").Append(m.layer)
                 .Append(",\"label\":\"").Append(m.label).Append("\"}");
         }
-        json.Append("],\"receipts\":[");
+        builder.Append("],\"receipts\":[");
         for (var i = 0; i < s.Receipts.Count; i++)
         {
-            if (i > 0) json.Append(',');
-            json.Append('"').Append(s.Receipts[i]).Append('"');
+            if (i > 0) builder.Append(',');
+            builder.Append('"').Append(s.Receipts[i]).Append('"');
         }
-        json.Append("]}");
+        builder.Append("]}");
     }
-    json.Append("]}");
-    return json.ToString();
+    builder.Append("]}");
+    return builder.ToString();
 }
 
 internal sealed class Scene

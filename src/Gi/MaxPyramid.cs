@@ -356,6 +356,7 @@ internal unsafe struct MaxPyramid
         return count;
     }
 
+#if NET
     private static int TrailingZeros(int value)
     {
         var isolate = value & -value;
@@ -363,4 +364,5 @@ internal unsafe struct MaxPyramid
         while ((isolate >>= 1) != 0) count++;
         return count;
     }
+#endif
 }
