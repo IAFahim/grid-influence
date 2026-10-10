@@ -97,6 +97,7 @@ internal static class Report
             writer.WriteNumber("dense_buffers_bytes"u8, snapshot.DenseBytes);
             writer.WriteNumber("dense_pointer_bytes"u8, snapshot.DensePointerBytes);
             writer.WriteNumber("raster_tiles"u8, snapshot.RasterTiles);
+            writer.WriteNumber("derived_tiles"u8, snapshot.DerivedTiles);
             writer.WriteNumber("query_pages_bytes"u8, snapshot.PageBytes);
             writer.WriteNumber("page_sums_bytes"u8, snapshot.PageSumBytes);
             writer.WriteNumber("max_pyramids_bytes"u8, snapshot.PyramidBytes);

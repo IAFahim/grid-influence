@@ -4,10 +4,12 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
 
 ## Model
 
-- A **world** (`World.New`, up to 64) owns **grids** and **layers**. A grid
+- A **world** (`World.New`, up to 255) owns **grids** and **layers**. A grid
   (`Grid.New(world, power, x, y, size)`, up to 32 per world) is a power-of-two cell grid,
   `2^power` cells per side (power 5–14), laid over a world-space rect `x,y,size`. A layer
   (`Layer.New(world)`, up to 32 per world) is an independent field channel present on every grid.
+  A layer either receives deposits (`Layer.New`) or is **derived** (`Layer.Sum`/`Min`/`Max`/
+  `Mask`): its cells are a pure function of other layers' cells, maintained by `Process` (below).
 - **Stamps** (`Stamp.New(sbyte* data, w, h)` / `Stamp.Box(w, h, value)` / `Stamp.Tent(w, h, value)` /
   `Stamp.Bell(w, h, value)`, up to 255) are baked
   cell-space content: `w×h` `sbyte` samples, centered on the placement position (origin offset
@@ -67,9 +69,11 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   finer grids upsample bilinearly at mip level 0, coarser grids select
   `floor(log2(1/scale))` mip levels and step sample coordinates in Q16.16, so minified deposits
   are box-filtered rather than aliased.
-- **Deposits are incremental and deferred**: each live tile owns a 6,528 B block — a 33×33
-  `int32` difference array padded to 4,384 B, a 32×32 `int16` page, an `int64` page sum, and an
-  `int16` page max in the padded 64 B sum slot. Raster stamps also need the tile's 32×32
+- **Deposits are incremental and deferred**: each live tile owns a 6,528 B block — a 32×32
+  `int16` page at offset 0, a 64 B slot holding the `int64` page sum, the `int16` page max, and
+  the dense/tent/bell pointers, then the 33×33 `int32` difference array (4,356 B, padded to the
+  block's 64 B multiple). Derived-layer tiles allocate only the 2,112 B page-and-slot header.
+  Raster stamps also need the tile's 32×32
   `int32` dense buffer: blocks touched by a raster deposit allocate it once (block grows to
   10,624 B, dense pinned at the block tail) and box-only tiles never carry it — resolve reads a
   shared zero page instead. Tent stamps need a second lazily attached buffer: the 32×32
@@ -120,6 +124,25 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   (vectorized for full nodes) before continuing upward. Each `Process` then rotates every
   (grid, layer) dirty list into its **changed list** — a zero-copy buffer swap, so the tiles the
   call resolved stay readable until the next `Process` overwrites them.
+- **Derived layers**: `Layer.Sum(world, a, weightA, b, weightB, shift)` reads
+  `clamp(round(weightA·A + weightB·B) / 2^shift)` — rounding half away from zero, weights within
+  ±32,767 and `shift` 0–15, so the `int32` total `|weightA·A + weightB·B| < 2^31` is exact —
+  and `Layer.Sum(world, a, weight, shift)` is its one-input form; `Layer.Min`/`Layer.Max(world,
+  a, b)` read the cellwise minimum/maximum; `Layer.Mask(world, a, b, min, max)` reads `A` where
+  `min ≤ B ≤ max` and 0 elsewhere. `A` and `B` are the inputs' resolved, saturated cells, so a
+  derived cell is exactly what a caller computes from `Query` on its inputs. Every operator maps
+  two zero inputs to zero, so a tile where no input holds a page holds no derived page either:
+  derived layers are as sparse as their inputs. Inputs must already exist (lower ids), so
+  creation order is a topological order and chains nest to the 32-layer limit; each layer
+  records the bitmask of source layers it reads. `Process`, after the drain (and the pool's
+  join), visits derived layers in id order: each marks the union of its inputs' dirty lists —
+  this window's resolved tiles, derived inputs included — and recombines exactly those tiles in
+  one pass over the 1,024 cells of each input page (an absent page reads the shared zero page),
+  writing the derived page, its sum, and its max (16 or 8 cells per vector step, bit-identical
+  to the scalar loop). All-zero results free the tile; pyramids and changed lists update as for
+  any layer, so every query works on derived layers. `Place` on a derived layer returns `-1`.
+  Recipes belong to the world's layer table and survive `Clear`; pages follow their inputs
+  through `Rewind` and `Clear`.
 - **Rewind**: `Record` drops any prior journal and starts appending a copy of every op the
   world's `Process` calls apply — the op already stores the applied-from and applied-to states
   plus the slot's generation, so the journal is an undo log costing one 32 B unmanaged append
@@ -210,7 +233,10 @@ add one `int64` page sum per live page, so large sparse grids do not visit every
   **Self-exclusion**: `TrySense(..., exclude, out v)`, `TrySenseArea(..., exclude, out t)`, and
   `TrySenseGradient(..., exclude, out gx, out gy)` (four excluded neighbour reads)
   answer exactly what the same query would return after `Remove(exclude); Process()` — bit for
-  bit, including saturation and the tent/bell once-per-cell rounding. The excluded source's
+  bit, including saturation and the tent/bell once-per-cell rounding — on derived layers too,
+  where the excluded source's own layer takes its excluded value (the rule below) and every
+  derived layer on the path to the queried one recombines it per cell; an area sums that delta
+  over the source's footprint inside the disk. The excluded source's
   *applied* state is used: a pending move, gain change, or removal is ignored until `Process`
   applies it; a source placed this frame excludes nothing; stale, foreign-layer, and invalid ids
   exclude nothing. Method: a page cell strictly inside `(−32768, 32767)` is the exact
@@ -392,7 +418,7 @@ pass behind them was `perf`-profile guided, receipts first.
 
 ## Unsafe proof
 
-- **Lifetime**: the world arena (32 `WorldCtx`) and stamp catalog (256 `StampVariant`) are
+- **Lifetime**: the world arena (255 `WorldCtx`) and stamp catalog (256 `StampVariant`) are
   process-lifetime pools allocated by the first creation call (`World.New`, `Stamp.New`,
   `Stamp.Box`) — never by static construction, so no static constructor on the assembly performs
   calls and Burst can compile `Query`/`QueryRegion` call graphs; world contents are
@@ -407,7 +433,7 @@ pass behind them was `perf`-profile guided, receipts first.
   the max pyramid: a flat `int16` slot array plus per-level offset and side tables, allocated
   zeroed by the layer's first resolved tile and freed only by `World.Clear`) or by a `PageMap`
   (each tile block — 6,528 B, or 10,624 B once a raster deposit attached the dense buffer at its
-  tail — is owned by its slot and
+  tail, or a 2,112 B header for a derived-layer tile — is owned by its slot and
   freed exactly when the tile resolves to zero, the world is cleared, or the map is disposed;
   attaching or growing dense happens only on the serial deposit thread, which republishes the
   block pointer through the map — and patches the block pointer captured by any earlier
@@ -416,7 +442,8 @@ pass behind them was `perf`-profile guided, receipts first.
   slots: each is created on the tile's first deposit of its kind by the same serial build
   thread, owned by the block, and freed with it). The shared zero dense
   page is allocated once with the arenas and never written afterwards.
-  `Stamp` variants — base samples, mip chain, and box constants — are catalog-owned for process
+  The layer recipe table (32 entries per world) is allocated by `World.New` and lives for the
+  process. `Stamp` variants — base samples, mip chain, and box constants — are catalog-owned for process
   lifetime. The resolve pool (background worker
   threads, one `Prev`-width scratch slice per worker, the shared dead-index buffer, and the
   1024-entry task buffer sized to 32 grids × 32 layers) is created
@@ -435,7 +462,10 @@ pass behind them was `perf`-profile guided, receipts first.
   `tentOut`/`bellOut` rows stack-allocated per call; sources
   are read-only during
   deposits of other sources. `PageMap` mutation happens only through its owning `LayerData`
-  pointer on the thread that called `Process`. The partial-region sum reads page rows only
+  pointer on the thread that called `Process`. A derived recombination reads input pages (and
+  the never-written shared zero page) and writes only its own layer's blocks, pyramid, and
+  dirty list; its inputs have lower ids and are complete before it runs, and it never runs
+  concurrently with a resolve. The partial-region sum reads page rows only
   inside `[0,32)×[0,32)` of a live block and writes nothing. Pyramid updates alias nothing
   outside their owning `LayerData`: each dirty tile touches exactly its own level-0 slot, and
   the propagation walk reads one 64-slot node plus one parent slot per level; `QueryMax` reads
@@ -452,8 +482,8 @@ pass behind them was `perf`-profile guided, receipts first.
   eight `int16` values; the same permuted cells widen into the page-sum accumulators, one
   horizontal add per tile. Groups cover exactly cells 0–31 and never read padded columns or
   beyond the 32-cell scratch/page rows. Raster taps widen unaligned 4-byte sample reads within
-  the padded allocation. Page rows (`PageOffset` is a multiple of 32) are
-  32 B aligned, and `QueryRegion`'s vectorized copy/zero fills use unaligned-safe 256-bit (or
+  the padded allocation. Pages sit at offset 0 of their 64 B aligned block, so page rows are
+  64 B aligned, and `QueryRegion`'s vectorized copy/zero fills use unaligned-safe 256-bit (or
   128-bit) stores with scalar tails, so any caller destination alignment is correct. Partial
   region sums widen page rows to `int32` vectors with the same unaligned-safe loads and scalar
   tails; a strip is at most 32 shorts per row, so the `int32` row accumulators and per-tile
@@ -462,13 +492,16 @@ pass behind them was `perf`-profile guided, receipts first.
   slot sits at a 64 B block offset and is written as one naturally aligned `int64`; the page max
   sits at `SumOffset + 8` as one naturally aligned `int16` inside the same padded slot. The
   dense, tent, and bell pointer slots sit side by side at `DensePtrOffset`/`TentPtrOffset`/
-  `BellPtrOffset` — 8 B each, naturally aligned — inside the pad before `SumOffset`. Max
+  `BellPtrOffset` — 8 B each, naturally aligned — in the same slot after the max, and the
+  difference array starts at `DiffOffset`, the 64 B multiple after the slot. Derived combines
+  load and store 16 or 8 cells per step at cell offsets that are multiples of the vector width
+  from a 64 B aligned page, through unaligned-safe loads and stores. Max
   pyramid nodes are 64 `int16` values at 128 B offsets inside a 64 B aligned buffer, so the
   full-node AVX2 max loads stay inside the allocation; partial nodes scan scalar. The
   dense
   tail of a raster block starts at `BlockBytes` — a multiple of 64 — so its rows are 64 B
   aligned; tiles without dense read the shared zero page, itself a 64 B aligned allocation.
-  The tent buffer is its own 64 B aligned allocation of `int64` cells at a 33-cell pitch, so
+  The tent buffer is its own 64 B aligned allocation of `int64` cells at a 32-cell pitch, so
   every element is naturally aligned; it is only ever read and written by scalar 8-byte
   accesses. The bell buffer is identical in size, pitch, alignment, and access pattern. On
   netstandard2.1 (Unity) `NativeHeap` backs onto `Marshal.AllocHGlobal`
@@ -530,7 +563,10 @@ pass behind them was `perf`-profile guided, receipts first.
   written before it is read — band and span arrays are filled up to the count their readers
   use, cell scratch is cleared or fully emitted first, and the resolve rows are cleared when
   their store is absent.
-- **Bounds**: stamps clip to grid rects before marking (extents clamp to the grid size in Q8;
+- **Bounds**: derived recombination reads exactly the 1,024 cells of each input page — the
+  shared zero page holds 4,096 B, so an absent input reads zeros in bounds — and writes the
+  1,024 cells of its own page; `int32` totals stay inside `±2^31` by the weight bound above.
+  Stamps clip to grid rects before marking (extents clamp to the grid size in Q8;
   grids whose `ScaleQ8` truncates to 0 are skipped); tile-local box corners land in
   `[0,32]×[0,32]` of the difference array (rows 0–32 exist for the exclusive far edge; column 32
   is written but never read, by design of the half-open prefix form). Tent and bell deposits

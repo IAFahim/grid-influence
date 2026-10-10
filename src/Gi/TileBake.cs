@@ -23,10 +23,6 @@ internal static unsafe partial class TileBake
         => (value + 32768 + (value >> 31)) >> 16;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static int RoundQ32(long value)
-        => (int)((value + 2147483648L + (value >> 63)) >> 32);
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static int RoundQ40(long value)
         => (int)((value + 549755813888L + (value >> 63)) >> 40);
 

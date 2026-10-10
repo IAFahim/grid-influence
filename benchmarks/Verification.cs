@@ -44,6 +44,10 @@ internal static partial class Verification
         Check("sense-exclude-matches-removal", SenseExcludeMatchesRemoval());
         Check("sense-exclude-reads-applied-state", SenseExcludeReadsAppliedState());
         Check("warm-sense-allocates-0-bytes", WarmSenseAllocationFree());
+        Check("derived-layers-match-cell-formulas", DerivedLayersMatchCellFormulas());
+        Check("derived-exclude-matches-removal", DerivedExcludeMatchesRemoval());
+        Check("derived-layers-follow-sources-rewind-and-clear", DerivedLayersFollowSourcesRewindAndClear());
+        Check("warm-derived-process-allocates-0-bytes", WarmDerivedProcessAllocationFree());
 
         Console.WriteLine(failures == 0 ? "verification: all receipts green" : $"verification: {failures} failures");
         return failures == 0 ? 0 : 1;

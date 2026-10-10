@@ -83,6 +83,8 @@ internal unsafe struct WorldCtx
     public GridCtx* Grids;
     public int GridCount;
     public int LayerCount;
+    public LayerRecipe* Recipes;
+    public int DerivedCount;
     public SourceColumns Sources;
     public NativeBuffer<DepositOp> Ops;
     public NativeBuffer<int> Pending;
@@ -95,7 +97,7 @@ internal unsafe struct WorldCtx
 
 public static unsafe partial class World
 {
-    internal const int MaxWorlds = 64;
+    internal const int MaxWorlds = 255;
     internal const int MaxGrids = 32;
     internal const int MaxLayers = 32;
     private const int MinPower = 5;
@@ -107,17 +109,18 @@ public static unsafe partial class World
     internal const int DenseBytes = Cells * sizeof(int);
     internal const int DiffBytes = TileBake.DiffRows * TileBake.DiffPitch * sizeof(int);
     internal const int PageBytes = Cells * sizeof(short);
-    internal const int PageOffset = (DiffBytes + 31) & ~31;
-    internal const int DensePtrOffset = PageOffset + PageBytes;
-    internal const int DensePtrSlot = 8;
-    internal const int TentPtrOffset = DensePtrOffset + DensePtrSlot;
+    internal const int PageOffset = 0;
+    internal const int SumOffset = PageOffset + PageBytes;
+    private const int SumSlotBytes = 64;
+    internal const int MaxOffset = SumOffset + 8;
+    internal const int DensePtrOffset = SumOffset + 16;
+    internal const int TentPtrOffset = DensePtrOffset + 8;
     internal const int BellPtrOffset = TentPtrOffset + 8;
+    internal const int HeaderBytes = SumOffset + SumSlotBytes;
+    private const int DiffOffset = HeaderBytes;
+    internal const int BlockBytes = (DiffOffset + DiffBytes + 63) & ~63;
     internal const int TentBytes = Cells * sizeof(long);
     internal const int BellBytes = TentBytes;
-    internal const int SumOffset = (BellPtrOffset + 8 + 63) & ~63;
-    internal const int SumSlotBytes = 64;
-    internal const int MaxOffset = SumOffset + 8;
-    internal const int BlockBytes = SumOffset + SumSlotBytes;
 
     private static int _worldCount;
 
@@ -132,6 +135,7 @@ public static unsafe partial class World
         var id = (byte)_worldCount++;
         var w = Runtime.Worlds + id;
         w->Grids = (GridCtx*)NativeHeap.AllocZeroed((nuint)(MaxGrids * sizeof(GridCtx)));
+        w->Recipes = (LayerRecipe*)NativeHeap.AllocZeroed((nuint)(MaxLayers * sizeof(LayerRecipe)));
         w->Prev = (int*)NativeHeap.AlignedAlloc(TileBake.TileSize * sizeof(int));
         w->FreeHead = -1;
         return id;
@@ -164,13 +168,15 @@ public static unsafe partial class World
         var w = GetContext(world);
         if (w == null) throw new ArgumentOutOfRangeException(nameof(world));
         if (w->LayerCount >= MaxLayers) throw new InvalidOperationException("Layer limit reached.");
-        return (byte)w->LayerCount++;
+        var id = w->LayerCount++;
+        w->Recipes[id] = new LayerRecipe { Reads = 1u << id };
+        return (byte)id;
     }
 
     public static int Place(byte world, byte layer, float x, float y, byte stamp, int gain)
     {
         var w = GetContext(world);
-        if (w == null || layer >= w->LayerCount || stamp == 0 || stamp >= StampCatalog.Count) return -1;
+        if (w == null || layer >= w->LayerCount || stamp == 0 || stamp >= StampCatalog.Count || IsDerived(w, layer)) return -1;
 
         var s = &w->Sources;
         var fresh = w->FreeHead < 0;
@@ -396,7 +402,7 @@ public static unsafe partial class World
                 var tileX0 = tx * TileBake.TileSize;
                 var tileY0 = ty * TileBake.TileSize;
                 if (kind == StampKind.ConstantRectangle)
-                    TileBake.EmitBox((int*)block, tileX0, tileY0, px, py, fx, fy, extentX, extentY, v, gain);
+                    TileBake.EmitBox(DiffOf(block), tileX0, tileY0, px, py, fx, fy, extentX, extentY, v, gain);
                 else if (kind == StampKind.Tent)
                     TileBake.EmitTent((long*)EnsureTent(block), tileX0, tileY0, px, py, fx, fy, extentX, extentY, v, gain);
                 else if (kind == StampKind.Bell)
@@ -494,7 +500,7 @@ public static unsafe partial class World
         var tileY0 = (f->Tile / tps) << TileBake.TileBits;
         var kind = TileBake.Effective(v, f->ExtentX, f->ExtentY);
         if (kind == StampKind.ConstantRectangle)
-            TileBake.EmitBox((int*)block, tileX0, tileY0, f->Px, f->Py, f->Fx, f->Fy, f->ExtentX, f->ExtentY, v, gain);
+            TileBake.EmitBox(DiffOf(block), tileX0, tileY0, f->Px, f->Py, f->Fx, f->Fy, f->ExtentX, f->ExtentY, v, gain);
         else if (kind == StampKind.Tent)
             TileBake.EmitTent((long*)EnsureTent(block), tileX0, tileY0, f->Px, f->Py, f->Fx, f->Fy, f->ExtentX, f->ExtentY, v, gain);
         else if (kind == StampKind.Bell)
@@ -714,6 +720,9 @@ public static unsafe partial class World
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static int* DiffOf(byte* block) => (int*)(block + DiffOffset);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static int* DenseOf(byte* block)
     {
         var dense = *(byte**)(block + DensePtrOffset);
@@ -795,7 +804,7 @@ public static unsafe partial class World
                             if (!pages->TryGet(tile, out var block)) continue;
 
                             new Span<int>(w->Prev, TileBake.TileSize).Clear();
-                            if (!TileBake.Resolve((int*)block, DenseOf(block), w->Prev, TentOf(block), BellOf(block),
+                            if (!TileBake.Resolve(DiffOf(block), DenseOf(block), w->Prev, TentOf(block), BellOf(block),
                                 (short*)(block + PageOffset), (long*)(block + SumOffset), (short*)(block + MaxOffset)))
                             {
                                 pages->Remove(tile);
@@ -812,6 +821,7 @@ public static unsafe partial class World
             }
         }
 
+        if (w->DerivedCount != 0) Derive(w);
         for (var gi = 0; gi < w->GridCount; gi++)
         {
             var g = w->Grids + gi;

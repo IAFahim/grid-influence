@@ -21,7 +21,7 @@ internal static unsafe class Receipts
         var pendingOk = a == (1 << 24) && b == ((1 << 24) | 1) && pending.LiveSources == 2 && pending.SourceSlots == 2 &&
             pending.SourceCapacity == 64 && pending.LiveTiles == 0 && pending.DirtyTiles == 0 &&
             pending.GridBytes == World.MaxGrids * sizeof(GridCtx) &&
-            pending.LayerBytes == 2 * World.MaxLayers * sizeof(LayerData) &&
+            pending.LayerBytes == 2 * World.MaxLayers * sizeof(LayerData) + World.MaxLayers * sizeof(LayerRecipe) &&
             pending.SourceBytes == 64 * 17 && pending.MapBytes == 0 &&
             pending.DirtyFlagBytes == 0 && pending.DirtyQueueBytes == 0 &&
             pending.DifferenceBytes == 0 && pending.DenseBytes == 0 && pending.RasterTiles == 0 &&

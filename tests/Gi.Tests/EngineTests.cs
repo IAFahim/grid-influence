@@ -760,7 +760,7 @@ public sealed class EngineTests
         Assert.Equal(2, processed.LiveTiles);
         Assert.Equal(1, processed.RasterTiles);
         Assert.Equal(World.DenseBytes, processed.DenseBytes);
-        Assert.Equal(2 * (World.SumOffset - World.DensePtrOffset), processed.DensePointerBytes);
+        Assert.Equal(2 * (World.HeaderBytes - World.DensePtrOffset), processed.DensePointerBytes);
         var expected = 0;
         for (var y = 0; y < 6; y++)
         for (var x = 0; x < 6; x++) expected += samples[y * 6 + x];

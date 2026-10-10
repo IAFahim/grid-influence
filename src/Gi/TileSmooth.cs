@@ -30,7 +30,7 @@ internal struct SmoothAxis
 
 internal static unsafe partial class TileBake
 {
-    internal const long BellExactHalf = 1L << 15;
+    private const long BellExactHalf = 1L << 15;
     private const long MinSmoothHalf = 256;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -69,7 +69,7 @@ internal static unsafe partial class TileBake
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    internal static void EmitSmooth(
+    private static void EmitSmooth(
         long* sums, StampKind kind, int tileX0, int tileY0,
         int px, int py, int fx, int fy, int extentX, int extentY, StampVariant* v, int gain)
     {

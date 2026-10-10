@@ -55,10 +55,10 @@ public static unsafe partial class World
         var cx = (int)(CellQ8(x, g->OriginX, g->ScaleQ8) >> 8);
         var cy = (int)(CellQ8(y, g->OriginY, g->ScaleQ8) >> 8);
         value = Query(world, (byte)gi, layer, cx, cy);
-        if (!Applied(w, exclude, layer, out var sx, out var sy, out var stamp, out var gain)) return complete;
+        if (!Applied(w, exclude, layer, out var source)) return complete;
 
-        var shape = ShapeOf(g, sx, sy, stamp, gain);
-        if (shape.Reaches(cx, cy)) value = ExcludeCell(g, layer, shape, cx, cy, value);
+        var shape = ShapeOf(g, source);
+        if (shape.Reaches(cx, cy)) value = ExcludedValue(w, g, layer, source.Layer, shape, cx, cy, value);
         return complete;
     }
 
@@ -237,21 +237,69 @@ public static unsafe partial class World
         var g = w->Grids + gi;
         var cx = (int)(CellQ8(x, g->OriginX, g->ScaleQ8) >> 8);
         var cy = (int)(CellQ8(y, g->OriginY, g->ScaleQ8) >> 8);
-        var excluding = Applied(w, exclude, layer, out var sx, out var sy, out var stamp, out var gain);
-        var shape = excluding ? ShapeOf(g, sx, sy, stamp, gain) : default;
+        var excluding = Applied(w, exclude, layer, out var source);
+        var shape = excluding ? ShapeOf(g, source) : default;
         var perUnit = g->ScaleQ8 / 512f;
-        gx = (Others(world, g, (byte)gi, layer, excluding, shape, cx + 1, cy) -
-            Others(world, g, (byte)gi, layer, excluding, shape, cx - 1, cy)) * perUnit;
-        gy = (Others(world, g, (byte)gi, layer, excluding, shape, cx, cy + 1) -
-            Others(world, g, (byte)gi, layer, excluding, shape, cx, cy - 1)) * perUnit;
+        gx = (Others(w, g, layer, excluding, source.Layer, shape, cx + 1, cy) -
+            Others(w, g, layer, excluding, source.Layer, shape, cx - 1, cy)) * perUnit;
+        gy = (Others(w, g, layer, excluding, source.Layer, shape, cx, cy + 1) -
+            Others(w, g, layer, excluding, source.Layer, shape, cx, cy - 1)) * perUnit;
         return complete;
     }
 
-    private static short Others(byte world, GridCtx* g, byte grid, byte layer, bool excluding, in Shape shape, int cx, int cy)
+    private static short Others(WorldCtx* w, GridCtx* g, byte layer, bool excluding, byte source, in Shape shape, int cx, int cy)
     {
-        var value = Query(world, grid, layer, cx, cy);
-        if (!excluding || (uint)cx >= (uint)g->Size || (uint)cy >= (uint)g->Size || !shape.Reaches(cx, cy)) return value;
-        return ExcludeCell(g, layer, shape, cx, cy, value);
+        if ((uint)cx >= (uint)g->Size || (uint)cy >= (uint)g->Size) return 0;
+        var value = Cell(g, layer, cx, cy);
+        if (!excluding || !shape.Reaches(cx, cy)) return value;
+        return ExcludedValue(w, g, layer, source, shape, cx, cy, value);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static short Cell(GridCtx* g, byte layer, int cx, int cy)
+    {
+        if (!g->Layers[layer].Pages.TryGet((cy >> TileBake.TileBits) * g->TilesPerSide + (cx >> TileBake.TileBits), out var block))
+            return 0;
+        return ((short*)(block + PageOffset))[(cy & (TileBake.TileSize - 1)) * TileBake.TileSize + (cx & (TileBake.TileSize - 1))];
+    }
+
+    #if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    #endif
+    private static short ExcludedValue(WorldCtx* w, GridCtx* g, byte layer, byte source, in Shape s, int cx, int cy, short page)
+    {
+        var r = w->Recipes + layer;
+        if (r->Op == LayerOp.Base) return layer == source ? ExcludeCell(g, layer, s, cx, cy, page) : page;
+        if ((r->Reads & (1u << source)) == 0) return page;
+
+        var a = ExcludedValue(w, g, r->A, source, s, cx, cy, Cell(g, r->A, cx, cy));
+        var b = r->B == r->A ? a : ExcludedValue(w, g, r->B, source, s, cx, cy, Cell(g, r->B, cx, cy));
+        return CombineCell(r, a, b);
+    }
+
+    #if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    #endif
+    private static long ExcludedMix(WorldCtx* w, GridCtx* g, byte layer, byte source, in Circle disk, in Shape s)
+    {
+        var fx0 = Math.Max(Math.Max(s.X0, 0), disk.X0);
+        var fy0 = Math.Max(Math.Max(s.Y0, 0), disk.Y0);
+        var fx1 = Math.Min(Math.Min(s.X1, g->Size) - 1, disk.X1);
+        var fy1 = Math.Min(Math.Min(s.Y1, g->Size) - 1, disk.Y1);
+        var delta = 0L;
+        for (var cy = fy0; cy <= fy1; cy++)
+        {
+            if (!Span(disk, cy, out var lo, out var hi)) continue;
+
+            var end = Math.Min(hi, fx1 + 1);
+            for (var cx = Math.Max(lo, fx0); cx < end; cx++)
+            {
+                var page = Cell(g, layer, cx, cy);
+                delta += ExcludedValue(w, g, layer, source, s, cx, cy, page) - page;
+            }
+        }
+
+        return delta;
     }
 
     #if NET
@@ -298,8 +346,11 @@ public static unsafe partial class World
             }
         }
 
-        if (Applied(w, exclude, layer, out var sx, out var sy, out var stamp, out var gain))
-            sum += ExcludedArea(g, layer, disk, ShapeOf(g, sx, sy, stamp, gain));
+        if (Applied(w, exclude, layer, out var source))
+        {
+            var shape = ShapeOf(g, source);
+            sum += IsDerived(w, layer) ? ExcludedMix(w, g, layer, source.Layer, disk, shape) : ExcludedArea(g, layer, disk, shape);
+        }
 
         total = WorldArea(sum, g->ScaleQ8);
         return complete;
@@ -368,13 +419,23 @@ public static unsafe partial class World
         public readonly bool Reaches(int cx, int cy) => cx >= X0 && cy >= Y0 && cx < X1 && cy < Y1;
     }
 
+    private struct Placed
+    {
+        public float X;
+        public float Y;
+        public byte Stamp;
+        public byte Layer;
+        public int Gain;
+    }
+
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    private static Shape ShapeOf(GridCtx* g, float x, float y, byte stamp, int gain)
+    private static Shape ShapeOf(GridCtx* g, in Placed source)
     {
-        var v = StampCatalog.Get(stamp);
-        TileBake.Footprint(x, y, g->OriginX, g->OriginY, g->ScaleQ8, g->Size << 8, v,
+        var v = StampCatalog.Get(source.Stamp);
+        var gain = source.Gain;
+        TileBake.Footprint(source.X, source.Y, g->OriginX, g->OriginY, g->ScaleQ8, g->Size << 8, v,
             out var px, out var py, out var fx, out var fy, out var extentX, out var extentY,
             out var x0, out var y0, out var x1, out var y1);
         var kind = TileBake.Effective(v, extentX, extentY);
@@ -443,7 +504,7 @@ public static unsafe partial class World
             return Saturate(page - core);
         }
 
-        var boxes = (int)TileBake.Quadrant((int*)block, lx, ly) + DenseOf(block)[cell];
+        var boxes = (int)TileBake.Quadrant(DiffOf(block), lx, ly) + DenseOf(block)[cell];
         return Saturate(Absent(boxes, tents, bells, kind, core, smooth));
     }
 
@@ -563,7 +624,7 @@ public static unsafe partial class World
 
             var tents = live ? TentOf(block) : null;
             var bells = live ? BellOf(block) : null;
-            if (saturated) TileBake.IntegrateBoxes((int*)block, DenseOf(block), top + rows, cols, boxes);
+            if (saturated) TileBake.IntegrateBoxes(DiffOf(block), DenseOf(block), top + rows, cols, boxes);
 
             if (!saturated && !smoothKind)
             {
@@ -603,41 +664,41 @@ public static unsafe partial class World
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    private static bool Applied(WorldCtx* w, int source, byte layer,
-        out float x, out float y, out byte stamp, out int gain)
+    private static bool Applied(WorldCtx* w, int id, byte layer, out Placed source)
     {
-        x = 0f;
-        y = 0f;
-        stamp = 0;
-        gain = 0;
-        if (source < 0) return false;
+        source = default;
+        if (id < 0) return false;
 
         var s = &w->Sources;
-        var slot = source & SourceIndexMask;
+        var slot = id & SourceIndexMask;
         if ((uint)slot >= (uint)s->Count) return false;
 
-        var generation = (byte)((uint)source >> 24);
+        var generation = (byte)((uint)id >> 24);
+        var reads = w->Recipes[layer].Reads;
         var pending = w->Pending.Pointer[slot];
         if (pending != 0)
         {
             var op = w->Ops.Pointer + pending - 1;
-            if (op->AliveFrom == 0 || op->FromGen != generation || op->FromLayer != layer) return false;
+            if (op->AliveFrom == 0 || op->FromGen != generation || (reads & (1u << op->FromLayer)) == 0) return false;
 
-            x = op->FromX;
-            y = op->FromY;
-            stamp = op->FromStamp;
-            gain = op->FromGain;
-            return gain != 0;
+            source.X = op->FromX;
+            source.Y = op->FromY;
+            source.Stamp = op->FromStamp;
+            source.Layer = op->FromLayer;
+            source.Gain = op->FromGain;
+            return source.Gain != 0;
         }
 
-        if (s->Alive.Pointer[slot] == 0 || s->Gen.Pointer[slot] != generation || s->Layer.Pointer[slot] != layer)
+        var sourceLayer = s->Layer.Pointer[slot];
+        if (s->Alive.Pointer[slot] == 0 || s->Gen.Pointer[slot] != generation || (reads & (1u << sourceLayer)) == 0)
             return false;
 
-        x = s->X.Pointer[slot];
-        y = s->Y.Pointer[slot];
-        stamp = s->Stamp.Pointer[slot];
-        gain = (sbyte)s->Gain.Pointer[slot];
-        return gain != 0;
+        source.X = s->X.Pointer[slot];
+        source.Y = s->Y.Pointer[slot];
+        source.Stamp = s->Stamp.Pointer[slot];
+        source.Layer = sourceLayer;
+        source.Gain = (sbyte)s->Gain.Pointer[slot];
+        return source.Gain != 0;
     }
 
     #if NET

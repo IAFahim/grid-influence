@@ -10,6 +10,7 @@ internal struct Snapshot
     public int SourceCapacity;
     public long PossibleTiles;
     public long LiveTiles;
+    public long DerivedTiles;
     public long DirtyTiles;
     public long MapSlots;
     public long Tombstones;
@@ -63,6 +64,7 @@ internal static unsafe class Inspection
             SourceSlots = s->Count,
             SourceCapacity = s->X.Capacity,
             GridBytes = World.MaxGrids * sizeof(GridCtx),
+            LayerBytes = World.MaxLayers * sizeof(LayerRecipe),
             ScratchBytes = TileBake.TileSize * sizeof(int),
             SourceBytes = (long)s->X.Capacity * sizeof(float) + (long)s->Y.Capacity * sizeof(float) +
                 s->Stamp.Capacity + s->Layer.Capacity + s->Gain.Capacity + s->Alive.Capacity +
@@ -86,6 +88,7 @@ internal static unsafe class Inspection
             {
                 var ld = g->Layers + li;
                 result.LiveTiles += ld->Pages.Count;
+                if (World.IsDerived(w, li)) result.DerivedTiles += ld->Pages.Count;
                 result.DirtyTiles += ld->Dirty.Length;
                 result.MapSlots += ld->Pages.SlotCount;
                 result.Tombstones += ld->Pages.TombstoneCount;
@@ -120,11 +123,10 @@ internal static unsafe class Inspection
             }
         }
 
-        var cells = TileBake.TileSize * TileBake.TileSize;
-        result.DifferenceBytes = result.LiveTiles * World.PageOffset;
-        result.DensePointerBytes = result.LiveTiles * (World.SumOffset - World.DensePtrOffset);
-        result.PageBytes = result.LiveTiles * cells * sizeof(short);
-        result.PageSumBytes = result.LiveTiles * World.SumSlotBytes;
+        result.DifferenceBytes = (result.LiveTiles - result.DerivedTiles) * (World.BlockBytes - World.HeaderBytes);
+        result.DensePointerBytes = result.LiveTiles * (World.HeaderBytes - World.DensePtrOffset);
+        result.PageBytes = result.LiveTiles * World.PageBytes;
+        result.PageSumBytes = result.LiveTiles * (World.DensePtrOffset - World.SumOffset);
 
         for (var i = 1; i < StampCatalog.Count; i++)
         {
