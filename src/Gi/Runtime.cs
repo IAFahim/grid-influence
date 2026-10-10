@@ -1,5 +1,7 @@
 using System.Runtime.CompilerServices;
 
+[module: SkipLocalsInit]
+
 namespace Gi;
 
 internal static unsafe class Runtime

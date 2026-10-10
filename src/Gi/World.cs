@@ -112,7 +112,7 @@ public static unsafe partial class World
     internal const int DensePtrSlot = 8;
     internal const int TentPtrOffset = DensePtrOffset + DensePtrSlot;
     internal const int BellPtrOffset = TentPtrOffset + 8;
-    internal const int TentBytes = TileBake.DiffRows * TileBake.DiffPitch * sizeof(long);
+    internal const int TentBytes = Cells * sizeof(long);
     internal const int BellBytes = TentBytes;
     internal const int SumOffset = (BellPtrOffset + 8 + 63) & ~63;
     internal const int SumSlotBytes = 64;

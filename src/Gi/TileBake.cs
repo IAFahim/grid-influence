@@ -277,37 +277,11 @@ internal static unsafe partial class TileBake
         => Vector128.Widen(Vector128.Widen(Vector128.CreateScalarUnsafe(*(int*)p).AsSByte()).Item1).Item1;
 #endif
 
-    private static void TentRow(long* tent, int y, long* tp, long* tq, int* tentOut)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void SmoothRow(long* sums, int y, int* output)
     {
-        var row = tent + y * DiffPitch;
-        var run = 0L;
-        var run2 = 0L;
-        for (var x = 0; x < TileSize; x++)
-        {
-            run += row[x];
-            tp[x] += run;
-            run2 += tp[x];
-            tq[x] += run2;
-            tentOut[x] = RoundQ40(tq[x]);
-        }
-    }
-
-    private static void BellRow(long* bell, int y, long* bp, long* bq, long* br, int* bellOut)
-    {
-        var row = bell + y * DiffPitch;
-        var run = 0L;
-        var run2 = 0L;
-        var run3 = 0L;
-        for (var x = 0; x < TileSize; x++)
-        {
-            run += row[x];
-            bp[x] += run;
-            run2 += bp[x];
-            bq[x] += run2;
-            run3 += bq[x];
-            br[x] += run3;
-            bellOut[x] = RoundQ40(br[x]);
-        }
+        var row = sums + y * TileSize;
+        for (var x = 0; x < TileSize; x++) output[x] = RoundQ40(row[x]);
     }
 
     #if NET
@@ -317,34 +291,11 @@ internal static unsafe partial class TileBake
     {
         var tentOut = stackalloc int[TileSize];
         var bellOut = stackalloc int[TileSize];
-        var tp = stackalloc long[TileSize];
-        var tq = stackalloc long[TileSize];
-        var bp = stackalloc long[TileSize];
-        var bq = stackalloc long[TileSize];
-        var br = stackalloc long[TileSize];
-        if (tent == null)
-        {
-            new Span<int>(tentOut, TileSize).Clear();
-        }
-        else
-        {
-            new Span<long>(tp, TileSize).Clear();
-            new Span<long>(tq, TileSize).Clear();
-        }
-
-        if (bell == null)
-        {
-            new Span<int>(bellOut, TileSize).Clear();
-        }
-        else
-        {
-            new Span<long>(bp, TileSize).Clear();
-            new Span<long>(bq, TileSize).Clear();
-            new Span<long>(br, TileSize).Clear();
-        }
+        if (tent == null) new Span<int>(tentOut, TileSize).Clear();
+        if (bell == null) new Span<int>(bellOut, TileSize).Clear();
 
 #if NET
-        if (Avx2.IsSupported) return Resolve256(difference, dense, previousRow, tent, bell, tp, tq, bp, bq, br, tentOut, bellOut, output, pageSum, pageMax);
+        if (Avx2.IsSupported) return Resolve256(difference, dense, previousRow, tent, bell, tentOut, bellOut, output, pageSum, pageMax);
 
         var acc = Vector128<int>.Zero;
         var sum = Vector128<int>.Zero;
@@ -359,8 +310,8 @@ internal static unsafe partial class TileBake
             var diffRow = difference + y * DiffPitch;
             var denseRow = dense + y * TileSize;
             var outRow = output + y * TileSize;
-            if (tent != null) TentRow(tent, y, tp, tq, tentOut);
-            if (bell != null) BellRow(bell, y, bp, bq, br, bellOut);
+            if (tent != null) SmoothRow(tent, y, tentOut);
+            if (bell != null) SmoothRow(bell, y, bellOut);
             var carry = 0;
             var x = 0;
 #if NET
@@ -417,7 +368,7 @@ internal static unsafe partial class TileBake
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    private static bool Resolve256(int* difference, int* dense, int* previousRow, long* tent, long* bell, long* tp, long* tq, long* bp, long* bq, long* br, int* tentOut, int* bellOut, short* output, long* pageSum, short* pageMax)
+    private static bool Resolve256(int* difference, int* dense, int* previousRow, long* tent, long* bell, int* tentOut, int* bellOut, short* output, long* pageSum, short* pageMax)
     {
         var acc = Vector256<int>.Zero;
         var fourth = Vector256.Create(3);
@@ -430,8 +381,8 @@ internal static unsafe partial class TileBake
             var diffRow = difference + y * DiffPitch;
             var denseRow = dense + y * TileSize;
             var outRow = output + y * TileSize;
-            if (tent != null) TentRow(tent, y, tp, tq, tentOut);
-            if (bell != null) BellRow(bell, y, bp, bq, br, bellOut);
+            if (tent != null) SmoothRow(tent, y, tentOut);
+            if (bell != null) SmoothRow(bell, y, bellOut);
             var carry = Vector256<int>.Zero;
             for (var x = 0; x < TileSize; x += 8)
             {

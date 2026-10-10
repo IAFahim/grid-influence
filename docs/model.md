@@ -27,18 +27,15 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   `value·gain` (the `Box` unit) within 0.2%; `C ≥ 2^8`, a source's largest product is below
   `2^51`, and int64 sums stay exact up to 4,096 maximum-strength kernels stacked on one cell —
   256× past int16 saturation.
-  A piecewise-polynomial signal has a sparse finite difference, so each tile the kernel touches
-  keeps its deposits in a lazily attached 33×33 `int64` buffer (8,712 B; second order for
-  tents, third order for bells, each behind its own pointer slot in the block pad). Per axis
-  the emitter writes the boundary injections at local cells `0..k−1` (the values a k-stage
-  prefix needs to reconstruct the weight at the tile edge, `k` = order) and the k-th
-  differences in windows around the three breakpoints — support start, centre, support end —
-  keeping only nonzero ones: at most 20 impulses per axis, written as unrounded
-  `value·gain·C·Δx·Δy` corner products so the chain telescopes exactly. Resolve re-derives each
-  cell as `RoundQ40(Σ value·gain·C·Wx·Wy)` through the matching int64 prefix chain, rounding once
-  per cell over all sources of that kind in the tile. Every weight is zero outside the stamp's
-  footprint, so tiles beyond it receive nothing; moves and removes negate the same impulses, so
-  retraction returns the buffer to literal zero.
+  Each tile the kernel touches keeps the exact unrounded sum of every kernel of that kind in a
+  lazily attached 32×32 `int64` buffer (8,192 B; one for tents, one for bells, each behind its
+  own pointer slot in the block pad). A deposit adds its product `value·gain·C·Wx·Wy` to every
+  cell of its support inside the tile — per axis the cells `First..Last` whose weight is
+  positive, the per-axis weights computed once per column and once per row — and resolve rounds
+  each cell once, `RoundQ40(Σ value·gain·C·Wx·Wy)`, over all sources of that kind in the tile.
+  Every weight is zero outside the stamp's footprint, so tiles beyond it receive nothing; moves
+  and removes subtract the identical products, so retraction returns the buffer to literal
+  zero, and sensing reads a cell's unrounded sum with one load.
   A bell whose half-extent on a grid reaches 128 cells (`extent/2 ≥ 2^15` Q8) cannot stay exact
   in `int64` (an exact cell-lattice paraboloid needs about `H⁴` of range), so on that grid it
   deposits through the raster path instead: `Stamp.Bell` bakes its paraboloid as a `w×h`
@@ -75,10 +72,10 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   `int16` page max in the padded 64 B sum slot. Raster stamps also need the tile's 32×32
   `int32` dense buffer: blocks touched by a raster deposit allocate it once (block grows to
   10,624 B, dense pinned at the block tail) and box-only tiles never carry it — resolve reads a
-  shared zero page instead. Tent stamps need a second lazily attached buffer: the 33×33
-  `int64` second-order store described above, allocated on the tile's first tent deposit and
-  freed with the block. Bell stamps need a third: the 33×33 `int64` third-order store
-  described above, allocated on the tile's first bell deposit and freed with the block.
+  shared zero page instead. Tent stamps need a second lazily attached buffer: the 32×32
+  `int64` sum store described above, allocated on the tile's first tent deposit and freed with
+  the block. Bell stamps need a third: the same store for bells, allocated on the tile's first
+  bell deposit and freed with the block.
   Mutations do not touch tiles: `Place`/`Move`/`SetGain`/`Remove`
   update the source columns and merge into a per-world op queue — one op per slot per window,
   carrying the state applied by the previous `Process` (retraction) and the latest state
@@ -106,11 +103,8 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   drains the per-(grid,layer) dirty lists: each
   dirty tile resolves its difference
   array through a 2D prefix sum (horizontal inclusive prefix + previous-row carry), adds dense,
-  and — for tiles carrying a tent buffer — a scalar second-order prefix chain per row
-  (`run`/`run2` × `tp`/`tq` in `int64`, `RoundQ32` once per cell) adds the tent contribution,
-  and — for tiles carrying a bell buffer — a scalar third-order prefix chain per row
-  (`run`/`run2`/`run3` × `bp`/`bq`/`br` in `int64`, `RoundQ40` once per cell) adds the bell
-  contribution,
+  adds each cell's tent and bell sums rounded once (`RoundQ40`) for tiles carrying those
+  buffers,
   saturates to `short` **after** summation so cancellation is preserved, and writes the page's
   cell total into its `int64` sum slot and the page's maximum cell into its `int16` max slot
   (both bit-identical across resolve paths). A tile that resolves to all-zero frees its block
@@ -223,13 +217,11 @@ add one `int64` page sum per live page, so large sparse grids do not visit every
   unsaturated total `T`; box and raster sources subtract their own integer contribution
   (`BoxAt` reuses the emitter's band clip on a one-cell window; rasters run `EmitRaster` on a
   one-cell clip); tent and bell sources replace the rounded sum of their kernel with the
-  rounded sum minus their exact product `value·gain·Wx·Wy` (times `C` for bells) — the impulse chain telescopes to that
-  product — which needs the cell's unrounded kernel sum, recovered as one weighted quadrant sum
-  of the tile's impulse buffer (weights `d+1` for tents, `C(d+2,2)` for bells, the closed form
-  of the resolve prefix chain). Saturated page cells rebuild every component (box prefix,
-  dense, tent, bell) before subtracting. Areas apply the same rule per tile of the source's
-  footprint inside the disk, integrating buffers once per tile up to the needed rows and
-  columns.
+  rounded sum minus their exact product `value·gain·C·Wx·Wy`, which needs the cell's unrounded
+  kernel sum — one load from the tile's tent or bell store. Saturated page cells rebuild every
+  component (box prefix, dense, tent, bell) before subtracting. Areas apply the same rule per
+  cell of the source's footprint inside the disk, reading the stores directly and integrating
+  the difference array only for tiles that hold a saturated cell.
   Sensing reads only resolved state, so it inherits `Query`'s one-frame latency: a source placed
   or moved this frame is seen after the next `Process`. Values saturate at ±32767 and signed
   sources cancel; a layer meant to detect presence should hold same-signed sources.
@@ -367,9 +359,8 @@ world rect at its own cell density; a source deposits into every grid it overlap
 churn, a 200-place window rewound and reprocessed (~100 µs — the inverse window costs the
 same deposits as the forward one), a place+remove-200 collapse window (~10 µs — the mutations
 apply no deposits), tent-200
-churn (16×16 tents, a few second-order impulse writes per axis per touched tile, persistent
-`int64` buffers — ~180–210 µs vs the ~295 µs one-band-per-cell form), bell-200 churn
-(16×16 bells, third-order impulses plus a third prefix chain — ~760–800 µs), full-grid
+churn (16×16 tents into persistent `int64` sum stores — ~160 µs), bell-200 churn
+(16×16 bells, same stores — ~210 µs), full-grid
 sum, a 1022² partial-region sum, the best-cell query against a one-million-call
 naive scan (0.1 µs vs ~5,600 µs on a 1024² layer), the gradient query (~5 ns per point), a
 16-layer × 25-dirty move-400 process, and
@@ -420,7 +411,7 @@ pass behind them was `perf`-profile guided, receipts first.
   freed exactly when the tile resolves to zero, the world is cleared, or the map is disposed;
   attaching or growing dense happens only on the serial deposit thread, which republishes the
   block pointer through the map — and patches the block pointer captured by any earlier
-  fragment of the same batch — before any later resolve can observe it. The 8,712 B tent and
+  fragment of the same batch — before any later resolve can observe it. The 8,192 B tent and
   bell buffers are separate allocations referenced from the block's tent and bell pointer
   slots: each is created on the tile's first deposit of its kind by the same serial build
   thread, owned by the block, and freed with it). The shared zero dense
@@ -441,7 +432,7 @@ pass behind them was `perf`-profile guided, receipts first.
   every tile is claimed by exactly one participant, so difference/dense/page/sum writes are
   disjoint and `previousRow` is one slice per participant (the caller's `Prev` for the main
   thread, a pool slice per worker), cleared per tile before use, with the resolve-time
-  `tp`/`tq`/`tentOut` and `bp`/`bq`/`br`/`bellOut` chains stack-allocated per call; sources
+  `tentOut`/`bellOut` rows stack-allocated per call; sources
   are read-only during
   deposits of other sources. `PageMap` mutation happens only through its owning `LayerData`
   pointer on the thread that called `Process`. The partial-region sum reads page rows only
@@ -530,39 +521,40 @@ pass behind them was `perf`-profile guided, receipts first.
   same rule: the first creation call allocates both arenas before any handle exists, and handles
   only originate from creation calls, so no query can observe an uninitialized arena.
   `Query`/`QueryRegion`/`QueryMax`/`QueryGradient`/`ChangedTiles`/`Covers`/`TrySense*` read
-  resolved pages, page sums, page maxima, tile impulse buffers, pyramid slots, changed lists,
+  resolved pages, page sums, page maxima, tile sum stores, pyramid slots, changed lists,
   source columns, and the pending op queue only, and may run concurrently with each other,
   never with mutation or process. Sensing writes nothing outside its own stack frame: each call
-  stackallocs its scratch (span rows, at most 24 KB of per-tile integration arrays for an
-  excluded area, a single cell for an excluded point), so concurrent sensing threads never share
-  scratch.
+  stackallocs its scratch (span rows, under 9 KB of per-tile arrays for an excluded area,
+  a single cell for an excluded point), so concurrent sensing threads never share scratch. The
+  module skips local zero-initialization (`SkipLocalsInit`): every `stackalloc` buffer is
+  written before it is read — band and span arrays are filled up to the count their readers
+  use, cell scratch is cleared or fully emitted first, and the resolve rows are cleared when
+  their store is absent.
 - **Bounds**: stamps clip to grid rects before marking (extents clamp to the grid size in Q8;
   grids whose `ScaleQ8` truncates to 0 are skipped); tile-local box corners land in
   `[0,32]×[0,32]` of the difference array (rows 0–32 exist for the exclusive far edge; column 32
-  is written but never read, by design of the half-open prefix form). Tent and bell impulses
-  land in `[0,31]×[0,31]` of their buffers — boundary injections at local cells `0..k−1`,
-  window differences only at local cells `k..31` (anything outside is skipped before the
-  write) — with at most `3 + 3·(k+2) ≤ 18` distinct cells per axis against the
-  `MaxSmoothImpulses` (20) stack slots, and the resolve-time prefix chains read rows 0–31 and
-  write `tentOut`/`bellOut` 0–31. Raster fragments clip to
+  is written but never read, by design of the half-open prefix form). Tent and bell deposits
+  write only cells `[max(First, tile), min(Last, tile + 31)]` per axis — inside `[0,31]×[0,31]`
+  of their 32×32 stores — and resolve reads rows 0–31 and writes `tentOut`/`bellOut` 0–31.
+  Raster fragments clip to
   the tile and read only inside the padded stamp allocation: sample coordinates advance by
   `256·65536/ScaleQ8` per cell in Q16.16 from a phase-derived origin, so at any mip level `L` the
   integer sample index stays within `[(−1), ceil(w/2^L)]` and every `+1` tap lands on the level's
   zero border. Level selection stops at the stamp's mip count, so tiny stamps sample level 0 with
   a wider step rather than reading past the chain.
   Sensing clips every disk to `[0, Size)` before touching a tile, computes spans in `int64` Q8
-  (reach clamps to 2^24 Q8 so `reach²` cannot overflow), and reads impulse buffers only at rows
-  `0..31`, columns `0..31` of their 33×33 pitch. One-cell source evaluation writes one `int` on
-  the stack: `EmitRaster` with `x1 = min(x1, cx+1)` clips its loops to that single cell.
-  Weighted quadrant sums accumulate in `int64` with the same wrap-around as the resolve chain,
-  so the closed form equals the chain modulo 2^64 bit for bit.
+  (reach clamps to 2^24 Q8 so `reach²` cannot overflow), and reads sum stores only at rows
+  `0..31`, columns `0..31`. One-cell source evaluation writes one `int` on the stack:
+  `EmitRaster` with `x1 = min(x1, cx+1)` clips its loops to that single cell. Sum stores
+  accumulate in `int64` with wrap-around; only each cell's final sum must fit, which the
+  4,096-kernel stacking bound above guarantees.
 
 ## Tool inspection
 
 `tools/stats` reads internal state through friend access, without reflection, counters on the
 data path, or additional public types. `Inspection.Read` validates the world handle, scans
 source liveness and grid/layer metadata, walks live page-map slots to count raster-tile dense
-buffers and impulse-tile tent/bell buffers, and returns a pointer-free value snapshot. Its cost
+buffers and tent/bell sum stores, and returns a pointer-free value snapshot. Its cost
 is O(source slots + grids × layers + map slots + catalog stamps); it does not scan cells.
 Memory includes allocated capacity, retained source/dirty buffers after `Clear`, every live tile
 block plus its dense, tent, and bell buffers where they exist, the per-(grid, layer) max pyramids,

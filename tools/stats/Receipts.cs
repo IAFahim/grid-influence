@@ -95,11 +95,11 @@ internal static unsafe class Receipts
         var tentGone = Inspection.Read(world);
         tentOk = tentOk && tentGone.TentTiles == 0 && tentGone.TentBytes == 0;
 
-        var bell = World.Place(world, layer, 64f, 64f, Stamp.Bell(12, 12, 40), 3);
+        var bell = World.Place(world, layer, 48f, 48f, Stamp.Bell(12, 12, 40), 3);
         World.Process(world);
         var belled = Inspection.Read(world);
         var bellOk = belled.BellTiles == 1 && belled.BellBytes == World.BellBytes &&
-            World.Query(world, grid, layer, 64, 64) > 0;
+            World.Query(world, grid, layer, 48, 48) > 0;
         World.Remove(world, bell);
         World.Process(world);
         var bellGone = Inspection.Read(world);

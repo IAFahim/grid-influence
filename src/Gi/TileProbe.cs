@@ -80,60 +80,6 @@ internal static unsafe partial class TileBake
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    internal static long Quadrant(long* impulses, int lx, int ly, int order)
-    {
-        var sum = 0L;
-        for (var y = 0; y <= ly; y++)
-        {
-            var row = impulses + y * DiffPitch;
-            var rowSum = 0L;
-            for (var x = 0; x <= lx; x++) rowSum += row[x] * Binomial(lx - x, order);
-            sum += rowSum * Binomial(ly - y, order);
-        }
-
-        return sum;
-    }
-
-    #if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    #endif
-    internal static void Integrate(long* impulses, int rows, int cols, int order, long* cells)
-    {
-        var p = stackalloc long[TileSize];
-        var q = stackalloc long[TileSize];
-        var r = stackalloc long[TileSize];
-        new Span<long>(p, TileSize).Clear();
-        new Span<long>(q, TileSize).Clear();
-        new Span<long>(r, TileSize).Clear();
-        for (var y = 0; y < rows; y++)
-        {
-            var row = impulses + y * DiffPitch;
-            var target = cells + y * TileSize;
-            var run = 0L;
-            var run2 = 0L;
-            var run3 = 0L;
-            for (var x = 0; x < cols; x++)
-            {
-                run += row[x];
-                p[x] += run;
-                run2 += p[x];
-                q[x] += run2;
-                if (order == 2)
-                {
-                    target[x] = q[x];
-                    continue;
-                }
-
-                run3 += q[x];
-                r[x] += run3;
-                target[x] = r[x];
-            }
-        }
-    }
-
-    #if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    #endif
     internal static void IntegrateBoxes(int* difference, int* dense, int rows, int cols, int* cells)
     {
         var previous = stackalloc int[TileSize];
@@ -150,7 +96,4 @@ internal static unsafe partial class TileBake
             }
         }
     }
-
-    private static long Binomial(int distance, int order)
-        => order == 2 ? distance + 1 : (long)(distance + 1) * (distance + 2) / 2;
 }

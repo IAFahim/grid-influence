@@ -431,28 +431,19 @@ public static unsafe partial class World
         if (!g->Layers[layer].Pages.TryGet((cy >> TileBake.TileBits) * g->TilesPerSide + (cx >> TileBake.TileBits), out var block))
             return Saturate(Absent(0, 0, 0, kind, core, smooth));
 
+        var cell = ly * TileBake.TileSize + lx;
         var tent = TentOf(block);
         var bell = BellOf(block);
+        var tents = tent == null ? 0 : tent[cell];
+        var bells = bell == null ? 0 : bell[cell];
         if (page > short.MinValue && page < short.MaxValue)
         {
-            if (kind == StampKind.Tent)
-            {
-                var tq = tent == null ? 0 : TileBake.Quadrant(tent, lx, ly, 2);
-                return Saturate(page - TileBake.RoundQ40(tq) + TileBake.RoundQ40(tq - smooth));
-            }
-
-            if (kind == StampKind.Bell)
-            {
-                var br = bell == null ? 0 : TileBake.Quadrant(bell, lx, ly, 3);
-                return Saturate(page - TileBake.RoundQ40(br) + TileBake.RoundQ40(br - smooth));
-            }
-
+            if (kind == StampKind.Tent) return Saturate(page - TileBake.RoundQ40(tents) + TileBake.RoundQ40(tents - smooth));
+            if (kind == StampKind.Bell) return Saturate(page - TileBake.RoundQ40(bells) + TileBake.RoundQ40(bells - smooth));
             return Saturate(page - core);
         }
 
-        var boxes = (int)TileBake.Quadrant((int*)block, lx, ly) + DenseOf(block)[ly * TileBake.TileSize + lx];
-        var tents = tent == null ? 0 : TileBake.Quadrant(tent, lx, ly, 2);
-        var bells = bell == null ? 0 : TileBake.Quadrant(bell, lx, ly, 3);
+        var boxes = (int)TileBake.Quadrant((int*)block, lx, ly) + DenseOf(block)[cell];
         return Saturate(Absent(boxes, tents, bells, kind, core, smooth));
     }
 
@@ -519,8 +510,6 @@ public static unsafe partial class World
         var hi = stackalloc int[n];
         var core = stackalloc int[n * n];
         var boxes = stackalloc int[n * n];
-        var tents = stackalloc long[n * n];
-        var bells = stackalloc long[n * n];
         var wx = stackalloc long[n];
         var wy = stackalloc long[n];
         var kind = s.Kind;
@@ -568,16 +557,12 @@ public static unsafe partial class World
             }
             else
             {
-                TileBake.SmoothWeights(kind, s.Px, s.Fx, s.ExtentX, tileX, n, wx);
-                TileBake.SmoothWeights(kind, s.Py, s.Fy, s.ExtentY, tileY, n, wy);
+                TileBake.SmoothWeights(kind, s.Px, s.Fx, s.ExtentX, tileX, cols, wx);
+                TileBake.SmoothWeights(kind, s.Py, s.Fy, s.ExtentY, tileY, top + rows, wy);
             }
 
-            var tentBuffer = live ? TentOf(block) : null;
-            var bellBuffer = live ? BellOf(block) : null;
-            var hasTents = tentBuffer != null && (saturated || kind == StampKind.Tent);
-            var hasBells = bellBuffer != null && (saturated || kind == StampKind.Bell);
-            if (hasTents) TileBake.Integrate(tentBuffer, top + rows, cols, 2, tents);
-            if (hasBells) TileBake.Integrate(bellBuffer, top + rows, cols, 3, bells);
+            var tents = live ? TentOf(block) : null;
+            var bells = live ? BellOf(block) : null;
             if (saturated) TileBake.IntegrateBoxes((int*)block, DenseOf(block), top + rows, cols, boxes);
 
             if (!saturated && !smoothKind)
@@ -589,20 +574,21 @@ public static unsafe partial class World
             for (var r = 0; r < rows; r++)
             {
                 var row = (top + r) * n;
-                var vy = wy[top + r];
+                var dy = smoothKind ? scale * wy[top + r] : 0;
                 for (var c = lo[r]; c < hi[r]; c++)
                 {
                     var i = row + c;
                     var p = live ? page[i] : (short)0;
-                    var tq = hasTents ? tents[i] : 0;
-                    var br = hasBells ? bells[i] : 0;
+                    var tq = tents == null ? 0 : tents[i];
+                    var br = bells == null ? 0 : bells[i];
+                    var own = smoothKind ? dy * wx[c] : 0;
                     long absent;
                     if (saturated && (p == short.MinValue || p == short.MaxValue))
-                        absent = Absent(boxes[i], tq, br, kind, smoothKind ? 0 : core[i], smoothKind ? scale * wx[c] * vy : 0);
+                        absent = Absent(boxes[i], tq, br, kind, smoothKind ? 0 : core[i], own);
                     else if (kind == StampKind.Tent)
-                        absent = p - TileBake.RoundQ40(tq) + TileBake.RoundQ40(tq - scale * wx[c] * vy);
+                        absent = p - TileBake.RoundQ40(tq) + TileBake.RoundQ40(tq - own);
                     else if (kind == StampKind.Bell)
-                        absent = p - TileBake.RoundQ40(br) + TileBake.RoundQ40(br - scale * wx[c] * vy);
+                        absent = p - TileBake.RoundQ40(br) + TileBake.RoundQ40(br - own);
                     else
                         absent = p - core[i];
 
