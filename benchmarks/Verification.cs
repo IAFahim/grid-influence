@@ -24,7 +24,7 @@ internal static class Verification
         Check("gradient-matches-central-differences", GradientMatchesCentralDifferences());
         Check("changed-tiles-match-drain", ChangedTilesMatchDrain());
         Check("deferred-window-matches-stepped-processing", DeferredWindowMatchesSteppedProcessing());
-        Check("tent-matches-band-oracle", TentMatchesBandOracle());
+        Check("tent-matches-impulse-oracle", TentMatchesImpulseOracle());
         Check("source-slots-reuse-and-stale-handles-inert", SourceSlotsReuseAndStaleInert());
         Check("signed-gain-exact", SignedGainExact());
         Check("multi-layer-pooled-matches-scans", MultiLayerPooledMatchesScans());
@@ -707,7 +707,7 @@ internal static class Verification
             Gi.World.ChangedTiles(collapse, gc, lc, null) == 0;
     }
 
-    private static unsafe bool TentMatchesBandOracle()
+    private static unsafe bool TentMatchesImpulseOracle()
     {
         var w = Gi.World.New();
         var fine = Gi.Grid.New(w, 8, 0f, 0f, 256f);
@@ -727,37 +727,108 @@ internal static class Verification
         var fineField = new int[256 * 256];
         var coarseField = new int[128 * 128];
 
-        int TentWeight(int cell, int peak, int half)
+        int RoundQ24(long value) => (int)((value + 8388608 + (value >> 63)) >> 24);
+
+        (int First, int Peak, int Last, int Up, int Down, int Tail) Axis(int origin, int phase, int extent)
         {
-            var distance = cell * 256 - peak;
-            if (distance < 0) distance = -distance;
-            return distance >= half ? 0 : 256 - 256 * distance / half;
+            var half = Math.Max(1, extent >> 1);
+            var peak = (origin << 8) + phase + (extent >> 1);
+            var first = ((peak - half) >> 8) + 1;
+            var last = (peak + half - 1) >> 8;
+            var peakCell = peak >> 8;
+            if (last < first)
+            {
+                first = peakCell;
+                last = peakCell;
+            }
+
+            if (peakCell < first) peakCell = first;
+            if (peakCell > last) peakCell = last;
+            var rise = peakCell - first + 1;
+            var fall = last + 1 - peakCell;
+            var up = 65536 / rise;
+            var down = up * rise / fall;
+            var tail = up * rise - down * (fall - 1);
+            return (first, peakCell, last, up, down, tail);
         }
 
-        void Rebuild(int[] target, int size, int scaleQ8)
+        int Weight(int cell, (int First, int Peak, int Last, int Up, int Down, int Tail) g)
         {
-            Array.Clear(target);
+            if (cell < g.First || cell > g.Last) return 0;
+            if (cell <= g.Peak) return g.Up * (cell - g.First + 1);
+            return g.Up * (g.Peak - g.First + 1) - g.Down * (cell - g.Peak);
+        }
+
+        int Slope(int cell, (int First, int Peak, int Last, int Up, int Down, int Tail) g)
+        {
+            if (cell < g.First || cell > g.Last + 1) return 0;
+            if (cell <= g.Peak) return g.Up;
+            return cell <= g.Last ? -g.Down : -g.Tail;
+        }
+
+        int CellValue(int cx, int cy, int scaleQ8,
+            Span<(int Cell, int Delta)> xs, Span<(int Cell, int Delta)> ys)
+        {
+            var sum = 0L;
             for (var i = 0; i < count; i++)
             {
                 if (!slive[i]) continue;
                 var width = ssize[i];
                 var extent = width * scaleQ8;
-                var half = Math.Max(1, extent >> 1);
                 var leadX = (long)(int)MathF.Floor(sx[i] * scaleQ8) + ((long)-(width * 128) * scaleQ8 >> 8);
                 var leadY = (long)(int)MathF.Floor(sy[i] * scaleQ8) + ((long)-(width * 128) * scaleQ8 >> 8);
-                var peakX = (int)(leadX + (extent >> 1));
-                var peakY = (int)(leadY + (extent >> 1));
-                for (var cy = (peakY - half) >> 8; cy <= ((peakY + half) >> 8) + 1; cy++)
-                for (var cx = (peakX - half) >> 8; cx <= ((peakX + half) >> 8) + 1; cx++)
+                var gx = Axis((int)(leadX >> 8), (int)(leadX & 255), extent);
+                var gy = Axis((int)(leadY >> 8), (int)(leadY & 255), extent);
+                var tx = cx & ~31;
+                var ty = cy & ~31;
+                var liveX = 0;
+                xs[liveX++] = (0, Weight(tx, gx));
+                var entryX = Slope(tx + 1, gx) - Weight(tx, gx);
+                if (entryX != 0) xs[liveX++] = (1, entryX);
+                for (var c = tx + 2; c <= Math.Min(gx.Last + 2, tx + 31); c++)
                 {
-                    var wy = TentWeight(cy, peakY, half);
-                    var wx = TentWeight(cx, peakX, half);
-                    if (wx <= 0 || wy <= 0) continue;
-                    var value = RoundQ16(40 * wx * wy) * sgain[i];
-                    if (value == 0 || (uint)cx >= (uint)size || (uint)cy >= (uint)size) continue;
-                    target[cy * size + cx] += value;
+                    var change = Slope(c, gx) - Slope(c - 1, gx);
+                    if (change != 0) xs[liveX++] = (c - tx, change);
                 }
+
+                var liveY = 0;
+                ys[liveY++] = (0, Weight(ty, gy));
+                var entryY = Slope(ty + 1, gy) - Weight(ty, gy);
+                if (entryY != 0) ys[liveY++] = (1, entryY);
+                for (var c = ty + 2; c <= Math.Min(gy.Last + 2, ty + 31); c++)
+                {
+                    var change = Slope(c, gy) - Slope(c - 1, gy);
+                    if (change != 0) ys[liveY++] = (c - ty, change);
+                }
+
+                var lx = cx - tx;
+                var ly = cy - ty;
+                var inner = 0L;
+                for (var y = 0; y < liveY; y++)
+                {
+                    if (ys[y].Cell > ly) continue;
+                    var countY = ly - ys[y].Cell + 1;
+                    for (var x = 0; x < liveX; x++)
+                    {
+                        if (xs[x].Cell > lx) continue;
+                        inner += (long)xs[x].Delta * ys[y].Delta * (lx - xs[x].Cell + 1) * countY;
+                    }
+                }
+
+                sum += 40L * sgain[i] * inner;
             }
+
+            return RoundQ24(sum);
+        }
+
+        void Rebuild(int[] target, int size, int scaleQ8)
+        {
+            Array.Clear(target);
+            Span<(int Cell, int Delta)> xs = stackalloc (int, int)[8];
+            Span<(int Cell, int Delta)> ys = stackalloc (int, int)[8];
+            for (var cy = 0; cy < size; cy++)
+            for (var cx = 0; cx < size; cx++)
+                target[cy * size + cx] += CellValue(cx, cy, scaleQ8, xs, ys);
         }
 
         bool Compare(byte grid, int size, int scaleQ8, int[] oracle)
@@ -767,7 +838,11 @@ internal static class Verification
             {
                 Gi.World.QueryRegion(w, grid, l, 0, 0, size, size, p);
                 for (var i = 0; i < oracle.Length; i++)
-                    if (p[i] != (short)Math.Clamp(oracle[i], short.MinValue, short.MaxValue)) return false;
+                    if (p[i] != (short)Math.Clamp(oracle[i], short.MinValue, short.MaxValue))
+                    {
+                        Console.WriteLine($"  first diff grid{size} ({i % size},{i / size}): engine {p[i]} oracle {oracle[i]}");
+                        return false;
+                    }
             }
 
             return true;

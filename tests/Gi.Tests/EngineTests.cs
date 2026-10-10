@@ -678,7 +678,7 @@ public sealed class EngineTests
             dense[y * 32 + x] = ((y * 19 + x * 31) % 17 - 8) * 70000;
         }
 
-        Assert.True(TileBake.Resolve(difference, dense, previous, output, &pageSum, &pageMax));
+        Assert.True(TileBake.Resolve(difference, dense, previous, null, output, &pageSum, &pageMax));
         var expectedSum = 0L;
         var expectedMax = short.MinValue;
         for (var y = 0; y < 32; y++)
@@ -701,7 +701,7 @@ public sealed class EngineTests
         new Span<int>(difference, TileBake.DiffRows * TileBake.DiffPitch).Clear();
         new Span<int>(dense, 32 * 32).Clear();
         new Span<int>(previous, 32).Clear();
-        Assert.False(TileBake.Resolve(difference, dense, previous, output, &pageSum, &pageMax));
+        Assert.False(TileBake.Resolve(difference, dense, previous, null, output, &pageSum, &pageMax));
         for (var i = 0; i < 32 * 32; i++) Assert.Equal(0, output[i]);
         Assert.Equal(0L, pageSum);
         Assert.Equal((short)0, pageMax);
@@ -1147,36 +1147,103 @@ public sealed class EngineTests
         Assert.Equal(0, World.ChangedTiles(w, g, l, null));
     }
 
-    private static int RoundQ16Tent(int value)
-        => value < 0 ? -((-value + 32768) >> 16) : (value + 32768) >> 16;
+    private static int RoundQ24Tent(long value)
+        => (int)((value + 8388608 + (value >> 63)) >> 24);
 
-    private static int TentAxisWeight(int cell, int peak, int half)
+    private readonly record struct TentAxisGeometry(int First, int Peak, int Last, int Up, int Down, int Tail);
+
+    private static TentAxisGeometry TentAxis(int origin, int phase, int extent)
     {
-        var distance = cell * 256 - peak;
-        if (distance < 0) distance = -distance;
-        return distance >= half ? 0 : 256 - 256 * distance / half;
+        var half = Math.Max(1, extent >> 1);
+        var peak = (origin << 8) + phase + (extent >> 1);
+        var first = ((peak - half) >> 8) + 1;
+        var last = (peak + half - 1) >> 8;
+        var peakCell = peak >> 8;
+        if (last < first)
+        {
+            first = peakCell;
+            last = peakCell;
+        }
+
+        if (peakCell < first) peakCell = first;
+        if (peakCell > last) peakCell = last;
+        var rise = peakCell - first + 1;
+        var fall = last + 1 - peakCell;
+        var up = 65536 / rise;
+        var down = up * rise / fall;
+        var tail = up * rise - down * (fall - 1);
+        return new TentAxisGeometry(first, peakCell, last, up, down, tail);
     }
 
-    private static void AccumulateTent(int[] field, int size, int px, int py, int fx, int fy,
+    private static int TentAxisWeight(int cell, in TentAxisGeometry g)
+    {
+        if (cell < g.First || cell > g.Last) return 0;
+        if (cell <= g.Peak) return g.Up * (cell - g.First + 1);
+        return g.Up * (g.Peak - g.First + 1) - g.Down * (cell - g.Peak);
+    }
+
+    private static int TentAxisSlope(int cell, in TentAxisGeometry g)
+    {
+        if (cell < g.First || cell > g.Last + 1) return 0;
+        if (cell <= g.Peak) return g.Up;
+        return cell <= g.Last ? -g.Down : -g.Tail;
+    }
+
+    private static long TentCellValue(int cx, int cy, in TentAxisGeometry gx, in TentAxisGeometry gy)
+    {
+        Span<(int Cell, int Delta)> xs = stackalloc (int, int)[8];
+        Span<(int Cell, int Delta)> ys = stackalloc (int, int)[8];
+        var tx = cx & ~31;
+        var ty = cy & ~31;
+        var liveX = 0;
+        xs[liveX++] = (0, TentAxisWeight(tx, gx));
+        var entryX = TentAxisSlope(tx + 1, gx) - TentAxisWeight(tx, gx);
+        if (entryX != 0) xs[liveX++] = (1, entryX);
+        for (var c = tx + 2; c <= Math.Min(gx.Last + 2, tx + 31); c++)
+        {
+            var change = TentAxisSlope(c, gx) - TentAxisSlope(c - 1, gx);
+            if (change != 0) xs[liveX++] = (c - tx, change);
+        }
+
+        var liveY = 0;
+        ys[liveY++] = (0, TentAxisWeight(ty, gy));
+        var entryY = TentAxisSlope(ty + 1, gy) - TentAxisWeight(ty, gy);
+        if (entryY != 0) ys[liveY++] = (1, entryY);
+        for (var c = ty + 2; c <= Math.Min(gy.Last + 2, ty + 31); c++)
+        {
+            var change = TentAxisSlope(c, gy) - TentAxisSlope(c - 1, gy);
+            if (change != 0) ys[liveY++] = (c - ty, change);
+        }
+
+        var lx = cx - tx;
+        var ly = cy - ty;
+        var sum = 0L;
+        for (var y = 0; y < liveY; y++)
+        {
+            if (ys[y].Cell > ly) continue;
+            var countY = ly - ys[y].Cell + 1;
+            for (var x = 0; x < liveX; x++)
+            {
+                if (xs[x].Cell > lx) continue;
+                sum += (long)xs[x].Delta * ys[y].Delta * (lx - xs[x].Cell + 1) * countY;
+            }
+        }
+
+        return sum;
+    }
+
+    private static void AccumulateTent(long[] field, int size, int px, int py, int fx, int fy,
         int width, int height, int constant, int gain)
     {
-        var extentX = width * 256;
-        var extentY = height * 256;
-        var peakX = (px << 8) + fx + (extentX >> 1);
-        var peakY = (py << 8) + fy + (extentY >> 1);
-        var halfX = Math.Max(1, extentX >> 1);
-        var halfY = Math.Max(1, extentY >> 1);
-        for (var cy = (peakY - halfY) >> 8; cy <= ((peakY + halfY) >> 8) + 1; cy++)
-        for (var cx = (peakX - halfX) >> 8; cx <= ((peakX + halfX) >> 8) + 1; cx++)
-        {
-            var wy = TentAxisWeight(cy, peakY, halfY);
-            var wx = TentAxisWeight(cx, peakX, halfX);
-            if (wx <= 0 || wy <= 0) continue;
-            var value = RoundQ16Tent(constant * wx * wy) * gain;
-            if (value == 0) continue;
-            if ((uint)cx >= (uint)size || (uint)cy >= (uint)size) continue;
-            field[cy * size + cx] += value;
-        }
+        var gx = TentAxis(px, fx, width * 256);
+        var gy = TentAxis(py, fy, height * 256);
+        var x0 = Math.Max((gx.First - 1) & ~31, 0);
+        var x1 = Math.Min((gx.Last + 1) | 31, size - 1);
+        var y0 = Math.Max((gy.First - 1) & ~31, 0);
+        var y1 = Math.Min((gy.Last + 1) | 31, size - 1);
+        for (var cy = y0; cy <= y1; cy++)
+        for (var cx = x0; cx <= x1; cx++)
+            field[cy * size + cx] += (long)constant * gain * TentCellValue(cx, cy, gx, gy);
     }
 
     private static (int px, int py, int fx, int fy) TentLead(float wx, float wy, int width, int height)
@@ -1187,7 +1254,7 @@ public sealed class EngineTests
     }
 
     [Fact]
-    public unsafe void TentDeposits_MatchBandOracle()
+    public unsafe void TentDeposits_MatchImpulseOracle()
     {
         var w = World.New();
         var g = Grid.New(w, 8, 0f, 0f, 256f);
@@ -1203,15 +1270,18 @@ public sealed class EngineTests
         var slive = new bool[count];
 
         var field = new int[256 * 256];
+        var tentField = new long[256 * 256];
         void RebuildOracle(int[] target)
         {
-            Array.Clear(target);
+            Array.Clear(tentField);
             for (var i = 0; i < count; i++)
             {
                 if (!slive[i]) continue;
                 var lead = TentLead(sx[i], sy[i], ssize[i], ssize[i]);
-                AccumulateTent(target, 256, lead.px, lead.py, lead.fx, lead.fy, ssize[i], ssize[i], 40, sgain[i]);
+                AccumulateTent(tentField, 256, lead.px, lead.py, lead.fx, lead.fy, ssize[i], ssize[i], 40, sgain[i]);
             }
+
+            for (var i = 0; i < target.Length; i++) target[i] = RoundQ24Tent(tentField[i]);
         }
 
         for (var i = 0; i < count; i++)

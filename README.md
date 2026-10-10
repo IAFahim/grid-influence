@@ -214,7 +214,7 @@ bash tools/stats/perf.sh stat --iterations 12000
 | `gradient-matches-central-differences` | `QueryGradient` equals the ±1-cell `Query` differences on two grids |
 | `changed-tiles-match-drain` | the changed-tile feed equals the window's exact tile footprints |
 | `deferred-window-matches-stepped-processing` | batched mutations are bit-identical to per-mutation `Process`; place+remove windows deposit nothing |
-| `tent-matches-band-oracle` | tent kernels match a per-cell band oracle on two grid scales |
+| `tent-matches-impulse-oracle` | tent kernels match a per-cell second-order-impulse oracle on two grid scales |
 | `saturated-sum-clamps` | saturation sticks at ±32767 after summation |
 | `cross-grid-sums-conserve-world-integral` | the same sources summed over four grid scales conserve the world integral exactly |
 

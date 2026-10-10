@@ -25,6 +25,8 @@ internal struct Snapshot
     public long DifferenceBytes;
     public long DenseBytes;
     public long DensePointerBytes;
+    public long TentBytes;
+    public long TentTiles;
     public long PageBytes;
     public long PageSumBytes;
     public long PyramidBytes;
@@ -36,7 +38,7 @@ internal struct Snapshot
 
     public readonly long WorldBytes => GridBytes + LayerBytes + SourceBytes + ScratchBytes +
         DirtyFlagBytes + DirtyQueueBytes + MapBytes + DifferenceBytes + DenseBytes + DensePointerBytes +
-        PageBytes + PageSumBytes + PyramidBytes + DepositQueueBytes;
+        TentBytes + PageBytes + PageSumBytes + PyramidBytes + DepositQueueBytes;
 
     public readonly long SharedBytes => WorldArenaBytes + StampArenaBytes + StampRasterBytes;
 
@@ -95,9 +97,17 @@ internal static unsafe class Inspection
                 for (var slot = 0; slot < ld->Pages.SlotCount; slot++)
                 {
                     if (used[slot] != PageMap.Live) continue;
-                    if (*(byte**)(blocks[slot] + World.DensePtrOffset) == null) continue;
-                    result.RasterTiles++;
-                    result.DenseBytes += World.DenseBytes;
+                    if (*(byte**)(blocks[slot] + World.DensePtrOffset) != null)
+                    {
+                        result.RasterTiles++;
+                        result.DenseBytes += World.DenseBytes;
+                    }
+
+                    if (*(byte**)(blocks[slot] + World.TentPtrOffset) != null)
+                    {
+                        result.TentTiles++;
+                        result.TentBytes += World.TentBytes;
+                    }
                 }
             }
         }

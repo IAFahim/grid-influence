@@ -277,7 +277,7 @@ internal static unsafe class ResolvePool
                 if (!pages->TryGet(tile, out var block)) continue;
 
                 new Span<int>(prev, TileBake.TileSize).Clear();
-                if (!TileBake.Resolve((int*)block, World.DenseOf(block), prev,
+                if (!TileBake.Resolve((int*)block, World.DenseOf(block), prev, World.TentOf(block),
                     (short*)(block + World.PageOffset), (long*)(block + World.SumOffset), (short*)(block + World.MaxOffset)))
                     _dead.Pointer[Interlocked.Increment(ref _deadCount) - 1] = i;
             }
