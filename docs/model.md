@@ -36,15 +36,24 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   finer grids upsample bilinearly at mip level 0, coarser grids select
   `floor(log2(1/scale))` mip levels and step sample coordinates in Q16.16, so minified deposits
   are box-filtered rather than aliased.
-- **Deposits are incremental**: each live tile owns a 6,528 B block — a 33×33 `int32` difference
-  array padded to 4,384 B, a 32×32 `int16` page, an `int64` page sum, and an `int16` page max in
-  the padded 64 B sum slot. Raster stamps also need the tile's 32×32 `int32` dense buffer: blocks
-  touched by a raster deposit allocate it once (block grows to 10,624 B, dense pinned at the block
-  tail) and box-only tiles never carry it — resolve reads a shared zero page instead. `Place`
-  deposits the stamp's contribution into every touched tile immediately;
-  `Move`/`Remove` deposit the exact negation at the stored position and `SetGain` the gain delta
-  (integer adds invert perfectly — no rebuild, no source scan).
-- **Process** drains the per-(grid,layer) dirty lists: each dirty tile resolves its difference
+- **Deposits are incremental and deferred**: each live tile owns a 6,528 B block — a 33×33
+  `int32` difference array padded to 4,384 B, a 32×32 `int16` page, an `int64` page sum, and an
+  `int16` page max in the padded 64 B sum slot. Raster stamps also need the tile's 32×32
+  `int32` dense buffer: blocks touched by a raster deposit allocate it once (block grows to
+  10,624 B, dense pinned at the block tail) and box-only tiles never carry it — resolve reads a
+  shared zero page instead. Mutations do not touch tiles: `Place`/`Move`/`SetGain`/`Remove`
+  update the source columns and merge into a per-world op queue — one op per slot per window,
+  carrying the state applied by the previous `Process` (retraction) and the latest state
+  (application). `Process` applies the queue first — the retraction negated at its stored
+  position, the application at the current one — and both emit paths are per-cell linear in
+  gain (`RoundQ16(base) · gain`), so difference-array contributions are plain integer adds:
+  any mutation sequence on a slot collapses exactly to one retract-and-apply pair, bit-identical
+  to stepping the same sequence through a `Process` per mutation. A slot placed and removed in
+  one window deposits nothing at all — no tiles are marked, no blocks exist. The queue and its
+  per-slot pending indexes live in unmanaged storage, reset every `Process`, and their capacity
+  is retained across windows (0 B warm).
+- **Process** applies the deferred op queue, then drains the per-(grid,layer) dirty lists: each
+  dirty tile resolves its difference
   array through a 2D prefix sum (horizontal inclusive prefix + previous-row carry), adds dense,
   saturates to `short` **after** summation so cancellation is preserved, and writes the page's
   cell total into its `int64` sum slot and the page's maximum cell into its `int16` max slot
@@ -121,9 +130,9 @@ byte layer = Layer.New(world);
 byte stamp = Stamp.New(samples, 16, 16);   // or Stamp.Box(8, 8, 100)
 
 int source = World.Place(world, layer, x: 128.5f, y: 64f, stamp, gain: 8);
-World.Move(world, source, 129f, 64f);      // relocates — negates old, deposits new
+World.Move(world, source, 129f, 64f);      // relocates — queued, applied at Process
 World.SetGain(world, source, 4);           // adjusts weight in place
-World.Process(world);                      // resolves dirty tiles once
+World.Process(world);                      // applies queued ops, resolves dirty tiles
 
 short v = World.Query(world, grid, layer, 64, 32);      // cell read
 long  t = World.Query(world, grid, layer, 0, 0, 32, 32); // region sum
@@ -165,6 +174,10 @@ world rect at its own cell density; a source deposits into every grid it overlap
   equals the tile footprints of that window's place/move/remove operations exactly (count,
   membership, no duplicates), stays layer-isolated, empties on idle `Process` and `Clear`, and
   includes tiles that resolved to zero and left the map.
+- `deferred-window-matches-stepped-processing` — three worlds of 90 mixed mutations applied
+  with one `Process` at the end produce bit-identical pages to the same sequences stepped
+  through a `Process` per mutation; and a place-200 + remove-200 window collapses to an empty
+  field with zero tiles, zero pages, and an empty changed list.
 - `source-slots-reuse-and-stale-handles-inert` — 2000 place/remove pairs keep slots bounded,
   the recycled id differs from the stale one, and stale `Move`/`SetGain`/`Remove` leave the
   field bit-identical.
@@ -180,7 +193,8 @@ world rect at its own cell density; a source deposits into every grid it overlap
   bit-identical output to Gi before and after churn; the same command then times both.
 
 `--timing` adds min-over-20-rep lines for unchanged, incremental, move-200 churn, place-200
-churn, full-grid sum, a 1022² partial-region sum, the best-cell query against a one-million-call
+churn, a place+remove-200 collapse window (5.7 µs — the mutations apply no deposits), full-grid
+sum, a 1022² partial-region sum, the best-cell query against a one-million-call
 naive scan (0.1 µs vs ~5,600 µs on a 1024² layer), the gradient query (~5 ns per point), a
 16-layer × 25-dirty move-400 process, and
 256² region reads (4000 sources, 1024² grid). Timing receipts live in
@@ -216,7 +230,10 @@ pass behind them was `perf`-profile guided, receipts first.
   `Stamp.Box`) — never by static construction, so no static constructor on the assembly performs
   calls and Burst can compile `Query`/`QueryRegion` call graphs; world contents are
   `NativeHeap` blocks owned by the context (grid array, `LayerData` array,
-  `InDirty`/`Dirty`/`Changed` per layer, `Prev` scratch, `SourceColumns` buffers — positions, stamp,
+  `InDirty`/`Dirty`/`Changed` per layer, `Prev` scratch, the deferred op queue and its per-slot
+  pending index column — appended by mutation, reset by every `Process`, with the pending tail
+  zeroed at column growth so fresh slots read "no op" and the whole column wiped by `Clear` —
+  and `SourceColumns` buffers — positions, stamp,
   layer, gain, liveness, the free-slot chain, and the generation bytes — and, per (grid, layer),
   the max pyramid: a flat `int16` slot array plus per-level offset and side tables, allocated
   zeroed by the layer's first resolved tile and freed only by `World.Clear`) or by a `PageMap`
@@ -276,7 +293,12 @@ pass behind them was `perf`-profile guided, receipts first.
   every access in that build is a naturally aligned scalar load or store, so the weaker
   alignment guarantee cannot be observed.
 - **Concurrency**: `Place`/`Move`/`SetGain`/`Remove`/`Process` are serial per world; different
-  worlds may run on different threads. `Process` fans the whole world drain out when its grids
+  worlds may run on different threads. Mutations only append to or merge within the owning
+  world's op queue — a merge targets the one op its slot's pending index names, an index that
+  only `ApplyDeposits` clears — and `Process` drains that queue on the owning thread before
+  any resolve runs, so deposits (including dense attach and growth, republished through the
+  page map before any later resolve can observe them) stay on one thread per world.
+  `Process` fans the whole world drain out when its grids
   and layers hold at least 32 dirty tiles in total:
   a fixed pool of `min(cores−1, 4)` background workers, created once and parked
   between calls. Pool ownership is a compare-and-swap flag; a second world whose `Process`
@@ -327,7 +349,8 @@ source liveness and grid/layer metadata, walks live page-map slots to count rast
 buffers, and returns a pointer-free value snapshot. Its cost
 is O(source slots + grids × layers + map slots + catalog stamps); it does not scan cells.
 Memory includes allocated capacity, retained source/dirty buffers after `Clear`, every live tile
-block plus its dense buffer where one exists, the per-(grid, layer) max pyramids, and shared
+block plus its dense buffer where one exists, the per-(grid, layer) max pyramids, the deferred
+op queue plus its pending column, and shared
 world/stamp arenas plus padded rasters. The selected world and
 process-wide shared allocations are reported separately; allocator metadata, alignment slack,
 other worlds, and the runtime are excluded from native totals. GC heap and process memory are

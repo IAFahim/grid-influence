@@ -41,12 +41,29 @@ internal unsafe struct GridCtx
     public LayerData* Layers;
 }
 
+internal struct DepositOp
+{
+    public int Slot;
+    public float FromX;
+    public float FromY;
+    public float ToX;
+    public float ToY;
+    public byte FromStamp;
+    public byte FromLayer;
+    public byte ToStamp;
+    public byte ToLayer;
+    public sbyte FromGain;
+    public sbyte ToGain;
+}
+
 internal unsafe struct WorldCtx
 {
     public GridCtx* Grids;
     public int GridCount;
     public int LayerCount;
     public SourceColumns Sources;
+    public NativeBuffer<DepositOp> Ops;
+    public NativeBuffer<int> Pending;
     public int* Prev;
     public int FreeHead;
 }
@@ -136,7 +153,7 @@ public static unsafe class World
         else
         {
             if (s->Count >= MaxSourceSlots) return -1;
-            if (s->Count == s->X.Length) GrowSources(s);
+            if (s->Count == s->X.Length) GrowSources(s, w);
             i = s->Count++;
         }
 
@@ -149,7 +166,7 @@ public static unsafe class World
         s->Layer.Pointer[i] = layer;
         s->Gain.Pointer[i] = g;
         s->Alive.Pointer[i] = 1;
-        Deposit(w, x, y, stamp, layer, (sbyte)g);
+        EnqueuePlace(w, i, x, y, stamp, layer, (sbyte)g);
         return (gen << 24) | i;
     }
 
@@ -157,16 +174,13 @@ public static unsafe class World
     {
         if (!TrySource(world, source, out var w, out var s, out var i)) return;
 
-        var stamp = s->Stamp.Pointer[i];
-        var layer = s->Layer.Pointer[i];
-        var gain = (sbyte)s->Gain.Pointer[i];
         var oldX = s->X.Pointer[i];
         var oldY = s->Y.Pointer[i];
         if (oldX == x && oldY == y) return;
+        var gain = (sbyte)s->Gain.Pointer[i];
+        EnqueueMutation(w, s, i, x, y, gain);
         s->X.Pointer[i] = x;
         s->Y.Pointer[i] = y;
-        Deposit(w, oldX, oldY, stamp, layer, -gain);
-        Deposit(w, x, y, stamp, layer, gain);
     }
 
     public static void SetGain(byte world, int source, int gain)
@@ -177,20 +191,99 @@ public static unsafe class World
         var current = s->Gain.Pointer[i];
         if (next == current) return;
 
+        EnqueueMutation(w, s, i, s->X.Pointer[i], s->Y.Pointer[i], (sbyte)next);
         s->Gain.Pointer[i] = next;
-        Deposit(w, s->X.Pointer[i], s->Y.Pointer[i],
-            s->Stamp.Pointer[i], s->Layer.Pointer[i], (sbyte)next - (sbyte)current);
     }
 
     public static void Remove(byte world, int source)
     {
         if (!TrySource(world, source, out var w, out var s, out var i)) return;
 
-        Deposit(w, s->X.Pointer[i], s->Y.Pointer[i],
-            s->Stamp.Pointer[i], s->Layer.Pointer[i], -(sbyte)s->Gain.Pointer[i]);
+        EnqueueMutation(w, s, i, s->X.Pointer[i], s->Y.Pointer[i], 0);
         s->Alive.Pointer[i] = 0;
         s->Free.Pointer[i] = w->FreeHead;
         w->FreeHead = i;
+    }
+
+    private static void EnqueuePlace(WorldCtx* w, int slot, float x, float y, byte stamp, byte layer, sbyte gain)
+    {
+        var pending = w->Pending.Pointer[slot];
+        if (pending != 0)
+        {
+            var op = w->Ops.Pointer + pending - 1;
+            op->ToX = x;
+            op->ToY = y;
+            op->ToStamp = stamp;
+            op->ToLayer = layer;
+            op->ToGain = gain;
+            return;
+        }
+
+        var n = w->Ops.Length;
+        w->Ops.Resize(n + 1);
+        var fresh = w->Ops.Pointer + n;
+        fresh->Slot = slot;
+        fresh->FromGain = 0;
+        fresh->FromX = x;
+        fresh->FromY = y;
+        fresh->FromStamp = stamp;
+        fresh->FromLayer = layer;
+        fresh->ToX = x;
+        fresh->ToY = y;
+        fresh->ToStamp = stamp;
+        fresh->ToLayer = layer;
+        fresh->ToGain = gain;
+        w->Pending.Pointer[slot] = n + 1;
+    }
+
+    private static void EnqueueMutation(WorldCtx* w, SourceColumns* s, int slot, float x, float y, sbyte gain)
+    {
+        var pending = w->Pending.Pointer[slot];
+        if (pending != 0)
+        {
+            var op = w->Ops.Pointer + pending - 1;
+            op->ToX = x;
+            op->ToY = y;
+            op->ToGain = gain;
+            return;
+        }
+
+        var stamp = s->Stamp.Pointer[slot];
+        var layer = s->Layer.Pointer[slot];
+        var n = w->Ops.Length;
+        w->Ops.Resize(n + 1);
+        var op2 = w->Ops.Pointer + n;
+        op2->Slot = slot;
+        op2->FromX = s->X.Pointer[slot];
+        op2->FromY = s->Y.Pointer[slot];
+        op2->FromStamp = stamp;
+        op2->FromLayer = layer;
+        op2->FromGain = (sbyte)s->Gain.Pointer[slot];
+        op2->ToX = x;
+        op2->ToY = y;
+        op2->ToStamp = stamp;
+        op2->ToLayer = layer;
+        op2->ToGain = gain;
+        w->Pending.Pointer[slot] = n + 1;
+    }
+
+    private static void ApplyDeposits(WorldCtx* w)
+    {
+        var count = w->Ops.Length;
+        if (count == 0) return;
+
+        var ops = w->Ops.Pointer;
+        for (var i = 0; i < count; i++)
+        {
+            var op = ops + i;
+            w->Pending.Pointer[op->Slot] = 0;
+            if (op->FromGain != 0)
+                Deposit(w, op->FromX, op->FromY, op->FromStamp, op->FromLayer, -op->FromGain);
+            if (op->ToGain != 0)
+                Deposit(w, op->ToX, op->ToY, op->ToStamp, op->ToLayer, op->ToGain);
+        }
+
+        w->Ops.Resize(0);
     }
 
     public static void Clear(byte world)
@@ -201,6 +294,8 @@ public static unsafe class World
         new Span<byte>(s->Alive.Pointer, s->Count).Clear();
         s->Count = 0;
         w->FreeHead = -1;
+        w->Ops.Resize(0);
+        new Span<int>(w->Pending.Pointer, w->Pending.Capacity).Clear();
 
         for (var gi = 0; gi < w->GridCount; gi++)
         {
@@ -355,6 +450,8 @@ public static unsafe class World
         var w = GetContext(world);
         if (w == null) return;
 
+        ApplyDeposits(w);
+
         var total = 0;
         for (var gi = 0; gi < w->GridCount; gi++)
         {
@@ -413,7 +510,7 @@ public static unsafe class World
         }
     }
 
-    private static void GrowSources(SourceColumns* s)
+    private static void GrowSources(SourceColumns* s, WorldCtx* w)
     {
         var capacity = Math.Max(64, s->X.Length * 2);
         var live = s->Count;
@@ -425,7 +522,9 @@ public static unsafe class World
         s->Alive.Resize(capacity);
         s->Free.Resize(capacity);
         s->Gen.Resize(capacity);
+        w->Pending.Resize(capacity);
         new Span<byte>(s->Gen.Pointer + live, capacity - live).Clear();
+        new Span<int>(w->Pending.Pointer + live, capacity - live).Clear();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
