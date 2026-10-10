@@ -129,6 +129,78 @@ internal static unsafe class TileBake
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
+    internal static void EmitTent(
+        int* difference, int tileX0, int tileY0,
+        int px, int py, int fx, int fy, int extentX, int extentY, StampVariant* v, int gain)
+    {
+        if (gain == 0) return;
+
+        var tx1 = tileX0 + TileSize;
+        var ty1 = tileY0 + TileSize;
+
+        var bxLo = stackalloc int[MaxTentBands];
+        var bxHi = stackalloc int[MaxTentBands];
+        var bxWeight = stackalloc int[MaxTentBands];
+        var liveX = TentBands(px, fx, extentX, tileX0, tx1, bxLo, bxHi, bxWeight);
+
+        var byLo = stackalloc int[MaxTentBands];
+        var byHi = stackalloc int[MaxTentBands];
+        var byWeight = stackalloc int[MaxTentBands];
+        var liveY = TentBands(py, fy, extentY, tileY0, ty1, byLo, byHi, byWeight);
+
+        var constant = v->Constant;
+        for (var y = 0; y < liveY; y++)
+        {
+            var rowTop = byLo[y] * DiffPitch;
+            var rowBottom = byHi[y] * DiffPitch;
+            var wy = byWeight[y];
+            for (var x = 0; x < liveX; x++)
+            {
+                var value = RoundQ16(constant * bxWeight[x] * wy) * gain;
+                if (value == 0) continue;
+
+                var lx0 = bxLo[x];
+                var lx1 = bxHi[x];
+                difference[rowTop + lx0] += value;
+                difference[rowTop + lx1] -= value;
+                difference[rowBottom + lx0] -= value;
+                difference[rowBottom + lx1] += value;
+            }
+        }
+    }
+
+    private const int MaxTentBands = TileSize;
+
+    private static int TentBands(
+        int origin, int phase, int extent, int tileLo, int tileHi,
+        int* bandLo, int* bandHi, int* bandWeight)
+    {
+        var half = Math.Max(1, extent >> 1);
+        var peak = (origin << 8) + phase + (extent >> 1);
+        var first = (peak - half) >> 8;
+        var last = ((peak + half) >> 8) + 1;
+        var live = 0;
+        for (var c = Math.Max(first, tileLo); c <= Math.Min(last, tileHi - 1); c++)
+        {
+            var distance = c * 256 - peak;
+            if (distance < 0) distance = -distance;
+            if (distance >= half) continue;
+
+            var weight = 256 - 256 * distance / half;
+            if (weight <= 0) continue;
+
+            bandLo[live] = c - tileLo;
+            bandHi[live] = c - tileLo + 1;
+            bandWeight[live] = weight;
+            live++;
+        }
+
+        return live;
+    }
+
+    #if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    #endif
     internal static void EmitRaster(
         int* dense, int tileX0, int tileY0,
         int px, int py, int fx, int fy, int x1, int y1, int scaleQ8,

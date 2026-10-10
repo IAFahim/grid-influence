@@ -1147,6 +1147,128 @@ public sealed class EngineTests
         Assert.Equal(0, World.ChangedTiles(w, g, l, null));
     }
 
+    private static int RoundQ16Tent(int value)
+        => value < 0 ? -((-value + 32768) >> 16) : (value + 32768) >> 16;
+
+    private static int TentAxisWeight(int cell, int peak, int half)
+    {
+        var distance = cell * 256 - peak;
+        if (distance < 0) distance = -distance;
+        return distance >= half ? 0 : 256 - 256 * distance / half;
+    }
+
+    private static void AccumulateTent(int[] field, int size, int px, int py, int fx, int fy,
+        int width, int height, int constant, int gain)
+    {
+        var extentX = width * 256;
+        var extentY = height * 256;
+        var peakX = (px << 8) + fx + (extentX >> 1);
+        var peakY = (py << 8) + fy + (extentY >> 1);
+        var halfX = Math.Max(1, extentX >> 1);
+        var halfY = Math.Max(1, extentY >> 1);
+        for (var cy = (peakY - halfY) >> 8; cy <= ((peakY + halfY) >> 8) + 1; cy++)
+        for (var cx = (peakX - halfX) >> 8; cx <= ((peakX + halfX) >> 8) + 1; cx++)
+        {
+            var wy = TentAxisWeight(cy, peakY, halfY);
+            var wx = TentAxisWeight(cx, peakX, halfX);
+            if (wx <= 0 || wy <= 0) continue;
+            var value = RoundQ16Tent(constant * wx * wy) * gain;
+            if (value == 0) continue;
+            if ((uint)cx >= (uint)size || (uint)cy >= (uint)size) continue;
+            field[cy * size + cx] += value;
+        }
+    }
+
+    private static (int px, int py, int fx, int fy) TentLead(float wx, float wy, int width, int height)
+    {
+        var leadX = (long)(int)MathF.Floor(wx * 256f) + ((long)-(width * 128) * 256 >> 8);
+        var leadY = (long)(int)MathF.Floor(wy * 256f) + ((long)-(height * 128) * 256 >> 8);
+        return ((int)(leadX >> 8), (int)(leadY >> 8), (int)(leadX & 255), (int)(leadY & 255));
+    }
+
+    [Fact]
+    public unsafe void TentDeposits_MatchBandOracle()
+    {
+        var w = World.New();
+        var g = Grid.New(w, 8, 0f, 0f, 256f);
+        var l = Layer.New(w);
+        var rng = new Random(83);
+        var widths = new[] { 1, 2, 3, 5, 8, 13, 24 };
+        const int count = 80;
+        var ids = new int[count];
+        var sx = new float[count];
+        var sy = new float[count];
+        var ssize = new int[count];
+        var sgain = new int[count];
+        var slive = new bool[count];
+
+        var field = new int[256 * 256];
+        void RebuildOracle(int[] target)
+        {
+            Array.Clear(target);
+            for (var i = 0; i < count; i++)
+            {
+                if (!slive[i]) continue;
+                var lead = TentLead(sx[i], sy[i], ssize[i], ssize[i]);
+                AccumulateTent(target, 256, lead.px, lead.py, lead.fx, lead.fy, ssize[i], ssize[i], 40, sgain[i]);
+            }
+        }
+
+        for (var i = 0; i < count; i++)
+        {
+            ssize[i] = widths[rng.Next(widths.Length)];
+            sx[i] = (float)(rng.NextDouble() * 250 + 3);
+            sy[i] = (float)(rng.NextDouble() * 250 + 3);
+            sgain[i] = rng.Next(-8, 13);
+            ids[i] = World.Place(w, l, sx[i], sy[i], Stamp.Tent(ssize[i], ssize[i], 40), sgain[i]);
+            slive[i] = true;
+        }
+
+        RebuildOracle(field);
+        World.Process(w);
+        var scan = new short[256 * 256];
+        fixed (short* p = scan)
+        {
+            World.QueryRegion(w, g, l, 0, 0, 256, 256, p);
+            for (var i = 0; i < field.Length; i++)
+                Assert.Equal((short)Math.Clamp(field[i], short.MinValue, short.MaxValue), p[i]);
+        }
+
+        for (var round = 0; round < 3; round++)
+        {
+            for (var i = round; i < count; i += 3)
+            {
+                if (rng.Next(3) == 0)
+                {
+                    World.Remove(w, ids[i]);
+                    slive[i] = false;
+                    continue;
+                }
+
+                sx[i] = (float)(rng.NextDouble() * 250 + 3);
+                sy[i] = (float)(rng.NextDouble() * 250 + 3);
+                World.Move(w, ids[i], sx[i], sy[i]);
+                if (rng.Next(4) == 0)
+                {
+                    sgain[i] = rng.Next(-8, 13);
+                    World.SetGain(w, ids[i], sgain[i]);
+                }
+            }
+
+            World.Process(w);
+            RebuildOracle(field);
+            fixed (short* p = scan)
+            {
+                World.QueryRegion(w, g, l, 0, 0, 256, 256, p);
+                for (var i = 0; i < field.Length; i++)
+                    Assert.Equal((short)Math.Clamp(field[i], short.MinValue, short.MaxValue), p[i]);
+            }
+        }
+
+        Assert.Equal((short)Math.Clamp(field.Max(), short.MinValue, short.MaxValue), World.QueryMax(w, g, l, out var mx, out var my));
+        Assert.Equal(World.Query(w, g, l, mx, my), World.QueryMax(w, g, l, out _, out _));
+    }
+
     [Fact]
     public unsafe void ChangedTiles_ReportLastProcessDrain()
     {

@@ -8,10 +8,18 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   (`Grid.New(world, power, x, y, size)`, up to 32 per world) is a power-of-two cell grid,
   `2^power` cells per side (power 5–14), laid over a world-space rect `x,y,size`. A layer
   (`Layer.New(world)`, up to 32 per world) is an independent field channel present on every grid.
-- **Stamps** (`Stamp.New(sbyte* data, w, h)` / `Stamp.Box(w, h, value)`, up to 255) are baked
+- **Stamps** (`Stamp.New(sbyte* data, w, h)` / `Stamp.Box(w, h, value)` / `Stamp.Tent(w, h, value)`,
+  up to 255) are baked
   cell-space content: `w×h` `sbyte` samples, centered on the placement position (origin offset
   `−w/2` cells in Q8). Uniform rasters classify as `ConstantRectangle` and take the
   difference-array path; the rest are `Raster` and deposit with sub-cell bilinear weights.
+  `Tent` is a smooth kernel: a linear falloff from the center to the support edge along each
+  axis (support `w×h` cells, exactly the box span), deposited through the same difference-array
+  corners as boxes — one band per covered cell, weight `256 − 256·d/half` where `d` is the
+  cell-edge Q8 distance from the peak, amplitude `RoundQ16(value · wx · wy) · gain` per band
+  pair. Sub-cell phases shift the peak smoothly between cells; the deposit is integer-exact
+  at every phase (band-oracle receipted), never touches a dense buffer, and moves/removes
+  negate the same bands exactly.
   Raster storage keeps a one-sample zero border (pitch `w+2`, `(w+2)×(h+2)`) so the deposit loop
   reads `x−1`/`y−pitch` unconditionally. Every raster stamp also bakes a mip chain: each level
   halves its predecessor with zero-padded 2×2 box averages (round-half-away-from-zero, divided by
@@ -127,7 +135,7 @@ add one `int64` page sum per live page, so large sparse grids do not visit every
 byte world = World.New();
 byte grid  = Grid.New(world, power: 8, x: 0f, y: 0f, size: 256f);   // 256×256 cells
 byte layer = Layer.New(world);
-byte stamp = Stamp.New(samples, 16, 16);   // or Stamp.Box(8, 8, 100)
+byte stamp = Stamp.New(samples, 16, 16);   // or Stamp.Box(8, 8, 100) / Stamp.Tent(12, 12, 90)
 
 int source = World.Place(world, layer, x: 128.5f, y: 64f, stamp, gain: 8);
 World.Move(world, source, 129f, 64f);      // relocates — queued, applied at Process
@@ -178,6 +186,9 @@ world rect at its own cell density; a source deposits into every grid it overlap
   with one `Process` at the end produce bit-identical pages to the same sequences stepped
   through a `Process` per mutation; and a place-200 + remove-200 window collapses to an empty
   field with zero tiles, zero pages, and an empty changed list.
+- `tent-matches-band-oracle` — 90 tent sources of eight support widths through three churn
+  rounds (place/move/remove, signed gains, sub-cell phases) match a per-cell band oracle
+  bit-exactly on two grids at scales 1 and 0.5.
 - `source-slots-reuse-and-stale-handles-inert` — 2000 place/remove pairs keep slots bounded,
   the recycled id differs from the stale one, and stale `Move`/`SetGain`/`Remove` leave the
   field bit-identical.
@@ -193,7 +204,8 @@ world rect at its own cell density; a source deposits into every grid it overlap
   bit-identical output to Gi before and after churn; the same command then times both.
 
 `--timing` adds min-over-20-rep lines for unchanged, incremental, move-200 churn, place-200
-churn, a place+remove-200 collapse window (5.7 µs — the mutations apply no deposits), full-grid
+churn, a place+remove-200 collapse window (5.7 µs — the mutations apply no deposits), tent-200
+churn (16×16 tents, difference-array path, no dense buffers), full-grid
 sum, a 1022² partial-region sum, the best-cell query against a one-million-call
 naive scan (0.1 µs vs ~5,600 µs on a 1024² layer), the gradient query (~5 ns per point), a
 16-layer × 25-dirty move-400 process, and

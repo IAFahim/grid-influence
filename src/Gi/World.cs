@@ -354,7 +354,7 @@ public static unsafe class World
             if (cx1 <= cx0 || cy1 <= cy0) continue;
 
             var ld = EnsureDirty(g, layer);
-            var raster = v->Kind != StampKind.ConstantRectangle;
+            var raster = v->Kind == StampKind.Raster;
             var tps = g->TilesPerSide;
             var tx0 = cx0 >> TileBake.TileBits;
             var tx1 = (cx1 - 1) >> TileBake.TileBits;
@@ -370,6 +370,8 @@ public static unsafe class World
                 var tileY0 = ty * TileBake.TileSize;
                 if (v->Kind == StampKind.ConstantRectangle)
                     TileBake.EmitBox((int*)block, tileX0, tileY0, px, py, fx, fy, extentX, extentY, v, gain);
+                else if (v->Kind == StampKind.Tent)
+                    TileBake.EmitTent((int*)block, tileX0, tileY0, px, py, fx, fy, extentX, extentY, v, gain);
                 else
                 {
                     var dense = *(byte**)(block + DensePtrOffset);

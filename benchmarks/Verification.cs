@@ -24,6 +24,7 @@ internal static class Verification
         Check("gradient-matches-central-differences", GradientMatchesCentralDifferences());
         Check("changed-tiles-match-drain", ChangedTilesMatchDrain());
         Check("deferred-window-matches-stepped-processing", DeferredWindowMatchesSteppedProcessing());
+        Check("tent-matches-band-oracle", TentMatchesBandOracle());
         Check("source-slots-reuse-and-stale-handles-inert", SourceSlotsReuseAndStaleInert());
         Check("signed-gain-exact", SignedGainExact());
         Check("multi-layer-pooled-matches-scans", MultiLayerPooledMatchesScans());
@@ -706,6 +707,109 @@ internal static class Verification
             Gi.World.ChangedTiles(collapse, gc, lc, null) == 0;
     }
 
+    private static unsafe bool TentMatchesBandOracle()
+    {
+        var w = Gi.World.New();
+        var fine = Gi.Grid.New(w, 8, 0f, 0f, 256f);
+        var coarse = Gi.Grid.New(w, 7, 0f, 0f, 256f);
+        var l = Gi.Layer.New(w);
+        var rng = new Random(509);
+        var widths = new[] { 1, 2, 3, 5, 8, 13, 24, 40 };
+        var tents = new byte[widths.Length];
+        for (var i = 0; i < widths.Length; i++) tents[i] = Gi.Stamp.Tent(widths[i], widths[i], 40);
+        const int count = 90;
+        var ids = new int[count];
+        var sx = new float[count];
+        var sy = new float[count];
+        var ssize = new int[count];
+        var sgain = new int[count];
+        var slive = new bool[count];
+        var fineField = new int[256 * 256];
+        var coarseField = new int[128 * 128];
+
+        int TentWeight(int cell, int peak, int half)
+        {
+            var distance = cell * 256 - peak;
+            if (distance < 0) distance = -distance;
+            return distance >= half ? 0 : 256 - 256 * distance / half;
+        }
+
+        void Rebuild(int[] target, int size, int scaleQ8)
+        {
+            Array.Clear(target);
+            for (var i = 0; i < count; i++)
+            {
+                if (!slive[i]) continue;
+                var width = ssize[i];
+                var extent = width * scaleQ8;
+                var half = Math.Max(1, extent >> 1);
+                var leadX = (long)(int)MathF.Floor(sx[i] * scaleQ8) + ((long)-(width * 128) * scaleQ8 >> 8);
+                var leadY = (long)(int)MathF.Floor(sy[i] * scaleQ8) + ((long)-(width * 128) * scaleQ8 >> 8);
+                var peakX = (int)(leadX + (extent >> 1));
+                var peakY = (int)(leadY + (extent >> 1));
+                for (var cy = (peakY - half) >> 8; cy <= ((peakY + half) >> 8) + 1; cy++)
+                for (var cx = (peakX - half) >> 8; cx <= ((peakX + half) >> 8) + 1; cx++)
+                {
+                    var wy = TentWeight(cy, peakY, half);
+                    var wx = TentWeight(cx, peakX, half);
+                    if (wx <= 0 || wy <= 0) continue;
+                    var value = RoundQ16(40 * wx * wy) * sgain[i];
+                    if (value == 0 || (uint)cx >= (uint)size || (uint)cy >= (uint)size) continue;
+                    target[cy * size + cx] += value;
+                }
+            }
+        }
+
+        bool Compare(byte grid, int size, int scaleQ8, int[] oracle)
+        {
+            var scan = new short[size * size];
+            fixed (short* p = scan)
+            {
+                Gi.World.QueryRegion(w, grid, l, 0, 0, size, size, p);
+                for (var i = 0; i < oracle.Length; i++)
+                    if (p[i] != (short)Math.Clamp(oracle[i], short.MinValue, short.MaxValue)) return false;
+            }
+
+            return true;
+        }
+
+        for (var round = 0; round < 3; round++)
+        {
+            for (var i = 0; i < count; i++)
+            {
+                if (round > 0 && rng.Next(5) == 0)
+                {
+                    Gi.World.Remove(w, ids[i]);
+                    slive[i] = false;
+                }
+
+                if (!slive[i])
+                {
+                    var k = rng.Next(widths.Length);
+                    ssize[i] = widths[k];
+                    sx[i] = (float)(rng.NextDouble() * 248 + 4);
+                    sy[i] = (float)(rng.NextDouble() * 248 + 4);
+                    sgain[i] = rng.Next(-8, 15);
+                    ids[i] = Gi.World.Place(w, l, sx[i], sy[i], tents[k], sgain[i]);
+                    slive[i] = true;
+                }
+                else if (round > 0)
+                {
+                    sx[i] = (float)(rng.NextDouble() * 248 + 4);
+                    sy[i] = (float)(rng.NextDouble() * 248 + 4);
+                    Gi.World.Move(w, ids[i], sx[i], sy[i]);
+                }
+            }
+
+            Gi.World.Process(w);
+            Rebuild(fineField, 256, 256);
+            Rebuild(coarseField, 128, 128);
+            if (!Compare(fine, 256, 256, fineField) || !Compare(coarse, 128, 128, coarseField)) return false;
+        }
+
+        return true;
+    }
+
     private static bool SourceSlotsReuseAndStaleInert()
     {
         var w = Gi.World.New();
@@ -1025,6 +1129,24 @@ internal static class Verification
             if (r >= 0 && el < best) best = el;
         }
         Console.WriteLine($"place+remove-200 collapse process: {best:F1} us");
+
+        var tentStamp = Gi.Stamp.Tent(16, 16, 60);
+        var tentIds = new int[200];
+        best = double.MaxValue;
+        for (var r = -1; r < 20; r++)
+        {
+            var t = Stopwatch.GetTimestamp();
+            for (var i = 0; i < tentIds.Length; i++)
+                tentIds[i] = Gi.World.Place(w, l,
+                    (i * 43.1f + (r + 1) * 19.3f) % 1000f + 12f,
+                    (i * 27.9f + (r + 1) * 21.7f) % 1000f + 12f, tentStamp, 8);
+            Gi.World.Process(w);
+            var el = Stopwatch.GetElapsedTime(t).TotalMicroseconds;
+            if (r >= 0 && el < best) best = el;
+            for (var i = 0; i < tentIds.Length; i++) Gi.World.Remove(w, tentIds[i]);
+            Gi.World.Process(w);
+        }
+        Console.WriteLine($"tent-200 churn process (16x16): {best:F0} us");
 
         best = double.MaxValue;
         long total = 0;
