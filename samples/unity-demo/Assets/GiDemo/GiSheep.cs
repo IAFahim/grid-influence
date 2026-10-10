@@ -10,6 +10,7 @@ internal sealed class GiSheep
     public Vector2 Pos;
     public Vector2 Vel;
     public float Phase;
+    public int Source;
 
     public void Update(float t)
     {
@@ -17,34 +18,26 @@ internal sealed class GiSheep
         var grid = GiEcosystemDemo.GridOne;
         var threatLayer = GiEcosystemDemo.Threat;
         var foodLayer = GiEcosystemDemo.Food;
-        var cx = (int)Pos.x;
-        var cy = (int)Pos.y;
 
-        var threat = GiEcosystemDemo.Q(world, grid, threatLayer, cx, cy);
-        var food = GiEcosystemDemo.Q(world, grid, foodLayer, cx, cy);
+        var threat = GiEcosystemDemo.Q(world, grid, threatLayer, (int)Pos.x, (int)Pos.y);
+        var food = GiEcosystemDemo.Q(world, grid, foodLayer, (int)Pos.x, (int)Pos.y);
 
         var escapeX = 0f;
         var escapeY = 0f;
         if (threat > 60)
         {
-            var right = GiEcosystemDemo.Q(world, grid, threatLayer, cx + 3, cy);
-            var left = GiEcosystemDemo.Q(world, grid, threatLayer, cx - 3, cy);
-            var up = GiEcosystemDemo.Q(world, grid, threatLayer, cx, cy + 3);
-            var down = GiEcosystemDemo.Q(world, grid, threatLayer, cx, cy - 3);
-            escapeX = -(right - left) * 0.045f;
-            escapeY = -(up - down) * 0.045f;
+            GiEcosystemDemo.G(world, grid, threatLayer, Pos.x, Pos.y, out var gx, out var gy);
+            escapeX = -gx * 0.14f;
+            escapeY = -gy * 0.14f;
         }
 
         var seekX = 0f;
         var seekY = 0f;
         if (food > 40 && threat < 400)
         {
-            var right = GiEcosystemDemo.Q(world, grid, foodLayer, cx + 3, cy);
-            var left = GiEcosystemDemo.Q(world, grid, foodLayer, cx - 3, cy);
-            var up = GiEcosystemDemo.Q(world, grid, foodLayer, cx, cy + 3);
-            var down = GiEcosystemDemo.Q(world, grid, foodLayer, cx, cy - 3);
-            seekX = (right - left) * 0.012f;
-            seekY = (up - down) * 0.012f;
+            GiEcosystemDemo.G(world, grid, foodLayer, Pos.x, Pos.y, out var gx, out var gy);
+            seekX = gx * 0.04f;
+            seekY = gy * 0.04f;
         }
 
         var wanderX = Mathf.Sin(t * 0.7f + Phase) * 0.4f;
@@ -58,6 +51,7 @@ internal sealed class GiSheep
         Vel = Vector2.Lerp(Vel, desired * speed, 0.09f);
         Pos += Vel * Time.deltaTime;
         Pos = GiEcosystemDemo.ClampWorld(Pos);
+        World.Move(world, Source, Pos.x, Pos.y);
 
         Body.position = new Vector3(Pos.x, 0.5f, Pos.y);
         if (Vel.sqrMagnitude > 0.02f)
@@ -68,6 +62,7 @@ internal sealed class GiSheep
     {
         Pos = new Vector2(8f + (float)rng.NextDouble() * 240f, 8f + (float)rng.NextDouble() * 240f);
         Vel = Vector2.zero;
+        World.Move((byte)GiEcosystemDemo.WorldId, Source, Pos.x, Pos.y);
     }
 }
 }

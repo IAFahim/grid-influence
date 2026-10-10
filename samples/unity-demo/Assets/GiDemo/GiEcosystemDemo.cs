@@ -20,6 +20,7 @@ public sealed class GiEcosystemDemo : MonoBehaviour
     internal static byte GridHalf;
     internal static byte Food;
     internal static byte Threat;
+    internal static byte Herd;
     internal static long Queries;
 
     private readonly System.Random _rng = new(42);
@@ -44,6 +45,10 @@ public sealed class GiEcosystemDemo : MonoBehaviour
     private long _queriesPerSecond;
     private long _queriesAtStat;
     private string _conservation = "";
+    private float _recordClock;
+    private int _snapSlot;
+    private readonly Vector2[] _sheepSnaps = new Vector2[6 * SheepCount];
+    private readonly Vector2[] _wolfSnaps = new Vector2[6 * WolfCount];
 
     private void Awake()
     {
@@ -55,6 +60,7 @@ public sealed class GiEcosystemDemo : MonoBehaviour
             GridHalf = Grid.New(id, 7, 0f, 0f, WorldUnits);
             Food = Layer.New(id);
             Threat = Layer.New(id);
+            Herd = Layer.New(id);
         }
         else
         {
@@ -77,6 +83,19 @@ public sealed class GiEcosystemDemo : MonoBehaviour
     {
         Queries++;
         return World.Query(world, grid, layer, x, y);
+    }
+
+    internal static void G(byte world, byte grid, byte layer, float x, float y, out int gx, out int gy)
+    {
+        Queries++;
+        World.QueryGradient(world, grid, layer, x, y, out gx, out gy);
+    }
+
+    internal static short M(byte world, byte grid, byte layer, int x, int y, int w, int h,
+        out int bx, out int by)
+    {
+        Queries++;
+        return World.QueryMax(world, grid, layer, x, y, w, h, out bx, out by);
     }
 
     internal static Vector2 ClampWorld(Vector2 p) =>
@@ -135,11 +154,13 @@ public sealed class GiEcosystemDemo : MonoBehaviour
             body.name = "Sheep";
             body.transform.localScale = new Vector3(0.9f, 0.7f, 0.9f);
             Paint(body, new Color32(228, 226, 214, 255));
+            var pos = new Vector2(12f + (float)_rng.NextDouble() * 232f, 12f + (float)_rng.NextDouble() * 232f);
             _sheep[i] = new GiSheep
             {
                 Body = body.transform,
-                Pos = new Vector2(12f + (float)_rng.NextDouble() * 232f, 12f + (float)_rng.NextDouble() * 232f),
-                Phase = (float)_rng.NextDouble() * 10f
+                Pos = pos,
+                Phase = (float)_rng.NextDouble() * 10f,
+                Source = World.Place((byte)WorldId, Herd, pos.x, pos.y, GiDemoStamps.HerdPing, 5)
             };
         }
 
@@ -178,9 +199,18 @@ public sealed class GiEcosystemDemo : MonoBehaviour
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var t = Time.time;
 
+        if (Input.GetKeyDown(KeyCode.R)) Rewind();
+
         UpdateWolves();
         UpdateCursor();
         World.Process((byte)WorldId);
+
+        _recordClock += Time.unscaledDeltaTime;
+        if (_recordClock >= 5f)
+        {
+            _recordClock = 0f;
+            World.Record((byte)WorldId);
+        }
 
         for (var i = 0; i < _sheep.Length; i++) _sheep[i].Update(t);
         for (var i = 0; i < _wolves.Length; i++) _wolves[i].Sync();
@@ -194,12 +224,44 @@ public sealed class GiEcosystemDemo : MonoBehaviour
             _fps = _frames;
             _frames = 0;
             _statClock = 0f;
+            _snapSlot = (_snapSlot + 1) % 6;
+            for (var i = 0; i < _sheep.Length; i++) _sheepSnaps[_snapSlot * SheepCount + i] = _sheep[i].Pos;
+            for (var i = 0; i < _wolves.Length; i++) _wolfSnaps[_snapSlot * WolfCount + i] = _wolves[i].Pos;
             var gc = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong();
             _gcPerSecond = gc - _gcMark;
             _gcMark = gc;
             _queriesPerSecond = Queries - _queriesAtStat;
             _queriesAtStat = Queries;
             RefreshConservation();
+        }
+    }
+
+    private void Rewind()
+    {
+        World.Rewind((byte)WorldId);
+        World.Process((byte)WorldId);
+
+        var slot = (_snapSlot + 1) % 6;
+        for (var i = 0; i < _sheep.Length; i++)
+        {
+            _sheep[i].Pos = _sheepSnaps[slot * SheepCount + i];
+            _sheep[i].Vel = Vector2.zero;
+            if (_sheep[i].Pos.sqrMagnitude < 0.01f) _sheep[i].Respawn(_rng);
+        }
+
+        for (var i = 0; i < _wolves.Length; i++)
+        {
+            _wolves[i].Pos = _wolfSnaps[slot * WolfCount + i];
+            _wolves[i].Vel = Vector2.zero;
+            _wolves[i].Hunting = false;
+            _wolves[i].RetryClock = 0f;
+            if (_wolves[i].Pos.sqrMagnitude < 0.01f) _wolves[i].Pos = new Vector2(24f + (float)_rng.NextDouble() * 208f, 24f + (float)_rng.NextDouble() * 208f);
+        }
+
+        if (_fearSource >= 0)
+        {
+            World.Remove((byte)WorldId, _fearSource);
+            _fearSource = -1;
         }
     }
 
@@ -210,24 +272,18 @@ public sealed class GiEcosystemDemo : MonoBehaviour
         {
             var w = _wolves[i];
             w.RetryClock -= dt;
-            if (w.RetryClock <= 0f && w.Target < 0)
+            if (w.RetryClock <= 0f)
             {
                 w.RetryClock = 0.25f;
-                var bestSq = float.MaxValue;
-                for (var s = 0; s < _sheep.Length; s++)
-                {
-                    var sq = (_sheep[s].Pos - w.Pos).sqrMagnitude;
-                    if (sq < bestSq)
-                    {
-                        bestSq = sq;
-                        w.Target = s;
-                    }
-                }
+                var peak = M((byte)WorldId, GridOne, Herd,
+                    (int)w.Pos.x - 48, (int)w.Pos.y - 48, 96, 96, out var bx, out var by);
+                w.Hunting = peak > 0;
+                if (w.Hunting) w.Hunt = new Vector2(bx + 0.5f, by + 0.5f);
             }
 
-            if (w.Target >= 0)
+            if (w.Hunting)
             {
-                var to = _sheep[w.Target].Pos - w.Pos;
+                var to = w.Hunt - w.Pos;
                 var dist = to.magnitude;
                 if (dist > 1.1f)
                 {
@@ -235,9 +291,25 @@ public sealed class GiEcosystemDemo : MonoBehaviour
                 }
                 else
                 {
-                    _eaten++;
-                    _sheep[w.Target].Respawn(_rng);
-                    w.Target = -1;
+                    var nearest = -1;
+                    var bestSq = 16f;
+                    for (var s = 0; s < _sheep.Length; s++)
+                    {
+                        var sq = (_sheep[s].Pos - w.Pos).sqrMagnitude;
+                        if (sq < bestSq)
+                        {
+                            bestSq = sq;
+                            nearest = s;
+                        }
+                    }
+
+                    if (nearest >= 0)
+                    {
+                        _eaten++;
+                        _sheep[nearest].Respawn(_rng);
+                    }
+
+                    w.Hunting = false;
                     w.Vel *= 0.4f;
                 }
             }
@@ -249,9 +321,7 @@ public sealed class GiEcosystemDemo : MonoBehaviour
             w.Pos = ClampWorld(w.Pos + w.Vel * dt);
             World.Move((byte)WorldId, w.Source, w.Pos.x, w.Pos.y);
 
-            var hunting = false;
-            if (w.Target >= 0 && (_sheep[w.Target].Pos - w.Pos).sqrMagnitude < 484f) hunting = true;
-            var gain = hunting ? 12 : 7;
+            var gain = w.Hunting ? 12 : 7;
             if (gain != w.Gain)
             {
                 World.SetGain((byte)WorldId, w.Source, gain);
@@ -327,7 +397,7 @@ public sealed class GiEcosystemDemo : MonoBehaviour
             + "\nwolves " + WolfCount + "   sheep " + SheepCount + "   eaten " + _eaten.ToString(CultureInfo.InvariantCulture)
             + "\nmanaged heap delta/s " + _gcPerSecond.ToString("N0", CultureInfo.InvariantCulture) + " B"
             + "\n" + _conservation
-            + "\nhold LMB: fear brush chases the cursor   hold RMB: paint food";
+            + "\nhold LMB: fear brush chases the cursor   hold RMB: paint food   R: rewind to checkpoint";
         GUI.Label(new Rect(14f, 14f, 940f, 140f), stats);
     }
 }

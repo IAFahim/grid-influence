@@ -23,10 +23,12 @@ internal static class Live
     internal static byte GridHalf;
     internal static byte Food;
     internal static byte Threat;
+    internal static byte Herd;
 
     private static readonly byte FoodCrumb = Stamp.Box(3, 3, 40);
     private static readonly byte WolfAura = Gaussian(17, 110);
     private static readonly byte FearBrush = Gaussian(15, 140);
+    private static readonly byte HerdPing = Stamp.Tent(9, 9, 60);
 
     private static Random _rng = new(42);
     private static LiveSheep[] _sheep = [];
@@ -43,11 +45,16 @@ internal static class Live
     private static long _maxAlloc;
     private static volatile bool _running = true;
     private static readonly Stopwatch _watch = new();
+    private static int _recordTicks;
+    private static int _snapTicks;
+    private static int _snapSlot;
+    private static readonly float[] _sheepSnaps = new float[6 * SheepCount * 2];
+    private static readonly float[] _wolfSnaps = new float[6 * WolfCount * 2];
 
     private static readonly ConcurrentQueue<ClientOp> Ops = new();
     private static readonly List<WebSocket> Sockets = [];
     private static readonly byte[] Frame =
-        new byte[16 + 8 * (SheepCount + WolfCount) + 4 * CellCount * CellCount];
+        new byte[16 + 8 * (SheepCount + WolfCount) + 6 * CellCount * CellCount];
 
     internal static void Run(string[] args)
     {
@@ -61,6 +68,7 @@ internal static class Live
         GridHalf = Grid.New(WorldId, 7, 0f, 0f, WorldUnits);
         Food = Layer.New(WorldId);
         Threat = Layer.New(WorldId);
+        Herd = Layer.New(WorldId);
         SpawnFood();
         SpawnAgents();
 
@@ -115,6 +123,12 @@ internal static class Live
         return World.Query(WorldId, grid, layer, x, y);
     }
 
+    internal static void G(byte grid, byte layer, float x, float y, out int gx, out int gy)
+    {
+        _queries++;
+        World.QueryGradient(WorldId, grid, layer, x, y, out gx, out gy);
+    }
+
     private static void SimLoop()
     {
         var clock = Stopwatch.StartNew();
@@ -137,8 +151,32 @@ internal static class Live
         UpdateWolves();
         DrainOps();
         World.Process(WorldId);
+
+        if (++_recordTicks >= 100)
+        {
+            _recordTicks = 0;
+            World.Record(WorldId);
+        }
+
         for (var i = 0; i < _sheep.Length; i++) _sheep[i].Update((float)_time);
         _time += TickSeconds;
+
+        if (++_snapTicks >= 20)
+        {
+            _snapTicks = 0;
+            _snapSlot = (_snapSlot + 1) % 6;
+            for (var i = 0; i < _sheep.Length; i++)
+            {
+                _sheepSnaps[_snapSlot * SheepCount * 2 + i * 2] = _sheep[i].X;
+                _sheepSnaps[_snapSlot * SheepCount * 2 + i * 2 + 1] = _sheep[i].Y;
+            }
+
+            for (var i = 0; i < _wolves.Length; i++)
+            {
+                _wolfSnaps[_snapSlot * WolfCount * 2 + i * 2] = _wolves[i].X;
+                _wolfSnaps[_snapSlot * WolfCount * 2 + i * 2 + 1] = _wolves[i].Y;
+            }
+        }
 
         PackFrame();
         _tick++;
@@ -185,6 +223,52 @@ internal static class Live
             {
                 Reset();
             }
+            else if (op.Op == 4)
+            {
+                Rewind();
+            }
+        }
+    }
+
+    private static void Rewind()
+    {
+        World.Rewind(WorldId);
+        World.Process(WorldId);
+
+        var slot = (_snapSlot + 1) % 6;
+        for (var i = 0; i < _sheep.Length; i++)
+        {
+            var sx = _sheepSnaps[slot * SheepCount * 2 + i * 2];
+            var sy = _sheepSnaps[slot * SheepCount * 2 + i * 2 + 1];
+            if (sx < 0.01f && sy < 0.01f) { _sheep[i].Respawn(_rng); continue; }
+            _sheep[i].X = sx;
+            _sheep[i].Y = sy;
+            _sheep[i].Vx = 0f;
+            _sheep[i].Vy = 0f;
+        }
+
+        for (var i = 0; i < _wolves.Length; i++)
+        {
+            var wx = _wolfSnaps[slot * WolfCount * 2 + i * 2];
+            var wy = _wolfSnaps[slot * WolfCount * 2 + i * 2 + 1];
+            if (wx < 0.01f && wy < 0.01f)
+            {
+                wx = 24f + (float)_rng.NextDouble() * 208f;
+                wy = 24f + (float)_rng.NextDouble() * 208f;
+            }
+
+            _wolves[i].X = wx;
+            _wolves[i].Y = wy;
+            _wolves[i].Vx = 0f;
+            _wolves[i].Vy = 0f;
+            _wolves[i].Hunting = false;
+            _wolves[i].RetryClock = 0f;
+        }
+
+        if (_fearSource >= 0)
+        {
+            World.Remove(WorldId, _fearSource);
+            _fearSource = -1;
         }
     }
 
@@ -195,25 +279,24 @@ internal static class Live
         {
             var w = _wolves[i];
             w.RetryClock -= dt;
-            if (w.RetryClock <= 0f && w.Target < 0)
+            if (w.RetryClock <= 0f)
             {
                 w.RetryClock = 0.25f;
-                var bestSq = float.MaxValue;
-                for (var s = 0; s < _sheep.Length; s++)
+                _queries++;
+                var peak = World.QueryMax(WorldId, GridOne, Herd,
+                    (int)w.X - 48, (int)w.Y - 48, 96, 96, out var bx, out var by);
+                w.Hunting = peak > 0;
+                if (w.Hunting)
                 {
-                    var dx = _sheep[s].X - w.X;
-                    var dy = _sheep[s].Y - w.Y;
-                    var sq = dx * dx + dy * dy;
-                    if (sq >= bestSq) continue;
-                    bestSq = sq;
-                    w.Target = s;
+                    w.HuntX = bx + 0.5f;
+                    w.HuntY = by + 0.5f;
                 }
             }
 
-            if (w.Target >= 0)
+            if (w.Hunting)
             {
-                var toX = _sheep[w.Target].X - w.X;
-                var toY = _sheep[w.Target].Y - w.Y;
+                var toX = w.HuntX - w.X;
+                var toY = w.HuntY - w.Y;
                 var dist = MathF.Sqrt(toX * toX + toY * toY);
                 if (dist > 1.1f)
                 {
@@ -222,9 +305,25 @@ internal static class Live
                 }
                 else
                 {
-                    _eaten++;
-                    _sheep[w.Target].Respawn(_rng);
-                    w.Target = -1;
+                    var nearest = -1;
+                    var bestSq = 16f;
+                    for (var s = 0; s < _sheep.Length; s++)
+                    {
+                        var dx = _sheep[s].X - w.X;
+                        var dy = _sheep[s].Y - w.Y;
+                        var sq = dx * dx + dy * dy;
+                        if (sq >= bestSq) continue;
+                        bestSq = sq;
+                        nearest = s;
+                    }
+
+                    if (nearest >= 0)
+                    {
+                        _eaten++;
+                        _sheep[nearest].Respawn(_rng);
+                    }
+
+                    w.Hunting = false;
                     w.Vx *= 0.4f;
                     w.Vy *= 0.4f;
                 }
@@ -239,14 +338,7 @@ internal static class Live
             w.Y = Math.Clamp(w.Y + w.Vy * dt, 3f, WorldUnits - 3f);
             World.Move(WorldId, w.Source, w.X, w.Y);
 
-            var hunting = false;
-            if (w.Target >= 0)
-            {
-                var dx = _sheep[w.Target].X - w.X;
-                var dy = _sheep[w.Target].Y - w.Y;
-                if (dx * dx + dy * dy < 484f) hunting = true;
-            }
-            var gain = hunting ? 12 : 7;
+            var gain = w.Hunting ? 12 : 7;
             if (gain == w.Gain) continue;
             World.SetGain(WorldId, w.Source, gain);
             w.Gain = gain;
@@ -276,6 +368,8 @@ internal static class Live
             World.QueryRegion(WorldId, GridOne, Threat, 0, 0, CellCount, CellCount, s);
             s += CellCount * CellCount;
             World.QueryRegion(WorldId, GridOne, Food, 0, 0, CellCount, CellCount, s);
+            s += CellCount * CellCount;
+            World.QueryRegion(WorldId, GridOne, Herd, 0, 0, CellCount, CellCount, s);
         }
     }
 
@@ -338,6 +432,11 @@ internal static class Live
         _lastPaintX = -99f;
         _lastPaintY = -99f;
         _eaten = 0;
+        _recordTicks = 0;
+        _snapTicks = 0;
+        _snapSlot = 0;
+        Array.Clear(_sheepSnaps);
+        Array.Clear(_wolfSnaps);
         _rng = new Random(42);
         SpawnFood();
         SpawnAgents();
@@ -363,12 +462,17 @@ internal static class Live
     {
         _sheep = new LiveSheep[SheepCount];
         for (var i = 0; i < SheepCount; i++)
+        {
+            var x = 12f + (float)_rng.NextDouble() * 232f;
+            var y = 12f + (float)_rng.NextDouble() * 232f;
             _sheep[i] = new LiveSheep
             {
-                X = 12f + (float)_rng.NextDouble() * 232f,
-                Y = 12f + (float)_rng.NextDouble() * 232f,
-                Phase = (float)_rng.NextDouble() * 10f
+                X = x,
+                Y = y,
+                Phase = (float)_rng.NextDouble() * 10f,
+                Source = World.Place(WorldId, Herd, x, y, HerdPing, 5)
             };
+        }
 
         _wolves = new LiveWolf[WolfCount];
         for (var i = 0; i < WolfCount; i++)
@@ -404,38 +508,31 @@ internal static class Live
 internal sealed class LiveSheep
 {
     public float X, Y, Vx, Vy, Phase;
+    public int Source;
 
     public void Update(float t)
     {
         var grid = Live.GridOne;
-        var cx = (int)X;
-        var cy = (int)Y;
 
-        var threat = Live.Q(grid, Live.Threat, cx, cy);
-        var food = Live.Q(grid, Live.Food, cx, cy);
+        var threat = Live.Q(grid, Live.Threat, (int)X, (int)Y);
+        var food = Live.Q(grid, Live.Food, (int)X, (int)Y);
 
         var escapeX = 0f;
         var escapeY = 0f;
         if (threat > 60)
         {
-            var right = Live.Q(grid, Live.Threat, cx + 3, cy);
-            var left = Live.Q(grid, Live.Threat, cx - 3, cy);
-            var up = Live.Q(grid, Live.Threat, cx, cy + 3);
-            var down = Live.Q(grid, Live.Threat, cx, cy - 3);
-            escapeX = -(right - left) * 0.045f;
-            escapeY = -(up - down) * 0.045f;
+            Live.G(grid, Live.Threat, X, Y, out var gx, out var gy);
+            escapeX = -gx * 0.14f;
+            escapeY = -gy * 0.14f;
         }
 
         var seekX = 0f;
         var seekY = 0f;
         if (food > 40 && threat < 400)
         {
-            var right = Live.Q(grid, Live.Food, cx + 3, cy);
-            var left = Live.Q(grid, Live.Food, cx - 3, cy);
-            var up = Live.Q(grid, Live.Food, cx, cy + 3);
-            var down = Live.Q(grid, Live.Food, cx, cy - 3);
-            seekX = (right - left) * 0.012f;
-            seekY = (up - down) * 0.012f;
+            Live.G(grid, Live.Food, X, Y, out var gx, out var gy);
+            seekX = gx * 0.04f;
+            seekY = gy * 0.04f;
         }
 
         var wanderX = MathF.Sin(t * 0.7f + Phase) * 0.4f;
@@ -458,6 +555,7 @@ internal sealed class LiveSheep
         var dt = (float)Live.TickSeconds;
         X = Math.Clamp(X + Vx * dt, 3f, Live.WorldUnits - 3f);
         Y = Math.Clamp(Y + Vy * dt, 3f, Live.WorldUnits - 3f);
+        World.Move(Live.WorldId, Source, X, Y);
     }
 
     public void Respawn(Random rng)
@@ -466,6 +564,7 @@ internal sealed class LiveSheep
         Y = 8f + (float)rng.NextDouble() * 240f;
         Vx = 0f;
         Vy = 0f;
+        World.Move(Live.WorldId, Source, X, Y);
     }
 }
 
@@ -473,7 +572,8 @@ internal sealed class LiveWolf
 {
     public float X, Y, Vx, Vy;
     public int Source;
-    public int Target = -1;
+    public float HuntX, HuntY;
+    public bool Hunting;
     public float RetryClock;
     public int Gain = 7;
 }

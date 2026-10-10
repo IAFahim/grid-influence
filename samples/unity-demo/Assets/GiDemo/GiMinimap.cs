@@ -9,6 +9,7 @@ internal sealed class GiMinimap
 
     private readonly int[] _threat = new int[Size * Size];
     private readonly int[] _food = new int[Size * Size];
+    private readonly int[] _herd = new int[Size * Size];
     private readonly Color32[] _pixels = new Color32[Size * Size];
     private Texture2D _texture;
     private float _norm = 600f;
@@ -35,6 +36,7 @@ internal sealed class GiMinimap
         var grid = GiEcosystemDemo.GridOne;
         var threatLayer = GiEcosystemDemo.Threat;
         var foodLayer = GiEcosystemDemo.Food;
+        var herdLayer = GiEcosystemDemo.Herd;
 
         var peak = 1;
         for (var y = 0; y < Size; y++)
@@ -42,9 +44,12 @@ internal sealed class GiMinimap
         {
             var threat = GiEcosystemDemo.Q(world, grid, threatLayer, x * 2, y * 2);
             var food = GiEcosystemDemo.Q(world, grid, foodLayer, x * 2, y * 2);
+            var herd = GiEcosystemDemo.Q(world, grid, herdLayer, x * 2, y * 2);
             _threat[y * Size + x] = threat;
             _food[y * Size + x] = food;
+            _herd[y * Size + x] = herd;
             var magnitude = threat > food ? threat : food;
+            if (herd > magnitude) magnitude = herd;
             if (magnitude > peak) peak = magnitude;
         }
 
@@ -53,7 +58,8 @@ internal sealed class GiMinimap
         {
             var t = Mathf.Clamp01(_threat[i] / _norm);
             var f = Mathf.Clamp01(_food[i] / _norm);
-            _pixels[i] = new Color32((byte)(t * 235f), (byte)(f * 225f + 18f), 22, 255);
+            var h = Mathf.Clamp01(_herd[i] / _norm);
+            _pixels[i] = new Color32((byte)(t * 235f), (byte)(f * 225f + 18f), (byte)(h * 200f + 22), 255);
         }
 
         _texture.SetPixels32(_pixels);

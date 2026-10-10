@@ -9,7 +9,8 @@ internal sealed class GiWolf
     public Vector2 Pos;
     public Vector2 Vel;
     public int Source;
-    public int Target = -1;
+    public Vector2 Hunt;
+    public bool Hunting;
     public float RetryClock;
     public int Gain = 7;
 

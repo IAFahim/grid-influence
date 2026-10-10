@@ -31,7 +31,7 @@ internal static class LiveTemplate
   <span class='chip on'>ecosystem · live</span>
   <span class='chip' id='dot'>connecting</span>
 </div>
-<div id='caption'>The gallery heightfield, ticking: 120 sheep read threat and food gradients every tick while 8 wolves chase them as World.Move'd sources. Right-drag paints fear or food onto the field.</div></div>
+<div id='caption'>The gallery heightfield, ticking: 120 sheep steer on World.QueryGradient while 8 wolves hunt the herd layer's region QueryMax. Right-drag paints fear or food; T rewinds the field 5 seconds via World.Rewind.</div></div>
 <div id='wrap'>
   <canvas id='c'></canvas>
   <div id='hud'>
@@ -45,7 +45,7 @@ internal static class LiveTemplate
     <div id='receipts'></div>
   </div>
   <div id='labels'></div>
-  <div id='hint'>drag = orbit · wheel = zoom · right-drag = paint · R = reset</div>
+  <div id='hint'>drag = orbit · wheel = zoom · right-drag = paint · R = reset · T = rewind 5s</div>
 </div>
 <script>
 const cv=document.getElementById('c'), wrap=document.getElementById('wrap');
@@ -100,9 +100,9 @@ gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,ibo);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER
 gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,libo);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,lidx,gl.STATIC_DRAW);
 let mn=0,mx=0,nz=0,m=1;
 
-const LAYERS=[{name:'threat',color:'#ff5252'},{name:'food',color:'#69f0ae'}];
-const raw=[new Int16Array(n),new Int16Array(n)];
-const active=new Set([0,1]);
+const LAYERS=[{name:'threat',color:'#ff5252'},{name:'food',color:'#69f0ae'},{name:'herd',color:'#64dfff'}];
+const raw=[new Int16Array(n),new Int16Array(n),new Int16Array(n)];
+const active=new Set([0,1,2]);
 let HS=1.0, dirty=true, tickN=0, eaten=0;
 
 const MAXA=256;
@@ -168,7 +168,7 @@ function connect(){
     if(typeof ev.data==='string'){setStats(ev.data);return;}
     const buf=ev.data, dv=new DataView(buf);
     const t=dv.getInt32(0,true), s=dv.getInt32(4,true), w=dv.getInt32(8,true);
-    if(s+w>MAXA||buf.byteLength<16+8*(s+w)+4*n)return;
+    if(s+w>MAXA||buf.byteLength<16+8*(s+w)+6*n)return;
     eaten=dv.getInt32(12,true);
     tickN=t;
     let off=16;
@@ -176,7 +176,8 @@ function connect(){
     for(let i=0;i<s;i++){cAx[i]=dv.getFloat32(off,true);cAy[i]=dv.getFloat32(off+4,true);off+=8;}
     for(let i=0;i<w;i++){cAx[s+i]=dv.getFloat32(off,true);cAy[s+i]=dv.getFloat32(off+4,true);off+=8;}
     raw[0].set(new Int16Array(buf,off,n));off+=2*n;
-    raw[1].set(new Int16Array(buf,off,n));
+    raw[1].set(new Int16Array(buf,off,n));off+=2*n;
+    raw[2].set(new Int16Array(buf,off,n));
     shN=s;wfN=w;tPrev=performance.now();dirty=true;
   };
 }
@@ -252,7 +253,9 @@ const pf=document.getElementById('pf'), pd=document.getElementById('pd');
 pf.onclick=()=>{paint=0;pf.classList.add('on');pd.classList.remove('on');};
 pd.onclick=()=>{paint=1;pd.classList.add('on');pf.classList.remove('on');};
 document.getElementById('rst').onclick=()=>sendOp(3,0,0);
-addEventListener('keydown',e=>{if(e.key==='r'||e.key==='R')sendOp(3,0,0);});
+addEventListener('keydown',e=>{
+  if(e.key==='r'||e.key==='R')sendOp(3,0,0);
+  if(e.key==='t'||e.key==='T')sendOp(4,0,0);});
 cv.addEventListener('contextmenu',e=>e.preventDefault());
 let rdown=false;
 cv.addEventListener('mousedown',e=>{if(e.button===2){rdown=true;paintAt(e);}});

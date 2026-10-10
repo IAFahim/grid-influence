@@ -1238,6 +1238,45 @@ internal static class Verification
         Console.WriteLine($"Gi full-grid sum: {best:F1} us (checksum {acc})");
     }
 
+    public static void PlaceProfile()
+    {
+        var w = Gi.World.New();
+        var g = Gi.Grid.New(w, 10, 0f, 0f, 1024f);
+        var l = Gi.Layer.New(w);
+        var stamp = Gi.Stamp.Box(16, 16, 60);
+        var rng = new Random(17);
+        for (var i = 0; i < 4000; i++)
+            Gi.World.Place(w, l, (float)(rng.NextDouble() * 1024), (float)(rng.NextDouble() * 1024), stamp, 8);
+        Gi.World.Process(w);
+
+        var placed = new int[200];
+        var rounds = int.Parse(Environment.GetEnvironmentVariable("PLACE_ROUNDS") ?? "4000");
+        var acc = 0L;
+        long placeTicks = 0, processTicks = 0, removeTicks = 0;
+        for (var r = 0; r < rounds; r++)
+        {
+            var t = Stopwatch.GetTimestamp();
+            for (var i = 0; i < placed.Length; i++)
+                placed[i] = Gi.World.Place(w, l,
+                    (i * 41.3f + (r + 1) * 17.9f) % 1000f + 12f,
+                    (i * 29.7f + (r + 1) * 23.1f) % 1000f + 12f, stamp, 8);
+            var t2 = Stopwatch.GetTimestamp();
+            placeTicks += t2 - t;
+            Gi.World.Process(w);
+            var t3 = Stopwatch.GetTimestamp();
+            processTicks += t3 - t2;
+            for (var i = 0; i < placed.Length; i++) Gi.World.Remove(w, placed[i]);
+            var t4 = Stopwatch.GetTimestamp();
+            removeTicks += t4 - t3;
+            Gi.World.Process(w);
+            processTicks += Stopwatch.GetTimestamp() - t4;
+            acc += Gi.World.Query(w, g, l, 0, 0, 64, 64);
+        }
+        var freq = Stopwatch.Frequency;
+        Console.WriteLine($"place-profile {rounds} rounds ({acc}) " +
+            $"place={placeTicks * 1e6 / freq / rounds:F1}us process={processTicks * 1e6 / freq / rounds:F1}us remove={removeTicks * 1e6 / freq / rounds:F1}us");
+    }
+
     public static void Timing()
     {
         var w = Gi.World.New();
