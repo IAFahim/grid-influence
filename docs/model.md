@@ -13,13 +13,21 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   cell-space content: `w×h` `sbyte` samples, centered on the placement position (origin offset
   `−w/2` cells in Q8). Uniform rasters classify as `ConstantRectangle` and take the
   difference-array path; the rest are `Raster` and deposit with sub-cell bilinear weights.
-  `Tent` is a smooth kernel: a linear falloff from the center to the support edge along each
-  axis (support `w×h` cells, exactly the box span), deposited through the same difference-array
-  corners as boxes — one band per covered cell, weight `256 − 256·d/half` where `d` is the
-  cell-edge Q8 distance from the peak, amplitude `RoundQ16(value · wx · wy) · gain` per band
-  pair. Sub-cell phases shift the peak smoothly between cells; the deposit is integer-exact
-  at every phase (band-oracle receipted), never touches a dense buffer, and moves/removes
-  negate the same bands exactly.
+  `Tent` is a piecewise-linear kernel: `WX(cx)·WY(cy)`, rising `Up` slope per cell to a peak
+  then falling `Down` per cell over the support `w×h` cells (exactly the box span), plus a
+  closing `Tail` step that lands the weight on zero at `last+1`. A piecewise-linear signal
+  has a sparse second derivative, so each tile the tent touches keeps its deposits in a
+  lazily attached 33×33 `int64` second-order buffer (8,712 B, held in the block's tent
+  pointer slot): per axis the emitter writes the absolute weight at the tile's left edge,
+  the entry correction at local cell 1, and every slope change inside the tile (rise start,
+  peak, fall end, and the `Tail` zero at `last+2`) — ≤6 impulses per axis, ≤36
+  `value·gain·Δx·Δy` corner writes per tile. The products are stored unrounded so the
+  impulse chain telescopes exactly: resolve re-derives each cell as
+  `RoundQ24(Σ value·gain·Wx·Wy)` through a second int64 prefix chain per row, rounding once
+  per cell over all tent sources in the tile. Sub-cell phases shift the breakpoints smoothly
+  between tiles; the deposit is integer-exact at every phase (impulse-oracle receipted),
+  never touches a dense buffer, and moves/removes negate the same impulses exactly — the
+  buffer is persistent, so retraction returns it to literal zero.
   Raster storage keeps a one-sample zero border (pitch `w+2`, `(w+2)×(h+2)`) so the deposit loop
   reads `x−1`/`y−pitch` unconditionally. Every raster stamp also bakes a mip chain: each level
   halves its predecessor with zero-padded 2×2 box averages (round-half-away-from-zero, divided by
@@ -49,7 +57,9 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   `int16` page max in the padded 64 B sum slot. Raster stamps also need the tile's 32×32
   `int32` dense buffer: blocks touched by a raster deposit allocate it once (block grows to
   10,624 B, dense pinned at the block tail) and box-only tiles never carry it — resolve reads a
-  shared zero page instead. Mutations do not touch tiles: `Place`/`Move`/`SetGain`/`Remove`
+  shared zero page instead. Tent stamps need a second lazily attached buffer: the 33×33
+  `int64` second-order store described above, allocated on the tile's first tent deposit and
+  freed with the block. Mutations do not touch tiles: `Place`/`Move`/`SetGain`/`Remove`
   update the source columns and merge into a per-world op queue — one op per slot per window,
   carrying the state applied by the previous `Process` (retraction) and the latest state
   (application). `Process` applies the queue first — the retraction negated at its stored
@@ -57,12 +67,27 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   gain (`RoundQ16(base) · gain`), so difference-array contributions are plain integer adds:
   any mutation sequence on a slot collapses exactly to one retract-and-apply pair, bit-identical
   to stepping the same sequence through a `Process` per mutation. A slot placed and removed in
-  one window deposits nothing at all — no tiles are marked, no blocks exist. The queue and its
-  per-slot pending indexes live in unmanaged storage, reset every `Process`, and their capacity
-  is retained across windows (0 B warm).
-- **Process** applies the deferred op queue, then drains the per-(grid,layer) dirty lists: each
+  one window deposits nothing at all — no tiles are marked, no blocks exist.
+  Batches whose ops are all `ConstantRectangle` below `ops × grids < 512` emit fused on the
+  calling thread as before; anything larger, or any batch containing a tent or raster stamp,
+  splits into a serial build phase (footprints, block growth, dirty marking, and per-tile
+  fragments that capture the block pointer plus the computed footprint — growth republishes
+  to earlier fragments of the same batch by patching the captured pointer) and an apply phase
+  that runs on the resolve pool when the fragment count crosses 128, hash-bucketed by
+  (grid, layer, tile) so no two participants share a tile, fenced by a symmetric barrier
+  before the resolve drain. Integer adds commute and the bucket scatter is stable, so pooled
+  and serial application are bit-identical. The queue, the
+  per-slot pending indexes, and the fragment buffer live in unmanaged storage,
+  reset every `Process`, and their capacity is retained across windows (0 B warm). The
+  journal — the same op shape recorded at apply time — lives alongside them and is governed
+  by `Record`/`Rewind` below, not by `Process`.
+- **Process** applies the deferred op queue (fused or fragmented as above — the fragment
+  apply rides one pooled phase with the drain, separated by a symmetric apply barrier), then
+  drains the per-(grid,layer) dirty lists: each
   dirty tile resolves its difference
   array through a 2D prefix sum (horizontal inclusive prefix + previous-row carry), adds dense,
+  and — for tiles carrying a tent buffer — a scalar second-order prefix chain per row
+  (`run`/`run2` × `tp`/`tq` in `int64`, `RoundQ24` once per cell) adds the tent contribution,
   saturates to `short` **after** summation so cancellation is preserved, and writes the page's
   cell total into its `int64` sum slot and the page's maximum cell into its `int16` max slot
   (both bit-identical across resolve paths). A tile that resolves to all-zero frees its block
@@ -78,6 +103,24 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   (vectorized for full nodes) before continuing upward. Each `Process` then rotates every
   (grid, layer) dirty list into its **changed list** — a zero-copy buffer swap, so the tiles the
   call resolved stay readable until the next `Process` overwrites them.
+- **Rewind**: `Record` drops any prior journal and starts appending a copy of every op the
+  world's `Process` calls apply — the op already stores the applied-from and applied-to states
+  plus the slot's generation, so the journal is an undo log costing one 32 B unmanaged append
+  per applied op. `Rewind` consumes the journal in reverse: each entry restores its slot's
+  columns to the recorded from-state (position, stamp, layer, gain, liveness, and — only when
+  the source was alive before the window — the generation byte, so a removed source revives
+  with its exact pre-window id while a rolled-back place's id stays stale) and enqueues the
+  inverse deposit pair `{retract latest applied, apply recorded from}`; per-slot queue merging
+  collapses multi-window journals to one net op per slot exactly like ordinary mutations.
+  Unapplied queued mutations are discarded first — their slots restore to their queued
+  from-states — so no applied or pending state escapes the checkpoint. The free-slot chain
+  cannot be replayed positionally (journal order is first-mutation order, not free-event
+  order), so `Rewind` rebuilds it canonically — dead slots chained in descending index order,
+  smallest slot at the head — a deterministic pure function of the restored columns. The next
+  `Process` applies the inverse ops through the normal deferred path, so a rewind costs the
+  same as the window it undoes — O(changes), never O(field). `StopRecording` discards the
+  journal without restoring; `Record` again re-anchors the checkpoint; `Clear` resets both.
+  With no journal there is no checkpoint and `Rewind` only cancels pending mutations.
 - **Query**: `World.Query(world, grid, layer, x, y)` is one hash lookup + page read;
   `(x, y, w, h)` sums a rect tile-wise — full-grid reads sum one `int64` per live page, partial
   regions sum the same `int64` slot for every tile the rect fully covers and scan only the
@@ -95,6 +138,13 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   interleave in scan order, so the descent's choice is deterministic but is not guaranteed to be
   the row-major-first maximum; verify with `Query` at the returned cell). An empty layer reports
   0 at (0,0). 0.1 µs for a 1024² layer where one million `Query` scans cost ~5,600 µs;
+  `QueryMax(world, grid, layer, x, y, w, h, out bx, out by)` scopes the same descent to a
+  cell-space rectangle: at every level only children whose tile range overlaps the rect are
+  visited, any node whose cached max is no better than the running best is skipped outright,
+  and only tiles that can still improve get their overlap cells scanned — ~0.5 µs for a
+  128×128 rect on a 1024² layer where the naive rescan reads 16k cells. Missing pages count
+  as 0, the returned position is the first cell in descent order holding the maximum inside
+  the rect, and an empty or out-of-range rect reports 0 at the clipped origin;
   `QueryGradient(world, grid, layer, x, y, out gx, out gy)` maps a world-space point with the
   same truncated `ScaleQ8` product as `QueryAt` and returns the central difference over resolved
   page cells — `Q(cx±1, cy)` and `Q(cx, cy±1)` as two ints; out-of-grid neighbors read 0, so
@@ -175,6 +225,10 @@ world rect at its own cell density; a source deposits into every grid it overlap
   left empty), then a fully covered negative layer, then the same layer pushed to saturation,
   `QueryMax` equals a full `QueryRegion` rescan of the layer, `Query` at the returned cell
   returns the maximum, and repeated calls return the identical value and position.
+- `query-max-region-matches-scan` — through three churn rounds on a 256² field, 40 random
+  rectangles per round plus full-grid, tile-straddling, single-cell, empty, and out-of-range
+  rects: the region `QueryMax` equals the per-cell rescan of the rect, the returned position
+  lies inside the rect, `Query` there returns the maximum, and repeated calls are identical.
 - `gradient-matches-central-differences` — through three churn rounds on a two-grid world
   (native and 2× scales), `QueryGradient` at random points equals the ±1-cell `Query`
   differences on both grids' own cell mappings.
@@ -186,12 +240,19 @@ world rect at its own cell density; a source deposits into every grid it overlap
   with one `Process` at the end produce bit-identical pages to the same sequences stepped
   through a `Process` per mutation; and a place-200 + remove-200 window collapses to an empty
   field with zero tiles, zero pages, and an empty changed list.
-- `tent-matches-band-oracle` — 90 tent sources of eight support widths through three churn
-  rounds (place/move/remove, signed gains, sub-cell phases) match a per-cell band oracle
-  bit-exactly on two grids at scales 1 and 0.5.
+- `tent-matches-impulse-oracle` — 90 tent sources of eight support widths through three churn
+  rounds (place/move/remove, signed gains, sub-cell phases) match a per-cell
+  second-order-impulse oracle — each source's per-axis slope-break impulses reconstructed to
+  `Wx·Wy`, scaled, and rounded once — bit-exactly on two grids at scales 1 and 0.5, including
+  exact zero beyond the support inside shared tiles.
 - `source-slots-reuse-and-stale-handles-inert` — 2000 place/remove pairs keep slots bounded,
   the recycled id differs from the stale one, and stale `Move`/`SetGain`/`Remove` leave the
   field bit-identical.
+- `rewind-restores-recorded-state` — after a two-window journal mixing a remove, a slot
+  reoccupation, moves, gain changes, and a new place across box and tent stamps, `Rewind` +
+  `Process` restores the recorded field's whole-layer sum bit-exactly; rolled-back ids stay
+  inert (the field is unchanged by mutating them) while the revived source's original id
+  mutates the field again, and a second `Rewind` with no checkpoint is inert.
 - `signed-gain-exact` — ± gains add and subtract exactly, `SetGain` crosses zero and clamps at
   ±16, and removing a signed pair restores the zero baseline.
 - `multi-layer-pooled-matches-scans` — 16 layers × 30 sources through three churn rounds
@@ -204,8 +265,11 @@ world rect at its own cell density; a source deposits into every grid it overlap
   bit-identical output to Gi before and after churn; the same command then times both.
 
 `--timing` adds min-over-20-rep lines for unchanged, incremental, move-200 churn, place-200
-churn, a place+remove-200 collapse window (5.7 µs — the mutations apply no deposits), tent-200
-churn (16×16 tents, difference-array path, no dense buffers), full-grid
+churn, a 200-place window rewound and reprocessed (~100 µs — the inverse window costs the
+same deposits as the forward one), a place+remove-200 collapse window (~10 µs — the mutations
+apply no deposits), tent-200
+churn (16×16 tents, ≤36 impulse writes per touched tile, persistent `int64` second-order
+buffers — ~170 µs vs the ~295 µs one-band-per-cell form), full-grid
 sum, a 1022² partial-region sum, the best-cell query against a one-million-call
 naive scan (0.1 µs vs ~5,600 µs on a 1024² layer), the gradient query (~5 ns per point), a
 16-layer × 25-dirty move-400 process, and
@@ -242,8 +306,10 @@ pass behind them was `perf`-profile guided, receipts first.
   `Stamp.Box`) — never by static construction, so no static constructor on the assembly performs
   calls and Burst can compile `Query`/`QueryRegion` call graphs; world contents are
   `NativeHeap` blocks owned by the context (grid array, `LayerData` array,
-  `InDirty`/`Dirty`/`Changed` per layer, `Prev` scratch, the deferred op queue and its per-slot
-  pending index column — appended by mutation, reset by every `Process`, with the pending tail
+  `InDirty`/`Dirty`/`Changed` per layer, `Prev` scratch, the deferred op queue with its per-slot
+  pending index column, the fragment buffer, and the journal — op copies appended by
+  `Process` while recording, consumed by `Rewind`, cleared by `Record`, `StopRecording`, and
+  `Clear`, with the pending tail
   zeroed at column growth so fresh slots read "no op" and the whole column wiped by `Clear` —
   and `SourceColumns` buffers — positions, stamp,
   layer, gain, liveness, the free-slot chain, and the generation bytes — and, per (grid, layer),
@@ -253,7 +319,11 @@ pass behind them was `perf`-profile guided, receipts first.
   tail — is owned by its slot and
   freed exactly when the tile resolves to zero, the world is cleared, or the map is disposed;
   attaching or growing dense happens only on the serial deposit thread, which republishes the
-  block pointer through the map before any later resolve can observe it). The shared zero dense
+  block pointer through the map — and patches the block pointer captured by any earlier
+  fragment of the same batch — before any later resolve can observe it. The 8,712 B tent
+  buffer is a separate allocation referenced from the block's tent pointer slot: created on
+  the tile's first tent deposit by the same serial build thread, owned by the block, and freed
+  with it). The shared zero dense
   page is allocated once with the arenas and never written afterwards.
   `Stamp` variants — base samples, mip chain, and box constants — are catalog-owned for process
   lifetime. The resolve pool (background worker
@@ -264,10 +334,14 @@ pass behind them was `perf`-profile guided, receipts first.
   destination; `ChangedTiles` copies from the changed list (stable between `Process` calls,
   swapped — never written in place — on the owning thread) into the caller's buffer. No `World.Free` exists: worlds are process-lifetime
   singletons, so no pointer escapes an owner.
-- **Aliasing**: each block is written by deposits and resolved in place; during a pooled phase
+- **Aliasing**: each block is written by deposits and resolved in place; during a pooled
+  apply phase every (grid, layer, tile) fragment bucket is claimed by exactly one
+  participant — the scatter assigns buckets by hash before signalling, so difference, tent,
+  and dense writes are tile-disjoint — and during a pooled resolve phase
   every tile is claimed by exactly one participant, so difference/dense/page/sum writes are
   disjoint and `previousRow` is one slice per participant (the caller's `Prev` for the main
-  thread, a pool slice per worker), cleared per tile before use; sources are read-only during
+  thread, a pool slice per worker), cleared per tile before use, with the resolve-time
+  `tp`/`tq`/`tentOut` chain stack-allocated per call; sources are read-only during
   deposits of other sources. `PageMap` mutation happens only through its owning `LayerData`
   pointer on the thread that called `Process`. The partial-region sum reads page rows only
   inside `[0,32)×[0,32)` of a live block and writes nothing. Pyramid updates alias nothing
@@ -294,22 +368,36 @@ pass behind them was `perf`-profile guided, receipts first.
   horizontal add cannot overflow (32 · 32768 < 2^20), and the result joins the `int64` region
   total. The sum
   slot sits at a 64 B block offset and is written as one naturally aligned `int64`; the page max
-  sits at `SumOffset + 8` as one naturally aligned `int16` inside the same padded slot. Max
+  sits at `SumOffset + 8` as one naturally aligned `int16` inside the same padded slot. The
+  dense and tent pointer slots sit side by side at `DensePtrOffset`/`TentPtrOffset` —
+  8 B each, naturally aligned — inside the pad before `SumOffset`. Max
   pyramid nodes are 64 `int16` values at 128 B offsets inside a 64 B aligned buffer, so the
   full-node AVX2 max loads stay inside the allocation; partial nodes scan scalar. The
   dense
   tail of a raster block starts at `BlockBytes` — a multiple of 64 — so its rows are 64 B
-  aligned; tiles without dense read the shared zero page, itself a 64 B aligned allocation. On
+  aligned; tiles without dense read the shared zero page, itself a 64 B aligned allocation.
+  The tent buffer is its own 64 B aligned allocation of `int64` cells at a 33-cell pitch, so
+  every element is naturally aligned; it is only ever read and written by scalar 8-byte
+  accesses. On
   netstandard2.1 (Unity) `NativeHeap` backs onto `Marshal.AllocHGlobal`
   with platform-natural alignment instead of 64-byte `AlignedAlloc`, and no SIMD paths compile:
   every access in that build is a naturally aligned scalar load or store, so the weaker
   alignment guarantee cannot be observed.
-- **Concurrency**: `Place`/`Move`/`SetGain`/`Remove`/`Process` are serial per world; different
+- **Concurrency**: `Place`/`Move`/`SetGain`/`Remove`/`Process`/`Record`/`StopRecording`/
+  `Rewind` are serial per world; different
   worlds may run on different threads. Mutations only append to or merge within the owning
   world's op queue — a merge targets the one op its slot's pending index names, an index that
-  only `ApplyDeposits` clears — and `Process` drains that queue on the owning thread before
-  any resolve runs, so deposits (including dense attach and growth, republished through the
-  page map before any later resolve can observe them) stay on one thread per world.
+  only `ApplyDeposits` clears. `Rewind` runs entirely on the owning thread: it writes source
+  columns, merges into the same op queue, and rebuilds the free chain in place, and the
+  inverse ops it enqueues reach workers only through a later `Process`. `Process` runs the serial build phase on the owning
+  thread — footprints, page-map `Put`, dense/tent attach and growth, dirty marking, and
+  fragment appends — so map and block mutation stay on one thread per world and every block
+  pointer a fragment captured is published before signalling. The apply phase is either
+  fused on that same thread (box-only batches under the threshold) or scattered over the
+  pool by (grid, layer, tile) hash bucket; a symmetric barrier — every participant,
+  caller included, runs its share then spins on the remaining count — makes all fragment
+  writes visible before any resolve reads the tile. Deposits therefore mutate blocks on
+  pooled workers but never two workers on one tile, and never concurrently with resolve.
   `Process` fans the whole world drain out when its grids
   and layers hold at least 32 dirty tiles in total:
   a fixed pool of `min(cores−1, 4)` background workers, created once and parked
@@ -346,7 +434,11 @@ pass behind them was `perf`-profile guided, receipts first.
 - **Bounds**: stamps clip to grid rects before marking (extents clamp to the grid size in Q8;
   grids whose `ScaleQ8` truncates to 0 are skipped); tile-local box corners land in
   `[0,32]×[0,32]` of the difference array (rows 0–32 exist for the exclusive far edge; column 32
-  is written but never read, by design of the half-open prefix form). Raster fragments clip to
+  is written but never read, by design of the half-open prefix form). Tent impulses land in
+  `[0,31]×[0,31]` of the second-order buffer — anchor at local 0, entry at local 1, slope
+  changes at `min(last+2, 31)` — with at most six impulses per axis (anchor, entry, and the
+  four support breakpoints) against the `MaxTentImpulses` stack slots, and the resolve-time
+  prefix chain reads rows 0–31 and writes `tentOut` 0–31. Raster fragments clip to
   the tile and read only inside the padded stamp allocation: sample coordinates advance by
   `256·65536/ScaleQ8` per cell in Q16.16 from a phase-derived origin, so at any mip level `L` the
   integer sample index stays within `[(−1), ceil(w/2^L)]` and every `+1` tap lands on the level's

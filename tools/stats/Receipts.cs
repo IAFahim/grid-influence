@@ -42,9 +42,10 @@ internal static unsafe class Receipts
             processed.DifferenceBytes + processed.DenseBytes + processed.DensePointerBytes +
                 processed.PageBytes + processed.PageSumBytes == 2 * World.BlockBytes + World.DenseBytes &&
             processed.PyramidBytes == 2 * (64 * 2 + 2 * 16 * 4) &&
-            processed.DepositQueueBytes == 16 * sizeof(DepositOp) + 64 * sizeof(int) &&
+            processed.DepositQueueBytes == 16 * sizeof(DepositOp) + 64 * sizeof(int) + 16 * sizeof(DepositFragment) &&
             processed.NativeBytes == pending.NativeBytes + 2 * World.BlockBytes + World.DenseBytes +
-                32 * (sizeof(int) + sizeof(byte*) + 1) + 8 + 128 + processed.PyramidBytes;
+                32 * (sizeof(int) + sizeof(byte*) + 1) + 8 + 128 + processed.PyramidBytes +
+                16 * sizeof(DepositFragment);
 
         World.Remove(world, a);
         World.Process(world);
@@ -84,13 +85,24 @@ internal static unsafe class Receipts
         var mutationOk = World.Query(world, grid, other, 16, 16) == 80 &&
             World.Query(world, grid, other, 48, 48) == 0;
 
+        var t = World.Place(world, layer, 48f, 48f, Stamp.Tent(8, 8, 40), 3);
+        World.Process(world);
+        var tented = Inspection.Read(world);
+        var tentOk = tented.TentTiles == 1 && tented.TentBytes == World.TentBytes &&
+            World.Query(world, grid, layer, 48, 48) > 0;
+        World.Remove(world, t);
+        World.Process(world);
+        var tentGone = Inspection.Read(world);
+        tentOk = tentOk && tentGone.TentTiles == 0 && tentGone.TentBytes == 0;
+
         World.Clear(world);
         var cleared = Inspection.Read(world);
         var clearOk = cleared.LiveSources == 0 && cleared.SourceSlots == 0 && cleared.SourceCapacity == 64 &&
             cleared.LiveTiles == 0 && cleared.DirtyTiles == 0 && cleared.MapSlots == 0 &&
             cleared.MapBytes == 0 && cleared.PyramidBytes == 0 && cleared.RasterTiles == 0 &&
-            cleared.DepositQueueBytes == 16 * sizeof(DepositOp) + 64 * sizeof(int) &&
-            cleared.WorldBytes == empty.WorldBytes + 64 * 17 + 8 + 256 + 16 * sizeof(DepositOp) + 64 * sizeof(int) &&
+            cleared.DepositQueueBytes == 16 * sizeof(DepositOp) + 64 * sizeof(int) + 16 * sizeof(DepositFragment) &&
+            cleared.WorldBytes == empty.WorldBytes + 64 * 17 + 8 + 256 + 16 * sizeof(DepositOp) +
+                64 * sizeof(int) + 16 * sizeof(DepositFragment) &&
             World.Query(world, grid, other, 0, 0, 64, 64) == 0;
 
         return
@@ -104,6 +116,7 @@ internal static unsafe class Receipts
             new("warm-process-allocates-0-bytes", processBytes == 0 && processOk, processBytes),
             new("warm-query-allocates-0-bytes", queryBytes == 0 && checksum == 100256L * 80, queryBytes),
             new("warm-move-process-allocates-0-bytes", mutationBytes == 0 && mutationOk, mutationBytes),
+            new("tent-buffer-accounted", tentOk, tented.TentBytes),
             new("clear-frees-pages-retains-capacity", clearOk, cleared.WorldBytes),
         ];
     }

@@ -21,11 +21,13 @@ internal static class Verification
         Check("region-sum-matches-cell-scans", RegionSumMatchesCellScans());
         Check("query-at-matches-deposits", QueryAtMatchesDeposits());
         Check("query-max-matches-full-scan", QueryMaxMatchesFullScan());
+        Check("query-max-region-matches-scan", QueryMaxRegionMatchesScan());
         Check("gradient-matches-central-differences", GradientMatchesCentralDifferences());
         Check("changed-tiles-match-drain", ChangedTilesMatchDrain());
         Check("deferred-window-matches-stepped-processing", DeferredWindowMatchesSteppedProcessing());
-        Check("tent-matches-band-oracle", TentMatchesBandOracle());
+        Check("tent-matches-impulse-oracle", TentMatchesImpulseOracle());
         Check("source-slots-reuse-and-stale-handles-inert", SourceSlotsReuseAndStaleInert());
+        Check("rewind-restores-recorded-state", RewindRestoresRecordedState());
         Check("signed-gain-exact", SignedGainExact());
         Check("multi-layer-pooled-matches-scans", MultiLayerPooledMatchesScans());
         Check("saturated-sum-clamps", SaturatedSumClamps());
@@ -512,6 +514,83 @@ internal static class Verification
         return Gi.World.QueryMax(w, g, cover, out _, out _) == short.MaxValue;
     }
 
+    private static unsafe bool QueryMaxRegionMatchesScan()
+    {
+        var w = Gi.World.New();
+        var g = Gi.Grid.New(w, 8, 0f, 0f, 256f);
+        var busy = Gi.Layer.New(w);
+        var stamp = Gi.Stamp.Box(20, 20, 25);
+        var rng = new Random(307);
+        var field = new short[256 * 256];
+
+        int ScanMax(int x0, int y0, int x1, int y1)
+        {
+            var best = short.MinValue;
+            for (var cy = y0; cy < y1; cy++)
+            for (var cx = x0; cx < x1; cx++)
+                if (field[cy * 256 + cx] > best) best = field[cy * 256 + cx];
+            return best;
+        }
+
+        bool RegionOk(int x, int y, int rw, int rh)
+        {
+            var expected = ScanMax(x, y, x + rw, y + rh);
+            var first = Gi.World.QueryMax(w, g, busy, x, y, rw, rh, out var bx, out var by);
+            var repeat = Gi.World.QueryMax(w, g, busy, x, y, rw, rh, out var rx, out var ry);
+            if (first != expected || repeat != first || bx != rx || by != ry) return false;
+            if (bx < x || bx >= x + rw || by < y || by >= y + rh) return false;
+            return Gi.World.Query(w, g, busy, bx, by) == first;
+        }
+
+        if (Gi.World.QueryMax(w, g, busy, 0, 0, 256, 256, out var ex, out var ey) != 0 ||
+            ex != 0 || ey != 0) return false;
+        if (Gi.World.QueryMax(w, g, busy, 400, 400, 10, 10, out _, out _) != 0) return false;
+        if (Gi.World.QueryMax(w, g, busy, 5, 5, 0, 8, out _, out _) != 0) return false;
+
+        var ids = new int[120];
+        for (var round = 0; round < 3; round++)
+        {
+            for (var i = 0; i < ids.Length; i++)
+            {
+                if (round > 0 && rng.Next(5) == 0)
+                {
+                    Gi.World.Remove(w, ids[i]);
+                    ids[i] = Gi.World.Place(w, busy,
+                        (float)(rng.NextDouble() * 240 + 8), (float)(rng.NextDouble() * 240 + 8),
+                        stamp, rng.Next(-8, 17));
+                }
+                else if (round > 0)
+                {
+                    Gi.World.Move(w, ids[i],
+                        (float)(rng.NextDouble() * 240 + 8), (float)(rng.NextDouble() * 240 + 8));
+                }
+                else
+                {
+                    ids[i] = Gi.World.Place(w, busy,
+                        (float)(rng.NextDouble() * 240 + 8), (float)(rng.NextDouble() * 240 + 8),
+                        stamp, rng.Next(-8, 17));
+                }
+            }
+
+            Gi.World.Process(w);
+            fixed (short* p = field) Gi.World.QueryRegion(w, g, busy, 0, 0, 256, 256, p);
+
+            for (var q = 0; q < 40; q++)
+            {
+                var rw = rng.Next(1, 80);
+                var rh = rng.Next(1, 80);
+                if (!RegionOk(rng.Next(257 - rw), rng.Next(257 - rh), rw, rh)) return false;
+            }
+
+            if (!RegionOk(0, 0, 256, 256)) return false;
+            if (!RegionOk(31, 31, 2, 2)) return false;
+            if (!RegionOk(30, 30, 5, 5)) return false;
+        }
+
+        return Gi.World.QueryMax(w, g, busy, 64, 64, 64, 64, out _, out _) ==
+            Gi.World.QueryMax(w, g, busy, 64, 64, 64, 64, out _, out _);
+    }
+
     private static bool GradientMatchesCentralDifferences()
     {
         var w = Gi.World.New();
@@ -707,7 +786,7 @@ internal static class Verification
             Gi.World.ChangedTiles(collapse, gc, lc, null) == 0;
     }
 
-    private static unsafe bool TentMatchesBandOracle()
+    private static unsafe bool TentMatchesImpulseOracle()
     {
         var w = Gi.World.New();
         var fine = Gi.Grid.New(w, 8, 0f, 0f, 256f);
@@ -727,37 +806,108 @@ internal static class Verification
         var fineField = new int[256 * 256];
         var coarseField = new int[128 * 128];
 
-        int TentWeight(int cell, int peak, int half)
+        int RoundQ24(long value) => (int)((value + 8388608 + (value >> 63)) >> 24);
+
+        (int First, int Peak, int Last, int Up, int Down, int Tail) Axis(int origin, int phase, int extent)
         {
-            var distance = cell * 256 - peak;
-            if (distance < 0) distance = -distance;
-            return distance >= half ? 0 : 256 - 256 * distance / half;
+            var half = Math.Max(1, extent >> 1);
+            var peak = (origin << 8) + phase + (extent >> 1);
+            var first = ((peak - half) >> 8) + 1;
+            var last = (peak + half - 1) >> 8;
+            var peakCell = peak >> 8;
+            if (last < first)
+            {
+                first = peakCell;
+                last = peakCell;
+            }
+
+            if (peakCell < first) peakCell = first;
+            if (peakCell > last) peakCell = last;
+            var rise = peakCell - first + 1;
+            var fall = last + 1 - peakCell;
+            var up = 65536 / rise;
+            var down = up * rise / fall;
+            var tail = up * rise - down * (fall - 1);
+            return (first, peakCell, last, up, down, tail);
         }
 
-        void Rebuild(int[] target, int size, int scaleQ8)
+        int Weight(int cell, (int First, int Peak, int Last, int Up, int Down, int Tail) g)
         {
-            Array.Clear(target);
+            if (cell < g.First || cell > g.Last) return 0;
+            if (cell <= g.Peak) return g.Up * (cell - g.First + 1);
+            return g.Up * (g.Peak - g.First + 1) - g.Down * (cell - g.Peak);
+        }
+
+        int Slope(int cell, (int First, int Peak, int Last, int Up, int Down, int Tail) g)
+        {
+            if (cell < g.First || cell > g.Last + 1) return 0;
+            if (cell <= g.Peak) return g.Up;
+            return cell <= g.Last ? -g.Down : -g.Tail;
+        }
+
+        int CellValue(int cx, int cy, int scaleQ8,
+            Span<(int Cell, int Delta)> xs, Span<(int Cell, int Delta)> ys)
+        {
+            var sum = 0L;
             for (var i = 0; i < count; i++)
             {
                 if (!slive[i]) continue;
                 var width = ssize[i];
                 var extent = width * scaleQ8;
-                var half = Math.Max(1, extent >> 1);
                 var leadX = (long)(int)MathF.Floor(sx[i] * scaleQ8) + ((long)-(width * 128) * scaleQ8 >> 8);
                 var leadY = (long)(int)MathF.Floor(sy[i] * scaleQ8) + ((long)-(width * 128) * scaleQ8 >> 8);
-                var peakX = (int)(leadX + (extent >> 1));
-                var peakY = (int)(leadY + (extent >> 1));
-                for (var cy = (peakY - half) >> 8; cy <= ((peakY + half) >> 8) + 1; cy++)
-                for (var cx = (peakX - half) >> 8; cx <= ((peakX + half) >> 8) + 1; cx++)
+                var gx = Axis((int)(leadX >> 8), (int)(leadX & 255), extent);
+                var gy = Axis((int)(leadY >> 8), (int)(leadY & 255), extent);
+                var tx = cx & ~31;
+                var ty = cy & ~31;
+                var liveX = 0;
+                xs[liveX++] = (0, Weight(tx, gx));
+                var entryX = Slope(tx + 1, gx) - Weight(tx, gx);
+                if (entryX != 0) xs[liveX++] = (1, entryX);
+                for (var c = tx + 2; c <= Math.Min(gx.Last + 2, tx + 31); c++)
                 {
-                    var wy = TentWeight(cy, peakY, half);
-                    var wx = TentWeight(cx, peakX, half);
-                    if (wx <= 0 || wy <= 0) continue;
-                    var value = RoundQ16(40 * wx * wy) * sgain[i];
-                    if (value == 0 || (uint)cx >= (uint)size || (uint)cy >= (uint)size) continue;
-                    target[cy * size + cx] += value;
+                    var change = Slope(c, gx) - Slope(c - 1, gx);
+                    if (change != 0) xs[liveX++] = (c - tx, change);
                 }
+
+                var liveY = 0;
+                ys[liveY++] = (0, Weight(ty, gy));
+                var entryY = Slope(ty + 1, gy) - Weight(ty, gy);
+                if (entryY != 0) ys[liveY++] = (1, entryY);
+                for (var c = ty + 2; c <= Math.Min(gy.Last + 2, ty + 31); c++)
+                {
+                    var change = Slope(c, gy) - Slope(c - 1, gy);
+                    if (change != 0) ys[liveY++] = (c - ty, change);
+                }
+
+                var lx = cx - tx;
+                var ly = cy - ty;
+                var inner = 0L;
+                for (var y = 0; y < liveY; y++)
+                {
+                    if (ys[y].Cell > ly) continue;
+                    var countY = ly - ys[y].Cell + 1;
+                    for (var x = 0; x < liveX; x++)
+                    {
+                        if (xs[x].Cell > lx) continue;
+                        inner += (long)xs[x].Delta * ys[y].Delta * (lx - xs[x].Cell + 1) * countY;
+                    }
+                }
+
+                sum += 40L * sgain[i] * inner;
             }
+
+            return RoundQ24(sum);
+        }
+
+        void Rebuild(int[] target, int size, int scaleQ8)
+        {
+            Array.Clear(target);
+            Span<(int Cell, int Delta)> xs = stackalloc (int, int)[8];
+            Span<(int Cell, int Delta)> ys = stackalloc (int, int)[8];
+            for (var cy = 0; cy < size; cy++)
+            for (var cx = 0; cx < size; cx++)
+                target[cy * size + cx] += CellValue(cx, cy, scaleQ8, xs, ys);
         }
 
         bool Compare(byte grid, int size, int scaleQ8, int[] oracle)
@@ -767,7 +917,11 @@ internal static class Verification
             {
                 Gi.World.QueryRegion(w, grid, l, 0, 0, size, size, p);
                 for (var i = 0; i < oracle.Length; i++)
-                    if (p[i] != (short)Math.Clamp(oracle[i], short.MinValue, short.MaxValue)) return false;
+                    if (p[i] != (short)Math.Clamp(oracle[i], short.MinValue, short.MaxValue))
+                    {
+                        Console.WriteLine($"  first diff grid{size} ({i % size},{i / size}): engine {p[i]} oracle {oracle[i]}");
+                        return false;
+                    }
             }
 
             return true;
@@ -840,6 +994,54 @@ internal static class Verification
         Gi.World.Process(w);
         if (Gi.World.Query(w, g, l, 20, 20) != 5 * 40) return false;
         return Gi.World.Query(w, g, l, 12, 12) == 0;
+    }
+
+    private static bool RewindRestoresRecordedState()
+    {
+        var w = Gi.World.New();
+        var g = Gi.Grid.New(w, 6, 0f, 0f, 64f);
+        var l = Gi.Layer.New(w);
+        var box = Gi.Stamp.Box(6, 6, 50);
+        var tent = Gi.Stamp.Tent(9, 9, 40);
+        var rng = new Random(99);
+        var kept = new int[24];
+        for (var i = 0; i < kept.Length; i++)
+            kept[i] = Gi.World.Place(w, l, rng.Next(4, 56), rng.Next(4, 56),
+                (i & 1) == 0 ? box : tent, 1 + rng.Next(14));
+        Gi.World.Process(w);
+        var baseline = Gi.World.Query(w, g, l, 0, 0, 64, 64);
+
+        Gi.World.Record(w);
+        var doomed = kept[3];
+        Gi.World.Remove(w, doomed);
+        var occupant = Gi.World.Place(w, l, 30f, 30f, box, 9);
+        Gi.World.Process(w);
+        for (var i = 0; i < kept.Length; i += 2)
+            if (kept[i] != doomed) Gi.World.Move(w, kept[i], rng.Next(4, 56), rng.Next(4, 56));
+        for (var i = 1; i < kept.Length; i += 3)
+            Gi.World.SetGain(w, kept[i], -4);
+        var extra = Gi.World.Place(w, l, 8f, 52f, tent, 7);
+        Gi.World.Process(w);
+        Gi.World.Move(w, kept[0], 2f, 2f);
+        if (Gi.World.Query(w, g, l, 0, 0, 64, 64) == baseline) return false;
+
+        Gi.World.Rewind(w);
+        Gi.World.Process(w);
+        if (Gi.World.Query(w, g, l, 0, 0, 64, 64) != baseline) return false;
+
+        Gi.World.Move(w, occupant, 4f, 4f);
+        Gi.World.Move(w, extra, 4f, 4f);
+        Gi.World.Remove(w, occupant);
+        Gi.World.Process(w);
+        if (Gi.World.Query(w, g, l, 0, 0, 64, 64) != baseline) return false;
+
+        Gi.World.Move(w, doomed, 10f, 10f);
+        Gi.World.Process(w);
+        if (Gi.World.Query(w, g, l, 12, 12) == 0) return false;
+
+        Gi.World.Rewind(w);
+        Gi.World.Process(w);
+        return Gi.World.Query(w, g, l, 12, 12) != 0;
     }
 
     private static bool SignedGainExact()
@@ -1114,6 +1316,25 @@ internal static class Verification
         }
         Console.WriteLine($"place-200 churn process: {best:F0} us");
 
+        best = double.MaxValue;
+        long rewindAcc = 0;
+        for (var r = -1; r < 20; r++)
+        {
+            Gi.World.Record(w);
+            for (var i = 0; i < placed.Length; i++)
+                placed[i] = Gi.World.Place(w, l,
+                    (i * 41.3f + (r + 1) * 17.9f) % 1000f + 12f,
+                    (i * 29.7f + (r + 1) * 23.1f) % 1000f + 12f, stamp, 8);
+            Gi.World.Process(w);
+            var t = Stopwatch.GetTimestamp();
+            Gi.World.Rewind(w);
+            Gi.World.Process(w);
+            var el = Stopwatch.GetElapsedTime(t).TotalMicroseconds;
+            rewindAcc += Gi.World.Query(w, g, l, 0, 0, 64, 64);
+            if (r >= 0 && el < best) best = el;
+        }
+        Console.WriteLine($"rewind+process of 200-place window: {best:F0} us ({rewindAcc})");
+
         var collapseIds = new int[200];
         best = double.MaxValue;
         for (var r = -1; r < 20; r++)
@@ -1180,6 +1401,19 @@ internal static class Verification
             if (el < best) best = el;
         }
         Console.WriteLine($"best-cell query (argmax over 1024x1024): {best:F2} us ({bestCell})");
+
+        best = double.MaxValue;
+        short bestRegion = 0;
+        for (var r = 0; r < 20; r++)
+        {
+            var t = Stopwatch.GetTimestamp();
+            for (var i = 0; i < 1_000; i++)
+                bestRegion = Gi.World.QueryMax(w, g, l,
+                    (i * 61) % 900, (i * 37) % 900, 128, 128, out _, out _);
+            var el = Stopwatch.GetElapsedTime(t).TotalMicroseconds;
+            if (el < best) best = el;
+        }
+        Console.WriteLine($"best-cell-in-128x128-region query: {best / 10:F2} us per 1k ({bestRegion})");
 
         best = double.MaxValue;
         long gradientAcc = 0;

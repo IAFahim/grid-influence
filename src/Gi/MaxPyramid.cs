@@ -168,6 +168,84 @@ internal unsafe struct MaxPyramid
         return target;
     }
 
+    public short Best(int tilesPerSide, PageMap* pages,
+        int cellX0, int cellY0, int cellX1, int cellY1, out int x, out int y)
+    {
+        x = cellX0;
+        y = cellY0;
+        if (_levels == 0) return 0;
+
+        var tx0 = cellX0 >> TileBake.TileBits;
+        var ty0 = cellY0 >> TileBake.TileBits;
+        var tx1 = (cellX1 - 1) >> TileBake.TileBits;
+        var ty1 = (cellY1 - 1) >> TileBake.TileBits;
+        var best = int.MinValue;
+        Visit(tilesPerSide, pages, _levels - 1, 0, 0, tx0, ty0, tx1, ty1,
+            cellX0, cellY0, cellX1, cellY1, ref best, ref x, ref y);
+        return best == int.MinValue ? (short)0 : (short)best;
+    }
+
+    private void Visit(int tilesPerSide, PageMap* pages, int level, int nodeX, int nodeY,
+        int tx0, int ty0, int tx1, int ty1, int cellX0, int cellY0, int cellX1, int cellY1,
+        ref int best, ref int x, ref int y)
+    {
+        var sides = _sides.Pointer;
+        var node = _slots.Pointer + _offsets.Pointer[level] +
+            (nodeY * sides[level] + nodeX) * NodeSlots;
+        var childSide = level == 0 ? tilesPerSide : sides[level - 1];
+        var vx = Math.Min(FanOut, childSide - (nodeX << 3));
+        var vy = Math.Min(FanOut, childSide - (nodeY << 3));
+        var shift = 3 * level;
+        var loX = Math.Max(0, (tx0 >> shift) - (nodeX << 3));
+        var loY = Math.Max(0, (ty0 >> shift) - (nodeY << 3));
+        var hiX = Math.Min(vx - 1, (tx1 >> shift) - (nodeX << 3));
+        var hiY = Math.Min(vy - 1, (ty1 >> shift) - (nodeY << 3));
+        for (var cy = loY; cy <= hiY; cy++)
+        for (var cx = loX; cx <= hiX; cx++)
+        {
+            if (node[cy * FanOut + cx] <= best) continue;
+            var childX = (nodeX << 3) + cx;
+            var childY = (nodeY << 3) + cy;
+            if (level != 0)
+            {
+                Visit(tilesPerSide, pages, level - 1, childX, childY,
+                    tx0, ty0, tx1, ty1, cellX0, cellY0, cellX1, cellY1, ref best, ref x, ref y);
+                continue;
+            }
+
+            var tileX0 = childX << TileBake.TileBits;
+            var tileY0 = childY << TileBake.TileBits;
+            var ox0 = Math.Max(cellX0, tileX0);
+            var oy0 = Math.Max(cellY0, tileY0);
+            var ox1 = Math.Min(cellX1 - 1, tileX0 + TileBake.TileSize - 1);
+            var oy1 = Math.Min(cellY1 - 1, tileY0 + TileBake.TileSize - 1);
+            if (!pages->TryGet(childY * tilesPerSide + childX, out var block))
+            {
+                if (0 > best)
+                {
+                    best = 0;
+                    x = ox0;
+                    y = oy0;
+                }
+
+                continue;
+            }
+
+            var page = (short*)(block + World.PageOffset);
+            for (var row = oy0; row <= oy1; row++)
+            {
+                var line = page + (row - tileY0) * TileBake.TileSize;
+                for (var col = ox0; col <= ox1; col++)
+                    if (line[col - tileX0] > best)
+                    {
+                        best = line[col - tileX0];
+                        x = col;
+                        y = row;
+                    }
+            }
+        }
+    }
+
     private static short MaxNode(short* slots, int vx, int vy)
     {
         if (vx == FanOut && vy == FanOut)

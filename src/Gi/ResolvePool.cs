@@ -15,7 +15,9 @@ internal unsafe struct ResolveTask
 internal static unsafe class ResolvePool
 {
     internal const int Threshold = 32;
+    internal const int ApplyThreshold = 128;
     private const int Chunk = 8;
+    private const int Buckets = 8;
 
     private static int _busy;
     private static int _workers;
@@ -24,6 +26,11 @@ internal static unsafe class ResolvePool
     private static int* _prevPool;
     private static NativeBuffer<int> _dead;
     private static NativeBuffer<ResolveTask> _tasks;
+    private static NativeBuffer<DepositFragment> _pooled;
+    private static NativeBuffer<int> _bucketIndex;
+    private static WorldCtx* _applyWorld;
+    private static int _phase;
+    private static int _applyRemaining;
     private static int _taskCount;
     private static int _total;
     private static int _cursor;
@@ -60,6 +67,51 @@ internal static unsafe class ResolvePool
     #endif
     internal static void ResolveWorld(WorldCtx* w, int total)
     {
+        PrepareTasks(w, total);
+        for (var k = 0; k < _workers; k++) _wake[k].Set();
+        RunShare(w->Prev);
+        Drain();
+        Finish(w);
+    }
+
+    internal static void ApplyAndResolveWorld(WorldCtx* w, int fragmentCount, int total)
+    {
+        ScatterFragments(w, fragmentCount);
+        PrepareTasks(w, total);
+        _applyRemaining = _workers + 1;
+        Volatile.Write(ref _phase, 1);
+        for (var k = 0; k < _workers; k++) _wake[k].Set();
+        ApplyShare(0);
+        Barrier(ref _applyRemaining);
+        RunShare(w->Prev);
+        Drain();
+        Finish(w);
+        Volatile.Write(ref _phase, 0);
+    }
+
+    private static void Barrier(ref int remaining)
+    {
+        Interlocked.Decrement(ref remaining);
+        var spin = 0;
+        while (Volatile.Read(ref remaining) != 0)
+        {
+            Thread.SpinWait(32);
+            if ((++spin & 15) == 0) Thread.Yield();
+        }
+    }
+
+    private static void Drain()
+    {
+        var spin = 0;
+        while (Volatile.Read(ref _remaining) != 0)
+        {
+            Thread.SpinWait(32);
+            if ((++spin & 15) == 0) Thread.Yield();
+        }
+    }
+
+    private static void PrepareTasks(WorldCtx* w, int total)
+    {
         _dead.Ensure(total);
         var tasks = _tasks.Pointer;
         var taskCount = 0;
@@ -84,16 +136,12 @@ internal static unsafe class ResolvePool
         _deadCount = 0;
         _cursor = total;
         _remaining = _workers;
-        for (var k = 0; k < _workers; k++) _wake[k].Set();
-        RunShare(w->Prev);
-        var spin = 0;
-        while (Volatile.Read(ref _remaining) != 0)
-        {
-            Thread.SpinWait(32);
-            if ((++spin & 15) == 0) Thread.Yield();
-        }
+    }
 
+    private static void Finish(WorldCtx* w)
+    {
         var dead = _dead.Pointer;
+        var tasks = _tasks.Pointer;
         for (var i = 0; i < _deadCount; i++)
         {
             var index = dead[i];
@@ -106,7 +154,7 @@ internal static unsafe class ResolvePool
             World.FreeBlock(block);
         }
 
-        for (var t = 0; t < taskCount; t++)
+        for (var t = 0; t < _taskCount; t++)
         {
             var task = tasks + t;
             var ld = task->Layer;
@@ -118,6 +166,55 @@ internal static unsafe class ResolvePool
                 var max = pages->TryGet(tile, out var block) ? *(short*)(block + World.MaxOffset) : (short)0;
                 ld->Max.Update(task->Grid->TilesPerSide, tile, max);
             }
+        }
+    }
+
+    private static void ScatterFragments(WorldCtx* w, int count)
+    {
+        _pooled.Ensure(count);
+        _bucketIndex.Ensure(Buckets * 2);
+        var counts = stackalloc int[Buckets];
+        var cursor = stackalloc int[Buckets];
+        for (var b = 0; b < Buckets; b++) counts[b] = 0;
+
+        var fragments = w->Fragments.Pointer;
+        for (var i = 0; i < count; i++) counts[BucketOf(fragments + i)]++;
+
+        var index = _bucketIndex.Pointer;
+        var start = 0;
+        for (var b = 0; b < Buckets; b++)
+        {
+            index[b] = start;
+            index[Buckets + b] = counts[b];
+            cursor[b] = start;
+            start += counts[b];
+        }
+
+        var pooled = _pooled.Pointer;
+        for (var i = 0; i < count; i++)
+        {
+            var f = fragments + i;
+            pooled[cursor[BucketOf(f)]++] = *f;
+        }
+
+        _applyWorld = w;
+    }
+
+    private static int BucketOf(DepositFragment* f)
+    {
+        var h = (uint)f->Tile * 2654435761u + (uint)(f->Grid * 37 + f->Layer);
+        return (int)((h >> 13) & (Buckets - 1));
+    }
+
+    private static void ApplyShare(int participant)
+    {
+        var index = _bucketIndex.Pointer;
+        var pooled = _pooled.Pointer;
+        var w = _applyWorld;
+        for (var b = participant; b < Buckets; b += _workers + 1)
+        {
+            var end = index[b] + index[Buckets + b];
+            for (var i = index[b]; i < end; i++) World.ApplyFragment(w, pooled + i);
         }
     }
 
@@ -142,6 +239,15 @@ internal static unsafe class ResolvePool
         while (true)
         {
             _wake[index].WaitOne();
+            if (Volatile.Read(ref _phase) != 0)
+            {
+                ApplyShare(index + 1);
+                Barrier(ref _applyRemaining);
+                RunShare(prev);
+                Interlocked.Decrement(ref _remaining);
+                continue;
+            }
+
             RunShare(prev);
             Interlocked.Decrement(ref _remaining);
         }
@@ -171,7 +277,7 @@ internal static unsafe class ResolvePool
                 if (!pages->TryGet(tile, out var block)) continue;
 
                 new Span<int>(prev, TileBake.TileSize).Clear();
-                if (!TileBake.Resolve((int*)block, World.DenseOf(block), prev,
+                if (!TileBake.Resolve((int*)block, World.DenseOf(block), prev, World.TentOf(block),
                     (short*)(block + World.PageOffset), (long*)(block + World.SumOffset), (short*)(block + World.MaxOffset)))
                     _dead.Pointer[Interlocked.Increment(ref _deadCount) - 1] = i;
             }
