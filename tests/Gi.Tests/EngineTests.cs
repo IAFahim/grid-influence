@@ -1147,104 +1147,52 @@ public sealed class EngineTests
         Assert.Equal(0, World.ChangedTiles(w, g, l, null));
     }
 
-    private static int RoundQ32Kernel(long value)
-        => (int)((value + 2147483648L + (value >> 63)) >> 32);
+    private static int RoundQ40Kernel(long value)
+        => (int)((value + 549755813888L + (value >> 63)) >> 40);
 
-    private readonly record struct TentAxisGeometry(int First, int Peak, int Last, int Up, int Down, int Tail);
-
-    private static TentAxisGeometry TentAxis(int origin, int phase, int extent)
+    private readonly record struct KernelAxis(long Centre, long Half, int Shift, bool Bell)
     {
-        var half = Math.Max(1, extent >> 1);
-        var peak = (origin << 8) + phase + (extent >> 1) - 128;
-        var first = ((peak - half) >> 8) + 1;
-        var last = (peak + half - 1) >> 8;
-        var peakCell = peak >> 8;
-        if (last < first)
-        {
-            first = peakCell;
-            last = peakCell;
-        }
+        public long Peak => Bell ? Half * Half : Half;
 
-        if (peakCell < first) peakCell = first;
-        if (peakCell > last) peakCell = last;
-        var rise = peakCell - first + 1;
-        var fall = last + 1 - peakCell;
-        var up = 65536 / rise;
-        var down = up * rise / fall;
-        var tail = up * rise - down * (fall - 1);
-        return new TentAxisGeometry(first, peakCell, last, up, down, tail);
+        public long Weight(int cell)
+        {
+            var d = ((cell * 256L + 128) >> Shift) - (Centre >> Shift);
+            var w = Bell ? Half * Half - d * d : Half - Math.Abs(d);
+            return Math.Max(0, w);
+        }
     }
 
-    private static int TentAxisWeight(int cell, in TentAxisGeometry g)
+    private static KernelAxis KernelAxisOf(bool bell, int origin, int phase, int extent)
     {
-        if (cell < g.First || cell > g.Last) return 0;
-        if (cell <= g.Peak) return g.Up * (cell - g.First + 1);
-        return g.Up * (g.Peak - g.First + 1) - g.Down * (cell - g.Peak);
+        var half = Math.Max(256L, extent >> 1);
+        var bits = 64 - System.Numerics.BitOperations.LeadingZeroCount((ulong)half);
+        var shift = Math.Clamp(bits - (bell ? 8 : 15), 0, 7);
+        return new KernelAxis(((long)origin << 8) + phase + (extent >> 1), half >> shift, shift, bell);
     }
 
-    private static int TentAxisSlope(int cell, in TentAxisGeometry g)
+    private static void AccumulateKernel(long[] field, int size, bool bell, int px, int py, int fx, int fy,
+        int width, int height, int constant, int gain)
     {
-        if (cell < g.First || cell > g.Last + 1) return 0;
-        if (cell <= g.Peak) return g.Up;
-        return cell <= g.Last ? -g.Down : -g.Tail;
-    }
-
-    private static long TentCellValue(int cx, int cy, in TentAxisGeometry gx, in TentAxisGeometry gy)
-    {
-        Span<(int Cell, int Delta)> xs = stackalloc (int, int)[8];
-        Span<(int Cell, int Delta)> ys = stackalloc (int, int)[8];
-        var tx = cx & ~31;
-        var ty = cy & ~31;
-        var liveX = 0;
-        xs[liveX++] = (0, TentAxisWeight(tx, gx));
-        var entryX = TentAxisSlope(tx + 1, gx) - TentAxisWeight(tx, gx);
-        if (entryX != 0) xs[liveX++] = (1, entryX);
-        for (var c = tx + 2; c <= Math.Min(gx.Last + 2, tx + 31); c++)
+        var gx = KernelAxisOf(bell, px, fx, width * 256);
+        var gy = KernelAxisOf(bell, py, fy, height * 256);
+        var peak = gx.Peak * gy.Peak;
+        var normalizer = ((1L << 40) + peak / 2) / peak;
+        for (var cy = 0; cy < size; cy++)
         {
-            var change = TentAxisSlope(c, gx) - TentAxisSlope(c - 1, gx);
-            if (change != 0) xs[liveX++] = (c - tx, change);
-        }
-
-        var liveY = 0;
-        ys[liveY++] = (0, TentAxisWeight(ty, gy));
-        var entryY = TentAxisSlope(ty + 1, gy) - TentAxisWeight(ty, gy);
-        if (entryY != 0) ys[liveY++] = (1, entryY);
-        for (var c = ty + 2; c <= Math.Min(gy.Last + 2, ty + 31); c++)
-        {
-            var change = TentAxisSlope(c, gy) - TentAxisSlope(c - 1, gy);
-            if (change != 0) ys[liveY++] = (c - ty, change);
-        }
-
-        var lx = cx - tx;
-        var ly = cy - ty;
-        var sum = 0L;
-        for (var y = 0; y < liveY; y++)
-        {
-            if (ys[y].Cell > ly) continue;
-            var countY = ly - ys[y].Cell + 1;
-            for (var x = 0; x < liveX; x++)
+            var wy = gy.Weight(cy);
+            if (wy == 0) continue;
+            for (var cx = 0; cx < size; cx++)
             {
-                if (xs[x].Cell > lx) continue;
-                sum += (long)xs[x].Delta * ys[y].Delta * (lx - xs[x].Cell + 1) * countY;
+                var wx = gx.Weight(cx);
+                if (wx == 0) continue;
+                field[cy * size + cx] += (long)constant * gain * normalizer * wx * wy;
             }
         }
-
-        return sum;
     }
 
     private static void AccumulateTent(long[] field, int size, int px, int py, int fx, int fy,
         int width, int height, int constant, int gain)
-    {
-        var gx = TentAxis(px, fx, width * 256);
-        var gy = TentAxis(py, fy, height * 256);
-        var x0 = Math.Max((gx.First - 1) & ~31, 0);
-        var x1 = Math.Min((gx.Last + 1) | 31, size - 1);
-        var y0 = Math.Max((gy.First - 1) & ~31, 0);
-        var y1 = Math.Min((gy.Last + 1) | 31, size - 1);
-        for (var cy = y0; cy <= y1; cy++)
-        for (var cx = x0; cx <= x1; cx++)
-            field[cy * size + cx] += (long)constant * gain * TentCellValue(cx, cy, gx, gy);
-    }
+        => AccumulateKernel(field, size, false, px, py, fx, fy, width, height, constant, gain);
 
     private static (int px, int py, int fx, int fy) TentLead(float wx, float wy, int width, int height)
     {
@@ -1281,7 +1229,7 @@ public sealed class EngineTests
                 AccumulateTent(tentField, 256, lead.px, lead.py, lead.fx, lead.fy, ssize[i], ssize[i], 40, sgain[i]);
             }
 
-            for (var i = 0; i < target.Length; i++) target[i] = RoundQ32Kernel(tentField[i]);
+            for (var i = 0; i < target.Length; i++) target[i] = RoundQ40Kernel(tentField[i]);
         }
 
         for (var i = 0; i < count; i++)
@@ -1339,53 +1287,11 @@ public sealed class EngineTests
         Assert.Equal(World.Query(w, g, l, mx, my), World.QueryMax(w, g, l, out _, out _));
     }
 
-    private static long BellAxisWeight(int cell, int first, int last)
-    {
-        if (cell < first || cell > last) return 0;
-        var h = last - first + 1;
-        var e = 2 * cell - first - last;
-        return h * h - e * e;
-    }
-
-    private static long BellNormalizer((int First, int Last) x, (int First, int Last) y)
-    {
-        var hx = (long)(x.Last - x.First + 1);
-        var hy = (long)(y.Last - y.First + 1);
-        var area = hx * hx * hy * hy;
-        return ((1L << 40) + area / 2) / area;
-    }
-
-    private static int RoundQ40Bell(long value)
-        => (int)((value + 549755813888L + (value >> 63)) >> 40);
-
-    private static (int First, int Last) BellAxis(int origin, int phase, int extent)
-    {
-        var half = Math.Max(1, extent >> 1);
-        var peak = (origin << 8) + phase + (extent >> 1) - 128;
-        var first = ((peak - half) >> 8) + 1;
-        var last = (peak + half - 1) >> 8;
-        if (last < first) { first = peak >> 8; last = first; }
-        return (first, last);
-    }
-
     private static void AccumulateBell(long[] field, int size, float wx, float wy,
         int width, int height, int constant, int gain)
     {
         var lead = TentLead(wx, wy, width, height);
-        var gx = BellAxis(lead.px, lead.fx, width * 256);
-        var gy = BellAxis(lead.py, lead.fy, height * 256);
-        var curve = BellNormalizer(gx, gy);
-        for (var cy = 0; cy < size; cy++)
-        {
-            var wyv = BellAxisWeight(cy, gy.First, gy.Last);
-            if (wyv == 0) continue;
-            for (var cx = 0; cx < size; cx++)
-            {
-                var wxv = BellAxisWeight(cx, gx.First, gx.Last);
-                if (wxv == 0) continue;
-                field[cy * size + cx] += (long)constant * gain * curve * wxv * wyv;
-            }
-        }
+        AccumulateKernel(field, size, true, lead.px, lead.py, lead.fx, lead.fy, width, height, constant, gain);
     }
 
     [Fact]
@@ -1415,7 +1321,7 @@ public sealed class EngineTests
                 AccumulateBell(bellField, 256, sx[i], sy[i], ssize[i], ssize[i], 40, sgain[i]);
             }
 
-            for (var i = 0; i < target.Length; i++) target[i] = RoundQ40Bell(bellField[i]);
+            for (var i = 0; i < target.Length; i++) target[i] = RoundQ40Kernel(bellField[i]);
         }
 
         for (var i = 0; i < count; i++)

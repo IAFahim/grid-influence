@@ -234,9 +234,11 @@ short  along  = World.QueryAt(world, grid, slowZone, x, y);
   `Process` resolved, for repainting or incremental sync.
 - **Sub-cell placement, world-anchored extents.** Positions convert to cell space in Q8; raster
   stamps deposit with bilinear edge weights, uniform rasters take a difference-array box path,
-  `Stamp.Tent` deposits a piecewise-linear kernel as ≤36 second-order impulses per touched
-  tile, and `Stamp.Bell` deposits a paraboloid kernel as ≤81 third-order impulses per touched
-  tile — both exact at every sub-cell phase, zero outside the support.
+  `Stamp.Tent` (piecewise-linear) and `Stamp.Bell` (paraboloid) are sampled at cell centres
+  against the true sub-cell kernel centre and deposited as a few second- or third-order
+  impulses per axis per touched tile — exact, smooth as they glide, peaking at `value·gain`
+  like a box, and zero outside the support (bells wider than 256 cells on a grid fall back to
+  their baked raster there).
   A stamp covers the same world rect on every grid of its world: extents scale with the grid,
   fractional edges become Q8 band weights, and raster stamps carry baked zero-padded box-average
   mip chains so coarse grids minify without aliasing (scale-1 grids keep the bit-identical 0.2
@@ -280,6 +282,8 @@ bash tools/stats/perf.sh stat --iterations 12000
 | `saturated-sum-clamps` | saturation sticks at ±32767 after summation |
 | `cross-grid-sums-conserve-world-integral` | the same sources summed over four grid scales conserve the world integral exactly |
 | `kernels-share-box-units-and-centre` | box, tent, and bell peaks read `value·gain` at every width, symmetric, full support |
+| `kernels-move-smoothly` | tents and bells glide sub-cell without whole-cell steps |
+| `kernels-hold-strength-at-every-scale` | tents and bells keep full strength on grids from 1/16 to 32 cells per unit |
 | `sense-picks-finest-covering-grid-and-reports-gaps` | grid-free reads use the documented grid rule; uncovered points report `false`, never "safe" |
 | `sense-area-matches-disk-scan` | world-space disk totals equal per-cell scans, including seam fallback to the coarse grid |
 | `sense-area-conserves-across-grids` | one field sensed on two resolutions gives the identical world-area total |

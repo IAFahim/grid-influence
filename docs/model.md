@@ -13,43 +13,39 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   cell-space content: `w×h` `sbyte` samples, centered on the placement position (origin offset
   `−w/2` cells in Q8). Uniform rasters classify as `ConstantRectangle` and take the
   difference-array path; the rest are `Raster` and deposit with sub-cell bilinear weights.
-  `Tent` is a piecewise-linear kernel: `WX(cx)·WY(cy)`, rising `Up` slope per cell to a peak
-  then falling `Down` per cell over the support `w×h` cells (exactly the box span), plus a
-  closing `Tail` step that lands the weight on zero at `last+1`. Weights are sampled at cell
-  centres (the support geometry runs on `peak − 128` in Q8), so a tent placed on a cell centre
-  is symmetric about that cell, and each axis weight is Q16 (`Up·rise ≈ 65536` = 1.0), so the
-  peak cell reads `value·gain` — the same unit as a `Box` cell. A piecewise-linear signal
-  has a sparse second derivative, so each tile the tent touches keeps its deposits in a
-  lazily attached 33×33 `int64` second-order buffer (8,712 B, held in the block's tent
-  pointer slot): per axis the emitter writes the absolute weight at the tile's left edge,
-  the entry correction at local cell 1, and every slope change inside the tile (rise start,
-  peak, fall end, and the `Tail` zero at `last+2`) — ≤6 impulses per axis, ≤36
-  `value·gain·Δx·Δy` corner writes per tile. The products are stored unrounded so the
-  impulse chain telescopes exactly: resolve re-derives each cell as
-  `RoundQ32(Σ value·gain·Wx·Wy)` through a second int64 prefix chain per row, rounding once
-  per cell over all tent sources in the tile. Sub-cell phases shift the breakpoints smoothly
-  between tiles; the deposit is integer-exact at every phase (impulse-oracle receipted),
-  never touches a dense buffer, and moves/removes negate the same impulses exactly — the
-  buffer is persistent, so retraction returns it to literal zero.
-  `Bell` is a paraboloid kernel: `C·WX(cx)·WY(cy)` where each axis is the discrete parabola
-  `h²−e²` over its support of `h` cells (`e = 2c−first−last`, centred on the support, positive
-  on every support cell, zero outside), and one joint normalizer
-  `C = round(2^40 / (hx²·hy²))` scales the product to Q40, so the peak reads `value·gain` within
-  0.2% at every width (a per-axis integer `curve = 65536/h²` collapses to 1 or 2 for wide
-  supports and left a 200-wide bell at 37% strength). `C ≥ 256` for every stamp size; a
-  source's largest product is `2032·2^40 < 2^51`, so int64 sums stay exact up to 4,096
-  maximum-strength bells stacked on one cell — 256× past int16 saturation. A parabola has a sparse third derivative: `Δ³w` is nonzero only at the three
-  cells entering the support and the three cells leaving it, so each tile the bell touches keeps
-  its deposits in a lazily attached 33×33 `int64` third-order buffer (8,712 B, held in the
-  block's bell pointer slot). Per axis the emitter writes the three boundary injections at
-  local cells 0–2 (the values a 3-stage prefix needs to reconstruct `w` at the tile edge) plus
-  the `Δ³` deltas at the six support-edge cells — ≤9 impulses per axis, ≤81
-  `value·gain·Δx·Δy` corner writes per tile, stored unrounded so the chain telescopes exactly.
-  Tile coverage extends two cells past the weight footprint because the trailing `Δ³` taps land
-  at `last+1`/`last+2`; the leading taps start at `first ≥ x0` so the footprint's left edge
-  needs no widening. Resolve re-derives each cell as `RoundQ40(Σ value·gain·C·Wx·Wy)` through a
-  third int64 prefix chain per row, rounding once per cell over all bell sources in the tile.
-  Retraction negates the same impulses and returns the buffer to literal zero.
+  `Tent` and `Bell` are smooth kernels sampled at cell centres: each axis measures the distance
+  `d` from a cell's centre to the kernel's true centre (`lead + extent/2` in Q8, so sub-cell
+  placement is continuous) and weighs it as `max(0, H − |d|)` (tent, piecewise-linear) or
+  `max(0, H² − d²)` (bell, paraboloid), where `H = max(256, extent/2)` in Q8. The one-cell
+  minimum half-width makes kernels narrower than a cell interpolate linearly between the two
+  nearest cells — a 1-wide tent on a cell boundary reads 50/50, never vanishes, and never
+  steps as it moves. To keep every product exact in `int64`, distances run in a per-axis unit
+  of `2^u` Q8 (`u ≤ 7`, chosen so the tent's `H < 2^15` units and the bell's `H < 2^8` units),
+  `d(c) = ((c·256 + 128) >> u) − (centre >> u)` — linear in `c`, so the weights stay an exact
+  piecewise polynomial. One joint normalizer `C = round(2^40 / (peakX·peakY))` (`peak = H` for
+  tents, `H²` for bells) scales the product to Q40, so a centred kernel's peak cell reads
+  `value·gain` (the `Box` unit) within 0.2%; `C ≥ 2^8`, a source's largest product is below
+  `2^51`, and int64 sums stay exact up to 4,096 maximum-strength kernels stacked on one cell —
+  256× past int16 saturation.
+  A piecewise-polynomial signal has a sparse finite difference, so each tile the kernel touches
+  keeps its deposits in a lazily attached 33×33 `int64` buffer (8,712 B; second order for
+  tents, third order for bells, each behind its own pointer slot in the block pad). Per axis
+  the emitter writes the boundary injections at local cells `0..k−1` (the values a k-stage
+  prefix needs to reconstruct the weight at the tile edge, `k` = order) and the k-th
+  differences in windows around the three breakpoints — support start, centre, support end —
+  keeping only nonzero ones: at most 20 impulses per axis, written as unrounded
+  `value·gain·C·Δx·Δy` corner products so the chain telescopes exactly. Resolve re-derives each
+  cell as `RoundQ40(Σ value·gain·C·Wx·Wy)` through the matching int64 prefix chain, rounding once
+  per cell over all sources of that kind in the tile. Every weight is zero outside the stamp's
+  footprint, so tiles beyond it receive nothing; moves and removes negate the same impulses, so
+  retraction returns the buffer to literal zero.
+  A bell whose half-extent on a grid reaches 128 cells (`extent/2 ≥ 2^15` Q8) cannot stay exact
+  in `int64` (an exact cell-lattice paraboloid needs about `H⁴` of range), so on that grid it
+  deposits through the raster path instead: `Stamp.Bell` bakes its paraboloid as a `w×h`
+  raster with mips at creation (`round(value·(w²−ex²)(h²−ey²)/(w²h²))`, `e = 2s+1−w`), and
+  the raster sampler upsamples it bilinearly — smooth, full strength, `O(area)` per deposit.
+  The choice is per grid and deterministic (`TileBake.Effective`), and sensing uses the same
+  rule. Tents fit at every scale.
   Raster storage keeps a one-sample zero border (pitch `w+2`, `(w+2)×(h+2)`) so the deposit loop
   reads `x−1`/`y−pitch` unconditionally. Every raster stamp also bakes a mip chain: each level
   halves its predecessor with zero-padded 2×2 box averages (round-half-away-from-zero, divided by
@@ -289,8 +285,14 @@ world rect at its own cell density; a source deposits into every grid it overlap
   reads equal a naive per-cell rescan across random place/move/remove churn worlds.
 - `region-sum-matches-cell-scans` — nine rect shapes (tile-aligned, one-off, clipped,
   negative-offset, 1×1) sum identically to per-cell scans on a 512² mixed box/raster field.
-- `kernels-share-box-units-and-centre` — box, tent, and bell stamps of 20 widths (1–255),
-  values ±90 and 1, gain 16, placed on a cell centre: the centre reads `value·gain` within 0.5%,
+- `kernels-move-smoothly` — box, tent, and bell stamps of 7 widths glide 2 cells in 1/16-cell
+  steps: no cell ever changes by more than the kernel's continuous slope allows (whole-cell
+  stepping kernels fail it).
+- `kernels-hold-strength-at-every-scale` — tents and bells of widths 1–255 on grids of scale
+  1/16 to 32 read `value·gain` within 1.5% at a centred cell (the bell raster fallback
+  included; exact bells used to vanish on fine grids).
+- `kernels-share-box-units-and-centre` — box, tent, and bell stamps of 12 widths (1–255),
+  values 90 (gain ±16) and 1, placed on a cell centre: the centre reads `value·gain` within 0.5%,
   profiles are symmetric along both axes, never exceed the centre, and odd widths cover exactly
   `w` cells. It shares no kernel formula with the engine and fails on each historical bug —
   tents/bells at 256× box strength (Q24 rounding of a Q32 product), the vanished last bell
@@ -365,10 +367,9 @@ world rect at its own cell density; a source deposits into every grid it overlap
 churn, a 200-place window rewound and reprocessed (~100 µs — the inverse window costs the
 same deposits as the forward one), a place+remove-200 collapse window (~10 µs — the mutations
 apply no deposits), tent-200
-churn (16×16 tents, ≤36 impulse writes per touched tile, persistent `int64` second-order
-buffers — ~170 µs vs the ~295 µs one-band-per-cell form), bell-200 churn
-(16×16 bells, ≤81 third-order impulse writes per touched tile plus a third prefix chain —
-~790 µs), full-grid
+churn (16×16 tents, a few second-order impulse writes per axis per touched tile, persistent
+`int64` buffers — ~180–210 µs vs the ~295 µs one-band-per-cell form), bell-200 churn
+(16×16 bells, third-order impulses plus a third prefix chain — ~760–800 µs), full-grid
 sum, a 1022² partial-region sum, the best-cell query against a one-million-call
 naive scan (0.1 µs vs ~5,600 µs on a 1024² layer), the gradient query (~5 ns per point), a
 16-layer × 25-dirty move-400 process, and
@@ -538,15 +539,12 @@ pass behind them was `perf`-profile guided, receipts first.
 - **Bounds**: stamps clip to grid rects before marking (extents clamp to the grid size in Q8;
   grids whose `ScaleQ8` truncates to 0 are skipped); tile-local box corners land in
   `[0,32]×[0,32]` of the difference array (rows 0–32 exist for the exclusive far edge; column 32
-  is written but never read, by design of the half-open prefix form). Tent impulses land in
-  `[0,31]×[0,31]` of the second-order buffer — anchor at local 0, entry at local 1, slope
-  changes at `min(last+2, 31)` — with at most six impulses per axis (anchor, entry, and the
-  four support breakpoints) against the `MaxTentImpulses` stack slots, and the resolve-time
-  prefix chain reads rows 0–31 and writes `tentOut` 0–31. Bell impulses land in
-  `[0,31]×[0,31]` of the third-order buffer — boundary injections at local cells 0–2, `Δ³`
-  deltas at the six support-edge cells clipped to `[3,31]` — with at most nine impulses per
-  axis against the `MaxBellImpulses` stack slots (11), and the resolve-time third-order chain
-  reads rows 0–31 and writes `bellOut` 0–31. Raster fragments clip to
+  is written but never read, by design of the half-open prefix form). Tent and bell impulses
+  land in `[0,31]×[0,31]` of their buffers — boundary injections at local cells `0..k−1`,
+  window differences only at local cells `k..31` (anything outside is skipped before the
+  write) — with at most `3 + 3·(k+2) ≤ 18` distinct cells per axis against the
+  `MaxSmoothImpulses` (20) stack slots, and the resolve-time prefix chains read rows 0–31 and
+  write `tentOut`/`bellOut` 0–31. Raster fragments clip to
   the tile and read only inside the padded stamp allocation: sample coordinates advance by
   `256·65536/ScaleQ8` per cell in Q16.16 from a phase-derived origin, so at any mip level `L` the
   integer sample index stays within `[(−1), ceil(w/2^L)]` and every `+1` tap lands on the level's

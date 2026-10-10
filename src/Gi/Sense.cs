@@ -360,12 +360,12 @@ public static unsafe partial class World
         public int Y0;
         public int X1;
         public int Y1;
-        public int Reach;
         public int Gain;
         public int ScaleQ8;
         public long Curve;
+        public StampKind Kind;
 
-        public readonly bool Reaches(int cx, int cy) => cx >= X0 && cy >= Y0 && cx < Reach && cy < Y1 + (Reach - X1);
+        public readonly bool Reaches(int cx, int cy) => cx >= X0 && cy >= Y0 && cx < X1 && cy < Y1;
     }
 
     #if NET
@@ -377,12 +377,15 @@ public static unsafe partial class World
         TileBake.Footprint(x, y, g->OriginX, g->OriginY, g->ScaleQ8, g->Size << 8, v,
             out var px, out var py, out var fx, out var fy, out var extentX, out var extentY,
             out var x0, out var y0, out var x1, out var y1);
+        var kind = TileBake.Effective(v, extentX, extentY);
         return new Shape
         {
             V = v, Px = px, Py = py, Fx = fx, Fy = fy, ExtentX = extentX, ExtentY = extentY,
-            X0 = x0, Y0 = y0, X1 = x1, Y1 = y1, Reach = x1 + (v->Kind == StampKind.Bell ? 2 : 0),
-            Gain = gain, ScaleQ8 = g->ScaleQ8,
-            Curve = v->Kind == StampKind.Bell ? TileBake.BellCurve(px, fx, extentX, py, fy, extentY) : 1,
+            X0 = x0, Y0 = y0, X1 = x1, Y1 = y1,
+            Gain = gain, ScaleQ8 = g->ScaleQ8, Kind = kind,
+            Curve = kind is StampKind.Tent or StampKind.Bell
+                ? TileBake.Normalizer(TileBake.Axis(kind, px, fx, extentX), TileBake.Axis(kind, py, fy, extentY))
+                : 1,
         };
     }
 
@@ -394,13 +397,13 @@ public static unsafe partial class World
         core = 0;
         smooth = 0;
         var v = s.V;
-        if (v->Kind == StampKind.ConstantRectangle)
+        if (s.Kind == StampKind.ConstantRectangle)
         {
             core = TileBake.BoxAt(s.Px, s.Py, s.Fx, s.Fy, s.ExtentX, s.ExtentY, v, s.Gain, cx, cy);
             return;
         }
 
-        if (v->Kind == StampKind.Raster)
+        if (s.Kind == StampKind.Raster)
         {
             var cell = 0;
             TileBake.EmitRaster(&cell, cx, cy, s.Px, s.Py, s.Fx, s.Fy,
@@ -411,9 +414,9 @@ public static unsafe partial class World
 
         long wx;
         long wy;
-        TileBake.SmoothWeights(v->Kind, s.Px, s.Fx, s.ExtentX, s.Curve, cx, 1, &wx);
-        TileBake.SmoothWeights(v->Kind, s.Py, s.Fy, s.ExtentY, 1, cy, 1, &wy);
-        smooth = (long)v->Constant * s.Gain * wx * wy;
+        TileBake.SmoothWeights(s.Kind, s.Px, s.Fx, s.ExtentX, cx, 1, &wx);
+        TileBake.SmoothWeights(s.Kind, s.Py, s.Fy, s.ExtentY, cy, 1, &wy);
+        smooth = (long)v->Constant * s.Gain * s.Curve * wx * wy;
     }
 
     #if NET
@@ -424,7 +427,7 @@ public static unsafe partial class World
         SourceAt(s, cx, cy, out var core, out var smooth);
         var lx = cx & (TileBake.TileSize - 1);
         var ly = cy & (TileBake.TileSize - 1);
-        var kind = s.V->Kind;
+        var kind = s.Kind;
         if (!g->Layers[layer].Pages.TryGet((cy >> TileBake.TileBits) * g->TilesPerSide + (cx >> TileBake.TileBits), out var block))
             return Saturate(Absent(0, 0, 0, kind, core, smooth));
 
@@ -435,7 +438,7 @@ public static unsafe partial class World
             if (kind == StampKind.Tent)
             {
                 var tq = tent == null ? 0 : TileBake.Quadrant(tent, lx, ly, 2);
-                return Saturate(page - TileBake.RoundQ32(tq) + TileBake.RoundQ32(tq - smooth));
+                return Saturate(page - TileBake.RoundQ40(tq) + TileBake.RoundQ40(tq - smooth));
             }
 
             if (kind == StampKind.Bell)
@@ -494,7 +497,7 @@ public static unsafe partial class World
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int Absent(int boxes, long tents, long bells, StampKind kind, int core, long smooth)
         => boxes - core +
-            TileBake.RoundQ32(tents - (kind == StampKind.Tent ? smooth : 0)) +
+            TileBake.RoundQ40(tents - (kind == StampKind.Tent ? smooth : 0)) +
             TileBake.RoundQ40(bells - (kind == StampKind.Bell ? smooth : 0));
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -507,8 +510,8 @@ public static unsafe partial class World
     {
         var fx0 = Math.Max(Math.Max(s.X0, 0), disk.X0);
         var fy0 = Math.Max(Math.Max(s.Y0, 0), disk.Y0);
-        var fx1 = Math.Min(Math.Min(s.Reach, g->Size) - 1, disk.X1);
-        var fy1 = Math.Min(Math.Min(s.Y1 + (s.Reach - s.X1), g->Size) - 1, disk.Y1);
+        var fx1 = Math.Min(Math.Min(s.X1, g->Size) - 1, disk.X1);
+        var fy1 = Math.Min(Math.Min(s.Y1, g->Size) - 1, disk.Y1);
         if (fx1 < fx0 || fy1 < fy0) return 0;
 
         const int n = TileBake.TileSize;
@@ -520,9 +523,9 @@ public static unsafe partial class World
         var bells = stackalloc long[n * n];
         var wx = stackalloc long[n];
         var wy = stackalloc long[n];
-        var kind = s.V->Kind;
+        var kind = s.Kind;
         var smoothKind = kind == StampKind.Tent || kind == StampKind.Bell;
-        var scale = (long)s.V->Constant * s.Gain;
+        var scale = (long)s.V->Constant * s.Gain * s.Curve;
         var pages = &g->Layers[layer].Pages;
         var delta = 0L;
         for (var ty = fy0 >> TileBake.TileBits; ty <= fy1 >> TileBake.TileBits; ty++)
@@ -565,8 +568,8 @@ public static unsafe partial class World
             }
             else
             {
-                TileBake.SmoothWeights(kind, s.Px, s.Fx, s.ExtentX, s.Curve, tileX, n, wx);
-                TileBake.SmoothWeights(kind, s.Py, s.Fy, s.ExtentY, 1, tileY, n, wy);
+                TileBake.SmoothWeights(kind, s.Px, s.Fx, s.ExtentX, tileX, n, wx);
+                TileBake.SmoothWeights(kind, s.Py, s.Fy, s.ExtentY, tileY, n, wy);
             }
 
             var tentBuffer = live ? TentOf(block) : null;
@@ -597,7 +600,7 @@ public static unsafe partial class World
                     if (saturated && (p == short.MinValue || p == short.MaxValue))
                         absent = Absent(boxes[i], tq, br, kind, smoothKind ? 0 : core[i], smoothKind ? scale * wx[c] * vy : 0);
                     else if (kind == StampKind.Tent)
-                        absent = p - TileBake.RoundQ32(tq) + TileBake.RoundQ32(tq - scale * wx[c] * vy);
+                        absent = p - TileBake.RoundQ40(tq) + TileBake.RoundQ40(tq - scale * wx[c] * vy);
                     else if (kind == StampKind.Bell)
                         absent = p - TileBake.RoundQ40(br) + TileBake.RoundQ40(br - scale * wx[c] * vy);
                     else

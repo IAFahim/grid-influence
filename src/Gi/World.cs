@@ -372,15 +372,15 @@ public static unsafe partial class World
                 out var extentX, out var extentY,
                 out var x0, out var y0, out var x1, out var y1);
 
-            var bell = v->Kind == StampKind.Bell;
+            var kind = TileBake.Effective(v, extentX, extentY);
             var cx0 = Math.Max(x0, 0);
             var cy0 = Math.Max(y0, 0);
-            var cx1 = Math.Min(x1 + (bell ? 2 : 0), g->Size);
-            var cy1 = Math.Min(y1 + (bell ? 2 : 0), g->Size);
+            var cx1 = Math.Min(x1, g->Size);
+            var cy1 = Math.Min(y1, g->Size);
             if (cx1 <= cx0 || cy1 <= cy0) continue;
 
             var ld = EnsureDirty(g, layer);
-            var raster = v->Kind == StampKind.Raster;
+            var raster = kind == StampKind.Raster;
             var tps = g->TilesPerSide;
             var tx0 = cx0 >> TileBake.TileBits;
             var tx1 = (cx1 - 1) >> TileBake.TileBits;
@@ -395,11 +395,11 @@ public static unsafe partial class World
 
                 var tileX0 = tx * TileBake.TileSize;
                 var tileY0 = ty * TileBake.TileSize;
-                if (v->Kind == StampKind.ConstantRectangle)
+                if (kind == StampKind.ConstantRectangle)
                     TileBake.EmitBox((int*)block, tileX0, tileY0, px, py, fx, fy, extentX, extentY, v, gain);
-                else if (v->Kind == StampKind.Tent)
+                else if (kind == StampKind.Tent)
                     TileBake.EmitTent((long*)EnsureTent(block), tileX0, tileY0, px, py, fx, fy, extentX, extentY, v, gain);
-                else if (bell)
+                else if (kind == StampKind.Bell)
                     TileBake.EmitBell((long*)EnsureBell(block), tileX0, tileY0, px, py, fx, fy, extentX, extentY, v, gain);
                 else
                     TileBake.EmitRaster(DenseOf(block), tileX0, tileY0, px, py, fx, fy, x1, y1, g->ScaleQ8, v, gain);
@@ -424,15 +424,15 @@ public static unsafe partial class World
                 out var extentX, out var extentY,
                 out var x0, out var y0, out var x1, out var y1);
 
-            var bell = v->Kind == StampKind.Bell;
+            var kind = TileBake.Effective(v, extentX, extentY);
             var cx0 = Math.Max(x0, 0);
             var cy0 = Math.Max(y0, 0);
-            var cx1 = Math.Min(x1 + (bell ? 2 : 0), g->Size);
-            var cy1 = Math.Min(y1 + (bell ? 2 : 0), g->Size);
+            var cx1 = Math.Min(x1, g->Size);
+            var cy1 = Math.Min(y1, g->Size);
             if (cx1 <= cx0 || cy1 <= cy0) continue;
 
             var ld = EnsureDirty(g, layer);
-            var raster = v->Kind == StampKind.Raster;
+            var raster = kind == StampKind.Raster;
             var tps = g->TilesPerSide;
             var tx0 = cx0 >> TileBake.TileBits;
             var tx1 = (cx1 - 1) >> TileBake.TileBits;
@@ -492,11 +492,12 @@ public static unsafe partial class World
         var tps = w->Grids[f->Grid].TilesPerSide;
         var tileX0 = (f->Tile % tps) << TileBake.TileBits;
         var tileY0 = (f->Tile / tps) << TileBake.TileBits;
-        if (v->Kind == StampKind.ConstantRectangle)
+        var kind = TileBake.Effective(v, f->ExtentX, f->ExtentY);
+        if (kind == StampKind.ConstantRectangle)
             TileBake.EmitBox((int*)block, tileX0, tileY0, f->Px, f->Py, f->Fx, f->Fy, f->ExtentX, f->ExtentY, v, gain);
-        else if (v->Kind == StampKind.Tent)
+        else if (kind == StampKind.Tent)
             TileBake.EmitTent((long*)EnsureTent(block), tileX0, tileY0, f->Px, f->Py, f->Fx, f->Fy, f->ExtentX, f->ExtentY, v, gain);
-        else if (v->Kind == StampKind.Bell)
+        else if (kind == StampKind.Bell)
             TileBake.EmitBell((long*)EnsureBell(block), tileX0, tileY0, f->Px, f->Py, f->Fx, f->Fy, f->ExtentX, f->ExtentY, v, gain);
         else
             TileBake.EmitRaster(DenseOf(block), tileX0, tileY0, f->Px, f->Py, f->Fx, f->Fy,

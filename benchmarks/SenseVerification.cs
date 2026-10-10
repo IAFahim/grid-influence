@@ -283,6 +283,7 @@ internal static partial class Verification
         Gi.Grid.New(w, 9, 0f, 0f, 256f);
         Gi.Grid.New(w, 8, 0f, 0f, 256f);
         Gi.Grid.New(w, 6, 0f, 0f, 256f);
+        Gi.Grid.New(w, 12, 64f, 48f, 160f);
         var l = Gi.Layer.New(w);
         var other = Gi.Layer.New(w);
         var stamps = SenseStamps();
