@@ -77,8 +77,10 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   (grid, layer, tile) so no two participants share a tile, fenced by a symmetric barrier
   before the resolve drain. Integer adds commute and the bucket scatter is stable, so pooled
   and serial application are bit-identical. The queue, the
-  per-slot pending indexes, the fragment buffer, and the journal live in unmanaged storage,
-  reset every `Process`, and their capacity is retained across windows (0 B warm).
+  per-slot pending indexes, and the fragment buffer live in unmanaged storage,
+  reset every `Process`, and their capacity is retained across windows (0 B warm). The
+  journal — the same op shape recorded at apply time — lives alongside them and is governed
+  by `Record`/`Rewind` below, not by `Process`.
 - **Process** applies the deferred op queue (fused or fragmented as above — the fragment
   apply rides one pooled phase with the drain, separated by a symmetric apply barrier), then
   drains the per-(grid,layer) dirty lists: each
@@ -101,6 +103,24 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   (vectorized for full nodes) before continuing upward. Each `Process` then rotates every
   (grid, layer) dirty list into its **changed list** — a zero-copy buffer swap, so the tiles the
   call resolved stay readable until the next `Process` overwrites them.
+- **Rewind**: `Record` drops any prior journal and starts appending a copy of every op the
+  world's `Process` calls apply — the op already stores the applied-from and applied-to states
+  plus the slot's generation, so the journal is an undo log costing one 32 B unmanaged append
+  per applied op. `Rewind` consumes the journal in reverse: each entry restores its slot's
+  columns to the recorded from-state (position, stamp, layer, gain, liveness, and — only when
+  the source was alive before the window — the generation byte, so a removed source revives
+  with its exact pre-window id while a rolled-back place's id stays stale) and enqueues the
+  inverse deposit pair `{retract latest applied, apply recorded from}`; per-slot queue merging
+  collapses multi-window journals to one net op per slot exactly like ordinary mutations.
+  Unapplied queued mutations are discarded first — their slots restore to their queued
+  from-states — so no applied or pending state escapes the checkpoint. The free-slot chain
+  cannot be replayed positionally (journal order is first-mutation order, not free-event
+  order), so `Rewind` rebuilds it canonically — dead slots chained in descending index order,
+  smallest slot at the head — a deterministic pure function of the restored columns. The next
+  `Process` applies the inverse ops through the normal deferred path, so a rewind costs the
+  same as the window it undoes — O(changes), never O(field). `StopRecording` discards the
+  journal without restoring; `Record` again re-anchors the checkpoint; `Clear` resets both.
+  With no journal there is no checkpoint and `Rewind` only cancels pending mutations.
 - **Query**: `World.Query(world, grid, layer, x, y)` is one hash lookup + page read;
   `(x, y, w, h)` sums a rect tile-wise — full-grid reads sum one `int64` per live page, partial
   regions sum the same `int64` slot for every tile the rect fully covers and scan only the
@@ -228,6 +248,11 @@ world rect at its own cell density; a source deposits into every grid it overlap
 - `source-slots-reuse-and-stale-handles-inert` — 2000 place/remove pairs keep slots bounded,
   the recycled id differs from the stale one, and stale `Move`/`SetGain`/`Remove` leave the
   field bit-identical.
+- `rewind-restores-recorded-state` — after a two-window journal mixing a remove, a slot
+  reoccupation, moves, gain changes, and a new place across box and tent stamps, `Rewind` +
+  `Process` restores the recorded field's whole-layer sum bit-exactly; rolled-back ids stay
+  inert (the field is unchanged by mutating them) while the revived source's original id
+  mutates the field again, and a second `Rewind` with no checkpoint is inert.
 - `signed-gain-exact` — ± gains add and subtract exactly, `SetGain` crosses zero and clamps at
   ±16, and removing a signed pair restores the zero baseline.
 - `multi-layer-pooled-matches-scans` — 16 layers × 30 sources through three churn rounds
@@ -240,7 +265,9 @@ world rect at its own cell density; a source deposits into every grid it overlap
   bit-identical output to Gi before and after churn; the same command then times both.
 
 `--timing` adds min-over-20-rep lines for unchanged, incremental, move-200 churn, place-200
-churn, a place+remove-200 collapse window (~10 µs — the mutations apply no deposits), tent-200
+churn, a 200-place window rewound and reprocessed (~100 µs — the inverse window costs the
+same deposits as the forward one), a place+remove-200 collapse window (~10 µs — the mutations
+apply no deposits), tent-200
 churn (16×16 tents, ≤36 impulse writes per touched tile, persistent `int64` second-order
 buffers — ~170 µs vs the ~295 µs one-band-per-cell form), full-grid
 sum, a 1022² partial-region sum, the best-cell query against a one-million-call
@@ -280,8 +307,9 @@ pass behind them was `perf`-profile guided, receipts first.
   calls and Burst can compile `Query`/`QueryRegion` call graphs; world contents are
   `NativeHeap` blocks owned by the context (grid array, `LayerData` array,
   `InDirty`/`Dirty`/`Changed` per layer, `Prev` scratch, the deferred op queue with its per-slot
-  pending index column, the fragment buffer, and the journal — appended by mutation and the
-  serial build phase, reset by every `Process`, with the pending tail
+  pending index column, the fragment buffer, and the journal — op copies appended by
+  `Process` while recording, consumed by `Rewind`, cleared by `Record`, `StopRecording`, and
+  `Clear`, with the pending tail
   zeroed at column growth so fresh slots read "no op" and the whole column wiped by `Clear` —
   and `SourceColumns` buffers — positions, stamp,
   layer, gain, liveness, the free-slot chain, and the generation bytes — and, per (grid, layer),
@@ -355,10 +383,13 @@ pass behind them was `perf`-profile guided, receipts first.
   with platform-natural alignment instead of 64-byte `AlignedAlloc`, and no SIMD paths compile:
   every access in that build is a naturally aligned scalar load or store, so the weaker
   alignment guarantee cannot be observed.
-- **Concurrency**: `Place`/`Move`/`SetGain`/`Remove`/`Process` are serial per world; different
+- **Concurrency**: `Place`/`Move`/`SetGain`/`Remove`/`Process`/`Record`/`StopRecording`/
+  `Rewind` are serial per world; different
   worlds may run on different threads. Mutations only append to or merge within the owning
   world's op queue — a merge targets the one op its slot's pending index names, an index that
-  only `ApplyDeposits` clears. `Process` runs the serial build phase on the owning
+  only `ApplyDeposits` clears. `Rewind` runs entirely on the owning thread: it writes source
+  columns, merges into the same op queue, and rebuilds the free chain in place, and the
+  inverse ops it enqueues reach workers only through a later `Process`. `Process` runs the serial build phase on the owning
   thread — footprints, page-map `Put`, dense/tent attach and growth, dirty marking, and
   fragment appends — so map and block mutation stay on one thread per world and every block
   pointer a fragment captured is published before signalling. The apply phase is either

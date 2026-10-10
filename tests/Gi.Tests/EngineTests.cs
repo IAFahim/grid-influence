@@ -1564,4 +1564,127 @@ public sealed class EngineTests
             foreach (var layer in layers) AssertMaxAgreesWithScan(w, g, layer, 1024);
         }
     }
+
+    private static unsafe short[] Snapshot(byte w, byte g, byte l, int size)
+    {
+        var cells = new short[size * size];
+        fixed (short* dst = cells) World.QueryRegion(w, g, l, 0, 0, size, size, dst);
+        return cells;
+    }
+
+    [Fact]
+    public unsafe void Rewind_RestoresFieldAndSources()
+    {
+        var w = World.New();
+        var g = Grid.New(w, 8, 0f, 0f, 256f);
+        var l = Layer.New(w);
+        var stamp = Stamp.Box(8, 8, 50);
+
+        var keep1 = World.Place(w, l, 20f, 20f, stamp, 8);
+        var keep2 = World.Place(w, l, 100f, 100f, stamp, 6);
+        var doomed = World.Place(w, l, 180f, 180f, stamp, 4);
+        World.Process(w);
+        var before = Snapshot(w, g, l, 256);
+
+        World.Record(w);
+        World.Move(w, keep1, 60f, 60f);
+        World.SetGain(w, keep2, -10);
+        World.Remove(w, doomed);
+        var added = World.Place(w, l, 220f, 40f, stamp, 12);
+        World.Process(w);
+        Assert.NotEqual(before, Snapshot(w, g, l, 256));
+
+        World.Rewind(w);
+        World.Process(w);
+        Assert.Equal(before, Snapshot(w, g, l, 256));
+
+        World.Move(w, doomed, 150f, 150f);
+        World.Process(w);
+        Assert.NotEqual(0, World.Query(w, g, l, 152, 152));
+
+        World.Move(w, added, 10f, 10f);
+        World.Process(w);
+        Assert.Equal(0, World.Query(w, g, l, 10, 10));
+    }
+
+    [Fact]
+    public unsafe void Rewind_MultiWindow()
+    {
+        var w = World.New();
+        var g = Grid.New(w, 8, 0f, 0f, 256f);
+        var l = Layer.New(w);
+        var stamp = Stamp.Box(8, 8, 40);
+
+        var s1 = World.Place(w, l, 30f, 30f, stamp, 8);
+        World.Process(w);
+        var before = Snapshot(w, g, l, 256);
+
+        World.Record(w);
+        World.Move(w, s1, 80f, 80f);
+        World.Process(w);
+        var s2 = World.Place(w, l, 200f, 200f, stamp, 9);
+        World.Move(w, s1, 120f, 40f);
+        World.Process(w);
+        World.SetGain(w, s1, 15);
+        World.Process(w);
+
+        World.Rewind(w);
+        World.Process(w);
+        Assert.Equal(before, Snapshot(w, g, l, 256));
+
+        World.SetGain(w, s1, 1);
+        World.Move(w, s2, 5f, 5f);
+        World.Process(w);
+        Assert.Equal(0, World.Query(w, g, l, 5, 5));
+    }
+
+    [Fact]
+    public unsafe void Rewind_DropsPendingMutations()
+    {
+        var w = World.New();
+        var g = Grid.New(w, 8, 0f, 0f, 256f);
+        var l = Layer.New(w);
+        var stamp = Stamp.Box(8, 8, 40);
+
+        var s1 = World.Place(w, l, 30f, 30f, stamp, 8);
+        World.Process(w);
+        var before = Snapshot(w, g, l, 256);
+
+        World.Record(w);
+        World.Process(w);
+        World.Move(w, s1, 90f, 90f);
+        World.Place(w, l, 210f, 210f, stamp, 5);
+        World.Rewind(w);
+        World.Process(w);
+        Assert.Equal(before, Snapshot(w, g, l, 256));
+    }
+
+    [Fact]
+    public unsafe void Rewind_ReplacesOccupiedSlot()
+    {
+        var w = World.New();
+        var g = Grid.New(w, 8, 0f, 0f, 256f);
+        var l = Layer.New(w);
+        var stamp = Stamp.Box(8, 8, 40);
+
+        var a = World.Place(w, l, 30f, 30f, stamp, 8);
+        World.Place(w, l, 200f, 200f, stamp, 4);
+        World.Process(w);
+        var before = Snapshot(w, g, l, 256);
+
+        World.Record(w);
+        World.Remove(w, a);
+        var c = World.Place(w, l, 140f, 140f, stamp, 11);
+        World.Process(w);
+
+        World.Rewind(w);
+        World.Process(w);
+        Assert.Equal(before, Snapshot(w, g, l, 256));
+
+        World.Move(w, a, 60f, 30f);
+        World.Move(w, c, 10f, 10f);
+        World.Process(w);
+        Assert.Equal(0, World.Query(w, g, l, 12, 12));
+        Assert.NotEqual(0, World.Query(w, g, l, 62, 32));
+    }
 }

@@ -27,6 +27,7 @@ internal static class Verification
         Check("deferred-window-matches-stepped-processing", DeferredWindowMatchesSteppedProcessing());
         Check("tent-matches-impulse-oracle", TentMatchesImpulseOracle());
         Check("source-slots-reuse-and-stale-handles-inert", SourceSlotsReuseAndStaleInert());
+        Check("rewind-restores-recorded-state", RewindRestoresRecordedState());
         Check("signed-gain-exact", SignedGainExact());
         Check("multi-layer-pooled-matches-scans", MultiLayerPooledMatchesScans());
         Check("saturated-sum-clamps", SaturatedSumClamps());
@@ -995,6 +996,54 @@ internal static class Verification
         return Gi.World.Query(w, g, l, 12, 12) == 0;
     }
 
+    private static bool RewindRestoresRecordedState()
+    {
+        var w = Gi.World.New();
+        var g = Gi.Grid.New(w, 6, 0f, 0f, 64f);
+        var l = Gi.Layer.New(w);
+        var box = Gi.Stamp.Box(6, 6, 50);
+        var tent = Gi.Stamp.Tent(9, 9, 40);
+        var rng = new Random(99);
+        var kept = new int[24];
+        for (var i = 0; i < kept.Length; i++)
+            kept[i] = Gi.World.Place(w, l, rng.Next(4, 56), rng.Next(4, 56),
+                (i & 1) == 0 ? box : tent, 1 + rng.Next(14));
+        Gi.World.Process(w);
+        var baseline = Gi.World.Query(w, g, l, 0, 0, 64, 64);
+
+        Gi.World.Record(w);
+        var doomed = kept[3];
+        Gi.World.Remove(w, doomed);
+        var occupant = Gi.World.Place(w, l, 30f, 30f, box, 9);
+        Gi.World.Process(w);
+        for (var i = 0; i < kept.Length; i += 2)
+            if (kept[i] != doomed) Gi.World.Move(w, kept[i], rng.Next(4, 56), rng.Next(4, 56));
+        for (var i = 1; i < kept.Length; i += 3)
+            Gi.World.SetGain(w, kept[i], -4);
+        var extra = Gi.World.Place(w, l, 8f, 52f, tent, 7);
+        Gi.World.Process(w);
+        Gi.World.Move(w, kept[0], 2f, 2f);
+        if (Gi.World.Query(w, g, l, 0, 0, 64, 64) == baseline) return false;
+
+        Gi.World.Rewind(w);
+        Gi.World.Process(w);
+        if (Gi.World.Query(w, g, l, 0, 0, 64, 64) != baseline) return false;
+
+        Gi.World.Move(w, occupant, 4f, 4f);
+        Gi.World.Move(w, extra, 4f, 4f);
+        Gi.World.Remove(w, occupant);
+        Gi.World.Process(w);
+        if (Gi.World.Query(w, g, l, 0, 0, 64, 64) != baseline) return false;
+
+        Gi.World.Move(w, doomed, 10f, 10f);
+        Gi.World.Process(w);
+        if (Gi.World.Query(w, g, l, 12, 12) == 0) return false;
+
+        Gi.World.Rewind(w);
+        Gi.World.Process(w);
+        return Gi.World.Query(w, g, l, 12, 12) != 0;
+    }
+
     private static bool SignedGainExact()
     {
         var w = Gi.World.New();
@@ -1266,6 +1315,25 @@ internal static class Verification
             Gi.World.Process(w);
         }
         Console.WriteLine($"place-200 churn process: {best:F0} us");
+
+        best = double.MaxValue;
+        long rewindAcc = 0;
+        for (var r = -1; r < 20; r++)
+        {
+            Gi.World.Record(w);
+            for (var i = 0; i < placed.Length; i++)
+                placed[i] = Gi.World.Place(w, l,
+                    (i * 41.3f + (r + 1) * 17.9f) % 1000f + 12f,
+                    (i * 29.7f + (r + 1) * 23.1f) % 1000f + 12f, stamp, 8);
+            Gi.World.Process(w);
+            var t = Stopwatch.GetTimestamp();
+            Gi.World.Rewind(w);
+            Gi.World.Process(w);
+            var el = Stopwatch.GetElapsedTime(t).TotalMicroseconds;
+            rewindAcc += Gi.World.Query(w, g, l, 0, 0, 64, 64);
+            if (r >= 0 && el < best) best = el;
+        }
+        Console.WriteLine($"rewind+process of 200-place window: {best:F0} us ({rewindAcc})");
 
         var collapseIds = new int[200];
         best = double.MaxValue;

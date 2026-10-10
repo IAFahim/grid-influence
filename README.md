@@ -36,6 +36,11 @@ World.QueryGradient(world, grid, layer, 130f, 64f, out var gx, out var gy); // �
 
 World.Remove(world, source);             // exact negation — no rebuild
 World.Clear(world);                      // frees every live tile block
+
+World.Record(world);                     // checkpoint — journal every applied op
+// ... mutate + Process to explore ...
+World.Rewind(world);                     // undo the recorded window(s) back to the checkpoint
+World.Process(world);                    // applies the inverse ops — O(changes), not O(field)
 ```
 
 A world mixes resolutions freely — e.g. a 1024² grid near the camera and 64² grids far away —
@@ -53,6 +58,18 @@ foreach (var enemy in enemies)
 World.Process(world);
 
 var safest = candidates.MinBy(c => World.QueryAt(world, grid, threats, c.X, c.Y));
+```
+
+**What-if lookahead and undo.** `Record` journals the ops each `Process` applies; `Rewind`
+replays them inverted — removed sources revive with their original ids, placed sources' ids go
+stale, and the field returns bit-exactly. Rollback, AI branch evaluation, and editor undo all
+cost O(changes in the window).
+
+```csharp
+World.Record(world);
+SimulatePlacements();          // any mutations + Process calls
+score = EvaluateField();
+World.Rewind(world);           // back to the checkpoint; apply with Process
 ```
 
 **Teams and auras as layers.** Layers are independent channels on every grid, so opposing
@@ -220,6 +237,7 @@ bash tools/stats/perf.sh stat --iterations 12000
 | `changed-tiles-match-drain` | the changed-tile feed equals the window's exact tile footprints |
 | `deferred-window-matches-stepped-processing` | batched mutations are bit-identical to per-mutation `Process`; place+remove windows deposit nothing |
 | `tent-matches-impulse-oracle` | tent kernels match a per-cell second-order-impulse oracle on two grid scales |
+| `rewind-restores-recorded-state` | `Rewind` restores the recorded field bit-exactly; revived ids live, rolled-back ids inert |
 | `saturated-sum-clamps` | saturation sticks at ±32767 after summation |
 | `cross-grid-sums-conserve-world-integral` | the same sources summed over four grid scales conserve the world integral exactly |
 

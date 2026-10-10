@@ -57,6 +57,7 @@ internal struct DepositOp
     public byte AliveFrom;
     public byte AliveTo;
     public byte Fresh;
+    public byte FromGen;
 }
 
 internal unsafe struct DepositFragment
@@ -265,6 +266,7 @@ public static unsafe class World
         freshOp->AliveFrom = 0;
         freshOp->AliveTo = 1;
         freshOp->Fresh = (byte)(fresh ? 1 : 0);
+        freshOp->FromGen = w->Sources.Gen.Pointer[slot];
         w->Pending.Pointer[slot] = n + 1;
     }
 
@@ -301,6 +303,7 @@ public static unsafe class World
         op2->AliveFrom = 1;
         op2->AliveTo = (byte)(alive ? 1 : 0);
         op2->Fresh = 0;
+        op2->FromGen = s->Gen.Pointer[slot];
         w->Pending.Pointer[slot] = n + 1;
     }
 
@@ -509,6 +512,7 @@ public static unsafe class World
         w->Ops.Resize(0);
         w->Fragments.Resize(0);
         w->Journal.Resize(0);
+        w->Recording = 0;
         new Span<int>(w->Pending.Pointer, w->Pending.Capacity).Clear();
 
         for (var gi = 0; gi < w->GridCount; gi++)
@@ -532,6 +536,105 @@ public static unsafe class World
                 ld->Max.Reset();
             }
         }
+    }
+
+    public static void Record(byte world)
+    {
+        var w = GetContext(world);
+        if (w == null) return;
+        w->Journal.Resize(0);
+        w->Recording = 1;
+    }
+
+    public static void StopRecording(byte world)
+    {
+        var w = GetContext(world);
+        if (w == null) return;
+        w->Journal.Resize(0);
+        w->Recording = 0;
+    }
+
+    public static void Rewind(byte world)
+    {
+        var w = GetContext(world);
+        if (w == null) return;
+        var s = &w->Sources;
+
+        var ops = w->Ops.Pointer;
+        for (var i = w->Ops.Length - 1; i >= 0; i--)
+        {
+            var op = ops + i;
+            RestoreSlot(s, op);
+            w->Pending.Pointer[op->Slot] = 0;
+        }
+        w->Ops.Resize(0);
+
+        var journal = w->Journal.Pointer;
+        for (var j = w->Journal.Length - 1; j >= 0; j--)
+        {
+            var op = journal + j;
+            RestoreSlot(s, op);
+            EnqueueRewind(w, op);
+        }
+
+        w->Journal.Resize(0);
+        w->Recording = 0;
+
+        w->FreeHead = -1;
+        for (var i = s->Count - 1; i >= 0; i--)
+            if (s->Alive.Pointer[i] == 0)
+            {
+                s->Free.Pointer[i] = w->FreeHead;
+                w->FreeHead = i;
+            }
+    }
+
+    private static void RestoreSlot(SourceColumns* s, DepositOp* op)
+    {
+        var slot = op->Slot;
+        s->X.Pointer[slot] = op->FromX;
+        s->Y.Pointer[slot] = op->FromY;
+        s->Stamp.Pointer[slot] = op->FromStamp;
+        s->Layer.Pointer[slot] = op->FromLayer;
+        s->Gain.Pointer[slot] = (byte)op->FromGain;
+        s->Alive.Pointer[slot] = op->AliveFrom;
+        if (op->AliveFrom != 0) s->Gen.Pointer[slot] = op->FromGen;
+    }
+
+    private static void EnqueueRewind(WorldCtx* w, DepositOp* entry)
+    {
+        var pending = w->Pending.Pointer[entry->Slot];
+        if (pending != 0)
+        {
+            var op = w->Ops.Pointer + pending - 1;
+            op->ToX = entry->FromX;
+            op->ToY = entry->FromY;
+            op->ToStamp = entry->FromStamp;
+            op->ToLayer = entry->FromLayer;
+            op->ToGain = entry->FromGain;
+            op->AliveTo = entry->AliveFrom;
+            return;
+        }
+
+        var n = w->Ops.Length;
+        w->Ops.Resize(n + 1);
+        var op2 = w->Ops.Pointer + n;
+        op2->Slot = entry->Slot;
+        op2->FromX = entry->ToX;
+        op2->FromY = entry->ToY;
+        op2->FromStamp = entry->ToStamp;
+        op2->FromLayer = entry->ToLayer;
+        op2->FromGain = entry->ToGain;
+        op2->ToX = entry->FromX;
+        op2->ToY = entry->FromY;
+        op2->ToStamp = entry->FromStamp;
+        op2->ToLayer = entry->FromLayer;
+        op2->ToGain = entry->FromGain;
+        op2->AliveFrom = entry->AliveTo;
+        op2->AliveTo = entry->AliveFrom;
+        op2->Fresh = 0;
+        op2->FromGen = entry->FromGen;
+        w->Pending.Pointer[entry->Slot] = n + 1;
     }
 
     private static bool TrySource(byte world, int source, out WorldCtx* w, out SourceColumns* s, out int index)
