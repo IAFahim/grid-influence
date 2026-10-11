@@ -21,6 +21,7 @@ public sealed class GiEcosystemDemo : MonoBehaviour
     internal static byte Food;
     internal static byte Threat;
     internal static byte Herd;
+    internal static byte Calm;
     internal static long Queries;
 
     private readonly System.Random _rng = new(42);
@@ -45,6 +46,7 @@ public sealed class GiEcosystemDemo : MonoBehaviour
     private long _queriesPerSecond;
     private long _queriesAtStat;
     private string _conservation = "";
+    private string _calmest = "";
     private float _recordClock;
     private int _snapSlot;
     private readonly Vector2[] _sheepSnaps = new Vector2[6 * SheepCount];
@@ -61,6 +63,7 @@ public sealed class GiEcosystemDemo : MonoBehaviour
             Food = Layer.New(id);
             Threat = Layer.New(id);
             Herd = Layer.New(id);
+            Calm = Layer.Sum(id, Food, 1, Threat, -2);
         }
         else
         {
@@ -289,8 +292,8 @@ public sealed class GiEcosystemDemo : MonoBehaviour
             {
                 w.RetryClock = 0.25f;
                 Queries++;
-                World.TrySenseMax((byte)WorldId, Herd, w.Pos.x, w.Pos.y, 48f, out var peak, out var hx, out var hy);
-                w.Hunting = peak > 0;
+                World.TrySenseNearest((byte)WorldId, Herd, w.Pos.x, w.Pos.y, 48f, 8, out var peak, out var hx, out var hy);
+                w.Hunting = peak >= 8;
                 if (w.Hunting) w.Hunt = new Vector2(hx, hy);
             }
 
@@ -333,6 +336,8 @@ public sealed class GiEcosystemDemo : MonoBehaviour
 
             w.Pos = ClampWorld(w.Pos + w.Vel * dt);
             World.Move((byte)WorldId, w.Source, w.Pos.x, w.Pos.y);
+            if (w.Vel.sqrMagnitude > 0.04f) w.Facing = Mathf.Atan2(w.Vel.y, w.Vel.x);
+            World.Turn((byte)WorldId, w.Source, w.Facing);
 
             var gain = w.Hunting ? 12 : 7;
             if (gain != w.Gain)
@@ -371,7 +376,9 @@ public sealed class GiEcosystemDemo : MonoBehaviour
             var p = new Vector2(x, y);
             if ((p - _lastPaint).sqrMagnitude > 9f)
             {
-                Place(GiDemoStamps.FoodCrumb, Food, x, y, 4);
+                var painted = World.Place((byte)WorldId, Food, x, y, GiDemoStamps.FoodCrumb, 4);
+                World.Fade((byte)WorldId, painted, 0, 600);
+                World.Expire((byte)WorldId, painted, 600);
                 _lastPaint = p;
             }
         }
@@ -384,6 +391,9 @@ public sealed class GiEcosystemDemo : MonoBehaviour
         _conservation = full == 4 * half
             ? "food 1x " + full.ToString(CultureInfo.InvariantCulture) + " == 4 x half " + half.ToString(CultureInfo.InvariantCulture)
             : "food 1x " + full.ToString(CultureInfo.InvariantCulture) + " != 4 x half " + half.ToString(CultureInfo.InvariantCulture);
+        var calm = World.QueryMax((byte)WorldId, GridOne, Calm, out var cx, out var cy);
+        _calmest = "calmest cell (" + cx.ToString(CultureInfo.InvariantCulture) + "," + cy.ToString(CultureInfo.InvariantCulture)
+            + ") reads " + calm.ToString(CultureInfo.InvariantCulture) + " — comfort = food − 2 × threat (derived, maintained by Process)";
     }
 
     private void OnGUI()
@@ -411,8 +421,9 @@ public sealed class GiEcosystemDemo : MonoBehaviour
             + "   crowded sheep " + CrowdedSheep.ToString(CultureInfo.InvariantCulture) + " (herd sensed excluding self)"
             + "\nmanaged heap delta/s " + _gcPerSecond.ToString("N0", CultureInfo.InvariantCulture) + " B"
             + "\n" + _conservation
-            + "\nhold LMB: fear brush chases the cursor   hold RMB: paint food   R: rewind to checkpoint";
-        GUI.Label(new Rect(14f, 14f, 940f, 140f), stats);
+            + "\n" + _calmest
+            + "\nhold LMB: fear brush chases the cursor   hold RMB: paint fading food   R: rewind to checkpoint";
+        GUI.Label(new Rect(14f, 14f, 940f, 160f), stats);
     }
 }
 }

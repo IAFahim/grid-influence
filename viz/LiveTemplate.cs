@@ -31,7 +31,7 @@ internal static class LiveTemplate
   <span class='chip on'>ecosystem · live</span>
   <span class='chip' id='dot'>connecting</span>
 </div>
-<div id='caption'>The gallery heightfield, ticking: 120 sheep steer on World.QueryGradient while 8 wolves hunt the herd layer's region QueryMax. Right-drag paints fear or food; T rewinds the field 5 seconds via World.Rewind.</div></div>
+<div id='caption'>The gallery heightfield, ticking: 120 sheep steer by field gradients under 8 wolves whose threat auras are turned cones (World.Turn) that sweep as they run — wolves find prey with TrySenseNearest. Right-drag paints fear, or food that fades out on its own (World.Fade); T rewinds the field 5 seconds via World.Rewind.</div></div>
 <div id='wrap'>
   <canvas id='c'></canvas>
   <div id='hud'>

@@ -546,6 +546,7 @@ dotnet run --project tools/stats -c Release -- stats                 # internals
 - `src/Gi` — the package (`net10.0` + `netstandard2.1`; Burst-callable query paths)
 - `tests/Gi.Tests` — oracle tests (69)
 - `benchmarks` — the 51 receipts and all the numbers above
-- `samples/world` — console walkthrough; `samples/unity-demo` — sheep/wolf ecosystem on `TrySense`
-- `viz` — static HTML render + live WebSocket ecosystem
+- `samples/world` — console walkthrough; `samples/unity-demo` — sheep/wolf ecosystem on
+  `TrySense`, with turned vision cones, a derived comfort layer, and fading paint
+- `viz` — static HTML render (round stamps, derived layers, fades) + live WebSocket ecosystem
 - `tools/stats` — internal statistics and profiling

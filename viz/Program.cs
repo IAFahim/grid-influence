@@ -17,6 +17,9 @@ MoveVsTrail();
 MultiGridLod();
 SparseWorld();
 ThousandSources();
+RoundTurntable();
+CombinedLayers();
+FadingTrail();
 
 var json = Serialize(scenes);
 var html = Template.Html.Replace("/*__DATA__*/", json);
@@ -294,6 +297,210 @@ void ThousandSources()
     scenes.Add(scene);
 }
 
+void RoundTurntable()
+{
+    var scene = new Scene("round & turned",
+        "Integer round kernels — disk, cone, dome — bake no samples. Middle row: one cone stamp id turned to eight angles. Bottom row: one dome stamp id scaled 0.5x to 2x. Turning back to angle 0 restores the axis-aligned field bit-exactly.");
+    var w = World.New();
+    var g = Grid.New(w, 8, 0f, 0f, 256f);
+    var shapes = scene.Layer(w, "shapes", "#ffd54f");
+    var turnedL = scene.Layer(w, "turned", "#ff8a65");
+    var scaledL = scene.Layer(w, "scaled", "#4fc3f7");
+
+    World.Place(w, shapes, 36f, 44f, Stamp.Disk(14, 90), 9);
+    scene.Mark(36f, 44f, shapes, "disk");
+    World.Place(w, shapes, 96.5f, 44.5f, Stamp.Cone(22, 100), 9);
+    scene.Mark(96.5f, 44.5f, shapes, "cone");
+    World.Place(w, shapes, 156f, 44f, Stamp.Dome(20, 100), 9);
+    scene.Mark(156f, 44f, shapes, "dome");
+    World.Place(w, shapes, 218f, 44f, Stamp.Cone(22, 100, arc: 60), 9);
+    scene.Mark(218f, 44f, shapes, "60-degree arc");
+
+    var cone = Stamp.Cone(22, 100, arc: 80);
+    var spun = new int[8];
+    for (var i = 0; i < 8; i++)
+    {
+        var x = 28f + i * 28.5f;
+        spun[i] = World.Place(w, turnedL, x, 140f, cone, 9);
+        World.Turn(w, spun[i], i * MathF.PI / 4f);
+        scene.Mark(x, 140f, turnedL, (i * 45).ToString(CultureInfo.InvariantCulture) + "°");
+    }
+
+    var dome = Stamp.Dome(16, 100);
+    float[] ladder = [0.5f, 1f, 1.5f, 2f];
+    for (var i = 0; i < ladder.Length; i++)
+    {
+        var id = World.Place(w, scaledL, 40f + i * 58f, 214f, dome, 9);
+        World.Scale(w, id, ladder[i]);
+        scene.Mark(40f + i * 58f, 214f, scaledL, ladder[i].ToString("F1", CultureInfo.InvariantCulture) + "x");
+    }
+
+    World.Process(w);
+    scene.Panel(w, g, "256² · 1 unit/cell", 256, 256f, 0, shapes, turnedL, scaledL);
+
+    var centre = World.Query(w, g, shapes, 96, 44);
+    scene.Receipt(centre == 900
+        ? "cone centre reads value × gain exactly: 100 × 9 = 900"
+        : "cone centre MISMATCH: " + centre.ToString(CultureInfo.InvariantCulture));
+
+    var sumBefore = World.Query(w, g, turnedL, 0, 0, 256, 256);
+    var probeBefore = World.Query(w, g, turnedL, 30, 132);
+    World.Turn(w, spun[1], 2.1f);
+    World.Process(w);
+    World.Turn(w, spun[1], MathF.PI / 4f);
+    World.Process(w);
+    var roundTrip = sumBefore == World.Query(w, g, turnedL, 0, 0, 256, 256) &&
+        probeBefore == World.Query(w, g, turnedL, 30, 132);
+    scene.Receipt(roundTrip
+        ? "turned away and back: region sum and probe cells bit-identical (angle 0 keeps the exact path)"
+        : "turn round-trip MISMATCH");
+
+    var wa = World.New();
+    var ga = Grid.New(wa, 8, 0f, 0f, 256f);
+    var la = Layer.New(wa);
+    var scaled = World.Place(wa, la, 128f, 128f, Stamp.Disk(10, 80), 8);
+    World.Scale(wa, scaled, 2f);
+    World.Process(wa);
+    var wb = World.New();
+    var gb = Grid.New(wb, 8, 0f, 0f, 256f);
+    var lb = Layer.New(wb);
+    World.Place(wb, lb, 128f, 128f, Stamp.Disk(20, 80), 8);
+    World.Process(wb);
+    var sumA = World.Query(wa, ga, la, 0, 0, 256, 256);
+    var sumB = World.Query(wb, gb, lb, 0, 0, 256, 256);
+    scene.Receipt(sumA == sumB
+        ? "disk r=10 at scale 2 deposits the exact field of disk r=20 (region sums "
+          + sumA.ToString(CultureInfo.InvariantCulture) + ")"
+        : "scale MISMATCH: " + sumA.ToString(CultureInfo.InvariantCulture) + " vs "
+          + sumB.ToString(CultureInfo.InvariantCulture));
+    scenes.Add(scene);
+}
+
+void CombinedLayers()
+{
+    var scene = new Scene("combined layers",
+        "Derived layers are cell formulas over other layers, recombined per changed tile by Process — the combination stays current without ever re-scanning. comfort = food − 2 × threat; grazing keeps food only where comfort is at least 150.");
+    var w = World.New();
+    var g = Grid.New(w, 8, 0f, 0f, 256f);
+    var food = scene.Layer(w, "food", "#69f0ae");
+    var threat = scene.Layer(w, "threat", "#ff5252");
+    var rng = new Random(31);
+
+    for (var i = 0; i < 5; i++)
+    {
+        var x = 40f + (float)(rng.NextDouble() * 176);
+        var y = 36f + (float)(rng.NextDouble() * 90);
+        World.Place(w, food, x, y, Stamp.Dome(12, 90), 6);
+        scene.Mark(x, y, food, "berries");
+    }
+
+    var fang = Stamp.Cone(26, 110, arc: 70);
+    for (var i = 0; i < 3; i++)
+    {
+        var x = 60f + i * 68f;
+        var y = 156f + (float)(rng.NextDouble() * 60);
+        var id = World.Place(w, threat, x, y, fang, 8);
+        World.Turn(w, id, (float)(rng.NextDouble() * Math.PI * 2));
+        scene.Mark(x, y, threat, "wolf");
+    }
+
+    var comfort = scene.Derived("comfort", "#b388ff", Layer.Sum(w, food, 1, threat, -2));
+    var grazing = scene.Derived("grazing", "#ffd54f", Layer.Mask(w, food, comfort, 150, short.MaxValue));
+
+    World.Process(w);
+    scene.Panel(w, g, "256² · 1 unit/cell", 256, 256f, 0, food, threat, comfort, grazing);
+
+    var mismatches = 0;
+    var scan = short.MinValue;
+    for (var y = 0; y < 256; y++)
+    for (var x = 0; x < 256; x++)
+    {
+        var value = World.Query(w, g, comfort, x, y);
+        var expect = (short)Math.Clamp((long)World.Query(w, g, food, x, y) - 2 * World.Query(w, g, threat, x, y),
+            short.MinValue, short.MaxValue);
+        if (value != expect) mismatches++;
+        if (value > scan) scan = value;
+    }
+
+    scene.Receipt(mismatches == 0
+        ? "comfort matches clamp(food − 2 × threat) cell for cell over all 65,536 cells"
+        : "comfort MISMATCH at " + mismatches.ToString("N0", CultureInfo.InvariantCulture) + " cells");
+
+    var best = World.QueryMax(w, g, comfort, out var bx, out var by);
+    scene.Receipt(best == scan
+        ? "QueryMax(comfort) = " + best.ToString(CultureInfo.InvariantCulture) + " at ("
+          + bx.ToString(CultureInfo.InvariantCulture) + "," + by.ToString(CultureInfo.InvariantCulture)
+          + ") — the same peak a full 65,536-cell scan finds"
+        : "QueryMax MISMATCH: " + best.ToString(CultureInfo.InvariantCulture) + " vs "
+          + scan.ToString(CultureInfo.InvariantCulture));
+
+    var grazingCells = 0;
+    for (var y = 0; y < 256; y++)
+    for (var x = 0; x < 256; x++)
+        if (World.Query(w, g, grazing, x, y) != 0) grazingCells++;
+    scene.Receipt("grazing holds " + grazingCells.ToString("N0", CultureInfo.InvariantCulture)
+        + " cells — food masked by comfort, maintained with the same per-tile upkeep");
+    scenes.Add(scene);
+}
+
+void FadingTrail()
+{
+    var scene = new Scene("fades & expiry",
+        "Sources age on their own: six crumbs fade to zero over staggered windows (integer gain steps, nothing spent between steps), the bell beacon expires outright, and per-tile change epochs tell AI when their neighbourhood last moved.");
+    var w = World.New();
+    var g = Grid.New(w, 8, 0f, 0f, 256f);
+    var scent = scene.Layer(w, "scent", "#4dd0e1");
+
+    var crumb = Stamp.Dome(8, 90);
+    var crumbs = new int[6];
+    for (var i = 0; i < 6; i++)
+    {
+        var x = 20f + i * 40f;
+        crumbs[i] = World.Place(w, scent, x, 88f, crumb, 12);
+        World.Fade(w, crumbs[i], 0, 16 + i * 8);
+        scene.Mark(x, 88f, scent, (16 + i * 8).ToString(CultureInfo.InvariantCulture) + "t");
+    }
+
+    var beacon = World.Place(w, scent, 196f, 190f, Stamp.Bell(24, 24, 100), 10);
+    World.Expire(w, beacon, 40);
+    scene.Mark(196f, 190f, scent, "expires t40");
+
+    World.Process(w);
+    var tick1 = World.Tick(w);
+    scene.Panel(w, g, "tick " + tick1.ToString(CultureInfo.InvariantCulture), 256, 256f, 0, scent);
+
+    while (World.Tick(w) < 24) World.Process(w);
+    scene.Panel(w, g, "tick 24", 256, 256f, 0, scent);
+    var gone = World.Query(w, g, scent, 20, 88);
+    var late = World.Query(w, g, scent, 220, 88);
+    scene.Receipt(gone == 0 && late > 0
+        ? "tick 24: the 16-tick crumb reads 0, the 56-tick crumb still reads "
+          + late.ToString(CultureInfo.InvariantCulture) + " — no per-tick cost between gain steps"
+        : "fade MISMATCH: " + gone.ToString(CultureInfo.InvariantCulture) + "/"
+          + late.ToString(CultureInfo.InvariantCulture));
+    var quietAtFirst = !World.Changed(w, scent, 20f, 88f, 10f, World.Tick(w) - 8);
+    var busyAtLast = World.Changed(w, scent, 220f, 88f, 10f, World.Tick(w) - 8);
+    scene.Receipt(quietAtFirst && busyAtLast
+        ? "Changed(since tick − 8): false beside the finished crumb, true beside the fading one — sleep until the neighbourhood moves"
+        : "changed-epochs MISMATCH");
+    var beaconAlive = World.Query(w, g, scent, 196, 190) > 0;
+
+    while (World.Tick(w) < 48) World.Process(w);
+    scene.Panel(w, g, "tick 48", 256, 256f, 0, scent);
+    var beaconGone = World.Query(w, g, scent, 196, 190) == 0;
+    scene.Receipt(beaconAlive && beaconGone
+        ? "the bell read through tick 24 and hit 0 at its tick-40 expiry — removed once, on schedule, by Process itself"
+        : "expiry MISMATCH");
+
+    while (World.Tick(w) < 96) World.Process(w);
+    var drained = World.Query(w, g, scent, 0, 0, 256, 256);
+    scene.Panel(w, g, "tick 96", 256, 256f, 0, scent);
+    scene.Receipt(drained == 0
+        ? "tick 96: whole-layer region sum 0 — every tile drained back to the empty sparse map"
+        : "drain MISMATCH: " + drained.ToString(CultureInfo.InvariantCulture));
+    scenes.Add(scene);
+}
+
 byte Gaussian(int size, int peak)
 {
     var s = new sbyte[size * size];
@@ -447,6 +654,12 @@ internal sealed class Scene
     {
         Layers.Add((name, color));
         return Gi.Layer.New(world);
+    }
+
+    public byte Derived(string name, string color, byte id)
+    {
+        Layers.Add((name, color));
+        return id;
     }
 
     public void Mark(float x, float y, int layer, string label) => Sources.Add((x, y, layer, label));

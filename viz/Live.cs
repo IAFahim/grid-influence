@@ -24,11 +24,13 @@ internal static class Live
     internal static byte Food;
     internal static byte Threat;
     internal static byte Herd;
+    internal static byte Calm;
 
     private static readonly byte FoodCrumb = Stamp.Box(3, 3, 40);
-    private static readonly byte WolfAura = Gaussian(17, 110);
+    private static readonly byte WolfAura = Stamp.Cone(20, 110, arc: 100);
     private static readonly byte FearBrush = Gaussian(15, 140);
     private static readonly byte HerdPing = Stamp.Tent(9, 9, 60);
+    private const int PaintFadeTicks = 300;
 
     private static Random _rng = new(42);
     private static LiveSheep[] _sheep = [];
@@ -69,6 +71,7 @@ internal static class Live
         Food = Layer.New(WorldId);
         Threat = Layer.New(WorldId);
         Herd = Layer.New(WorldId);
+        Calm = Layer.Sum(WorldId, Food, 1, Threat, -2);
         SpawnFood();
         SpawnAgents();
 
@@ -230,7 +233,9 @@ internal static class Live
                 var dy = sy - _lastPaintY;
                 if (dx * dx + dy * dy >= 4f)
                 {
-                    World.Place(WorldId, Food, sx, sy, FoodCrumb, 4);
+                    var painted = World.Place(WorldId, Food, sx, sy, FoodCrumb, 4);
+                    World.Fade(WorldId, painted, 0, PaintFadeTicks);
+                    World.Expire(WorldId, painted, PaintFadeTicks);
                     _lastPaintX = sx;
                     _lastPaintY = sy;
                 }
@@ -299,8 +304,8 @@ internal static class Live
             {
                 w.RetryClock = 0.25f;
                 _queries++;
-                World.TrySenseMax(WorldId, Herd, w.X, w.Y, 48f, out var peak, out var hx, out var hy);
-                w.Hunting = peak > 0;
+                World.TrySenseNearest(WorldId, Herd, w.X, w.Y, 48f, 8, out var peak, out var hx, out var hy);
+                w.Hunting = peak >= 8;
                 if (w.Hunting)
                 {
                     w.HuntX = hx;
@@ -352,6 +357,8 @@ internal static class Live
             w.X = Math.Clamp(w.X + w.Vx * dt, 3f, WorldUnits - 3f);
             w.Y = Math.Clamp(w.Y + w.Vy * dt, 3f, WorldUnits - 3f);
             World.Move(WorldId, w.Source, w.X, w.Y);
+            if (w.Vx * w.Vx + w.Vy * w.Vy > 0.04f) w.Facing = MathF.Atan2(w.Vy, w.Vx);
+            World.Turn(WorldId, w.Source, w.Facing);
 
             var gain = w.Hunting ? 12 : 7;
             if (gain == w.Gain) continue;
@@ -435,6 +442,11 @@ internal static class Live
             .Append(" · tick managed alloc max ").Append(_maxAlloc.ToString("N0", CultureInfo.InvariantCulture)).Append(" B\n");
         sb.Append("crowded sheep ").Append(CrowdedSheep.ToString(CultureInfo.InvariantCulture))
             .Append(" · herd sensed excluding self (TrySenseArea exclude)\n");
+        var calm = World.QueryMax(WorldId, GridOne, Calm, out var calmX, out var calmY);
+        sb.Append("calmest cell (").Append(calmX.ToString(CultureInfo.InvariantCulture)).Append(',')
+            .Append(calmY.ToString(CultureInfo.InvariantCulture)).Append(") reads ")
+            .Append(calm.ToString(CultureInfo.InvariantCulture))
+            .Append(" — comfort = food − 2 × threat (derived, maintained by Process)\n");
         sb.Append("—\n");
         sb.Append(conservation).Append('\n');
         sb.Append("stream ").Append(Frame.Length.ToString("N0", CultureInfo.InvariantCulture))
@@ -600,5 +612,6 @@ internal sealed class LiveWolf
     public float HuntX, HuntY;
     public bool Hunting;
     public float RetryClock;
+    public float Facing;
     public int Gain = 7;
 }
