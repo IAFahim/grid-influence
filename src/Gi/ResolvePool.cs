@@ -17,7 +17,7 @@ internal static unsafe class ResolvePool
     internal const int Threshold = 32;
     internal const int ApplyThreshold = 128;
     private const int Chunk = 8;
-    private const int Buckets = 8;
+    private const int Buckets = 64;
 
     private static int _busy;
     private static int _workers;
@@ -34,6 +34,7 @@ internal static unsafe class ResolvePool
     private static int _taskCount;
     private static int _total;
     private static int _cursor;
+    private static int _bucketCursor;
     private static int _remaining;
     private static int _deadCount;
 
@@ -81,7 +82,7 @@ internal static unsafe class ResolvePool
         _applyRemaining = _workers + 1;
         Volatile.Write(ref _phase, 1);
         for (var k = 0; k < _workers; k++) _wake[k].Set();
-        ApplyShare(0);
+        ApplyShare();
         Barrier(ref _applyRemaining);
         RunShare(w->Prev);
         Drain();
@@ -198,6 +199,7 @@ internal static unsafe class ResolvePool
         }
 
         _applyWorld = w;
+        _bucketCursor = 0;
     }
 
     private static int BucketOf(DepositFragment* f)
@@ -206,12 +208,13 @@ internal static unsafe class ResolvePool
         return (int)((h >> 13) & (Buckets - 1));
     }
 
-    private static void ApplyShare(int participant)
+    private static void ApplyShare()
     {
         var index = _bucketIndex.Pointer;
         var pooled = _pooled.Pointer;
         var w = _applyWorld;
-        for (var b = participant; b < Buckets; b += _workers + 1)
+        int b;
+        while ((b = Interlocked.Increment(ref _bucketCursor) - 1) < Buckets)
         {
             var end = index[b] + index[Buckets + b];
             for (var i = index[b]; i < end; i++) World.ApplyFragment(w, pooled + i);
@@ -241,7 +244,7 @@ internal static unsafe class ResolvePool
             _wake[index].WaitOne();
             if (Volatile.Read(ref _phase) != 0)
             {
-                ApplyShare(index + 1);
+                ApplyShare();
                 Barrier(ref _applyRemaining);
             }
 

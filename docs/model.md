@@ -144,7 +144,9 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   fragments that capture the block pointer plus their placement's index — growth republishes
   to earlier fragments of the same batch by patching the captured pointer) and an apply phase
   that runs on the resolve pool when the fragment count crosses 128, hash-bucketed by
-  (grid, layer, tile) so no two participants share a tile, fenced by a symmetric barrier
+  (grid, layer, tile) into 64 buckets claimed one at a time through an atomic counter, so no
+  two participants share a tile while a participant that finishes early takes the remaining
+  buckets, fenced by a symmetric barrier
   before the resolve drain. Integer adds commute and the bucket scatter is stable, so pooled
   and serial application are bit-identical. The queue, the
   per-slot pending indexes, and the fragment buffer live in unmanaged storage,
@@ -673,8 +675,9 @@ pass behind them was `perf`-profile guided, receipts first.
   fragment appends — so map and block mutation stay on one thread per world and every block
   pointer a fragment captured is published before signalling. The apply phase is either
   fused on that same thread (box-only batches under the threshold) or scattered over the
-  pool by (grid, layer, tile) hash bucket; a symmetric barrier — every participant,
-  caller included, runs its share then spins on the remaining count — makes all fragment
+  pool by (grid, layer, tile) hash bucket, each bucket claimed once through an atomic
+  counter; a symmetric barrier — every participant,
+  caller included, drains the buckets then spins on the remaining count — makes all fragment
   writes visible before any resolve reads the tile. Deposits therefore mutate blocks on
   pooled workers but never two workers on one tile, and never concurrently with resolve.
   `Process` fans the whole world drain out when its grids

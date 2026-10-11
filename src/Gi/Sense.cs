@@ -1007,6 +1007,7 @@ public static unsafe partial class World
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static long CeilCell(long q8) => -(-q8 >> 8);
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static long SquareRoot(long value)
     {
         var root = (long)Math.Sqrt(value);
