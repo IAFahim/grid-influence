@@ -12,6 +12,7 @@ internal sealed class GiWolf
     public Vector2 Hunt;
     public bool Hunting;
     public float RetryClock;
+    public float Facing;
     public int Gain = 7;
 
     public void Sync()

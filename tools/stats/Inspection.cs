@@ -10,6 +10,7 @@ internal struct Snapshot
     public int SourceCapacity;
     public long PossibleTiles;
     public long LiveTiles;
+    public long DerivedTiles;
     public long DirtyTiles;
     public long MapSlots;
     public long Tombstones;
@@ -63,15 +64,21 @@ internal static unsafe class Inspection
             SourceSlots = s->Count,
             SourceCapacity = s->X.Capacity,
             GridBytes = World.MaxGrids * sizeof(GridCtx),
+            LayerBytes = World.MaxLayers * sizeof(LayerRecipe),
             ScratchBytes = TileBake.TileSize * sizeof(int),
             SourceBytes = (long)s->X.Capacity * sizeof(float) + (long)s->Y.Capacity * sizeof(float) +
                 s->Stamp.Capacity + s->Layer.Capacity + s->Gain.Capacity + s->Alive.Capacity +
+                ((long)s->Angle.Capacity + s->Scale.Capacity) * sizeof(ushort) +
+                s->Timed.Capacity + s->FadeFrom.Capacity + s->FadeTo.Capacity +
+                ((long)s->FadeStart.Capacity + s->FadeTicks.Capacity + s->ExpireAt.Capacity + s->Due.Capacity) * sizeof(int) +
                 (long)s->Free.Capacity * sizeof(int) + s->Gen.Capacity,
             WorldArenaBytes = World.MaxWorlds * sizeof(WorldCtx),
             StampArenaBytes = StampCatalog.MaxStamps * sizeof(StampVariant),
-            Stamps = StampCatalog.Count - 1,
+
             DepositQueueBytes = (long)w->Ops.Capacity * sizeof(DepositOp) + (long)w->Pending.Capacity * sizeof(int) +
-                (long)w->Fragments.Capacity * sizeof(DepositFragment) + (long)w->Journal.Capacity * sizeof(DepositOp),
+                (long)w->Fragments.Capacity * sizeof(DepositFragment) + (long)w->Placements.Capacity * sizeof(Placement) +
+                (long)w->Journal.Capacity * sizeof(DepositOp) + (long)w->ScheduleJournal.Capacity * sizeof(ScheduleRecord) +
+                (long)w->Timers.Capacity * sizeof(Alarm),
         };
 
         for (var i = 0; i < s->Count; i++)
@@ -86,13 +93,14 @@ internal static unsafe class Inspection
             {
                 var ld = g->Layers + li;
                 result.LiveTiles += ld->Pages.Count;
+                if (World.IsDerived(w, li)) result.DerivedTiles += ld->Pages.Count;
                 result.DirtyTiles += ld->Dirty.Length;
                 result.MapSlots += ld->Pages.SlotCount;
                 result.Tombstones += ld->Pages.TombstoneCount;
                 result.MapBytes += (long)ld->Pages.SlotCount * (sizeof(int) + sizeof(byte*) + sizeof(byte));
                 result.DirtyQueueBytes += (long)(ld->Dirty.Capacity + ld->Changed.Capacity) * sizeof(int);
                 result.PyramidBytes += ld->Max.Bytes;
-                if (ld->InDirty != null) result.DirtyFlagBytes += g->TileCount;
+                if (ld->InDirty != null) result.DirtyFlagBytes += (long)g->TileCount * (1 + sizeof(int));
 
                 var used = ld->Pages.Used;
                 var blocks = ld->Pages.Blocks;
@@ -120,16 +128,17 @@ internal static unsafe class Inspection
             }
         }
 
-        var cells = TileBake.TileSize * TileBake.TileSize;
-        result.DifferenceBytes = result.LiveTiles * World.PageOffset;
-        result.DensePointerBytes = result.LiveTiles * (World.SumOffset - World.DensePtrOffset);
-        result.PageBytes = result.LiveTiles * cells * sizeof(short);
-        result.PageSumBytes = result.LiveTiles * World.SumSlotBytes;
+        result.DifferenceBytes = (result.LiveTiles - result.DerivedTiles) * (World.BlockBytes - World.HeaderBytes);
+        result.DensePointerBytes = result.LiveTiles * (World.HeaderBytes - World.DensePtrOffset);
+        result.PageBytes = result.LiveTiles * World.PageBytes;
+        result.PageSumBytes = result.LiveTiles * (World.DensePtrOffset - World.SumOffset);
 
         for (var i = 1; i < StampCatalog.Count; i++)
         {
             var v = StampCatalog.Get((byte)i);
-            if (v->Kind != StampKind.Raster) continue;
+            if (v->Live == 0) continue;
+            result.Stamps++;
+            if (v->Data == null) continue;
             result.RasterStamps++;
             result.StampRasterBytes += (long)v->Pitch * (v->Height + 2);
             var mw = v->Width;

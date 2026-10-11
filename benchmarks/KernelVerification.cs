@@ -137,3 +137,51 @@ internal static partial class Verification
         return valueGain * normalizer * Weight(leadX, cx) * Weight(leadY, cy);
     }
 }
+
+internal static partial class Verification
+{
+    private static bool SubCellKernelsReachTheirSupport()
+    {
+        foreach (var (power, size) in new[] { (7, 256f), (6, 256f), (5, 256f) })
+        {
+            var w = Gi.World.New();
+            var g = Gi.Grid.New(w, power, 0f, 0f, size);
+            var l = Gi.Layer.New(w);
+            var scaleQ8 = (int)((1 << power) / size * 256f);
+            foreach (var bell in new[] { false, true })
+            foreach (var width in new[] { 1, 2, 3 })
+            {
+                var stamp = bell ? Gi.Stamp.Bell(width, width, 100) : Gi.Stamp.Tent(width, width, 100);
+                for (var phase = 0; phase < 256; phase += 17)
+                {
+                    var cell = (1 << power) / 2 + (phase & 1);
+                    var wx = (cell * 256 + phase) / (float)scaleQ8 + width / 2f;
+                    var wy = (8 * 256 + 128) / (float)scaleQ8;
+                    var id = Gi.World.Place(w, l, wx, wy, stamp, 16);
+                    Gi.World.Process(w);
+                    for (var cy = 4; cy <= 12; cy++)
+                    for (var cx = cell - 4; cx <= cell + 4; cx++)
+                    {
+                        var expected = Math.Clamp(OracleRoundQ40(OracleKernel(bell, wx, wy, width, scaleQ8, cx, cy, 1600)), short.MinValue, short.MaxValue);
+                        if (Gi.World.Query(w, g, l, cx, cy) != expected) return Fail(width, phase, stamp, cx);
+                    }
+
+                    var probes = new short[9];
+                    for (var i = 0; i < 9; i++)
+                        Gi.World.TrySense(w, l, (cell - 4 + i + 0.5f) * 256f / scaleQ8, wy, id, out probes[i]);
+                    Gi.World.Remove(w, id);
+                    Gi.World.Process(w);
+                    for (var i = 0; i < 9; i++)
+                    {
+                        Gi.World.TrySense(w, l, (cell - 4 + i + 0.5f) * 256f / scaleQ8, wy, out var removed);
+                        if (removed != probes[i]) return Fail(width, phase, stamp, -1 - i);
+                    }
+                }
+
+                if (!Gi.Stamp.Free(stamp)) return false;
+            }
+        }
+
+        return true;
+    }
+}

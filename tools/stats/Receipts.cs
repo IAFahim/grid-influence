@@ -21,8 +21,8 @@ internal static unsafe class Receipts
         var pendingOk = a == (1 << 24) && b == ((1 << 24) | 1) && pending.LiveSources == 2 && pending.SourceSlots == 2 &&
             pending.SourceCapacity == 64 && pending.LiveTiles == 0 && pending.DirtyTiles == 0 &&
             pending.GridBytes == World.MaxGrids * sizeof(GridCtx) &&
-            pending.LayerBytes == 2 * World.MaxLayers * sizeof(LayerData) &&
-            pending.SourceBytes == 64 * 17 && pending.MapBytes == 0 &&
+            pending.LayerBytes == 2 * World.MaxLayers * sizeof(LayerData) + World.MaxLayers * sizeof(LayerRecipe) &&
+            pending.SourceBytes == 64 * 40 && pending.MapBytes == 0 &&
             pending.DirtyFlagBytes == 0 && pending.DirtyQueueBytes == 0 &&
             pending.DifferenceBytes == 0 && pending.DenseBytes == 0 && pending.RasterTiles == 0 &&
             pending.DepositQueueBytes == 16 * sizeof(DepositOp) + 64 * sizeof(int) &&
@@ -37,15 +37,15 @@ internal static unsafe class Receipts
             World.Query(world, grid, other, 0, 0, 64, 64) == 20 &&
             processed.LiveTiles == 2 && processed.DirtyTiles == 0 &&
             processed.MapBytes == 32 * (sizeof(int) + sizeof(byte*) + 1) &&
-            processed.DirtyFlagBytes == 8 && processed.DirtyQueueBytes == 128 &&
+            processed.DirtyFlagBytes == 40 && processed.DirtyQueueBytes == 128 &&
             processed.RasterTiles == 1 &&
             processed.DifferenceBytes + processed.DenseBytes + processed.DensePointerBytes +
                 processed.PageBytes + processed.PageSumBytes == 2 * World.BlockBytes + World.DenseBytes &&
             processed.PyramidBytes == 2 * (64 * 2 + 2 * 16 * 4) &&
-            processed.DepositQueueBytes == 16 * sizeof(DepositOp) + 64 * sizeof(int) + 16 * sizeof(DepositFragment) &&
+            processed.DepositQueueBytes == 16 * sizeof(DepositOp) + 64 * sizeof(int) + 16 * sizeof(DepositFragment) + 16 * sizeof(Placement) &&
             processed.NativeBytes == pending.NativeBytes + 2 * World.BlockBytes + World.DenseBytes +
-                32 * (sizeof(int) + sizeof(byte*) + 1) + 8 + 128 + processed.PyramidBytes +
-                16 * sizeof(DepositFragment);
+                32 * (sizeof(int) + sizeof(byte*) + 1) + 40 + 128 + processed.PyramidBytes +
+                16 * sizeof(DepositFragment) + 16 * sizeof(Placement);
 
         World.Remove(world, a);
         World.Process(world);
@@ -95,11 +95,11 @@ internal static unsafe class Receipts
         var tentGone = Inspection.Read(world);
         tentOk = tentOk && tentGone.TentTiles == 0 && tentGone.TentBytes == 0;
 
-        var bell = World.Place(world, layer, 64f, 64f, Stamp.Bell(12, 12, 40), 3);
+        var bell = World.Place(world, layer, 48f, 48f, Stamp.Bell(12, 12, 40), 3);
         World.Process(world);
         var belled = Inspection.Read(world);
         var bellOk = belled.BellTiles == 1 && belled.BellBytes == World.BellBytes &&
-            World.Query(world, grid, layer, 64, 64) > 0;
+            World.Query(world, grid, layer, 48, 48) > 0;
         World.Remove(world, bell);
         World.Process(world);
         var bellGone = Inspection.Read(world);
@@ -110,9 +110,9 @@ internal static unsafe class Receipts
         var clearOk = cleared.LiveSources == 0 && cleared.SourceSlots == 0 && cleared.SourceCapacity == 64 &&
             cleared.LiveTiles == 0 && cleared.DirtyTiles == 0 && cleared.MapSlots == 0 &&
             cleared.MapBytes == 0 && cleared.PyramidBytes == 0 && cleared.RasterTiles == 0 &&
-            cleared.DepositQueueBytes == 16 * sizeof(DepositOp) + 64 * sizeof(int) + 16 * sizeof(DepositFragment) &&
-            cleared.WorldBytes == empty.WorldBytes + 64 * 17 + 8 + 256 + 16 * sizeof(DepositOp) +
-                64 * sizeof(int) + 16 * sizeof(DepositFragment) &&
+            cleared.DepositQueueBytes == 16 * sizeof(DepositOp) + 64 * sizeof(int) + 16 * sizeof(DepositFragment) + 16 * sizeof(Placement) &&
+            cleared.WorldBytes == empty.WorldBytes + 64 * 40 + 40 + 256 + 16 * sizeof(DepositOp) +
+                64 * sizeof(int) + 16 * sizeof(DepositFragment) + 16 * sizeof(Placement) &&
             World.Query(world, grid, other, 0, 0, 64, 64) == 0;
 
         return

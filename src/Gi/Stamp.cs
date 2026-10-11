@@ -6,10 +6,14 @@ internal enum StampKind : byte
     Raster,
     Tent,
     Bell,
+    Disk,
+    Cone,
+    Dome,
 }
 
 internal unsafe struct StampVariant
 {
+    public byte Live;
     public StampKind Kind;
     public int Width;
     public int Height;
@@ -20,18 +24,36 @@ internal unsafe struct StampVariant
     public sbyte* Data;
     public sbyte* Mips;
     public int MipCount;
+    public int Arc;
+    public int ArcCos;
+    public int ArcSin;
 }
 
 internal static unsafe class StampCatalog
 {
     internal const int MaxStamps = 256;
     private const int MaxAxis = 256;
+    private const int MaxRadius = MaxAxis / 2;
+    private const int FullArc = 360;
 
     private static int _count = 1;
 
     internal static int Count => _count;
 
     internal static StampVariant* Get(byte id) => Runtime.Stamps + id;
+
+    internal static bool Valid(byte id) => id != 0 && id < _count && Runtime.Stamps[id].Live != 0;
+
+    public static bool Free(byte id)
+    {
+        if (!Valid(id) || World.UsesStamp(id)) return false;
+
+        var v = Runtime.Stamps + id;
+        if (v->Data != null) NativeHeap.Free(v->Data - v->Pitch - 1);
+        if (v->Mips != null) NativeHeap.Free(v->Mips);
+        *v = default;
+        return true;
+    }
 
     public static byte Bake(sbyte* data, int width, int height)
     {
@@ -182,6 +204,30 @@ internal static unsafe class StampCatalog
         return (byte)id;
     }
 
+    public static byte Round(StampKind kind, int radius, sbyte value, int arc)
+    {
+        if (radius < 1 || radius > MaxRadius) throw new ArgumentOutOfRangeException(nameof(radius));
+        if (arc < 1 || arc > FullArc) throw new ArgumentOutOfRangeException(nameof(arc));
+        Runtime.Ensure();
+
+        var id = Reserve();
+        var v = Runtime.Stamps + id;
+        v->Kind = kind;
+        v->Width = 2 * radius;
+        v->Height = 2 * radius;
+        v->OriginQ8X = -(radius * 256);
+        v->OriginQ8Y = -(radius * 256);
+        v->Constant = value;
+        if (arc < FullArc)
+        {
+            v->Arc = arc * 32768 / FullArc;
+            v->ArcCos = TileBake.Cos(v->Arc);
+            v->ArcSin = TileBake.Sin(v->Arc);
+        }
+
+        return (byte)id;
+    }
+
     private static void Validate(int width, int height)
     {
         if (width < 1 || width > MaxAxis) throw new ArgumentOutOfRangeException(nameof(width));
@@ -190,8 +236,16 @@ internal static unsafe class StampCatalog
 
     private static int Reserve()
     {
-        if (_count >= MaxStamps) throw new InvalidOperationException("Stamp catalog is full.");
-        return _count++;
+        var id = 1;
+        while (id < _count && Runtime.Stamps[id].Live != 0) id++;
+        if (id == _count)
+        {
+            if (_count >= MaxStamps) throw new InvalidOperationException("Stamp catalog is full.");
+            _count++;
+        }
+
+        Runtime.Stamps[id] = new StampVariant { Live = 1 };
+        return id;
     }
 }
 
@@ -214,4 +268,15 @@ public static unsafe class Stamp
 
     public static byte Bell(int width, int height, sbyte value)
         => StampCatalog.Bell(width, height, value);
+
+    public static byte Disk(int radius, sbyte value, int arc = 360)
+        => StampCatalog.Round(StampKind.Disk, radius, value, arc);
+
+    public static byte Cone(int radius, sbyte value, int arc = 360)
+        => StampCatalog.Round(StampKind.Cone, radius, value, arc);
+
+    public static byte Dome(int radius, sbyte value, int arc = 360)
+        => StampCatalog.Round(StampKind.Dome, radius, value, arc);
+
+    public static bool Free(byte stamp) => StampCatalog.Free(stamp);
 }

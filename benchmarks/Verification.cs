@@ -36,6 +36,7 @@ internal static partial class Verification
         Check("kernels-share-box-units-and-centre", KernelsShareBoxUnitsAndCentre());
         Check("kernels-move-smoothly", KernelsMoveSmoothly());
         Check("kernels-hold-strength-at-every-scale", KernelsHoldStrengthAtEveryScale());
+        Check("sub-cell-kernels-reach-their-support", SubCellKernelsReachTheirSupport());
         Check("sense-picks-finest-covering-grid-and-reports-gaps", SensePicksFinestAndReportsGaps());
         Check("sense-area-matches-disk-scan", SenseAreaMatchesDiskScan());
         Check("sense-area-conserves-across-grids", SenseAreaConservesAcrossGrids());
@@ -44,6 +45,23 @@ internal static partial class Verification
         Check("sense-exclude-matches-removal", SenseExcludeMatchesRemoval());
         Check("sense-exclude-reads-applied-state", SenseExcludeReadsAppliedState());
         Check("warm-sense-allocates-0-bytes", WarmSenseAllocationFree());
+        Check("derived-layers-match-cell-formulas", DerivedLayersMatchCellFormulas());
+        Check("derived-exclude-matches-removal", DerivedExcludeMatchesRemoval());
+        Check("derived-layers-follow-sources-rewind-and-clear", DerivedLayersFollowSourcesRewindAndClear());
+        Check("warm-derived-process-allocates-0-bytes", WarmDerivedProcessAllocationFree());
+        Check("turned-and-round-stamps-match-oracle", TurnedAndRoundStampsMatchOracle());
+        Check("round-kernels-share-box-units-and-centre", RoundKernelsShareBoxUnitsAndCentre());
+        Check("stamps-turn-and-scale-smoothly", StampsTurnAndScaleSmoothly());
+        Check("turn-and-scale-round-trip-exactly", TurnAndScaleRoundTripExactly());
+        Check("stamps-wider-than-grid-cover-it", StampsWiderThanGridCoverIt());
+        Check("turned-exclude-matches-removal", TurnedExcludeMatchesRemoval());
+        Check("warm-turned-process-allocates-0-bytes", WarmTurnedProcessAllocationFree());
+        Check("fade-steps-match-schedule", FadeStepsMatchSchedule());
+        Check("expire-removes-on-schedule", ExpireRemovesOnSchedule());
+        Check("rewind-resumes-schedules", RewindResumesSchedules());
+        Check("warm-fade-process-allocates-0-bytes", WarmFadeProcessAllocationFree());
+        Check("changed-since-matches-epochs", ChangedSinceMatchesEpochs());
+        Check("sense-nearest-matches-scan", SenseNearestMatchesScan());
 
         Console.WriteLine(failures == 0 ? "verification: all receipts green" : $"verification: {failures} failures");
         return failures == 0 ? 0 : 1;
@@ -1567,5 +1585,6 @@ internal static partial class Verification
         }
         Console.WriteLine($"query-region 256x256: {best:F1} us ({checksum})");
         SenseTiming(w, l, ids[0]);
+        FeatureTiming();
     }
 }

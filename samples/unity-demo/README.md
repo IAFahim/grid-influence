@@ -14,21 +14,27 @@ sheep; sheep steer entirely by field queries; you paint fear and food with the m
 ## Controls
 
 - Hold LMB on the ground: a fear brush chases the cursor, sheep flee it.
-- Hold RMB on the ground: paint persistent food, sheep graze toward it.
-- Watch the top-right minimap: red = threat layer, green = food layer.
+- Hold RMB on the ground: paint food that fades out over ten seconds
+  (`World.Fade` + `World.Expire`), sheep graze toward it while it lasts.
+- Watch the top-right minimap: red = threat cones, green = food layer.
 
 ## What it demonstrates
 
-- Wolves are moving sources (`World.Place` + `World.Move` each frame, `World.SetGain`
-  when hunting), resolved once per frame by a single `World.Process`.
+- Wolves are moving turned sources (`World.Place` + `World.Move` each frame,
+  `World.Turn` to their heading, `World.SetGain` when hunting): their threat aura is a
+  `Stamp.Cone` vision cone that sweeps as they run, resolved once per frame by a single
+  `World.Process`.
 - Sheep never touch a grid handle: `World.TrySense` reads threat and food at their own
   position, `World.TrySenseGradient` steers them (per world unit, so speed does not jump
   between the 256² and 128² grids), and personal space comes from
   `World.TrySenseArea(..., exclude: self)` on the herd layer — each sheep stamps its own
   tent there, and exclusion removes exactly its own contribution, so a lone sheep reads 0
   instead of its own aura. No sheep knows anything about the wolves directly.
-- Wolves hunt with `World.TrySenseMax` over a 48-unit radius and get the strongest herd
-  point back in world coordinates.
+- Wolves hunt with `World.TrySenseNearest`: the nearest herd cell above a threshold
+  within 48 units, in world coordinates — one query, no scan.
+- The calmest-cell HUD line reads a derived layer: comfort = `Layer.Sum(food, 1,
+  threat, -2)`, maintained per changed tile by `Process`, and `World.QueryMax` lands on
+  its peak in one pyramid read.
 - The HUD shows live field queries/s and managed alloc/s (the engine's warm path
   allocates 0 B; what you see is IMGUI and demo UI).
 - `food 1x == 4 × half` recomputes every second: the 256² and 128² grids over the same

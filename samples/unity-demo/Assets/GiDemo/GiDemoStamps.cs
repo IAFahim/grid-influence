@@ -7,7 +7,7 @@ namespace GiDemo
 internal static class GiDemoStamps
 {
     internal static readonly byte FoodCrumb = Stamp.Box(3, 3, 40);
-    internal static readonly byte WolfAura = Gaussian(17, 110);
+    internal static readonly byte WolfAura = Stamp.Cone(20, 110, arc: 100);
     internal static readonly byte FearBrush = Gaussian(15, 140);
     internal static readonly byte HerdPing = Stamp.Tent(9, 9, 60);
 

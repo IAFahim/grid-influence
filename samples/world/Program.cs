@@ -3,6 +3,10 @@ using Gi;
 AggroRange();
 MultiResolutionTraffic();
 RasterStamp();
+BestSpot();
+VisionCone();
+ScentTrail();
+NearestFood();
 return 0;
 
 void AggroRange()
@@ -73,4 +77,75 @@ void RasterStamp()
     var peak = 0;
     for (var c = 0; c < 128; c++) peak = Math.Max(peak, World.Query(w, g, l, c, 64));
     Console.WriteLine($"blob row peak influence: {peak}");
+}
+
+void BestSpot()
+{
+    Console.WriteLine("== best spot: food minus twice the threat ==");
+    var w = World.New();
+    var g = Grid.New(w, power: 8, x: 0f, y: 0f, size: 256f);
+    var food = Layer.New(w);
+    var threat = Layer.New(w);
+    var score = Layer.Sum(w, food, 1, threat, -2);
+    var berries = Stamp.Dome(10, 60);
+    var wolves = Stamp.Cone(24, 50);
+    var rng = new Random(5);
+    for (var i = 0; i < 40; i++)
+        World.Place(w, food, (float)(rng.NextDouble() * 256), (float)(rng.NextDouble() * 256), berries, 4);
+    for (var i = 0; i < 8; i++)
+        World.Place(w, threat, (float)(rng.NextDouble() * 256), (float)(rng.NextDouble() * 256), wolves, 6);
+    World.Process(w);
+
+    var best = World.QueryMax(w, g, score, out var bx, out var by);
+    Console.WriteLine($"best cell ({bx},{by}) scores {best}: food {World.Query(w, g, food, bx, by)}, threat {World.Query(w, g, threat, bx, by)}");
+}
+
+void VisionCone()
+{
+    Console.WriteLine("== a guard's vision cone turns ==");
+    var w = World.New();
+    var g = Grid.New(w, power: 7, x: 0f, y: 0f, size: 128f);
+    var seen = Layer.New(w);
+    var guard = World.Place(w, seen, 64f, 64f, Stamp.Cone(30, 100, arc: 70), 1);
+    foreach (var (label, angle) in new[] { ("+x", 0f), ("+y", MathF.PI / 2f), ("-x", MathF.PI) })
+    {
+        World.Turn(w, guard, angle);
+        World.Process(w);
+        Console.WriteLine($"facing {label}: sees {World.QueryAt(w, g, seen, 84f, 64f)} at +x, " +
+            $"{World.QueryAt(w, g, seen, 64f, 84f)} at +y, {World.QueryAt(w, g, seen, 44f, 64f)} at -x");
+    }
+}
+
+void ScentTrail()
+{
+    Console.WriteLine("== a scent trail fades on its own ==");
+    var w = World.New();
+    var g = Grid.New(w, power: 7, x: 0f, y: 0f, size: 128f);
+    var scent = Layer.New(w);
+    var crumb = Stamp.Dome(3, 40);
+    for (var step = 0; step < 40; step++)
+    {
+        var id = World.Place(w, scent, 10f + step * 2.5f, 64f, crumb, 16);
+        World.Fade(w, id, 0, ticks: 30);
+        World.Expire(w, id, ticks: 30);
+        World.Process(w);
+    }
+
+    Console.WriteLine($"tick {World.Tick(w)}: scent {World.QueryAt(w, g, scent, 10f, 64f)} where it started, " +
+        $"{World.QueryAt(w, g, scent, 60f, 64f)} midway, {World.QueryAt(w, g, scent, 107.5f, 64f)} at the head");
+}
+
+void NearestFood()
+{
+    Console.WriteLine("== nearest food worth walking to ==");
+    var w = World.New();
+    Grid.New(w, power: 7, x: 0f, y: 0f, size: 128f);
+    var food = Layer.New(w);
+    World.Place(w, food, 30f, 70f, Stamp.Disk(3, 20), 1);
+    World.Place(w, food, 90f, 60f, Stamp.Disk(3, 80), 1);
+    World.Process(w);
+
+    World.TrySenseNearest(w, food, 64f, 64f, 60f, 10, out var any, out var ax, out var ay);
+    World.TrySenseNearest(w, food, 64f, 64f, 60f, 50, out var rich, out var rx, out var ry);
+    Console.WriteLine($"nearest food >= 10: {any} at ({ax},{ay}); nearest food >= 50: {rich} at ({rx},{ry})");
 }

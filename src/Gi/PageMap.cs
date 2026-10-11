@@ -29,6 +29,8 @@ internal unsafe struct PageMap
 
     public readonly byte** Blocks => _blocks;
 
+    public readonly int* Keys => _keys;
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private readonly int SlotOf(int key) => (int)((uint)key * 2654435761u >> _shift);
 
