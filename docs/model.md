@@ -36,7 +36,10 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   cell of its support inside the tile — per axis the cells `First..Last` whose weight is
   positive, the per-axis weights computed once per column and once per row — and resolve rounds
   each cell once, `RoundQ40(Σ value·gain·C·Wx·Wy)`, over all sources of that kind in the tile.
-  Every weight is zero outside the stamp's footprint, so tiles beyond it receive nothing; moves
+  A tent or bell's cell bounds are its support — per axis `First..Last` — rather than its box
+  footprint, so tiles and exclusion follow a kernel narrower than a cell to the neighbour its
+  one-cell minimum half-width reaches. Every weight is zero outside that support, so tiles
+  beyond it receive nothing; moves
   and removes subtract the identical products, so retraction returns the buffer to literal
   zero, and sensing reads a cell's unrounded sum with one load.
   A bell whose half-extent on a grid reaches 128 cells (`extent/2 ≥ 2^15` Q8) cannot stay exact
@@ -467,6 +470,12 @@ world rect at its own cell density; a source deposits into every grid it overlap
 - `saturated-sum-clamps` — saturation sticks at ±32767 after summation.
 - `cross-grid-sums-conserve-world-integral` — the same box sources summed over four grids at
   scales 2/1/0.5/0.25 scale exactly by cell area (`full == 4·fine == 16·half == 64·quarter`).
+- `sub-cell-kernels-reach-their-support` — tents and bells of widths 1–3 on grids at scales
+  1/2, 1/4, and 1/8, swept across a tile boundary in 17/256-cell phase steps: every cell of the
+  neighbourhood equals the independent kernel oracle and every excluded read there equals the
+  read after removal — a kernel narrower than a cell reaches the cell beside its box footprint
+  through its one-cell minimum half-width, which 0.6 dropped across tile edges and left out of
+  exclusion.
 - `derived-layers-match-cell-formulas` — eleven derived recipes (weighted sums with and without
   shifts and saturating weights, the one-input form, `Min`, `Max`, two `Mask` bands, and chains
   of derived inputs) over four grids through five churn rounds of mixed box, raster, tent, and

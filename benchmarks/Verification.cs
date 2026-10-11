@@ -36,6 +36,7 @@ internal static partial class Verification
         Check("kernels-share-box-units-and-centre", KernelsShareBoxUnitsAndCentre());
         Check("kernels-move-smoothly", KernelsMoveSmoothly());
         Check("kernels-hold-strength-at-every-scale", KernelsHoldStrengthAtEveryScale());
+        Check("sub-cell-kernels-reach-their-support", SubCellKernelsReachTheirSupport());
         Check("sense-picks-finest-covering-grid-and-reports-gaps", SensePicksFinestAndReportsGaps());
         Check("sense-area-matches-disk-scan", SenseAreaMatchesDiskScan());
         Check("sense-area-conserves-across-grids", SenseAreaConservesAcrossGrids());

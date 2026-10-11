@@ -430,7 +430,7 @@ Full semantics and the unsafe lifetime/aliasing/alignment/concurrency proof live
 ## Receipts
 
 Every claim above is asserted, not documented. `dotnet run --project benchmarks -c Release --
---verify` runs all 50 receipts before printing a single timing — with and without hardware
+--verify` runs all 51 receipts before printing a single timing — with and without hardware
 intrinsics:
 
 | receipts | what they pin down |
@@ -441,7 +441,7 @@ intrinsics:
 | `query-max-*`, `gradient-matches-central-differences` | argmax and gradients equal full rescans |
 | `changed-tiles-match-drain`, `deferred-window-matches-stepped-processing`, `changed-since-matches-epochs` | the changed feeds are exact; batched == stepped processing |
 | `tent-matches-impulse-oracle`, `bell-matches-paraboloid-oracle`, `turned-and-round-stamps-match-oracle` | kernels equal independent oracles written from the spec, not the engine |
-| `kernels-*`, `round-kernels-share-box-units-and-centre`, `stamps-turn-and-scale-smoothly` | peaks read `value·gain`; glides, turns, and growth never step |
+| `kernels-*`, `round-kernels-share-box-units-and-centre`, `stamps-turn-and-scale-smoothly`, `sub-cell-kernels-reach-their-support` | peaks read `value·gain`; glides, turns, and growth never step; sub-cell kernels reach across tile edges |
 | `turn-and-scale-round-trip-exactly`, `stamps-wider-than-grid-cover-it` | angle 0 and scale 1 restore the field; oversized stamps cover their grid |
 | `derived-layers-match-cell-formulas`, `derived-layers-follow-sources-rewind-and-clear` | 11 recipes incl. chains equal their formulas on every cell, through churn, rewind, clear, and late creation |
 | `sense-*`, `derived-exclude-matches-removal`, `turned-exclude-matches-removal` | grid picking, disk scans, nearest, and exclusion == removal bit for bit |
@@ -545,7 +545,7 @@ dotnet run --project tools/stats -c Release -- stats                 # internals
 
 - `src/Gi` — the package (`net10.0` + `netstandard2.1`; Burst-callable query paths)
 - `tests/Gi.Tests` — oracle tests (69)
-- `benchmarks` — the 50 receipts and all the numbers above
+- `benchmarks` — the 51 receipts and all the numbers above
 - `samples/world` — console walkthrough; `samples/unity-demo` — sheep/wolf ecosystem on `TrySense`
 - `viz` — static HTML render + live WebSocket ecosystem
 - `tools/stats` — internal statistics and profiling

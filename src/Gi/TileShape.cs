@@ -108,8 +108,15 @@ internal static unsafe partial class TileBake
 
         if (!turned)
         {
-            if (p.Plane is Plane.Tent or Plane.Bell)
-                p.Curve = Normalizer(Axis(p.Kind, p.Px, p.Fx, p.ExtentX), Axis(p.Kind, p.Py, p.Fy, p.ExtentY));
+            if (p.Plane is not (Plane.Tent or Plane.Bell)) return true;
+
+            var axisX = Axis(p.Kind, p.Px, p.Fx, p.ExtentX);
+            var axisY = Axis(p.Kind, p.Py, p.Fy, p.ExtentY);
+            p.Curve = Normalizer(axisX, axisY);
+            p.X0 = Math.Clamp(axisX.First, -1, size + 1);
+            p.X1 = Math.Clamp(axisX.Last + 1, -1, size + 1);
+            p.Y0 = Math.Clamp(axisY.First, -1, size + 1);
+            p.Y1 = Math.Clamp(axisY.Last + 1, -1, size + 1);
             return true;
         }
 
