@@ -107,12 +107,10 @@ internal unsafe struct WorldCtx
 
 public static unsafe partial class World
 {
-    internal const int MaxWorlds = 255;
-    internal const int MaxGrids = 32;
-    internal const int MaxLayers = 32;
-    private const int MinPower = 5;
-    private const int MaxPower = 14;
-    private const int MaxGain = 16;
+    internal const int MaxWorlds = ValidationRules.MaxWorlds;
+    internal const int MaxGrids = ValidationRules.MaxGrids;
+    internal const int MaxLayers = ValidationRules.MaxLayers;
+    private const int MaxGain = ValidationRules.MaxGain;
     private const ushort UnitScale = 256;
     internal const int MaxSourceSlots = 1 << 24;
     internal const int SourceIndexMask = MaxSourceSlots - 1;
@@ -154,7 +152,7 @@ public static unsafe partial class World
 
     internal static byte AddGrid(byte world, int power, float x, float y, float size)
     {
-        if (power < MinPower || power > MaxPower) throw new ArgumentOutOfRangeException(nameof(power));
+        if (!ValidationRules.IsPower(power)) throw new ArgumentOutOfRangeException(nameof(power));
         if (size <= 0f) throw new ArgumentOutOfRangeException(nameof(size));
 
         var w = GetContext(world);

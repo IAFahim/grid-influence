@@ -12,6 +12,8 @@ runs, machines, and SIMD on or off.
 dotnet add package Gi.Influence
 ```
 
+Editor and tooling integrations can use the separate [Gi.Validation](src/Gi.Validation/README.md) package for numeric validation. It shares Gi's constraints without referencing the runtime assembly.
+
 ## The whole API in one screen
 
 ```csharp
@@ -544,7 +546,8 @@ dotnet run --project tools/stats -c Release -- stats                 # internals
 ```
 
 - `src/Gi` — the package (`net10.0` + `netstandard2.1`; Burst-callable query paths)
-- `tests/Gi.Tests` — oracle tests (69)
+- `src/Gi.Validation` — optional validation for editors and tools
+- `tests/Gi.Tests` — oracle and validation tests (108)
 - `benchmarks` — the 51 receipts and all the numbers above
 - `samples/world` — console walkthrough; `samples/unity-demo` — sheep/wolf ecosystem on
   `TrySense`, with turned vision cones, a derived comfort layer, and fading paint

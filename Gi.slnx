@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Gi/Gi.csproj" />
+    <Project Path="src/Gi.Validation/Gi.Validation.csproj" />
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/world/Gi.WorldSample.csproj" />

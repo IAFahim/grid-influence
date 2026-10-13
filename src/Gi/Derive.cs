@@ -29,8 +29,6 @@ internal struct LayerRecipe
 
 public static unsafe partial class World
 {
-    private const int MaxWeight = short.MaxValue;
-    private const int MaxShift = 15;
 
     internal static byte AddDerived(byte world, LayerOp op, byte a, byte b, int weightA, int weightB, int shift, short low, short high)
     {
@@ -38,9 +36,9 @@ public static unsafe partial class World
         if (w == null) throw new ArgumentOutOfRangeException(nameof(world));
         if (a >= w->LayerCount) throw new ArgumentOutOfRangeException(nameof(a));
         if (b >= w->LayerCount) throw new ArgumentOutOfRangeException(nameof(b));
-        if (weightA < -MaxWeight || weightA > MaxWeight) throw new ArgumentOutOfRangeException(nameof(weightA));
-        if (weightB < -MaxWeight || weightB > MaxWeight) throw new ArgumentOutOfRangeException(nameof(weightB));
-        if (shift < 0 || shift > MaxShift) throw new ArgumentOutOfRangeException(nameof(shift));
+        if (!ValidationRules.IsWeight(weightA)) throw new ArgumentOutOfRangeException(nameof(weightA));
+        if (!ValidationRules.IsWeight(weightB)) throw new ArgumentOutOfRangeException(nameof(weightB));
+        if (!ValidationRules.IsShift(shift)) throw new ArgumentOutOfRangeException(nameof(shift));
         if (low > high) throw new ArgumentOutOfRangeException(nameof(low));
 
         var reads = w->Recipes[a].Reads | w->Recipes[b].Reads;
