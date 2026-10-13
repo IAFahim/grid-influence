@@ -65,6 +65,13 @@ public static class GiValidation
         return Accept(out error);
     }
 
+    public static bool TryDerivedLayer(int firstWeight, int secondWeight, int shift, out string? error)
+    {
+        if (!ValidationRules.IsWeight(firstWeight) || !ValidationRules.IsWeight(secondWeight) || !ValidationRules.IsShift(shift))
+            return Reject("Derived layer weights must be -32767 through 32767 and shift 0 through 15.", out error);
+        return Accept(out error);
+    }
+
     public static bool TryGrid(int power, float size, out string? error)
     {
         if (!ValidationRules.IsPower(power) || !ValidationRules.IsGridSize(size))

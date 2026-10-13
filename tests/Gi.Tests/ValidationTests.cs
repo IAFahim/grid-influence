@@ -107,6 +107,21 @@ public sealed class ValidationTests
             assembly => assembly.Name == "Gi");
     }
 
+    [Theory]
+    [InlineData(-32767, 32767, 0, true)]
+    [InlineData(32767, -32767, 15, true)]
+    [InlineData(-32768, 0, 0, false)]
+    [InlineData(32768, 0, 0, false)]
+    [InlineData(0, -32768, 0, false)]
+    [InlineData(0, 32768, 0, false)]
+    [InlineData(1, 1, -1, false)]
+    [InlineData(1, 1, 16, false)]
+    public void Derived_layer_parameters_follow_runtime_weight_and_shift_limits(int firstWeight, int secondWeight, int shift, bool valid)
+    {
+        Assert.Equal(valid, GiValidation.TryDerivedLayer(firstWeight, secondWeight, shift, out var error));
+        Assert.Equal(valid, error == null);
+    }
+
     [Fact]
     public void Shape_limits_agree_with_runtime_exceptions_and_parameter_names()
     {
