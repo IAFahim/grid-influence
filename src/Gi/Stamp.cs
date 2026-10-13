@@ -31,10 +31,8 @@ internal unsafe struct StampVariant
 
 internal static unsafe class StampCatalog
 {
-    internal const int MaxStamps = 256;
-    private const int MaxAxis = 256;
-    private const int MaxRadius = MaxAxis / 2;
-    private const int FullArc = 360;
+    internal const int MaxStamps = ValidationRules.MaxStamps;
+    private const int FullArc = ValidationRules.FullArc;
 
     private static int _count = 1;
 
@@ -206,8 +204,8 @@ internal static unsafe class StampCatalog
 
     public static byte Round(StampKind kind, int radius, sbyte value, int arc)
     {
-        if (radius < 1 || radius > MaxRadius) throw new ArgumentOutOfRangeException(nameof(radius));
-        if (arc < 1 || arc > FullArc) throw new ArgumentOutOfRangeException(nameof(arc));
+        if (!ValidationRules.IsRadius(radius)) throw new ArgumentOutOfRangeException(nameof(radius));
+        if (!ValidationRules.IsArc(arc)) throw new ArgumentOutOfRangeException(nameof(arc));
         Runtime.Ensure();
 
         var id = Reserve();
@@ -230,8 +228,8 @@ internal static unsafe class StampCatalog
 
     private static void Validate(int width, int height)
     {
-        if (width < 1 || width > MaxAxis) throw new ArgumentOutOfRangeException(nameof(width));
-        if (height < 1 || height > MaxAxis) throw new ArgumentOutOfRangeException(nameof(height));
+        if (!ValidationRules.IsAxis(width)) throw new ArgumentOutOfRangeException(nameof(width));
+        if (!ValidationRules.IsAxis(height)) throw new ArgumentOutOfRangeException(nameof(height));
     }
 
     private static int Reserve()

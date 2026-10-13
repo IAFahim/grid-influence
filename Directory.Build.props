@@ -1,6 +1,7 @@
 <Project>
   <PropertyGroup>
-    <GiVersion>0.7.0-alpha.1</GiVersion>
+    <GiVersion>0.7.0-alpha.2</GiVersion>
+    <GiValidationVersion>0.1.0-alpha.1</GiValidationVersion>
     <LangVersion>14</LangVersion>
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>

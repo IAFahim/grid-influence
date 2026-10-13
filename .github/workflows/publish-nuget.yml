@@ -40,13 +40,16 @@ jobs:
         env:
           DOTNET_EnableHWIntrinsic: "0"
       - run: dotnet pack src/Gi -c Release --no-build -o artifacts/packages
-      - name: Packed file matches tag
+      - run: dotnet pack src/Gi.Validation -c Release --no-build -o artifacts/packages
+      - name: Packed files match release versions
         env:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#v}"
           test -f "artifacts/packages/Gi.Influence.$version.nupkg"
+          validation_version="$(python3 -c 'import xml.etree.ElementTree as ET; print(ET.parse("Directory.Build.props").findtext(".//GiValidationVersion"))')"
+          test -f "artifacts/packages/Gi.Validation.$validation_version.nupkg"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: gi-influence-${{ inputs.tag }}-${{ github.run_id }}
@@ -73,7 +76,7 @@ jobs:
         id: login
         with:
           user: iafahim
-      - name: Push package
+      - name: Push packages
         env:
           NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
           RELEASE_TAG: ${{ inputs.tag }}
@@ -81,3 +84,6 @@ jobs:
           set -euo pipefail
           version="${RELEASE_TAG#v}"
           dotnet nuget push "artifacts/packages/Gi.Influence.$version.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+          for package in artifacts/packages/Gi.Validation.*.nupkg; do
+            dotnet nuget push "$package" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+          done

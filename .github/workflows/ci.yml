@@ -33,6 +33,7 @@ jobs:
         env:
           DOTNET_EnableHWIntrinsic: "0"
       - run: dotnet pack src/Gi -c Release --no-build -o artifacts/packages
+      - run: dotnet pack src/Gi.Validation -c Release --no-build -o artifacts/packages
 
   inspect:
     runs-on: ubuntu-latest

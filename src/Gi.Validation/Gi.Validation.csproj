@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net10.0;netstandard2.1</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Version>$(GiValidationVersion)</Version>
+    <PackageId>Gi.Validation</PackageId>
+    <Authors>IAFahim</Authors>
+    <Description>Pure numeric validation for Gi influence fields and stamps, for editor and tooling use.</Description>
+    <PackageProjectUrl>https://github.com/IAFahim/grid-influence</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/IAFahim/grid-influence</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../Gi/ValidationRules.cs" Link="ValidationRules.cs" />
+    <None Include="README.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
+</Project>
