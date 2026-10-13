@@ -47,6 +47,7 @@ World.Record(world);                     // checkpoint — journal applied ops a
 Explore();                               // mutate + Process freely
 World.Rewind(world);                     // inverse ops; field and schedules return exactly
 Stamp.Free(cone);                        // return an unused stamp's id to the catalog
+World.Free(world);                       // release the world's memory and its handle
 ```
 
 One world can hold many grids and many layers — a 1024² grid for steering plus a 64² grid for

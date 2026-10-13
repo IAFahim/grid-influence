@@ -4,7 +4,9 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
 
 ## Model
 
-- A **world** (`World.New`, up to 255) owns **grids** and **layers**. A grid
+- A **world** (`World.New`, up to 255 live at once) owns **grids** and **layers**. `World.Free(world)`
+  releases the world's memory and its handle: `World.New` reuses the lowest free handle, and a freed
+  handle reads as absent to every call. A grid
   (`Grid.New(world, power, x, y, size)`, up to 32 per world) is a power-of-two cell grid,
   `2^power` cells per side (power 5–14), laid over a world-space rect `x,y,size`. A layer
   (`Layer.New(world)`, up to 32 per world) is an independent field channel present on every grid.
@@ -409,6 +411,7 @@ short p = World.QueryAt(world, grid, layer, 128f, 64f);  // world-space point
 short m = World.QueryMax(world, grid, layer, out var mx, out var my); // best cell
 World.QueryGradient(world, grid, layer, 128f, 64f, out var gx, out var gy); // ±1-cell slope
 World.Remove(world, source);
+World.Free(world);                         // releases the world's memory and its handle
 ```
 
 A world can mix resolutions freely — `Grid 256x / 1024x / 32x` — each grid covering its own
@@ -612,9 +615,9 @@ pass behind them was `perf`-profile guided, receipts first.
   layer, gain, angle, scale, schedule columns, liveness, the free-slot chain, and the generation
   bytes — the timer heap and schedule journal (reset by `Clear`, capacity retained), and, per
   (grid, layer), the dirty flags and tile epochs (allocated together by the layer's first marked
-  tile on that grid and kept for the process), and
+  tile on that grid and kept until `World.Free`), and
   the max pyramid: a flat `int16` slot array plus per-level offset and side tables, allocated
-  zeroed by the layer's first resolved tile and freed only by `World.Clear`) or by a `PageMap`
+  zeroed by the layer's first resolved tile and freed by `World.Clear` and `World.Free`) or by a `PageMap`
   (each tile block — 6,528 B, or 10,624 B once a raster deposit attached the dense buffer at its
   tail, or a 2,112 B header for a derived-layer tile — is owned by its slot and
   freed exactly when the tile resolves to zero, the world is cleared, or the map is disposed;
@@ -627,8 +630,8 @@ pass behind them was `perf`-profile guided, receipts first.
   freed with it). The per-window placement buffer lives beside the fragment buffer, is reset by
   every `Process`, keeps its capacity, and is only read during a pooled apply. The shared zero dense
   page is allocated once with the arenas and never written afterwards.
-  The layer recipe table (32 entries per world) is allocated by `World.New` and lives for the
-  process. `Stamp` variants — base samples, mip chain, and box constants — are catalog-owned until
+  The layer recipe table (32 entries per world) is allocated by `World.New` and freed by
+  `World.Free`. `Stamp` variants — base samples, mip chain, and box constants — are catalog-owned until
   `Stamp.Free` succeeds (no live source, pending op, or journal entry in any world names the
   stamp, so no deposit, retraction, rewind, or exclusion can still read it), and otherwise for
   the process. The resolve pool (background worker
@@ -637,8 +640,15 @@ pass behind them was `perf`-profile guided, receipts first.
   lazily by the first ≥32-dirty-tile `Process` and lives for the process; its native scratch is
   never freed and its threads never terminate. `QueryRegion` writes only the caller's
   destination; `ChangedTiles` copies from the changed list (stable between `Process` calls,
-  swapped — never written in place — on the owning thread) into the caller's buffer. No `World.Free` exists: worlds are process-lifetime
-  singletons, so no pointer escapes an owner.
+  swapped — never written in place — on the owning thread) into the caller's buffer. `World.Free` releases each allocation listed above exactly once on the
+  owning thread: every live tile block through `FreeBlock` (which also frees the block's dense,
+  tent, and bell attachments), then per layer the page map, dirty flags, epochs, dirty and changed
+  lists, and max pyramid, then the layer array of each grid, the grid array, the recipe table, the
+  `Prev` scratch, the rebuild table, and every `SourceColumns` and world buffer. It then zeroes
+  the context; a context without a grid array is not a world, so `GetContext` returns null for it
+  and every handle-taking call reads a freed handle as absent. No pointer escapes an owner: handles
+  are bytes, source ids carry a generation, and the resolve pool holds a world pointer only inside
+  one `Process` or column call.
 - **Aliasing**: each block is written by deposits and resolved in place; during a pooled
   apply phase every (grid, layer, tile) fragment bucket is claimed by exactly one
   participant — the scatter assigns buckets by hash before signalling, so difference, tent,
@@ -737,10 +747,11 @@ pass behind them was `perf`-profile guided, receipts first.
   independent, arithmetic is integer-exact, the dead set is a pure function of page content, and
   the order of removals has no observable effect on map contents. Warm pooled `Process`
   allocates 0 B: the pool, its scratch, the task buffer, and the dead buffer are sized at
-  creation and by grow-to-max before steady state. World creation and stamp catalog mutation (creation and `Stamp.Free`, which
+  creation and by grow-to-max before steady state. World creation, `World.Free`, and stamp catalog mutation (creation and `Stamp.Free`, which
   scans every world's source columns, op queue, and journal) are also serialized
-  across worlds because their arenas and counts are process-wide, and `Stamp.Free` must not
-  overlap any world's mutation or `Process`. Pool initialization rides the
+  across worlds because their arenas and counts are process-wide, `Stamp.Free` must not
+  overlap any world's mutation or `Process`, and `World.Free` must not overlap any call that
+  takes the freed handle. Pool initialization rides the
   same rule: the first creation call allocates both arenas before any handle exists, and handles
   only originate from creation calls, so no query can observe an uninitialized arena.
   `Fade`/`Expire`/`Turn`/`Scale` are mutations like `Move`; timers run on the owning thread at

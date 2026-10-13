@@ -27,6 +27,27 @@ internal struct SourceColumns
     public NativeBuffer<int> Free;
     public NativeBuffer<byte> Gen;
     public int Count;
+
+    public void Release()
+    {
+        X.Free();
+        Y.Free();
+        Stamp.Free();
+        Layer.Free();
+        Gain.Free();
+        Angle.Free();
+        Scale.Free();
+        Timed.Free();
+        FadeFrom.Free();
+        FadeTo.Free();
+        FadeStart.Free();
+        FadeTicks.Free();
+        ExpireAt.Free();
+        Due.Free();
+        Alive.Free();
+        Free.Free();
+        Gen.Free();
+    }
 }
 
 internal unsafe struct LayerData
@@ -170,14 +191,29 @@ public static unsafe partial class World
     private static int _worldCount;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static WorldCtx* GetContext(byte world) => world < _worldCount ? Runtime.Worlds + world : null;
+    internal static WorldCtx* GetContext(byte world)
+    {
+        if (world >= _worldCount) return null;
+
+        var w = Runtime.Worlds + world;
+        return w->Grids == null ? null : w;
+    }
+
+    private static byte ReserveSlot()
+    {
+        for (var i = 0; i < _worldCount; i++)
+            if (Runtime.Worlds[i].Grids == null) return (byte)i;
+
+        if (_worldCount >= MaxWorlds) throw new InvalidOperationException("World limit reached.");
+
+        return (byte)_worldCount++;
+    }
 
     public static byte New()
     {
         Runtime.Ensure();
-        if (_worldCount >= MaxWorlds) throw new InvalidOperationException("World limit reached.");
 
-        var id = (byte)_worldCount++;
+        var id = ReserveSlot();
         var w = Runtime.Worlds + id;
         w->Grids = (GridCtx*)NativeHeap.AllocZeroed((nuint)(MaxGrids * sizeof(GridCtx)));
         w->Recipes = (LayerRecipe*)NativeHeap.AllocZeroed((nuint)(MaxLayers * sizeof(LayerRecipe)));
@@ -186,6 +222,55 @@ public static unsafe partial class World
         for (var i = 0; i < MaxGrids * MaxLayers; i++) w->Rebuilds[i] = -1;
         w->FreeHead = -1;
         return id;
+    }
+
+    public static bool Free(byte world)
+    {
+        var w = GetContext(world);
+        if (w == null) return false;
+
+        for (var gi = 0; gi < w->GridCount; gi++) FreeGrid(w->Grids + gi, w->LayerCount);
+        NativeHeap.Free(w->Grids);
+        NativeHeap.Free(w->Recipes);
+        NativeHeap.AlignedFree(w->Prev);
+        NativeHeap.Free(w->Rebuilds);
+        w->Sources.Release();
+        w->Ops.Free();
+        w->Pending.Free();
+        w->Fragments.Free();
+        w->Placements.Free();
+        w->Journal.Free();
+        w->ScheduleJournal.Free();
+        w->Timers.Free();
+        w->RebuildArena.Free();
+        w->RebuildChains.Free();
+        w->RebuildDense.Free();
+        w->RebuildTails.Free();
+        w->RebuildPlacements.Free();
+        w->RebuildPresent.Free();
+        *w = default;
+        return true;
+    }
+
+    private static void FreeGrid(GridCtx* g, int layerCount)
+    {
+        for (var l = 0; l < layerCount; l++) FreeLayer(g->Layers + l);
+        NativeHeap.Free(g->Layers);
+    }
+
+    private static void FreeLayer(LayerData* ld)
+    {
+        var pages = &ld->Pages;
+        var used = pages->Used;
+        var blocks = pages->Blocks;
+        for (var i = 0; i < pages->SlotCount; i++)
+            if (used[i] == PageMap.Live) FreeBlock(blocks[i]);
+        pages->Reset();
+        NativeHeap.Free(ld->InDirty);
+        NativeHeap.Free(ld->Epochs);
+        ld->Dirty.Free();
+        ld->Changed.Free();
+        ld->Max.Reset();
     }
 
     internal static byte AddGrid(byte world, int power, float x, float y, float size)
