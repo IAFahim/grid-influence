@@ -24,6 +24,7 @@ internal static class ValidationRules
     internal static bool IsValue(int value) => value >= MinValue && value <= MaxValue;
     internal static bool IsGain(int gain) => gain >= -MaxGain && gain <= MaxGain;
     internal static bool IsCount(int count, int maximum) => count >= 0 && count <= maximum;
+    internal static bool IsIndex(int index, int maximum) => index >= 0 && index < maximum;
     internal static bool IsPower(int power) => power >= MinPower && power <= MaxPower;
     internal static bool IsWeight(int weight) => weight >= -MaxWeight && weight <= MaxWeight;
     internal static bool IsShift(int shift) => shift >= 0 && shift <= MaxShift;

@@ -44,6 +44,27 @@ public static class GiValidation
         return Accept(out error);
     }
 
+    public static bool TryWorldIndex(int index, out string? error)
+    {
+        if (!ValidationRules.IsIndex(index, ValidationRules.MaxWorlds))
+            return Reject("World register index must be between 0 and 254.", out error);
+        return Accept(out error);
+    }
+
+    public static bool TryLayerIndex(int index, out string? error)
+    {
+        if (!ValidationRules.IsIndex(index, ValidationRules.MaxLayers))
+            return Reject("Layer register index must be between 0 and 31.", out error);
+        return Accept(out error);
+    }
+
+    public static bool TryStampIndex(int index, out string? error)
+    {
+        if (!ValidationRules.IsIndex(index, ValidationRules.MaxUsableStamps))
+            return Reject("Stamp register index must be between 0 and 254; Gi reserves handle zero.", out error);
+        return Accept(out error);
+    }
+
     public static bool TryGrid(int power, float size, out string? error)
     {
         if (!ValidationRules.IsPower(power) || !ValidationRules.IsGridSize(size))

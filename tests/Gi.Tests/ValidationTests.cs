@@ -81,6 +81,25 @@ public sealed class ValidationTests
         Assert.Equal(valid, error == null);
     }
 
+    [Theory]
+    [InlineData(int.MinValue, false, false, false)]
+    [InlineData(-1, false, false, false)]
+    [InlineData(0, true, true, true)]
+    [InlineData(31, true, true, true)]
+    [InlineData(32, true, false, true)]
+    [InlineData(254, true, false, true)]
+    [InlineData(255, false, false, false)]
+    [InlineData(int.MaxValue, false, false, false)]
+    public void Register_indices_reject_missing_selections_and_exclusive_upper_bounds(int index, bool worlds, bool layers, bool stamps)
+    {
+        Assert.Equal(worlds, GiValidation.TryWorldIndex(index, out var worldError));
+        Assert.Equal(worlds, worldError == null);
+        Assert.Equal(layers, GiValidation.TryLayerIndex(index, out var layerError));
+        Assert.Equal(layers, layerError == null);
+        Assert.Equal(stamps, GiValidation.TryStampIndex(index, out var stampError));
+        Assert.Equal(stamps, stampError == null);
+    }
+
     [Fact]
     public void Validation_assembly_has_no_Gi_runtime_dependency()
     {
