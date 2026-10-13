@@ -72,7 +72,9 @@ public sealed class LayerTests
         Assert.Throws<ArgumentOutOfRangeException>(() => Layer.Min(w, a, 31));
         Assert.Throws<ArgumentOutOfRangeException>(() => Layer.Sum(w, a, short.MaxValue + 1));
         Assert.Throws<ArgumentOutOfRangeException>(() => Layer.Sum(w, a, 1, -1));
+        Assert.Equal("weight", Assert.Throws<ArgumentOutOfRangeException>(() => Layer.Sum(w, a, short.MinValue)).ParamName);
         Assert.Throws<ArgumentOutOfRangeException>(() => Layer.Mask(w, a, d, 5, 4));
+        Assert.Equal("min", Assert.Throws<ArgumentOutOfRangeException>(() => Layer.Mask(w, a, a, 5, 4)).ParamName);
     }
 
     [Fact]

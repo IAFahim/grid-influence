@@ -108,4 +108,22 @@ public sealed class TimeTests
         World.Process(w);
         Assert.Equal(7, World.Query(w, g, l, 5, 5));
     }
+    [Fact]
+    public void FadeTarget_ClampsToSignedSixteen()
+    {
+        var w = World.New();
+        var g = Grid.New(w, 5, 0f, 0f, 32f);
+        var l = Layer.New(w);
+        var id = World.Place(w, l, 10.5f, 10.5f, Stamp.Box(1, 1, 5), 0);
+        World.Fade(w, id, 100, 3);
+        for (var i = 0; i < 3; i++) World.Process(w);
+        Assert.Equal(80, World.Query(w, g, l, 10, 10));
+
+        World.SetGain(w, id, 0);
+        World.Process(w);
+        World.Fade(w, id, -100, 3);
+        for (var i = 0; i < 3; i++) World.Process(w);
+        Assert.Equal(-80, World.Query(w, g, l, 10, 10));
+    }
+
 }

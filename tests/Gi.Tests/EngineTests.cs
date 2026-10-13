@@ -470,6 +470,20 @@ public sealed class EngineTests
     }
 
     [Fact]
+    public void PlaceGain_ClampsToSignedSixteen()
+    {
+        var w = World.New();
+        var g = Grid.New(w, power: 6, x: 0f, y: 0f, size: 64f);
+        var l = Layer.New(w);
+        var stamp = Stamp.Box(3, 3, 10);
+        World.Place(w, l, 16.5f, 16.5f, stamp, 100);
+        World.Place(w, l, 40.5f, 16.5f, stamp, -100);
+        World.Process(w);
+        Assert.Equal(160, World.Query(w, g, l, 16, 16));
+        Assert.Equal(-160, World.Query(w, g, l, 40, 16));
+    }
+
+    [Fact]
     public void SubCellPlacement_SpreadsEdgeWeights()
     {
         var w = World.New();
@@ -526,7 +540,7 @@ public sealed class EngineTests
     }
 
     [Fact]
-    public void Process_RepeatedIsDeterministic()
+    public unsafe void Process_RepeatedIsDeterministic()
     {
         var w = World.New();
         var g = Grid.New(w, power: 7, x: 0f, y: 0f, size: 128f);
@@ -537,11 +551,12 @@ public sealed class EngineTests
             World.Place(w, l, (float)(rng.NextDouble() * 120), (float)(rng.NextDouble() * 120), stamp, 7);
 
         World.Process(w);
-        var a = World.Query(w, g, l, 60, 60);
-        var b = World.Query(w, g, l, 5, 90);
+        var first = new short[128 * 128];
+        fixed (short* p = first) World.QueryRegion(w, g, l, 0, 0, 128, 128, p);
         World.Process(w);
-        Assert.Equal(a, World.Query(w, g, l, 60, 60));
-        Assert.Equal(b, World.Query(w, g, l, 5, 90));
+        var second = new short[128 * 128];
+        fixed (short* p = second) World.QueryRegion(w, g, l, 0, 0, 128, 128, p);
+        Assert.Equal(first, second);
     }
 
     [Fact]
@@ -1209,6 +1224,8 @@ public sealed class EngineTests
         var l = Layer.New(w);
         var rng = new Random(83);
         var widths = new[] { 1, 2, 3, 5, 8, 13, 24 };
+        var tents = new byte[widths.Length];
+        for (var k = 0; k < widths.Length; k++) tents[k] = Stamp.Tent((ushort)widths[k], (ushort)widths[k], 40);
         const int count = 80;
         var ids = new int[count];
         var sx = new float[count];
@@ -1238,7 +1255,7 @@ public sealed class EngineTests
             sx[i] = (float)(rng.NextDouble() * 250 + 3);
             sy[i] = (float)(rng.NextDouble() * 250 + 3);
             sgain[i] = rng.Next(-8, 13);
-            ids[i] = World.Place(w, l, sx[i], sy[i], Stamp.Tent((ushort)ssize[i], (ushort)ssize[i], 40), (sbyte)sgain[i]);
+            ids[i] = World.Place(w, l, sx[i], sy[i], tents[Array.IndexOf(widths, ssize[i])], (sbyte)sgain[i]);
             slive[i] = true;
         }
 
@@ -1302,6 +1319,8 @@ public sealed class EngineTests
         var l = Layer.New(w);
         var rng = new Random(97);
         var widths = new[] { 2, 3, 5, 8, 13, 24 };
+        var bells = new byte[widths.Length];
+        for (var k = 0; k < widths.Length; k++) bells[k] = Stamp.Bell((ushort)widths[k], (ushort)widths[k], 40);
         const int count = 80;
         var ids = new int[count];
         var sx = new float[count];
@@ -1330,7 +1349,7 @@ public sealed class EngineTests
             sx[i] = (float)(rng.NextDouble() * 250 + 3);
             sy[i] = (float)(rng.NextDouble() * 250 + 3);
             sgain[i] = rng.Next(-8, 13);
-            ids[i] = World.Place(w, l, sx[i], sy[i], Stamp.Bell((ushort)ssize[i], (ushort)ssize[i], 40), (sbyte)sgain[i]);
+            ids[i] = World.Place(w, l, sx[i], sy[i], bells[Array.IndexOf(widths, ssize[i])], (sbyte)sgain[i]);
             slive[i] = true;
         }
 
@@ -1444,6 +1463,88 @@ public sealed class EngineTests
         var repeat = World.QueryMax(w, g, l, out var x2, out var y2);
         Assert.Equal(first, repeat);
         Assert.Equal((x, y), (x2, y2));
+    }
+
+    [Fact]
+    public unsafe void QueryMax_RegionMatchesRectScan()
+    {
+        var w = World.New();
+        var g = Grid.New(w, 8, 0f, 0f, 256f);
+        var l = Layer.New(w);
+        var box = Stamp.Box(12, 12, 40);
+        var rng = new Random(37);
+        for (var i = 0; i < 40; i++)
+            World.Place(w, l, (float)(rng.NextDouble() * 244 + 6), (float)(rng.NextDouble() * 244 + 6), box, (sbyte)rng.Next(-6, 12));
+        World.Process(w);
+
+        var scan = new short[256 * 256];
+        fixed (short* p = scan) World.QueryRegion(w, g, l, 0, 0, 256, 256, p);
+        for (var t = 0; t < 20; t++)
+        {
+            var x0 = rng.Next(240);
+            var y0 = rng.Next(240);
+            var width = 1 + rng.Next(16);
+            var height = 1 + rng.Next(16);
+            short expected = 0;
+            for (var y = y0; y < y0 + height; y++)
+            for (var x = x0; x < x0 + width; x++)
+                if (scan[y * 256 + x] > expected) expected = scan[y * 256 + x];
+
+            var best = World.QueryMax(w, g, l, x0, y0, width, height, out var bx, out var by);
+            Assert.Equal(expected, best);
+            if (best == 0) continue;
+
+            Assert.Equal(best, World.Query(w, g, l, bx, by));
+            Assert.InRange(bx, x0, x0 + width - 1);
+            Assert.InRange(by, y0, y0 + height - 1);
+        }
+    }
+
+    [Fact]
+    public void SenseMax_MatchesRowMajorDiskScan()
+    {
+        var w = World.New();
+        var g = Grid.New(w, 8, 0f, 0f, 256f);
+        var l = Layer.New(w);
+        var box = Stamp.Box(10, 10, 60);
+        var rng = new Random(41);
+        for (var i = 0; i < 30; i++)
+            World.Place(w, l, (float)(rng.NextDouble() * 236 + 10), (float)(rng.NextDouble() * 236 + 10), box, (sbyte)rng.Next(1, 9));
+        World.Process(w);
+
+        for (var t = 0; t < 8; t++)
+        {
+            var cx = 30 + rng.Next(196);
+            var cy = 30 + rng.Next(196);
+            var x = cx + 0.5f;
+            var y = cy + 0.5f;
+            var reach = 8 + rng.Next(23);
+
+            short expected = 0;
+            var ex = x;
+            var ey = y;
+            var first = true;
+            for (var ty = cy - reach; ty <= cy + reach; ty++)
+            for (var tx = cx - reach; tx <= cx + reach; tx++)
+            {
+                var dx = tx + 0.5f - x;
+                var dy = ty + 0.5f - y;
+                if (dx * dx + dy * dy > reach * reach) continue;
+                var v = World.Query(w, g, l, tx, ty);
+                if (first || v > expected)
+                {
+                    expected = v;
+                    ex = tx + 0.5f;
+                    ey = ty + 0.5f;
+                    first = false;
+                }
+            }
+
+            Assert.True(World.TrySenseMax(w, l, x, y, reach, out var value, out var bx, out var by));
+            Assert.Equal(expected, value);
+            Assert.Equal(ex, bx);
+            Assert.Equal(ey, by);
+        }
     }
 
     [Fact]
@@ -1794,4 +1895,22 @@ public sealed class EngineTests
         Assert.True(World.TrySense(w, threat, 100.4f, 100.7f, other, out var nobody));
         Assert.Equal(0, nobody);
     }
+    [Fact]
+    public void StopRecording_DiscardsTheJournal()
+    {
+        var w = World.New();
+        var g = Grid.New(w, power: 6, x: 0f, y: 0f, size: 64f);
+        var l = Layer.New(w);
+        var s = World.Place(w, l, 20f, 20f, Stamp.Box(4, 4, 50), 2);
+        World.Process(w);
+        World.Record(w);
+        World.Move(w, s, 40f, 20f);
+        World.Process(w);
+        World.StopRecording(w);
+        World.Rewind(w);
+        World.Process(w);
+        Assert.Equal(100, World.Query(w, g, l, 40, 20));
+        Assert.Equal(0, World.Query(w, g, l, 20, 20));
+    }
+
 }

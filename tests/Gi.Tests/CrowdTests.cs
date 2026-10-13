@@ -611,6 +611,6 @@ public sealed unsafe class CrowdTests
 
         Assert.Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
         Assert.True(hits > 0);
-        Assert.True(acc > long.MinValue);
+        Assert.NotEqual(0L, acc);
     }
 }

@@ -136,4 +136,25 @@ public sealed class ShapeTests
         World.Process(w);
         Assert.Equal(32 * 32 * 20, World.Query(w, g, l, 0, 0, 32, 32));
     }
+    [Fact]
+    public void New_RejectsShortSampleSpans()
+    {
+        Assert.Throws<ArgumentException>(() => Stamp.New((ReadOnlySpan<sbyte>)new sbyte[3], 2, 2));
+    }
+
+    [Fact]
+    public unsafe void NewPointerOverload_BakesSamples()
+    {
+        var samples = new sbyte[6];
+        for (var i = 0; i < samples.Length; i++) samples[i] = 5;
+        byte stamp;
+        fixed (sbyte* p = samples) stamp = Stamp.New(p, 3, 2);
+        var w = World.New();
+        var g = Grid.New(w, 5, 0f, 0f, 32f);
+        var l = Layer.New(w);
+        World.Place(w, l, 16.5f, 16.5f, stamp, 2);
+        World.Process(w);
+        Assert.Equal(10, World.Query(w, g, l, 16, 16));
+    }
+
 }
