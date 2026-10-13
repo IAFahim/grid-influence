@@ -22,7 +22,7 @@ internal static class GiDemoStamps
             var v = peak * Math.Exp(-(dx * dx + dy * dy) / (2 * sigma * sigma));
             samples[y * size + x] = (sbyte)Math.Clamp((int)Math.Round(v), -128, 127);
         }
-        fixed (sbyte* p = samples) return Stamp.New(p, size, size);
+        fixed (sbyte* p = samples) return Stamp.New(p, (ushort)size, (ushort)size);
     }
 }
 }

@@ -30,11 +30,11 @@ public static unsafe partial class World
         return w == null ? 0 : w->Tick;
     }
 
-    public static void Fade(byte world, int source, int gain, int ticks)
+    public static void Fade(byte world, int source, sbyte gain, int ticks)
     {
         if (!TrySource(world, source, out var w, out var s, out var i)) return;
 
-        var target = (sbyte)Math.Clamp(gain, -MaxGain, MaxGain);
+        var target = (sbyte)Math.Clamp((int)gain, -MaxGain, MaxGain);
         var current = (sbyte)s->Gain.Pointer[i];
         JournalSchedule(w, s, i);
         if (ticks <= 0 || target == current)

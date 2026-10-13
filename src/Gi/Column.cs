@@ -1,5 +1,3 @@
-using System.Runtime.CompilerServices;
-
 namespace Gi;
 
 public static unsafe partial class World
@@ -54,7 +52,7 @@ public static unsafe partial class World
 
             var x = xs[i];
             var y = ys[i];
-            if (s->X.Pointer[slot] == x && s->Y.Pointer[slot] == y) continue;
+            if (*(int*)&x == *(int*)&s->X.Pointer[slot] && *(int*)&y == *(int*)&s->Y.Pointer[slot]) continue;
             EnqueueMutation(w, s, slot, x, y, (sbyte)s->Gain.Pointer[slot], s->Angle.Pointer[slot], s->Scale.Pointer[slot], true);
             s->X.Pointer[slot] = x;
             s->Y.Pointer[slot] = y;

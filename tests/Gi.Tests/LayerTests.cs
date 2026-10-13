@@ -76,6 +76,18 @@ public sealed class LayerTests
     }
 
     [Fact]
+    public void DerivedLayers_ConsumeTheSharedLayerBudget()
+    {
+        var w = World.New();
+        Grid.New(w, 5, 0f, 0f, 32f);
+        for (var i = 0; i < World.MaxLayers - 1; i++) Layer.New(w);
+        var derived = Layer.Max(w, 0, 0);
+        Assert.Equal((byte)(World.MaxLayers - 1), derived);
+        Assert.Throws<InvalidOperationException>(() => Layer.New(w));
+        Assert.Throws<InvalidOperationException>(() => Layer.Max(w, 0, 0));
+    }
+
+    [Fact]
     public unsafe void ChainedLayers_FollowChangesAndReportChangedTiles()
     {
         var w = World.New();

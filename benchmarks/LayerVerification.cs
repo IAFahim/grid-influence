@@ -82,13 +82,13 @@ internal static partial class Verification
                 if (op == 0)
                 {
                     ids.Add(Gi.World.Place(w, bases[rng.Next(bases.Length)], (float)(rng.NextDouble() * 280 - 12),
-                        (float)(rng.NextDouble() * 280 - 12), stamps[rng.Next(stamps.Length)], rng.Next(-16, 17)));
+                        (float)(rng.NextDouble() * 280 - 12), stamps[rng.Next(stamps.Length)], (sbyte)rng.Next(-16, 17)));
                     continue;
                 }
 
                 var index = rng.Next(ids.Count);
                 if (op == 1) Gi.World.Move(w, ids[index], (float)(rng.NextDouble() * 280 - 12), (float)(rng.NextDouble() * 280 - 12));
-                else if (op == 2) Gi.World.SetGain(w, ids[index], rng.Next(-16, 17));
+                else if (op == 2) Gi.World.SetGain(w, ids[index], (sbyte)rng.Next(-16, 17));
                 else
                 {
                     Gi.World.Remove(w, ids[index]);
@@ -195,7 +195,7 @@ internal static partial class Verification
         var ids = new List<int>();
         for (var i = 0; i < 240; i++)
             ids.Add(Gi.World.Place(w, i % 3 == 0 ? other : l, (float)(rng.NextDouble() * 270 - 7),
-                (float)(rng.NextDouble() * 270 - 7), stamps[rng.Next(stamps.Length)], rng.Next(-16, 17)));
+                (float)(rng.NextDouble() * 270 - 7), stamps[rng.Next(stamps.Length)], (sbyte)rng.Next(-16, 17)));
         var piles = new List<int>();
         for (var i = 0; i < 50; i++) piles.Add(Gi.World.Place(w, i % 2 == 0 ? l : other, 100.3f, 77.7f, stamps[i % 4], 16));
         ids.AddRange(piles);
@@ -277,7 +277,7 @@ internal static partial class Verification
 
         var ids = new int[60];
         for (var i = 0; i < ids.Length; i++)
-            ids[i] = Gi.World.Place(w, i % 2 == 0 ? a : b, 20f + i * 3.7f, 30f + i * 2.9f, i % 3 == 0 ? tent : box, 3 + i % 5);
+            ids[i] = Gi.World.Place(w, i % 2 == 0 ? a : b, 20f + i * 3.7f, 30f + i * 2.9f, i % 3 == 0 ? tent : box, (sbyte)(3 + i % 5));
         Gi.World.Process(w);
         var baseline = Read(w, g, d, 256);
         Gi.World.Record(w);
@@ -303,7 +303,7 @@ internal static partial class Verification
             if (sums[c] != Math.Clamp(ra[c] + rb[c], short.MinValue, short.MaxValue)) return false;
         if (Gi.World.Query(w, g, d, 64, 64) != 250) return false;
 
-        for (var i = 0; i < 40; i++) Gi.World.Place(w, i % 2 == 0 ? a : b, 10f + i * 6.1f, 200f - i * 4.3f, i % 3 == 0 ? tent : box, 2 + i % 7);
+        for (var i = 0; i < 40; i++) Gi.World.Place(w, i % 2 == 0 ? a : b, 10f + i * 6.1f, 200f - i * 4.3f, i % 3 == 0 ? tent : box, (sbyte)(2 + i % 7));
         Gi.World.Process(w);
         var late = Gi.Layer.Max(w, a, b);
         var later = Gi.Layer.Sum(w, d, 2, late, -1);

@@ -162,11 +162,9 @@ internal unsafe struct WorldCtx
 
 public static unsafe partial class World
 {
-    internal const int MaxLayers = ValidationRules.MaxLayers;
+    public const int MaxLayers = ValidationRules.MaxLayers;
     internal const int MaxWorlds = ValidationRules.MaxWorlds;
     internal const int MaxGrids = ValidationRules.MaxGrids;
-    private const int MinPower = ValidationRules.MinPower;
-    private const int MaxPower = ValidationRules.MaxPower;
     private const int MaxGain = ValidationRules.MaxGain;
     private const ushort UnitScale = 256;
     internal const int MaxSourceSlots = 1 << 24;
@@ -218,7 +216,7 @@ public static unsafe partial class World
         w->Grids = (GridCtx*)NativeHeap.AllocZeroed((nuint)(MaxGrids * sizeof(GridCtx)));
         w->Recipes = (LayerRecipe*)NativeHeap.AllocZeroed((nuint)(MaxLayers * sizeof(LayerRecipe)));
         w->Prev = (int*)NativeHeap.AlignedAlloc(TileBake.TileSize * sizeof(int));
-        w->Rebuilds = (int*)NativeHeap.AllocZeroed((nuint)(2 * MaxGrids * MaxLayers * sizeof(int)));
+        w->Rebuilds = (int*)NativeHeap.AllocZeroed(2 * MaxGrids * MaxLayers * sizeof(int));
         for (var i = 0; i < MaxGrids * MaxLayers; i++) w->Rebuilds[i] = -1;
         w->FreeHead = -1;
         return id;
@@ -305,7 +303,7 @@ public static unsafe partial class World
         return (byte)id;
     }
 
-    public static int Place(byte world, byte layer, float x, float y, byte stamp, int gain)
+    public static int Place(byte world, byte layer, float x, float y, byte stamp, sbyte gain)
     {
         var w = GetContext(world);
         if (w == null || layer >= w->LayerCount || !StampCatalog.Valid(stamp) || IsDerived(w, layer)) return -1;
@@ -324,7 +322,7 @@ public static unsafe partial class World
             i = s->Count++;
         }
 
-        var g = (byte)Math.Clamp(gain, -MaxGain, MaxGain);
+        var g = (byte)Math.Clamp((int)gain, -MaxGain, MaxGain);
         var gen = (byte)((s->Gen.Pointer[i] + 1) & 127);
         s->Gen.Pointer[i] = gen;
         s->X.Pointer[i] = x;
@@ -354,11 +352,11 @@ public static unsafe partial class World
         s->Y.Pointer[i] = y;
     }
 
-    public static void SetGain(byte world, int source, int gain)
+    public static void SetGain(byte world, int source, sbyte gain)
     {
         if (!TrySource(world, source, out var w, out var s, out var i)) return;
 
-        var next = (byte)Math.Clamp(gain, -MaxGain, MaxGain);
+        var next = (byte)Math.Clamp((int)gain, -MaxGain, MaxGain);
         if ((s->Timed.Pointer[i] & Fading) != 0)
         {
             JournalSchedule(w, s, i);

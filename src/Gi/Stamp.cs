@@ -249,31 +249,31 @@ internal static unsafe class StampCatalog
 
 public static unsafe class Stamp
 {
-    public static byte New(sbyte* data, int width, int height)
+    public static byte New(sbyte* data, ushort width, ushort height)
         => StampCatalog.Bake(data, width, height);
 
-    public static byte New(ReadOnlySpan<sbyte> data, int width, int height)
+    public static byte New(ReadOnlySpan<sbyte> data, ushort width, ushort height)
     {
         if (data.Length < width * height) throw new ArgumentException("Sample span is smaller than width*height.", nameof(data));
         fixed (sbyte* p = data) return StampCatalog.Bake(p, width, height);
     }
 
-    public static byte Box(int width, int height, sbyte value)
+    public static byte Box(ushort width, ushort height, sbyte value)
         => StampCatalog.Box(width, height, value);
 
-    public static byte Tent(int width, int height, sbyte value)
+    public static byte Tent(ushort width, ushort height, sbyte value)
         => StampCatalog.Tent(width, height, value);
 
-    public static byte Bell(int width, int height, sbyte value)
+    public static byte Bell(ushort width, ushort height, sbyte value)
         => StampCatalog.Bell(width, height, value);
 
-    public static byte Disk(int radius, sbyte value, int arc = 360)
+    public static byte Disk(ushort radius, sbyte value, ushort arc = 360)
         => StampCatalog.Round(StampKind.Disk, radius, value, arc);
 
-    public static byte Cone(int radius, sbyte value, int arc = 360)
+    public static byte Cone(ushort radius, sbyte value, ushort arc = 360)
         => StampCatalog.Round(StampKind.Cone, radius, value, arc);
 
-    public static byte Dome(int radius, sbyte value, int arc = 360)
+    public static byte Dome(ushort radius, sbyte value, ushort arc = 360)
         => StampCatalog.Round(StampKind.Dome, radius, value, arc);
 
     public static bool Free(byte stamp) => StampCatalog.Free(stamp);

@@ -9,9 +9,12 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   handle reads as absent to every call. A grid
   (`Grid.New(world, power, x, y, size)`, up to 32 per world) is a power-of-two cell grid,
   `2^power` cells per side (power 5–14), laid over a world-space rect `x,y,size`. A layer
-  (`Layer.New(world)`, up to 32 per world) is an independent field channel present on every grid.
-  A layer either receives deposits (`Layer.New`) or is **derived** (`Layer.Sum`/`Min`/`Max`/
+  (`Layer.New(world)`) is an independent field channel present on every grid. A layer either
+  receives deposits (`Layer.New`) or is **derived** (`Layer.Sum`/`Min`/`Max`/
   `Mask`): its cells are a pure function of other layers' cells, maintained by `Process` (below).
+  Deposited and derived layers share one table: a world holds at most `World.MaxLayers` (32)
+  layers in total, so a derived combo takes one of the same slots as a raw channel and the plan
+  is `raw + derived ≤ 32`.
 - **Stamps** (`Stamp.New(sbyte* data, w, h)` / `Stamp.Box(w, h, value)` / `Stamp.Tent(w, h, value)` /
   `Stamp.Bell(w, h, value)` / `Stamp.Disk`/`Cone`/`Dome(radius, value, arc)`, up to 255 live at
   once) are baked
@@ -218,7 +221,12 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   two zero inputs to zero, so a tile where no input holds a page holds no derived page either:
   derived layers are as sparse as their inputs. Inputs must already exist (lower ids), so
   creation order is a topological order and chains nest to the 32-layer limit; each layer
-  records the bitmask of source layers it reads. `Process`, after the drain (and the pool's
+  records the bitmask of source layers it reads. The 32-layer budget is shared between
+  deposited and derived layers, and the cap is load-bearing rather than an allocation knob: a
+  recipe's read set is one `uint` over layer indices, the per-window crowd set is one `uint`
+  over layer indices, and the per-layer live-source counts are a fixed 32-entry array in the
+  world context, so a wider budget widens those masks on the place and process paths; layer ids
+  stay bytes. `Process`, after the drain (and the pool's
   join), visits derived layers in id order: each marks the union of its inputs' dirty lists —
   this window's resolved tiles, derived inputs included — and recombines exactly those tiles in
   one pass over the 1,024 cells of each input page (an absent page reads the shared zero page),

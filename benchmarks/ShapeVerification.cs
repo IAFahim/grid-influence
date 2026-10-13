@@ -186,13 +186,13 @@ internal static partial class Verification
 
     private static byte ShapeStamp(OracleSource s) => s.Kind switch
     {
-        KindBox => Gi.Stamp.Box(s.Width, s.Height, s.Value),
-        KindRaster => Gi.Stamp.New(s.Samples!, s.Width, s.Height),
-        KindTent => Gi.Stamp.Tent(s.Width, s.Height, s.Value),
-        KindBell => Gi.Stamp.Bell(s.Width, s.Height, s.Value),
-        KindDisk => Gi.Stamp.Disk(s.Width / 2, s.Value, s.ArcDegrees),
-        KindCone => Gi.Stamp.Cone(s.Width / 2, s.Value, s.ArcDegrees),
-        KindDome => Gi.Stamp.Dome(s.Width / 2, s.Value, s.ArcDegrees),
+        KindBox => Gi.Stamp.Box((ushort)s.Width, (ushort)s.Height, s.Value),
+        KindRaster => Gi.Stamp.New(s.Samples!, (ushort)s.Width, (ushort)s.Height),
+        KindTent => Gi.Stamp.Tent((ushort)s.Width, (ushort)s.Height, s.Value),
+        KindBell => Gi.Stamp.Bell((ushort)s.Width, (ushort)s.Height, s.Value),
+        KindDisk => Gi.Stamp.Disk((ushort)(s.Width / 2), s.Value, (ushort)s.ArcDegrees),
+        KindCone => Gi.Stamp.Cone((ushort)(s.Width / 2), s.Value, (ushort)s.ArcDegrees),
+        KindDome => Gi.Stamp.Dome((ushort)(s.Width / 2), s.Value, (ushort)s.ArcDegrees),
         _ => throw new ArgumentOutOfRangeException(nameof(s)),
     };
 
@@ -251,7 +251,7 @@ internal static partial class Verification
         void Add(OracleSource s)
         {
             var id = Gi.World.Place(w, l, s.X, s.Y, palette.First(p => p.Shape.Kind == s.Kind && p.Shape.Width == s.Width &&
-                p.Shape.Height == s.Height && p.Shape.Value == s.Value && p.Shape.ArcDegrees == s.ArcDegrees && p.Shape.Samples == s.Samples).Stamp, s.Gain);
+                p.Shape.Height == s.Height && p.Shape.Value == s.Value && p.Shape.ArcDegrees == s.ArcDegrees && p.Shape.Samples == s.Samples).Stamp, (sbyte)s.Gain);
             Gi.World.Turn(w, id, s.Radians);
             Gi.World.Scale(w, id, s.Scale / 256f);
             live.Add((id, s));
@@ -308,7 +308,7 @@ internal static partial class Verification
                     default:
                     {
                         var gained = s with { Gain = rng.Next(-16, 17) };
-                        Gi.World.SetGain(w, id, gained.Gain);
+                        Gi.World.SetGain(w, id, (sbyte)gained.Gain);
                         live[index] = (id, gained);
                         break;
                     }
@@ -338,8 +338,8 @@ internal static partial class Verification
         var w = Gi.World.New();
         var g = Gi.Grid.New(w, 9, 0f, 0f, 512f);
         var l = Gi.Layer.New(w);
-        foreach (var radius in new[] { 1, 2, 3, 7, 16, 41, 90, 128 })
-        foreach (var make in new Func<int, sbyte, byte>[] { (r, v) => Gi.Stamp.Disk(r, v), (r, v) => Gi.Stamp.Cone(r, v), (r, v) => Gi.Stamp.Dome(r, v) })
+        foreach (var radius in new ushort[] { 1, 2, 3, 7, 16, 41, 90, 128 })
+        foreach (var make in new Func<ushort, sbyte, byte>[] { (r, v) => Gi.Stamp.Disk(r, v), (r, v) => Gi.Stamp.Cone(r, v), (r, v) => Gi.Stamp.Dome(r, v) })
         {
             var stamp = make(radius, 90);
             if (!RoundKernelHoldsCentre(w, g, l, stamp, radius) || !Gi.Stamp.Free(stamp)) return false;
@@ -350,7 +350,7 @@ internal static partial class Verification
 
     private static bool RoundKernelHoldsCentre(byte w, byte g, byte l, byte stamp, int radius)
     {
-        foreach (var gain in new[] { 16, -7 })
+        foreach (var gain in new sbyte[] { 16, -7 })
         {
             var id = Gi.World.Place(w, l, 256.5f, 256.5f, stamp, gain);
             Gi.World.Process(w);
@@ -450,7 +450,7 @@ internal static partial class Verification
         byte[] stamps = [Gi.Stamp.Box(14, 9, 70), Gi.Stamp.Tent(17, 11, 80), Gi.Stamp.Bell(13, 19, 60), Gi.Stamp.New(samples, 9, 7)];
         var ids = new int[stamps.Length * 6];
         for (var i = 0; i < ids.Length; i++)
-            ids[i] = Gi.World.Place(w, l, 20f + i * 9.3f, 30f + i * 7.1f, stamps[i % stamps.Length], 5 + i % 4);
+            ids[i] = Gi.World.Place(w, l, 20f + i * 9.3f, 30f + i * 7.1f, stamps[i % stamps.Length], (sbyte)(5 + i % 4));
         Gi.World.Process(w);
         var baseline = Read(w, g, l, 256);
         for (var i = 0; i < ids.Length; i++)
@@ -536,7 +536,7 @@ internal static partial class Verification
         for (var i = 0; i < 160; i++)
         {
             var s = RandomShape(rng, i % 7, 256f);
-            var id = Gi.World.Place(w, l, s.X, s.Y, palette[i % 14], s.Gain);
+            var id = Gi.World.Place(w, l, s.X, s.Y, palette[i % 14], (sbyte)s.Gain);
             if (i % 5 != 0) Gi.World.Turn(w, id, s.Radians);
             Gi.World.Scale(w, id, s.Scale / 256f);
             ids.Add(id);

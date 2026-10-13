@@ -22,12 +22,12 @@ internal static partial class Verification
             var n = cases.Count;
             var cx = n % 64;
             var cy = n / 64 * 2;
-            cases.Add((Gi.World.Place(w, l, cx + 0.5f, cy + 0.5f, unit, from), cx, cy, from, to, ticks));
+            cases.Add((Gi.World.Place(w, l, cx + 0.5f, cy + 0.5f, unit, (sbyte)from), cx, cy, from, to, ticks));
         }
 
         Gi.World.Process(w);
         var start = Gi.World.Tick(w);
-        foreach (var c in cases) Gi.World.Fade(w, c.Id, c.To, c.Ticks);
+        foreach (var c in cases) Gi.World.Fade(w, c.Id, (sbyte)c.To, c.Ticks);
         for (var k = 1; k <= 104; k++)
         {
             Gi.World.Process(w);
@@ -110,8 +110,8 @@ internal static partial class Verification
             placed = [];
             for (var i = 0; i < 60; i++)
             {
-                var id = Gi.World.Place(w, l, (float)(rng.NextDouble() * 128), (float)(rng.NextDouble() * 128), stamps[i % 3], rng.Next(-16, 17));
-                if (i % 2 == 0) Gi.World.Fade(w, id, rng.Next(-16, 17), rng.Next(1, 40));
+                var id = Gi.World.Place(w, l, (float)(rng.NextDouble() * 128), (float)(rng.NextDouble() * 128), stamps[i % 3], (sbyte)rng.Next(-16, 17));
+                if (i % 2 == 0) Gi.World.Fade(w, id, (sbyte)rng.Next(-16, 17), rng.Next(1, 40));
                 if (i % 3 == 0) Gi.World.Expire(w, id, rng.Next(1, 30));
                 placed.Add(id);
             }
@@ -127,10 +127,10 @@ internal static partial class Verification
         for (var t = 0; t < 5; t++)
         {
             var id = ids[window.Next(ids.Count)];
-            Gi.World.Fade(a, id, window.Next(-16, 17), window.Next(1, 10));
+            Gi.World.Fade(a, id, (sbyte)window.Next(-16, 17), window.Next(1, 10));
             Gi.World.Expire(a, ids[window.Next(ids.Count)], window.Next(1, 4));
             Gi.World.Move(a, ids[window.Next(ids.Count)], (float)(window.NextDouble() * 128), (float)(window.NextDouble() * 128));
-            Gi.World.SetGain(a, ids[window.Next(ids.Count)], window.Next(-16, 17));
+            Gi.World.SetGain(a, ids[window.Next(ids.Count)], (sbyte)window.Next(-16, 17));
             Gi.World.Process(a);
         }
 
@@ -178,7 +178,7 @@ internal static partial class Verification
                     continue;
                 }
 
-                Gi.World.Fade(w, ids[i], f % 2 == 0 ? 16 : -16, 12 + i % 9);
+                Gi.World.Fade(w, ids[i], (sbyte)(f % 2 == 0 ? 16 : -16), 12 + i % 9);
                 until[i] = f + 12 + i % 9;
             }
 
@@ -213,9 +213,9 @@ internal static partial class Verification
                 var op = ids.Count < 5 ? 0 : rng.Next(6);
                 var px = (float)(rng.NextDouble() * 136 - 4);
                 var py = (float)(rng.NextDouble() * 136 - 4);
-                if (op == 0) ids.Add(Gi.World.Place(w, l, px, py, stamps[rng.Next(3)], rng.Next(1, 17)));
+                if (op == 0) ids.Add(Gi.World.Place(w, l, px, py, stamps[rng.Next(3)], (sbyte)rng.Next(1, 17)));
                 else if (op == 1) Gi.World.Move(w, ids[rng.Next(ids.Count)], px, py);
-                else if (op == 2) Gi.World.Fade(w, ids[rng.Next(ids.Count)], rng.Next(-16, 17), rng.Next(1, 12));
+                else if (op == 2) Gi.World.Fade(w, ids[rng.Next(ids.Count)], (sbyte)rng.Next(-16, 17), rng.Next(1, 12));
                 else if (op == 3) Gi.World.Expire(w, ids[rng.Next(ids.Count)], rng.Next(1, 8));
                 else if (op == 4) Gi.World.Turn(w, ids[rng.Next(ids.Count)], (float)(rng.NextDouble() * 7));
             }

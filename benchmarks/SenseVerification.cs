@@ -36,7 +36,7 @@ internal static partial class Verification
         var rng = new Random(404);
         for (var i = 0; i < 700; i++)
             Gi.World.Place(w, l, (float)(rng.NextDouble() * 1040 - 8), (float)(rng.NextDouble() * 1040 - 8),
-                stamps[rng.Next(stamps.Length)], rng.Next(-16, 17));
+                stamps[rng.Next(stamps.Length)], (sbyte)rng.Next(-16, 17));
         for (var i = 0; i < 40; i++) Gi.World.Place(w, l, 140f, 140f, stamps[0], 16);
         Gi.World.Process(w);
         _layered = new SenseWorld { World = w, Layer = l, Grids = specs };
@@ -205,7 +205,7 @@ internal static partial class Verification
         {
             var x = 200 + rng.Next(29) * 4;
             var y = 200 + rng.Next(29) * 4;
-            var gain = 1 + rng.Next(16);
+            var gain = (sbyte)(1 + rng.Next(16));
             Gi.World.Place(fine, lf, x, y, box, gain);
             Gi.World.Place(coarse, lc, x, y, box, gain);
         }
@@ -291,7 +291,7 @@ internal static partial class Verification
         var ids = new List<int>();
         for (var i = 0; i < 260; i++)
             ids.Add(Gi.World.Place(w, i % 9 == 0 ? other : l, (float)(rng.NextDouble() * 270 - 7),
-                (float)(rng.NextDouble() * 270 - 7), stamps[rng.Next(stamps.Length)], rng.Next(-16, 17)));
+                (float)(rng.NextDouble() * 270 - 7), stamps[rng.Next(stamps.Length)], (sbyte)rng.Next(-16, 17)));
         var piles = new List<int>();
         for (var i = 0; i < 60; i++) piles.Add(Gi.World.Place(w, l, 100.3f, 77.7f, stamps[i % 2 == 0 ? 0 : 3], 16));
         for (var i = 0; i < 40; i++) piles.Add(Gi.World.Place(w, l, 180.6f, 160.2f, stamps[1], 16));

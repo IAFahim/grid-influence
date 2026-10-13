@@ -221,7 +221,7 @@ public sealed class EngineTests
         {
             var x = (float)(rng.NextDouble() * 248);
             var y = (float)(rng.NextDouble() * 248);
-            var gain = 1 + rng.Next(16);
+            var gain = (sbyte)(1 + rng.Next(16));
             World.Place(w, l, x, y, stamp, gain);
             sources.Add(Oracle.Rast(x, y, 0f, 0f, 1f, samples, 7, 9, gain));
         }
@@ -802,7 +802,7 @@ public sealed class EngineTests
         var rng = new Random(31);
         for (var i = 0; i < 80; i++)
         {
-            World.Place(w, l, (float)(rng.NextDouble() * 128), (float)(rng.NextDouble() * 128), box, 6 + rng.Next(11));
+            World.Place(w, l, (float)(rng.NextDouble() * 128), (float)(rng.NextDouble() * 128), box, (sbyte)(6 + rng.Next(11)));
             World.Place(w, l, (float)(rng.NextDouble() * 128), (float)(rng.NextDouble() * 128), raster, 4);
         }
 
@@ -867,7 +867,7 @@ public sealed class EngineTests
         {
             var x = (float)(rng.NextDouble() * 256);
             var y = (float)(rng.NextDouble() * 256);
-            World.Place(w, l, x, y, rng.Next(2) == 0 ? box : raster, 4 + rng.Next(13));
+            World.Place(w, l, x, y, rng.Next(2) == 0 ? box : raster, (sbyte)(4 + rng.Next(13)));
         }
 
         World.Process(w);
@@ -1021,7 +1021,7 @@ public sealed class EngineTests
         for (var i = 0; i < ids.Length; i++)
             ids[i] = World.Place(w, l,
                 (float)(rng.NextDouble() * 244 + 6), (float)(rng.NextDouble() * 244 + 6),
-                stamp, rng.Next(-8, 17));
+                stamp, (sbyte)rng.Next(-8, 17));
         World.Process(w);
 
         for (var i = 0; i < 500; i++)
@@ -1080,7 +1080,7 @@ public sealed class EngineTests
                 var stamp = k % 3 == 0 ? stampA : k % 3 == 1 ? stampB : stampC;
                 var x = (float)(rng.NextDouble() * 244 + 6);
                 var y = (float)(rng.NextDouble() * 244 + 6);
-                var gain = rng.Next(-16, 17);
+                var gain = (sbyte)rng.Next(-16, 17);
                 switch (rng.Next(4))
                 {
                     case 0:
@@ -1238,7 +1238,7 @@ public sealed class EngineTests
             sx[i] = (float)(rng.NextDouble() * 250 + 3);
             sy[i] = (float)(rng.NextDouble() * 250 + 3);
             sgain[i] = rng.Next(-8, 13);
-            ids[i] = World.Place(w, l, sx[i], sy[i], Stamp.Tent(ssize[i], ssize[i], 40), sgain[i]);
+            ids[i] = World.Place(w, l, sx[i], sy[i], Stamp.Tent((ushort)ssize[i], (ushort)ssize[i], 40), (sbyte)sgain[i]);
             slive[i] = true;
         }
 
@@ -1269,7 +1269,7 @@ public sealed class EngineTests
                 if (rng.Next(4) == 0)
                 {
                     sgain[i] = rng.Next(-8, 13);
-                    World.SetGain(w, ids[i], sgain[i]);
+                    World.SetGain(w, ids[i], (sbyte)sgain[i]);
                 }
             }
 
@@ -1330,7 +1330,7 @@ public sealed class EngineTests
             sx[i] = (float)(rng.NextDouble() * 250 + 3);
             sy[i] = (float)(rng.NextDouble() * 250 + 3);
             sgain[i] = rng.Next(-8, 13);
-            ids[i] = World.Place(w, l, sx[i], sy[i], Stamp.Bell(ssize[i], ssize[i], 40), sgain[i]);
+            ids[i] = World.Place(w, l, sx[i], sy[i], Stamp.Bell((ushort)ssize[i], (ushort)ssize[i], 40), (sbyte)sgain[i]);
             slive[i] = true;
         }
 
@@ -1361,7 +1361,7 @@ public sealed class EngineTests
                 if (rng.Next(4) == 0)
                 {
                     sgain[i] = rng.Next(-8, 13);
-                    World.SetGain(w, ids[i], sgain[i]);
+                    World.SetGain(w, ids[i], (sbyte)sgain[i]);
                 }
             }
 
@@ -1459,7 +1459,7 @@ public sealed class EngineTests
             ids[i] = World.Place(w, l,
                 (float)(rng.NextDouble() * 244 + 6),
                 (float)(rng.NextDouble() * 244 + 6),
-                box, rng.Next(-6, 10));
+                box, (sbyte)rng.Next(-6, 10));
 
         World.Process(w);
         for (var round = 0; round < 10; round++)
@@ -1477,7 +1477,7 @@ public sealed class EngineTests
             World.Place(w, l,
                 (float)(rng.NextDouble() * 244 + 6),
                 (float)(rng.NextDouble() * 244 + 6),
-                box, rng.Next(-6, 10));
+                box, (sbyte)rng.Next(-6, 10));
             World.Process(w);
         }
     }
@@ -1551,7 +1551,7 @@ public sealed class EngineTests
             World.Place(w, (i & 1) == 0 ? red : blue,
                 (float)(rng.NextDouble() * 480 + 16),
                 (float)(rng.NextDouble() * 480 + 16),
-                stamp, rng.Next(1, 17));
+                stamp, (sbyte)rng.Next(1, 17));
 
         World.Process(w);
         foreach (var grid in new[] { g1, g2 })
@@ -1580,7 +1580,7 @@ public sealed class EngineTests
                     ids[i] = World.Place(w, layer,
                         (float)(rng.NextDouble() * 1000 + 12),
                         (float)(rng.NextDouble() * 1000 + 12),
-                        stamp, rng.Next(-8, 17));
+                        stamp, (sbyte)rng.Next(-8, 17));
                 }
                 else if (round > 0)
                 {
@@ -1593,7 +1593,7 @@ public sealed class EngineTests
                     ids[i] = World.Place(w, layer,
                         (float)(rng.NextDouble() * 1000 + 12),
                         (float)(rng.NextDouble() * 1000 + 12),
-                        stamp, rng.Next(-8, 17));
+                        stamp, (sbyte)rng.Next(-8, 17));
                 }
             }
 

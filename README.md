@@ -280,6 +280,9 @@ World.TrySenseMax(world, grazing, sheepX, sheepY, 30f, out _, out float gx, out 
   layer, against 860 µs for two `QueryRegion` calls plus a scan. Upkeep is one vectorized pass
   per changed input tile — about 50 µs on a frame that moved 60 food bells.
 - Create one at any time; its first `Process` fills it from the inputs' live tiles.
+- Derived layers are not free slots: they draw from the same `World.MaxLayers` (32) table as
+  deposited channels, so plan `raw + derived ≤ 32`. The cap is structural — recipes and crowd
+  tracking use 32-bit layer masks — not a memory knob.
 
 ## Time without decay passes
 

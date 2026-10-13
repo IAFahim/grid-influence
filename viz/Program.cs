@@ -55,7 +55,7 @@ void Combat()
         var a = i / 7.0 * Math.PI * 2;
         var x = 140f + (float)(Math.Cos(a) * (38 + rng.Next(18)));
         var y = 120f + (float)(Math.Sin(a) * (38 + rng.Next(18)));
-        World.Place(w, threat, x, y, minion, 4 + rng.Next(7));
+        World.Place(w, threat, x, y, minion, (sbyte)(4 + rng.Next(7)));
     }
 
     var trailStamp = Stamp.Box(8, 8, 28);
@@ -63,7 +63,7 @@ void Combat()
     {
         var t = i / 27.0;
         World.Place(w, trailL, 24f + (float)(t * 200),
-            205f - (float)(t * 140) + (float)(Math.Sin(t * 9) * 9), trailStamp, 14 - i / 2);
+            205f - (float)(t * 140) + (float)(Math.Sin(t * 9) * 9), trailStamp, (sbyte)(14 - i / 2));
     }
 
     World.Place(w, danger, 62f, 60f, Gaussian(36, -100), 12);
@@ -168,7 +168,7 @@ void MoveVsTrail()
         var y = 128f + (float)(90 * Math.Sin(3.1 * t + 1));
         if (i == 0) mover = World.Place(w, moved, x, y, stamp, 12);
         else World.Move(w, mover, x, y);
-        World.Place(w, trailL, x, y, stamp, 3 + i / 45);
+        World.Place(w, trailL, x, y, stamp, (sbyte)(3 + i / 45));
     }
 
     var beacon = World.Place(w, trailL, 216f, 32f, Stamp.Box(20, 20, 70), 9);
@@ -204,7 +204,7 @@ void MultiGridLod()
     {
         var x = (rng.Next(54) + 1) * 4;
         var y = (rng.Next(54) + 1) * 4;
-        World.Place(w, boxes, x, y, box, 4 + rng.Next(9));
+        World.Place(w, boxes, x, y, box, (sbyte)(4 + rng.Next(9)));
     }
     World.Place(w, brush, 128f, 128f, Gaussian(32, 90), 10);
 
@@ -239,7 +239,7 @@ void SparseWorld()
     foreach (var (cx, cy) in clusters)
         for (var i = 0; i < 60; i++)
             World.Place(w, cover, cx + (float)(rng.NextDouble() * 360 - 180), cy + (float)(rng.NextDouble() * 360 - 180),
-                stamp, 6 + rng.Next(9));
+                stamp, (sbyte)(6 + rng.Next(9)));
     for (var i = 0; i < 30; i++)
         World.Place(w, cover, 600 + rng.Next(2900), 600 + rng.Next(2900), stamp, 8);
 
@@ -269,11 +269,11 @@ void ThousandSources()
     var rng = new Random(13);
     var stamps = new byte[12];
     for (var i = 0; i < stamps.Length; i++)
-        stamps[i] = Stamp.Box(4 + i, 4 + i, (sbyte)(20 + i * 4));
+        stamps[i] = Stamp.Box((ushort)(4 + i), (ushort)(4 + i), (sbyte)(20 + i * 4));
     var placeSw = System.Diagnostics.Stopwatch.StartNew();
     for (var i = 0; i < 5000; i++)
         World.Place(w, density, (float)(rng.NextDouble() * 1024), (float)(rng.NextDouble() * 1024),
-            stamps[rng.Next(stamps.Length)], 1 + rng.Next(8));
+            stamps[rng.Next(stamps.Length)], (sbyte)(1 + rng.Next(8)));
     var placeMs = placeSw.Elapsed.TotalMilliseconds;
 
     var processSw = System.Diagnostics.Stopwatch.StartNew();
@@ -514,7 +514,7 @@ byte Gaussian(int size, int peak)
         var v = peak * Math.Exp(-(dx * dx + dy * dy) / (2 * sigma * sigma));
         s[y * size + x] = (sbyte)Math.Clamp(Math.Round(v), -128, 127);
     }
-    return Stamp.New(s, size, size);
+    return Stamp.New(s, (ushort)size, (ushort)size);
 }
 
 byte Shape(int width, int height, Func<int, int, int, sbyte> sample)
@@ -523,7 +523,7 @@ byte Shape(int width, int height, Func<int, int, int, sbyte> sample)
     for (var y = 0; y < height; y++)
     for (var x = 0; x < width; x++)
         s[y * width + x] = sample(x, y, Math.Min(width, height) / 2);
-    return Stamp.New(s, width, height);
+    return Stamp.New(s, (ushort)width, (ushort)height);
 }
 
 byte Noise(int size, int amp, int seed)
@@ -531,7 +531,7 @@ byte Noise(int size, int amp, int seed)
     var rng = new Random(seed);
     var s = new sbyte[size * size];
     for (var i = 0; i < s.Length; i++) s[i] = (sbyte)(rng.Next(amp * 2 + 1) - amp);
-    return Stamp.New(s, size, size);
+    return Stamp.New(s, (ushort)size, (ushort)size);
 }
 
 byte Letters()
@@ -551,7 +551,7 @@ byte Letters()
     for (var y = 0; y < rows.Length; y++)
     for (var x = 0; x < width; x++)
         if (rows[y][x] != '.') s[y * width + x] = 100;
-    return Stamp.New(s, width, rows.Length);
+    return Stamp.New(s, (ushort)width, (ushort)rows.Length);
 }
 
 int FirstCovered(byte w, byte g, byte layer, int y, int x0, int x1)

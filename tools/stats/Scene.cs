@@ -16,14 +16,15 @@ internal readonly struct Scene(byte world, byte grid, int cells, int layers, int
         var grid = Gi.Grid.New(world, options.Power, 0f, 0f, cells);
         for (var i = 0; i < options.Layers; i++) Layer.New(world);
 
+        var size = (ushort)options.StampSize;
         byte stamp;
         if (options.Raster)
         {
-            Span<sbyte> samples = stackalloc sbyte[options.StampSize * options.StampSize];
+            Span<sbyte> samples = stackalloc sbyte[size * size];
             for (var i = 0; i < samples.Length; i++) samples[i] = (sbyte)(i % 61 - 30);
-            stamp = Stamp.New(samples, options.StampSize, options.StampSize);
+            stamp = Stamp.New(samples, size, size);
         }
-        else stamp = Stamp.Box(options.StampSize, options.StampSize, 60);
+        else stamp = Stamp.Box(size, size, 60);
 
         var state = 17u;
         for (var i = 0; i < options.Sources; i++)

@@ -360,7 +360,7 @@ internal static class Live
             if (w.Vx * w.Vx + w.Vy * w.Vy > 0.04f) w.Facing = MathF.Atan2(w.Vy, w.Vx);
             World.Turn(WorldId, w.Source, w.Facing);
 
-            var gain = w.Hunting ? 12 : 7;
+            var gain = (sbyte)(w.Hunting ? 12 : 7);
             if (gain == w.Gain) continue;
             World.SetGain(WorldId, w.Source, gain);
             w.Gain = gain;
@@ -528,7 +528,7 @@ internal static class Live
             var v = peak * Math.Exp(-(dx * dx + dy * dy) / (2 * sigma * sigma));
             samples[y * size + x] = (sbyte)Math.Clamp((int)Math.Round(v), -128, 127);
         }
-        return Stamp.New(samples, size, size);
+        return Stamp.New(samples, (ushort)size, (ushort)size);
     }
 
     private readonly record struct ClientOp(byte Op, float X, float Y);

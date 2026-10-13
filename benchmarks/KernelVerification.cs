@@ -5,7 +5,7 @@ internal static partial class Verification
         var w = Gi.World.New();
         var g = Gi.Grid.New(w, 9, 0f, 0f, 512f);
         var l = Gi.Layer.New(w);
-        int[] widths = [1, 3, 5, 9, 15, 23, 33, 63, 129, 183, 231, 255];
+        ushort[] widths = [1, 3, 5, 9, 15, 23, 33, 63, 129, 183, 231, 255];
         foreach (var width in widths)
         foreach (var value in new sbyte[] { 90, 1 })
         {
@@ -16,7 +16,7 @@ internal static partial class Verification
                 Gi.Stamp.Bell(width, width, value),
             };
             foreach (var stamp in stamps)
-            foreach (var gain in value == 1 ? new[] { 1 } : new[] { 16, -16 })
+            foreach (var gain in value == 1 ? new sbyte[] { 1 } : new sbyte[] { 16, -16 })
             {
                 var id = Gi.World.Place(w, l, 256.5f, 256.5f, stamp, gain);
                 Gi.World.Process(w);
@@ -49,7 +49,7 @@ internal static partial class Verification
         var w = Gi.World.New();
         var g = Gi.Grid.New(w, 8, 0f, 0f, 256f);
         var l = Gi.Layer.New(w);
-        foreach (var width in new[] { 1, 2, 3, 8, 16, 33, 64 })
+        foreach (var width in new ushort[] { 1, 2, 3, 8, 16, 33, 64 })
         foreach (var kind in new[] { 0, 1, 2 })
         {
             var stamp = kind == 0 ? Gi.Stamp.Box(width, width, 100) : kind == 1 ? Gi.Stamp.Tent(width, width, 100) : Gi.Stamp.Bell(width, width, 100);
@@ -82,7 +82,7 @@ internal static partial class Verification
     private static bool KernelsHoldStrengthAtEveryScale()
     {
         var strengthStamps = new List<(int Width, byte Stamp)>();
-        foreach (var width in new[] { 1, 16, 64, 128, 255 })
+        foreach (var width in new ushort[] { 1, 16, 64, 128, 255 })
         {
             strengthStamps.Add((width, Gi.Stamp.Tent(width, width, 90)));
             strengthStamps.Add((width, Gi.Stamp.Bell(width, width, 90)));
@@ -149,7 +149,7 @@ internal static partial class Verification
             var l = Gi.Layer.New(w);
             var scaleQ8 = (int)((1 << power) / size * 256f);
             foreach (var bell in new[] { false, true })
-            foreach (var width in new[] { 1, 2, 3 })
+            foreach (var width in new ushort[] { 1, 2, 3 })
             {
                 var stamp = bell ? Gi.Stamp.Bell(width, width, 100) : Gi.Stamp.Tent(width, width, 100);
                 for (var phase = 0; phase < 256; phase += 17)

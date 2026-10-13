@@ -127,7 +127,7 @@ public sealed class FreeTests
         var first = -1;
         for (var i = 0; i < 300; i++)
         {
-            var id = World.Place(world, (byte)(i % 2), i * 37 % 500, i * 91 % 500, stamps[i % stamps.Length], 1 + i % 4);
+            var id = World.Place(world, (byte)(i % 2), i * 37 % 500, i * 91 % 500, stamps[i % stamps.Length], (sbyte)(1 + i % 4));
             Assert.True(id >= 0);
             if (first < 0) first = id;
         }
@@ -159,7 +159,11 @@ public sealed class FreeTests
             var layer = Layer.New(world);
             Layer.Sum(world, layer, 1);
             for (var i = 0; i < 16; i++)
-                World.Place(world, layer, 128f + i % 4 * 256f, 128f + i / 4 * 256f, box, 1);
+            {
+                var column = i % 4;
+                var row = i / 4;
+                World.Place(world, layer, 128f + column * 256f, 128f + row * 256, box, 1);
+            }
             World.Process(world);
             Assert.True(World.Free(world));
         }

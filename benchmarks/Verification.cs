@@ -265,7 +265,7 @@ internal static partial class Verification
         {
             var x = (float)(rng.NextDouble() * 256);
             var y = (float)(rng.NextDouble() * 256);
-            Gi.World.Place(w, l, x, y, rng.Next(2) == 0 ? box : raster, 4 + rng.Next(13));
+            Gi.World.Place(w, l, x, y, rng.Next(2) == 0 ? box : raster, (sbyte)(4 + rng.Next(13)));
         }
 
         Gi.World.Process(w);
@@ -324,7 +324,7 @@ internal static partial class Verification
         var box = Gi.Stamp.Box(16, 16, 90);
         var rng = new Random(53);
         for (var i = 0; i < 40; i++)
-            Gi.World.Place(w, l, (rng.Next(54) + 4) * 4, (rng.Next(54) + 4) * 4, box, 4 + i % 5);
+            Gi.World.Place(w, l, (rng.Next(54) + 4) * 4, (rng.Next(54) + 4) * 4, box, (sbyte)(4 + i % 5));
         Gi.World.Process(w);
 
         var full = Gi.World.Query(w, gFull, l, 0, 0, 512, 512);
@@ -359,7 +359,7 @@ internal static partial class Verification
                         continue;
                     }
 
-                    sources[i] = Gi.World.Place(w, l, x, y, rng.Next(2) == 0 ? box : raster, 1 + rng.Next(16));
+                    sources[i] = Gi.World.Place(w, l, x, y, rng.Next(2) == 0 ? box : raster, (sbyte)(1 + rng.Next(16)));
                 }
 
                 if (churn > 0)
@@ -405,7 +405,7 @@ internal static partial class Verification
         var rng = new Random(77);
         for (var i = 0; i < 400; i++)
             Gi.World.Place(w, l, (float)(rng.NextDouble() * 512), (float)(rng.NextDouble() * 512),
-                rng.Next(2) == 0 ? box : raster, 4 + rng.Next(13));
+                rng.Next(2) == 0 ? box : raster, (sbyte)(4 + rng.Next(13)));
         Gi.World.Process(w);
 
         (int x, int y, int width, int height)[] regions =
@@ -519,7 +519,7 @@ internal static partial class Verification
                     Gi.World.Remove(w, ids[i]);
                     ids[i] = Gi.World.Place(w, layer,
                         (float)(rng.NextDouble() * 1000 + 12), (float)(rng.NextDouble() * 1000 + 12),
-                        stamp, rng.Next(-8, 17));
+                        stamp, (sbyte)rng.Next(-8, 17));
                 }
                 else if (round > 0)
                 {
@@ -530,7 +530,7 @@ internal static partial class Verification
                 {
                     ids[i] = Gi.World.Place(w, layer,
                         (float)(rng.NextDouble() * 1000 + 12), (float)(rng.NextDouble() * 1000 + 12),
-                        stamp, rng.Next(-8, 17));
+                        stamp, (sbyte)rng.Next(-8, 17));
                 }
             }
 
@@ -595,7 +595,7 @@ internal static partial class Verification
                     Gi.World.Remove(w, ids[i]);
                     ids[i] = Gi.World.Place(w, busy,
                         (float)(rng.NextDouble() * 240 + 8), (float)(rng.NextDouble() * 240 + 8),
-                        stamp, rng.Next(-8, 17));
+                        stamp, (sbyte)rng.Next(-8, 17));
                 }
                 else if (round > 0)
                 {
@@ -606,7 +606,7 @@ internal static partial class Verification
                 {
                     ids[i] = Gi.World.Place(w, busy,
                         (float)(rng.NextDouble() * 240 + 8), (float)(rng.NextDouble() * 240 + 8),
-                        stamp, rng.Next(-8, 17));
+                        stamp, (sbyte)rng.Next(-8, 17));
                 }
             }
 
@@ -648,7 +648,7 @@ internal static partial class Verification
                     Gi.World.Remove(w, ids[i]);
                     ids[i] = Gi.World.Place(w, l,
                         (float)(rng.NextDouble() * 500 + 6), (float)(rng.NextDouble() * 500 + 6),
-                        stamp, rng.Next(-8, 17));
+                        stamp, (sbyte)rng.Next(-8, 17));
                 }
                 else if (round > 0)
                 {
@@ -659,7 +659,7 @@ internal static partial class Verification
                 {
                     ids[i] = Gi.World.Place(w, l,
                         (float)(rng.NextDouble() * 500 + 6), (float)(rng.NextDouble() * 500 + 6),
-                        stamp, rng.Next(-8, 17));
+                        stamp, (sbyte)rng.Next(-8, 17));
                 }
             }
 
@@ -770,7 +770,7 @@ internal static partial class Verification
                 var k = rng.Next(ids.Length);
                 var x = (float)(rng.NextDouble() * 240 + 8);
                 var y = (float)(rng.NextDouble() * 240 + 8);
-                var gain = rng.Next(-16, 17);
+                var gain = (sbyte)rng.Next(-16, 17);
                 switch (rng.Next(4))
                 {
                     case 0:
@@ -833,7 +833,7 @@ internal static partial class Verification
         var coarse = Gi.Grid.New(w, 7, 0f, 0f, 256f);
         var l = Gi.Layer.New(w);
         var rng = new Random(509);
-        var widths = new[] { 1, 2, 3, 5, 8, 13, 24, 40 };
+        var widths = new ushort[] { 1, 2, 3, 5, 8, 13, 24, 40 };
         var tents = new byte[widths.Length];
         for (var i = 0; i < widths.Length; i++) tents[i] = Gi.Stamp.Tent(widths[i], widths[i], 40);
         const int count = 90;
@@ -895,7 +895,7 @@ internal static partial class Verification
                     sx[i] = (float)(rng.NextDouble() * 248 + 4);
                     sy[i] = (float)(rng.NextDouble() * 248 + 4);
                     sgain[i] = rng.Next(-8, 15);
-                    ids[i] = Gi.World.Place(w, l, sx[i], sy[i], tents[k], sgain[i]);
+                    ids[i] = Gi.World.Place(w, l, sx[i], sy[i], tents[k], (sbyte)sgain[i]);
                     slive[i] = true;
                 }
                 else if (round > 0)
@@ -922,7 +922,7 @@ internal static partial class Verification
         var coarse = Gi.Grid.New(w, 7, 0f, 0f, 256f);
         var l = Gi.Layer.New(w);
         var rng = new Random(613);
-        var widths = new[] { 2, 3, 5, 8, 13, 24, 40 };
+        var widths = new ushort[] { 2, 3, 5, 8, 13, 24, 40 };
         var bells = new byte[widths.Length];
         for (var i = 0; i < widths.Length; i++) bells[i] = Gi.Stamp.Bell(widths[i], widths[i], 40);
         const int count = 90;
@@ -984,7 +984,7 @@ internal static partial class Verification
                     sx[i] = (float)(rng.NextDouble() * 248 + 4);
                     sy[i] = (float)(rng.NextDouble() * 248 + 4);
                     sgain[i] = rng.Next(-8, 15);
-                    ids[i] = Gi.World.Place(w, l, sx[i], sy[i], bells[k], sgain[i]);
+                    ids[i] = Gi.World.Place(w, l, sx[i], sy[i], bells[k], (sbyte)sgain[i]);
                     slive[i] = true;
                 }
                 else if (round > 0)
@@ -1047,7 +1047,7 @@ internal static partial class Verification
         var kept = new int[24];
         for (var i = 0; i < kept.Length; i++)
             kept[i] = Gi.World.Place(w, l, rng.Next(4, 56), rng.Next(4, 56),
-                (i & 1) == 0 ? box : tent, 1 + rng.Next(14));
+                (i & 1) == 0 ? box : tent, (sbyte)(1 + rng.Next(14)));
         Gi.World.Process(w);
         var baseline = Gi.World.Query(w, g, l, 0, 0, 64, 64);
 
@@ -1130,7 +1130,7 @@ internal static partial class Verification
                 sources[l] = new int[30];
                 for (var i = 0; i < 30; i++)
                     sources[l][i] = Gi.World.Place(w, layerIds[l],
-                        (float)(rng.NextDouble() * 256), (float)(rng.NextDouble() * 256), stamp, 1 + rng.Next(16));
+                        (float)(rng.NextDouble() * 256), (float)(rng.NextDouble() * 256), stamp, (sbyte)(1 + rng.Next(16)));
             }
 
             if (churn > 0)

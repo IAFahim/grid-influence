@@ -92,11 +92,11 @@ internal static partial class Verification
         Gi.Grid.New(w, 8, 0f, 0f, 256f);
         Gi.Grid.New(w, 8, 128.5f, 64.25f, 256f);
         var l = Gi.Layer.New(w);
-        var stamps = new byte[] { CrowdSenseBox, CrowdSenseTent, CrowdSenseBell };
+        var stamps = new[] { CrowdSenseBox, CrowdSenseTent, CrowdSenseBell };
         var rng = new Random(95);
         for (var i = 0; i < 400; i++)
             Gi.World.Place(w, l, (float)(rng.NextDouble() * 1040 - 8), (float)(rng.NextDouble() * 1040 - 8),
-                stamps[rng.Next(stamps.Length)], rng.Next(-16, 17));
+                stamps[rng.Next(stamps.Length)], (sbyte)rng.Next(-16, 17));
         Gi.World.Process(w);
 
         const int count = 9_000;
@@ -132,7 +132,7 @@ internal static partial class Verification
 
     private static unsafe bool ChangedMaskMatchesChanged()
     {
-        var (w, _, l, ids, xs, ys) = Crowd(600, 12, CrowdBox12, 8, 97);
+        var (w, _, l, ids, _, _) = Crowd(600, 12, CrowdBox12, 8, 97);
         Gi.World.Process(w);
         var since = Gi.World.Tick(w);
         var rng = new Random(99);
@@ -196,7 +196,7 @@ internal static partial class Verification
 
     private static bool WarmCrowdAllocationFree()
     {
-        var (w, _, l, ids, xs, ys) = Crowd(20_000, 8, CrowdBox8, 10, 105);
+        var (w, _, _, ids, xs, ys) = Crowd(20_000, 8, CrowdBox8, 10, 105);
         Gi.World.Process(w);
         for (var frame = 0; frame < 2; frame++)
         {
@@ -223,7 +223,7 @@ internal static partial class Verification
 
     private static unsafe bool WarmColumnAllocationFree()
     {
-        var (w, _, l, ids, xs, ys) = Crowd(4_000, 12, CrowdBox12, 10, 107);
+        var (w, _, l, ids, _, _) = Crowd(4_000, 12, CrowdBox12, 10, 107);
         Gi.World.Process(w);
         var since = Gi.World.Tick(w);
         var rng = new Random(109);
@@ -324,7 +324,7 @@ internal static partial class Verification
 
     private static unsafe void ColumnTiming()
     {
-        var (w, _, l, ids, xs, ys) = Crowd(4_000, 12, CrowdBox12, 10, 115);
+        var (w, _, l, ids, _, _) = Crowd(4_000, 12, CrowdBox12, 10, 115);
         Gi.World.Process(w);
         var since = Gi.World.Tick(w);
         var rng = new Random(117);
@@ -367,7 +367,7 @@ internal static partial class Verification
             for (var r = 0; r < 20; r++)
             {
                 var t = Stopwatch.GetTimestamp();
-                for (var i = 0; i < 100_000; i++) acc += Gi.World.TrySense(w, l, xp[i], yp[i], out var value) ? value : (short)0;
+                for (var i = 0; i < 100_000; i++) acc += Gi.World.TrySense(w, l, xp[i], yp[i], out var value) ? value : 0;
                 var el = Stopwatch.GetElapsedTime(t).TotalMicroseconds;
                 if (el < best) best = el;
             }
@@ -406,7 +406,7 @@ internal static partial class Verification
 
         Console.WriteLine($"changed loop 100k agents: {best:F0} us ({acc})");
 
-        var (sw, _, sl, sids, sxs, sys) = Crowd(100_000, 8, CrowdBox8, 10, 119);
+        var (sw, _, _, sids, sxs, sys) = Crowd(100_000, 8, CrowdBox8, 10, 119);
         Gi.World.Process(sw);
         best = double.MaxValue;
         fixed (int* ip = sids)

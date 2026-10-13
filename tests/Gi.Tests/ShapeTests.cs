@@ -117,7 +117,7 @@ public sealed class ShapeTests
 
         for (var i = 0; i < 600; i++)
         {
-            var transient = Stamp.Dome(1 + i % 100, 40);
+            var transient = Stamp.Dome((ushort)(1 + i % 100), 40);
             var source = World.Place(w, l, 30f, 30f, transient, 1);
             Assert.NotEqual(-1, source);
             World.Remove(w, source);

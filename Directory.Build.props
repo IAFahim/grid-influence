@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <GiVersion>0.8.0-alpha.1</GiVersion>
+    <GiVersion>1.0.0</GiVersion>
     <GiValidationVersion>0.1.0-alpha.3</GiValidationVersion>
     <LangVersion>14</LangVersion>
     <Deterministic>true</Deterministic>

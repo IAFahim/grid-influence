@@ -196,7 +196,7 @@ public sealed class GiEcosystemDemo : MonoBehaviour
         }
     }
 
-    private void Place(byte stamp, byte layer, float x, float y, int gain) =>
+    private void Place(byte stamp, byte layer, float x, float y, sbyte gain) =>
         World.Place((byte)WorldId, layer, x, y, stamp, gain);
 
     private static void Paint(GameObject go, Color32 color)
@@ -339,7 +339,7 @@ public sealed class GiEcosystemDemo : MonoBehaviour
             if (w.Vel.sqrMagnitude > 0.04f) w.Facing = Mathf.Atan2(w.Vel.y, w.Vel.x);
             World.Turn((byte)WorldId, w.Source, w.Facing);
 
-            var gain = w.Hunting ? 12 : 7;
+            var gain = (sbyte)(w.Hunting ? 12 : 7);
             if (gain != w.Gain)
             {
                 World.SetGain((byte)WorldId, w.Source, gain);
