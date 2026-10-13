@@ -153,6 +153,37 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   reset every `Process`, and their capacity is retained across windows (0 B warm). The
   journal — the same op shape recorded at apply time — lives alongside them and is governed
   by `Record`/`Rewind` below, not by `Process`.
+- **Crowds** rebuild instead of retract-and-reapply. Before applying ops, `Process` counts
+  deposits per layer straight from the op queue (every non-zero gain side of an op) and
+  compares against a per-layer live count — sources alive, gain non-zero, on that layer —
+  maintained incrementally by `Place`/`Remove`/`SetGain` and recomputed in one pass whenever a
+  flag set by timers, `Rewind`, or any gain/liveness mutation says the cache is stale; `Move`
+  never sets it, so a pure-motion crowd pays nothing for the count. A layer whose deposits
+  reach its live count (with a 64-deposit floor, so tiny layers never enter) is *crowded*:
+  its ops are skipped by the apply phase entirely, and the layer is rebuilt. The rebuild
+  scatters every live source on the layer into per-(tile, worker) chunk chains — a chunk is 16
+  inline 36-byte items; a box stamp's item carries its whole footprint (cell, phase, extent,
+  stamp, gain), any other plane stores one `Placement` per source per slot and the item carries
+  its index — then collects the touched set (chain heads ∪ existing page keys, so dissipated
+  tiles clear), pre-allocates pages and dense buffers serially, and resolves each touched tile
+  by re-emitting its own chain into a cleared difference array. Before re-emitting, the tile
+  saves its old page; after resolving it compares, and only tiles whose pages differ stay in
+  the dirty list — so epochs, `Changed`, and sleeping AI behave exactly as under incremental
+  processing (asserted: crowded output equals stepped incremental output cell for cell).
+  Crowdedness is a per-layer, per-frame decision, derived layers never crowd (they recombine),
+  and idle frames — an empty op queue — short-circuit before any counting.
+- **Columns** batch the per-agent API. `Column.SenseColumn(world, layer, xs, ys, count, values,
+  whole)` walks the pointer arrays the way a kernel walks a column: it senses each agent's
+  position (the same grid-picking, exclusion-free path as `TrySense`) and writes the `short`
+  value, optionally a `ulong` word per 64 agents flagging whole-tile answers; it returns
+  `false` only when some agent stands off every grid. `Column.ChangedMask(world, layer, xs, ys,
+  reach, since, count, words)` writes one `ulong` per 64 agents — bit set when that agent's
+  disk changed since the tick — zeros for quiet words, and returns the changed count.
+  `Column.Sync(world, sources, xs, ys, count)` is the fused column form of `Move`: it
+  validates generations, skips no-ops, and enqueues the same coalescing ops `Move` would,
+  batch after batch, with zero managed allocation. At 8,192 rows or more (and a free pool) the
+  batches fan out over the worker pool in 1,024-row chunks aligned to word boundaries so every
+  mask word has one writer; smaller or contended batches run the identical loop serially.
 - **Process** applies the deferred op queue (fused or fragmented as above — the fragment
   apply rides one pooled phase with the drain, separated by a symmetric apply barrier), then
   drains the per-(grid,layer) dirty lists: each
@@ -720,7 +751,31 @@ pass behind them was `perf`-profile guided, receipts first.
   may run concurrently with each other,
   never with mutation or process. Sensing writes nothing outside its own stack frame: each call
   stackallocs its scratch (span rows, under 9 KB of per-tile arrays for an excluded area,
-  a single cell for an excluded point), so concurrent sensing threads never share scratch. The
+  a single cell for an excluded point), so concurrent sensing threads never share scratch.
+  Every pool round — apply+resolve, crowded scatter, and the two column modes — hands off
+  through a parked gate: each worker publishes itself parked (a volatile flag per worker)
+  immediately before blocking on its wake event, and a round initiator spins until every worker
+  is parked before it writes any round state (cursors, counters, task tables, worker buffers).
+  Because a wake event is only signalled after the initiator observed the worker parked, and
+  the worker consumes exactly one signal per round, an `AutoResetEvent`'s coalescing can never
+  absorb a round: each round's signal reaches a thread that is at or past its park point, so
+  every worker executes every round exactly once and each round's barrier arithmetic balances.
+  The crowded rebuild keeps one writer per arena: scatter workers and the caller each own a
+  slot — per-slot tail table, per-slot placement buffer, per-slot chunk arena — and chunk
+  references are 32-bit indices into the owning slot's arena, so arena growth (a realloc that
+  frees the old base) never invalidates a reference another thread holds; each writer re-reads
+  its arena base after growing before linking the fresh chunk. Chain heads live in a per-round
+  region of a world buffer — written once per (tile, slot) by that slot's writer when it
+  allocates a tile's first chunk, and read only after the round's barrier — and per-slot
+  buffer headers are padded to separate cache lines so concurrent appends do not share a line.
+  The resolve phase reads chains and arenas strictly after the last scatter round's barrier,
+  and each tile's chain is walked by exactly the one worker that owns that dirty index, so
+  rebuild writes are tile-local like ordinary resolve writes. Crowd- and column-round statics
+  (worker buffers, per-slot arena and placement pointers) belong to the pool and are only
+  touched under its acquire flag, the same ownership rule as the task table. The per-layer
+  live counts are world state mutated only by the world's owning thread (mutators, timers,
+  `Rewind`, `Clear`); the rebuild reads them on that same thread inside `Process`, so the
+  cache needs no synchronization beyond the world's serial-mutation rule. The
   module skips local zero-initialization (`SkipLocalsInit`): every `stackalloc` buffer is
   written before it is read — band and span arrays are filled up to the count their readers
   use, cell scratch is cleared or fully emitted first, and the resolve rows are cleared when

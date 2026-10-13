@@ -3,4 +3,5 @@ if (mode == "--place") { Verification.PlaceProfile(); return 0; }
 var result = Verification.Run();
 if (mode == "--timing") Verification.Timing();
 if (mode == "--compare") Verification.Compare();
+if (mode == "--crowd") Verification.CrowdTiming();
 return result;

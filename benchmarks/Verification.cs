@@ -62,6 +62,14 @@ internal static partial class Verification
         Check("warm-fade-process-allocates-0-bytes", WarmFadeProcessAllocationFree());
         Check("changed-since-matches-epochs", ChangedSinceMatchesEpochs());
         Check("sense-nearest-matches-scan", SenseNearestMatchesScan());
+        Check("crowded-rebuild-matches-stepped-incremental", CrowdedMatchesStepped(3000, 8, CrowdBox8, 10, 4, 500));
+        Check("crowded-small-boxes-match-stepped-incremental", CrowdedMatchesStepped(300, 4, CrowdBox4, 9, 4, 20));
+        Check("crowded-unchanged-frames-report-no-changed-tiles", CrowdedIdleFramesReportNothing());
+        Check("sense-column-matches-try-sense", SenseColumnMatchesTrySense());
+        Check("changed-mask-matches-changed", ChangedMaskMatchesChanged());
+        Check("sync-matches-move", SyncMatchesMove());
+        Check("warm-crowded-process-allocates-0-bytes", WarmCrowdAllocationFree());
+        Check("warm-column-batches-allocate-0-bytes", WarmColumnAllocationFree());
 
         Console.WriteLine(failures == 0 ? "verification: all receipts green" : $"verification: {failures} failures");
         return failures == 0 ? 0 : 1;

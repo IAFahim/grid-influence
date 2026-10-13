@@ -345,6 +345,37 @@ Three rules still apply: reads see the last `Process` (one frame of latency), ce
 ±32,767, and a layer meant to detect presence should hold same-signed sources (opposing signs
 cancel).
 
+## Crowds rebuild, sensors batch
+
+When most of a layer moves, retract-and-reapply per op is the wrong shape — 100,000 sources
+walking one cell each costs 100,000 paired deposits while the redraw costs one pass.
+`Process` counts deposits per layer from the op queue itself, compares against the live-source
+count it maintains incrementally, and when movers reach about half the layer it rebuilds that
+layer tile-by-tile instead: sources scatter into per-tile chunk chains (box stamps carry their
+whole footprint inline, ~36 B per touch), each dirty tile re-emits its own items and resolves,
+and a tile only lands in `Changed` if its page actually differs. The rebuild is bit-identical
+to stepped incremental processing on every cell — asserted, not hoped — and idle or lightly
+moved frames never enter it.
+
+The same batching serves agent loops. Kernels can take a Gi column like any other column:
+
+```csharp
+// fill a kernel column straight from the field (returns false only off every grid)
+Column.SenseColumn(world, threat, agentXs, agentYs, agentCount, threats, null);
+
+// one call per swarm, not one Changed per agent — emits the 64-bit words kernels consume
+Column.ChangedMask(world, threat, agentXs, agentYs, reach: 24f, since: lastDecision,
+                   count: agentCount, words: changedWords);
+
+// move every agent that has a position column (sv slot space, ECS chunk, your own SoA)
+Column.Sync(world, sourceIds, newXs, newYs, count);
+```
+
+`SenseColumn` reads agent coordinates as `float*` and writes `short*` values (plus optional
+whole-tile flags); `ChangedMask` writes one `ulong` per 64 agents, zeros for the quiet ones;
+`Sync` is the fused form of `Move` for a whole column — gen-validated, coalescing, zero managed
+allocation. At 8,192+ rows they fan out over the same worker pool as resolve.
+
 ## Speed
 
 i9-14900K, .NET 10, Release, min over reps. The workload is 4,000 box sources on a 1024² grid
@@ -376,6 +407,23 @@ unless noted; `process` rows include the mutations.
 | 2,000 fading sources, per tick | 31 µs mean, 0 µs idle | vs ~330 µs dense decay pass |
 | move 400 across 16 layers + `Process` | 74 µs | one flattened worker queue |
 | `QueryRegion` fill 256² | 6.8 µs | straight into your pixel buffer |
+| `SenseColumn` per agent | 9.7 ns | 100k agents, pooled |
+| `ChangedMask` per agent | 15 ns | reach 24, 100k agents |
+| `Sync` per position | 13.8 ns | 100k, excludes `Process` |
+
+And the crowd sweep — every source on one layer moving every frame, `Process` alone timed,
+rebuild vs the same engine's incremental path (best of 10):
+
+| workload | incremental | crowded rebuild | naive redraw |
+| --- | ---: | ---: | ---: |
+| 20,000 boxes 8×8, 1024² | 1,667 µs | **520 µs** | 922 µs |
+| 100,000 boxes 4×4, 1024² | 8,824 µs | **1,382 µs** | 1,631 µs |
+| 4,000 boxes 16×16, 1024² | 530 µs | **289 µs** | 919 µs |
+
+The rebuild wins from ~50% movers up (the deposit count itself is the trigger — 2 deposits per
+move vs the live count), matches incremental below that, and costs nothing when nothing moves.
+`--crowd` reproduces the table, including the per-fraction sweep and the receipts that pin the
+rebuild to stepped incremental output cell for cell.
 
 Against the naive implementation every field library starts with — a dense `int[]` per layer,
 cleared and redrawn from every source each frame (4,000 sources, 200 moves, same machine):
@@ -417,9 +465,16 @@ tile), so an empty world of any size costs zero.
 - **Queries never scan.** Region sums add one `int64` per fully covered tile; `QueryMax`
   descends a per-(grid,layer) max pyramid; nearest prunes tiles by their max; `Changed` reads
   per-tile epochs.
+- **Crowded layers rebuild.** Deposits counted from the op queue vs an incrementally maintained
+  live count decide per layer, per frame. The rebuild scatters sources into per-(tile, worker)
+  chunk chains — one writer per arena, indices stable across growth — then re-emits and resolves
+  each touched tile from its own chain, saving the old page first so `Changed` still means
+  "values differ". Dissipated tiles free their blocks; derived layers see the same dirty set.
 - **Big frames fan out.** ≥32 dirty tiles total splits resolve over a fixed worker pool; large
-  mutation batches fragment by tile so no two workers share a tile. Pooled and serial output are
-  bit-identical.
+  mutation batches fragment by tile so no two workers share a tile. Rounds handshake through a
+  parked gate — workers flag themselves parked before waiting, initiators wait for all-parked
+  before publishing round state — so wake-ups stay one-per-round regardless of timing. Pooled
+  and serial output are bit-identical.
 - **Handles, not objects.** Everything public returns `byte` ids into unmanaged arenas; source
   ids pack a generation over the slot index, so stale handles are inert no-ops and slots
   recycle. No managed allocation on the data path.
@@ -432,7 +487,7 @@ Full semantics and the unsafe lifetime/aliasing/alignment/concurrency proof live
 ## Receipts
 
 Every claim above is asserted, not documented. `dotnet run --project benchmarks -c Release --
---verify` runs all 51 receipts before printing a single timing — with and without hardware
+--verify` runs all 59 receipts before printing a single timing — with and without hardware
 intrinsics:
 
 | receipts | what they pin down |
@@ -450,6 +505,9 @@ intrinsics:
 | `fade-steps-match-schedule`, `expire-removes-on-schedule`, `rewind-resumes-schedules` | 140 fades follow the spec every tick; expiry edge cases; a rewound world tracks its twin |
 | `source-slots-reuse-and-stale-handles-inert`, `rewind-restores-recorded-state`, `signed-gain-exact` | handle lifecycle, rewind, signed gains |
 | `saturated-sum-clamps`, `cross-grid-sums-conserve-world-integral`, `multi-layer-pooled-matches-scans` | saturation, scale conservation, pooled determinism |
+| `crowded-rebuild-matches-stepped-incremental`, `crowded-small-boxes-match-stepped-incremental`, `crowded-unchanged-frames-report-no-changed-tiles` | the rebuild equals stepped incremental on every cell; no-change frames report no changed tiles |
+| `sense-column-matches-try-sense`, `changed-mask-matches-changed`, `sync-matches-move` | column batches equal the per-agent API bit for bit |
+| `warm-crowded-process-allocates-0-bytes`, `warm-column-batches-allocate-0-bytes` | 0 B for crowded `Process` and column batches, warm |
 
 ## Cookbook
 
@@ -541,14 +599,15 @@ dotnet run --project benchmarks -c Release --no-build -- --verify
 DOTNET_EnableHWIntrinsic=0 dotnet run --project benchmarks -c Release --no-build -- --verify
 dotnet run --project benchmarks -c Release --no-build -- --timing    # every number above
 dotnet run --project benchmarks -c Release --no-build -- --compare   # Gi vs the naive grid
+dotnet run --project benchmarks -c Release --no-build -- --crowd     # crowded rebuild sweep
 dotnet run --project viz -c Release --no-build -- live               # http://127.0.0.1:8740
 dotnet run --project tools/stats -c Release -- stats                 # internals as JSON
 ```
 
 - `src/Gi` — the package (`net10.0` + `netstandard2.1`; Burst-callable query paths)
 - `src/Gi.Validation` — optional validation for editors and tools
-- `tests/Gi.Tests` — oracle and validation tests (108)
-- `benchmarks` — the 51 receipts and all the numbers above
+- `tests/Gi.Tests` — oracle, crowd, and validation tests
+- `benchmarks` — the 59 receipts and all the numbers above
 - `samples/world` — console walkthrough; `samples/unity-demo` — sheep/wolf ecosystem on
   `TrySense`, with turned vision cones, a derived comfort layer, and fading paint
 - `viz` — static HTML render (round stamps, derived layers, fades) + live WebSocket ecosystem

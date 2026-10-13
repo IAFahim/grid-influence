@@ -83,8 +83,32 @@ internal unsafe struct DepositFragment
     public byte Layer;
 }
 
+internal struct RebuildItem
+{
+    public const int Bytes = 36;
+    public int Px;
+    public int Py;
+    public int Fx;
+    public int Fy;
+    public int ExtentX;
+    public int ExtentY;
+    public int Gain;
+    public int Local;
+    public uint StampSlot;
+}
+
+internal unsafe struct RebuildChunk
+{
+    public const int Capacity = 16;
+    public int Next;
+    public int Count;
+    public fixed byte Payload[Capacity * RebuildItem.Bytes];
+}
+
 internal unsafe struct WorldCtx
 {
+    public const int MaxLayers = 32;
+
     public GridCtx* Grids;
     public int GridCount;
     public int LayerCount;
@@ -103,13 +127,25 @@ internal unsafe struct WorldCtx
     public byte Recording;
     public int* Prev;
     public int FreeHead;
+    public uint Crowded;
+    public fixed int LayerLive[MaxLayers];
+    public byte LiveStale;
+    public int* Rebuilds;
+    public NativeBuffer<RebuildChunk> RebuildArena;
+    public NativeBuffer<int> RebuildChains;
+    public NativeBuffer<byte> RebuildDense;
+    public NativeBuffer<int> RebuildTails;
+    public NativeBuffer<Placement> RebuildPlacements;
+    public NativeBuffer<byte> RebuildPresent;
 }
 
 public static unsafe partial class World
 {
+    internal const int MaxLayers = ValidationRules.MaxLayers;
     internal const int MaxWorlds = ValidationRules.MaxWorlds;
     internal const int MaxGrids = ValidationRules.MaxGrids;
-    internal const int MaxLayers = ValidationRules.MaxLayers;
+    private const int MinPower = ValidationRules.MinPower;
+    private const int MaxPower = ValidationRules.MaxPower;
     private const int MaxGain = ValidationRules.MaxGain;
     private const ushort UnitScale = 256;
     internal const int MaxSourceSlots = 1 << 24;
@@ -146,6 +182,8 @@ public static unsafe partial class World
         w->Grids = (GridCtx*)NativeHeap.AllocZeroed((nuint)(MaxGrids * sizeof(GridCtx)));
         w->Recipes = (LayerRecipe*)NativeHeap.AllocZeroed((nuint)(MaxLayers * sizeof(LayerRecipe)));
         w->Prev = (int*)NativeHeap.AlignedAlloc(TileBake.TileSize * sizeof(int));
+        w->Rebuilds = (int*)NativeHeap.AllocZeroed((nuint)(2 * MaxGrids * MaxLayers * sizeof(int)));
+        for (var i = 0; i < MaxGrids * MaxLayers; i++) w->Rebuilds[i] = -1;
         w->FreeHead = -1;
         return id;
     }
@@ -214,6 +252,7 @@ public static unsafe partial class World
         JournalSchedule(w, s, i);
         s->Timed.Pointer[i] = 0;
         s->Alive.Pointer[i] = 1;
+        if (g != 0) w->LayerLive[layer]++;
         EnqueuePlace(w, i, x, y, stamp, layer, (sbyte)g);
         return (gen << 24) | i;
     }
@@ -243,6 +282,8 @@ public static unsafe partial class World
 
         if (next == s->Gain.Pointer[i]) return;
 
+        if (next == 0) w->LayerLive[s->Layer.Pointer[i]]--;
+        else if (s->Gain.Pointer[i] == 0) w->LayerLive[s->Layer.Pointer[i]]++;
         EnqueueMutation(w, s, i, s->X.Pointer[i], s->Y.Pointer[i], (sbyte)next, s->Angle.Pointer[i], s->Scale.Pointer[i], true);
         s->Gain.Pointer[i] = next;
     }
@@ -276,6 +317,7 @@ public static unsafe partial class World
     {
         if (!TrySource(world, source, out var w, out var s, out var i)) return;
 
+        if (s->Gain.Pointer[i] != 0) w->LayerLive[s->Layer.Pointer[i]]--;
         EnqueueMutation(w, s, i, s->X.Pointer[i], s->Y.Pointer[i], 0, s->Angle.Pointer[i], s->Scale.Pointer[i], false);
         if (s->Timed.Pointer[i] != 0)
         {
@@ -381,6 +423,7 @@ public static unsafe partial class World
         for (var i = 0; i < count && !deferred; i++)
         {
             var probe = ops + i;
+            if ((w->Crowded & (1u << probe->ToLayer)) != 0) continue;
             if (probe->FromGain != 0 && Heavy(probe->FromStamp, probe->FromAngle)) deferred = true;
             else if (probe->ToGain != 0 && Heavy(probe->ToStamp, probe->ToAngle)) deferred = true;
         }
@@ -397,6 +440,8 @@ public static unsafe partial class World
                 w->Journal.Resize(journalIndex + 1);
                 w->Journal.Pointer[journalIndex] = *op;
             }
+
+            if ((w->Crowded & (1u << op->ToLayer)) != 0) continue;
 
             if (op->FromGain != 0)
             {
@@ -416,6 +461,45 @@ public static unsafe partial class World
     }
 
     private const int DeferredOps = 512;
+    private const int CrowdDeposits = 64;
+    internal const uint BoxItem = 1u << 31;
+
+    private static uint ScanCrowding(WorldCtx* w)
+    {
+        var crowded = 0u;
+        var count = w->Ops.Length;
+        if (count == 0) return crowded;
+
+        var deposits = stackalloc int[MaxLayers];
+        new Span<int>(deposits, w->LayerCount).Clear();
+        var ops = w->Ops.Pointer;
+        for (var i = 0; i < count; i++)
+        {
+            var op = ops + i;
+            var layer = op->ToLayer;
+            if (op->FromGain != 0) deposits[layer]++;
+            if (op->ToGain != 0) deposits[layer]++;
+        }
+
+        var s = &w->Sources;
+        if (w->LiveStale != 0)
+        {
+            new Span<int>(w->LayerLive, w->LayerCount).Clear();
+            for (var i = 0; i < s->Count; i++)
+                if (s->Alive.Pointer[i] != 0 && s->Gain.Pointer[i] != 0) w->LayerLive[s->Layer.Pointer[i]]++;
+            w->LiveStale = 0;
+        }
+
+        for (var l = 0; l < w->LayerCount; l++)
+        {
+            if (IsDerived(w, l) || deposits[l] < CrowdDeposits) continue;
+
+            var live = w->LayerLive[l];
+            if (deposits[l] >= live && live > 0) crowded |= 1u << l;
+        }
+
+        return crowded;
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool Heavy(byte stamp, int angle) => angle != 0 || StampCatalog.Get(stamp)->Kind != StampKind.ConstantRectangle;
@@ -566,6 +650,235 @@ public static unsafe partial class World
         for (var i = 0; i < count; i++) ApplyFragment(w, fragments + i);
     }
 
+    internal static void ScatterSource(WorldCtx* w, GridCtx* g, byte layer, int slotIndex, int sourceIndex, int tiles,
+        int chainsRegion, int denseRegion, int* tails, NativeBuffer<RebuildChunk>* arena, NativeBuffer<Placement>* placements)
+    {
+        var s = &w->Sources;
+        if (s->Alive.Pointer[sourceIndex] == 0 || s->Layer.Pointer[sourceIndex] != layer) return;
+        var gain = (sbyte)s->Gain.Pointer[sourceIndex];
+        if (gain == 0) return;
+        var stamp = s->Stamp.Pointer[sourceIndex];
+        if (!TileBake.Place(s->X.Pointer[sourceIndex], s->Y.Pointer[sourceIndex], g->OriginX, g->OriginY, g->ScaleQ8, g->Size,
+            StampCatalog.Get(stamp), s->Angle.Pointer[sourceIndex], s->Scale.Pointer[sourceIndex], out var p)) return;
+
+        uint stampSlot = stamp | ((uint)slotIndex << 8);
+        var local = 0;
+        if (p.Plane == Plane.Difference)
+        {
+            stampSlot |= BoxItem;
+        }
+        else
+        {
+            local = placements->Length;
+            placements->Resize(local + 1);
+            placements->Pointer[local] = p;
+        }
+
+        var cx0 = Math.Max(p.X0, 0);
+        var cy0 = Math.Max(p.Y0, 0);
+        var cx1 = Math.Min(p.X1, g->Size);
+        var cy1 = Math.Min(p.Y1, g->Size);
+        if (cx1 <= cx0 || cy1 <= cy0) return;
+
+        var chains = w->RebuildChains.Pointer + chainsRegion + slotIndex * tiles;
+        var dense = w->RebuildDense.Pointer + denseRegion;
+        var tps = g->TilesPerSide;
+        for (var ty = cy0 >> TileBake.TileBits; ty <= (cy1 - 1) >> TileBake.TileBits; ty++)
+        for (var tx = cx0 >> TileBake.TileBits; tx <= (cx1 - 1) >> TileBake.TileBits; tx++)
+        {
+            if (!TileBake.Touches(&p, tx << TileBake.TileBits, ty << TileBake.TileBits)) continue;
+
+            var tile = ty * tps + tx;
+            var chunkIndex = tails[tile];
+            RebuildChunk* chunk;
+            int at;
+            if (chunkIndex >= 0)
+            {
+                chunk = arena->Pointer + chunkIndex;
+                at = chunk->Count;
+                if (at == RebuildChunk.Capacity)
+                {
+                    chunkIndex = arena->Length;
+                    arena->Resize(chunkIndex + 1);
+                    (arena->Pointer + tails[tile])->Next = chunkIndex;
+                    chunk = arena->Pointer + chunkIndex;
+                    chunk->Next = -1;
+                    chunk->Count = 0;
+                    tails[tile] = chunkIndex;
+                    at = 0;
+                }
+            }
+            else
+            {
+                chunkIndex = arena->Length;
+                arena->Resize(chunkIndex + 1);
+                chains[tile] = chunkIndex;
+                chunk = arena->Pointer + chunkIndex;
+                chunk->Next = -1;
+                chunk->Count = 0;
+                tails[tile] = chunkIndex;
+                at = 0;
+            }
+
+            if (p.Plane == Plane.Dense) dense[tile] = 1;
+            ((RebuildItem*)chunk->Payload)[at] = new RebuildItem
+            {
+                Px = p.Px,
+                Py = p.Py,
+                Fx = p.Fx,
+                Fy = p.Fy,
+                ExtentX = p.ExtentX,
+                ExtentY = p.ExtentY,
+                Gain = gain,
+                Local = local,
+                StampSlot = stampSlot,
+            };
+            chunk->Count = at + 1;
+        }
+    }
+
+    private static void RebuildLayer(WorldCtx* w, GridCtx* g, byte layer, int slot)
+    {
+        var ld = EnsureDirty(g, layer);
+        var tiles = g->TileCount;
+        var (chainsRegion, denseRegion) = PrepareMerge(w, tiles, 1);
+        w->RebuildTails.Ensure(tiles);
+        new Span<int>(w->RebuildTails.Pointer, tiles).Fill(-1);
+
+        var s = &w->Sources;
+        for (var i = 0; i < s->Count; i++)
+            ScatterSource(w, g, layer, 0, i, tiles, chainsRegion, denseRegion, w->RebuildTails.Pointer,
+                &w->RebuildArena, &w->RebuildPlacements);
+
+        MergeLayer(w, g, ld, tiles, chainsRegion, denseRegion, 1, w->Rebuilds + 2 * slot);
+    }
+
+    private static (int Chains, int Dense) PrepareMerge(WorldCtx* w, int tiles, int slots)
+    {
+        var chainsRegion = w->RebuildChains.Length;
+        w->RebuildChains.Resize(chainsRegion + slots * tiles);
+        new Span<int>(w->RebuildChains.Pointer + chainsRegion, slots * tiles).Fill(-1);
+
+        var denseRegion = w->RebuildDense.Length;
+        w->RebuildDense.Resize(denseRegion + tiles);
+        new Span<byte>(w->RebuildDense.Pointer + denseRegion, tiles).Clear();
+
+        w->RebuildPresent.Resize(w->RebuildPresent.Length + tiles);
+        new Span<byte>(w->RebuildPresent.Pointer + w->RebuildPresent.Length - tiles, tiles).Clear();
+        return (chainsRegion, denseRegion);
+    }
+
+    internal static void MergeLayer(WorldCtx* w, GridCtx* g, LayerData* ld, int tiles, int chainsRegion, int denseRegion, int slots, int* slot)
+    {
+        var present = w->RebuildPresent.Pointer + w->RebuildPresent.Length - tiles;
+        var pages = &ld->Pages;
+        var used = pages->Used;
+        var keys = pages->Keys;
+        for (var i = 0; i < pages->SlotCount; i++)
+            if (used[i] == PageMap.Live) present[keys[i]] |= 1;
+
+        var chains = w->RebuildChains.Pointer + chainsRegion;
+        var dense = w->RebuildDense.Pointer + denseRegion;
+        ld->Dirty.Resize(tiles);
+        var dirty = ld->Dirty.Pointer;
+        var di = 0;
+        for (var t = 0; t < tiles; t++)
+        {
+            var head = -1;
+            for (var k = 0; k < slots && head < 0; k++) head = chains[k * tiles + t];
+            if (head >= 0)
+            {
+                var block = TileBlock(ld, t, false);
+                if (dense[t] != 0) EnsureDense(ld, t, block);
+                dirty[di++] = t;
+            }
+            else if (present[t] != 0)
+            {
+                dirty[di++] = t;
+            }
+
+            present[t] = 0;
+        }
+
+        ld->Dirty.Resize(di);
+        slot[0] = chainsRegion;
+        slot[1] = slots;
+    }
+
+    #if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    #endif
+    internal static byte* RebuildTile(WorldCtx* w, GridCtx* g, LayerData* ld, int tile, int chainsRegion, int slots,
+        RebuildChunk** arenas, Placement** placements, int* prev, byte* changed)
+    {
+        var tps = g->TilesPerSide;
+        var tileX0 = (tile % tps) << TileBake.TileBits;
+        var tileY0 = (tile / tps) << TileBake.TileBits;
+        var block = TileBlock(ld, tile, false);
+        var oldPage = stackalloc short[Cells];
+        Buffer.MemoryCopy(block + PageOffset, oldPage, PageBytes, PageBytes);
+        new Span<int>(DiffOf(block), DiffBytes / sizeof(int)).Clear();
+        var dense = *(byte**)(block + DensePtrOffset);
+        if (dense != null) new Span<int>(dense, Cells).Clear();
+        var tent = TentOf(block);
+        if (tent != null) new Span<long>(tent, Cells).Clear();
+        var bell = BellOf(block);
+        if (bell != null) new Span<long>(bell, Cells).Clear();
+
+        var difference = DiffOf(block);
+        var chains = w->RebuildChains.Pointer + chainsRegion;
+        for (var k = 0; k < slots; k++)
+        {
+            var chunkIndex = chains[k * g->TileCount + tile];
+            while (chunkIndex >= 0)
+            {
+                var chunk = arenas[k] + chunkIndex;
+                var items = (RebuildItem*)chunk->Payload;
+                for (var n = 0; n < chunk->Count; n++)
+                {
+                    var item = items + n;
+                    var stampSlot = item->StampSlot;
+                    if ((stampSlot & BoxItem) != 0)
+                        TileBake.EmitBox(difference, tileX0, tileY0, item->Px, item->Py, item->Fx, item->Fy,
+                            item->ExtentX, item->ExtentY, StampCatalog.Get((byte)stampSlot), item->Gain);
+                    else
+                        Emit(placements[(int)((stampSlot >> 8) & 255)] + item->Local, block, tileX0, tileY0, item->Gain);
+                }
+
+                chunkIndex = chunk->Next;
+            }
+        }
+
+        ld->InDirty[tile] = 0;
+        tent = TentOf(block);
+        bell = BellOf(block);
+        new Span<int>(prev, TileBake.TileSize).Clear();
+        if (!TileBake.Resolve(difference, DenseOf(block), prev, tent, bell,
+            (short*)(block + PageOffset), (long*)(block + SumOffset), (short*)(block + MaxOffset)))
+        {
+            *changed = PageAny(oldPage) ? (byte)1 : (byte)0;
+            return null;
+        }
+
+        var page = (short*)(block + PageOffset);
+        *changed = 0;
+        for (var i = 0; i < Cells; i++)
+            if (oldPage[i] != page[i])
+            {
+                *changed = 1;
+                break;
+            }
+
+        return block;
+    }
+
+    private static bool PageAny(short* page)
+    {
+        for (var i = 0; i < Cells; i++)
+            if (page[i] != 0) return true;
+        return false;
+    }
+
     public static void Clear(byte world)
     {
         var w = GetContext(world);
@@ -581,6 +894,14 @@ public static unsafe partial class World
         w->ScheduleJournal.Resize(0);
         w->Timers.Resize(0);
         w->Recording = 0;
+        w->Crowded = 0;
+        w->LiveStale = 0;
+        new Span<int>(w->LayerLive, w->LayerCount).Clear();
+        w->RebuildChains.Resize(0);
+        w->RebuildDense.Resize(0);
+        w->RebuildPlacements.Resize(0);
+        w->RebuildPresent.Resize(0);
+        new Span<int>(w->Rebuilds, 2 * MaxGrids * MaxLayers).Fill(0);
         new Span<int>(w->Pending.Pointer, w->Pending.Capacity).Clear();
 
         for (var gi = 0; gi < w->GridCount; gi++)
@@ -636,6 +957,7 @@ public static unsafe partial class World
         var w = GetContext(world);
         if (w == null) return;
         var s = &w->Sources;
+        w->LiveStale = 1;
 
         var ops = w->Ops.Pointer;
         for (var i = w->Ops.Length - 1; i >= 0; i--)
@@ -764,7 +1086,7 @@ public static unsafe partial class World
         return ld;
     }
 
-    private static byte* TileBlock(LayerData* ld, int tile, bool dense)
+    internal static byte* TileBlock(LayerData* ld, int tile, bool dense)
     {
         var pages = &ld->Pages;
         if (pages->TryGet(tile, out var block)) return block;
@@ -777,7 +1099,7 @@ public static unsafe partial class World
         return block;
     }
 
-    private static byte* EnsureDense(LayerData* ld, int tile, byte* block)
+    internal static byte* EnsureDense(LayerData* ld, int tile, byte* block)
     {
         var dense = *(byte**)(block + DensePtrOffset);
         if (dense != null) return block;
@@ -859,8 +1181,56 @@ public static unsafe partial class World
         if (w == null) return;
 
         w->Tick++;
-        if (w->Timers.Length != 0) RunTimers(w);
+        if (w->Timers.Length != 0)
+        {
+            RunTimers(w);
+            w->LiveStale = 1;
+        }
+        w->Crowded = ScanCrowding(w);
         var fragmentCount = ApplyDeposits(w);
+
+        w->RebuildChains.Resize(0);
+        w->RebuildDense.Resize(0);
+        w->RebuildPresent.Resize(0);
+        w->RebuildPlacements.Resize(0);
+        w->RebuildArena.Resize(0);
+        new Span<int>(w->Rebuilds, 2 * w->GridCount * MaxLayers).Fill(0);
+
+        var pooled = w->Crowded != 0 && ResolvePool.TryAcquire();
+        if (pooled)
+        {
+            var stride = 0;
+            for (var gi = 0; gi < w->GridCount; gi++)
+                for (var l = 0; l < w->LayerCount; l++)
+                    if ((w->Crowded & (1u << l)) != 0) stride = Math.Max(stride, (w->Grids + gi)->TileCount);
+
+            ResolvePool.BeginCrowdFrame(stride);
+            for (var gi = 0; gi < w->GridCount; gi++)
+            {
+                var g = w->Grids + gi;
+                for (var l = 0; l < w->LayerCount; l++)
+                {
+                    if ((w->Crowded & (1u << l)) == 0) continue;
+
+                    var ld = EnsureDirty(g, (byte)l);
+                    var (chainsRegion, denseRegion) = PrepareMerge(w, g->TileCount, ResolvePool.Slots);
+                    ResolvePool.ScatterLayer(w, g, (byte)l, chainsRegion, denseRegion);
+                    MergeLayer(w, g, ld, g->TileCount, chainsRegion, denseRegion, ResolvePool.Slots,
+                        w->Rebuilds + 2 * (gi * MaxLayers + l));
+                }
+            }
+        }
+        else
+        {
+            for (var gi = 0; gi < w->GridCount; gi++)
+            {
+                var g = w->Grids + gi;
+                for (var l = 0; l < w->LayerCount; l++)
+                {
+                    if ((w->Crowded & (1u << l)) != 0) RebuildLayer(w, g, (byte)l, gi * MaxLayers + l);
+                }
+            }
+        }
 
         var total = 0;
         for (var gi = 0; gi < w->GridCount; gi++)
@@ -870,7 +1240,7 @@ public static unsafe partial class World
                 if (!IsDerived(w, l)) total += g->Layers[l].Dirty.Length;
         }
 
-        var pooled = total >= ResolvePool.Threshold && ResolvePool.TryAcquire();
+        if (!pooled && total >= ResolvePool.Threshold) pooled = ResolvePool.TryAcquire();
         if (pooled && fragmentCount >= ResolvePool.ApplyThreshold)
         {
             ResolvePool.ApplyAndResolveWorld(w, fragmentCount, total);
@@ -888,6 +1258,10 @@ public static unsafe partial class World
             }
             else
             {
+                Placement** serialPlacements = stackalloc Placement*[1];
+                RebuildChunk** serialArena = stackalloc RebuildChunk*[1];
+                serialPlacements[0] = w->RebuildPlacements.Pointer;
+                serialArena[0] = w->RebuildArena.Pointer;
                 for (var gi = 0; gi < w->GridCount; gi++)
                 {
                     var g = w->Grids + gi;
@@ -896,11 +1270,40 @@ public static unsafe partial class World
                         if (IsDerived(w, l)) continue;
 
                         var ld = g->Layers + l;
-                        var span = ld->Dirty.Span;
+                        var rebuildSlot = 2 * (gi * MaxLayers + l);
+                        var slots = w->Rebuilds[rebuildSlot + 1];
+                        var chainsRegion = w->Rebuilds[rebuildSlot];
                         var pages = &ld->Pages;
-                        foreach (var tile in span)
+                        var dirty = ld->Dirty.Pointer;
+                        var kept = 0;
+                        for (var i = 0; i < ld->Dirty.Length; i++)
                         {
+                            var tile = dirty[i];
+                            if (slots != 0)
+                            {
+                                byte changed;
+                                var rebuilt = RebuildTile(w, g, ld, tile, chainsRegion, slots, serialArena, serialPlacements, w->Prev, &changed);
+                                if (rebuilt == null)
+                                {
+                                    if (pages->TryGet(tile, out var dead))
+                                    {
+                                        pages->Remove(tile);
+                                        FreeBlock(dead);
+                                    }
+
+                                    ld->Max.Update(g->TilesPerSide, tile, 0);
+                                }
+                                else
+                                {
+                                    ld->Max.Update(g->TilesPerSide, tile, *(short*)(rebuilt + MaxOffset));
+                                }
+
+                                if (changed != 0) dirty[kept++] = tile;
+                                continue;
+                            }
+
                             ld->InDirty[tile] = 0;
+                            dirty[kept++] = tile;
                             if (!pages->TryGet(tile, out var block)) continue;
 
                             new Span<int>(w->Prev, TileBake.TileSize).Clear();
@@ -916,6 +1319,8 @@ public static unsafe partial class World
                                 ld->Max.Update(g->TilesPerSide, tile, *(short*)(block + MaxOffset));
                             }
                         }
+
+                        ld->Dirty.Resize(kept);
                     }
                 }
             }
