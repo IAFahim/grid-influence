@@ -34,7 +34,8 @@ public static unsafe partial class World
                 continue;
             }
 
-            onlyUpdates &= command.Kind == SourceCommandKind.Update && !command.Target.Pending;
+            onlyUpdates &= (command.Kind == SourceCommandKind.Update ||
+                            command.Kind == SourceCommandKind.UpdateTransform) && !command.Target.Pending;
             if (!command.Target.Pending) continue;
             var creationIndex = command.Target.Identifier;
             if ((uint)creationIndex >= (uint)index || commands[creationIndex].Kind != SourceCommandKind.Place)
@@ -107,6 +108,23 @@ public static unsafe partial class World
             if (float.IsFinite(command.HeadingRadians)) angle = QuantizeSourceBatchAngle(command.HeadingRadians);
             var scale = source->Scale.Pointer[slot];
             if (float.IsFinite(command.ScaleValue)) scale = QuantizeSourceBatchScale(command.ScaleValue);
+            if (command.Kind == SourceCommandKind.UpdateTransform)
+            {
+                if (command.PositionX != source->X.Pointer[slot] || command.PositionY != source->Y.Pointer[slot] ||
+                    angle != source->Angle.Pointer[slot] || scale != source->Scale.Pointer[slot])
+                {
+                    EnqueueMutation(context, source, slot, command.PositionX, command.PositionY,
+                        (sbyte)source->Gain.Pointer[slot], angle, scale, true);
+                    source->X.Pointer[slot] = command.PositionX;
+                    source->Y.Pointer[slot] = command.PositionY;
+                    source->Angle.Pointer[slot] = angle;
+                    source->Scale.Pointer[slot] = scale;
+                }
+
+                results[index] = new SourceResult(identifier, SourceResultStatus.Applied);
+                continue;
+            }
+
             var gain = (byte)Math.Clamp((int)command.Gain, -MaxGain, MaxGain);
             if ((source->Timed.Pointer[slot] & Fading) != 0)
             {
@@ -428,6 +446,11 @@ public static unsafe partial class World
                 FoldSourceTurn(entry, ref state, command.HeadingRadians, index);
                 FoldSourceScale(entry, ref state, command.ScaleValue, index);
                 FoldSourceGain(entry, ref state, command.Gain, index);
+                break;
+            case SourceCommandKind.UpdateTransform:
+                FoldSourceMove(entry, ref state, command.PositionX, command.PositionY, index);
+                FoldSourceTurn(entry, ref state, command.HeadingRadians, index);
+                FoldSourceScale(entry, ref state, command.ScaleValue, index);
                 break;
             case SourceCommandKind.Move:
                 FoldSourceMove(entry, ref state, command.PositionX, command.PositionY, index);

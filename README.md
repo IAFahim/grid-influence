@@ -414,6 +414,7 @@ unless noted; `process` rows include the mutations.
 | `exclude: self` point / area r=24 bell | 0.03–0.04 / 2.7 µs | exact aura removal, no rebuild |
 | place/move 200 boxes + `Process` | ~80–95 µs | deferred ops, pooled resolve |
 | 4,000 bells 16×16 + 200 moves, `Process` stages | 280 µs total | prep 74 / apply 50 / resolve 156 — parallel build; serial build totals 818 µs (`--stages`) |
+| 65,536 transform updates via `ApplyBatch` | 2,061 µs | 31.8M rows/s — `UpdateTransform` snapshots preserve fades, 0 B warm (`--batch`) |
 | place 200 tents 16×16 + `Process` | ~110 µs | exact sums per cell |
 | place 200 bells 16×16 + `Process` | ~150–195 µs | exact sums per cell |
 | turn 200 vision cones (r=16, 90°) + `Process` | ~320 µs | per-cell round kernel |
@@ -593,7 +594,7 @@ Full semantics and the unsafe lifetime/aliasing/alignment/concurrency proof live
 ## Receipts
 
 Every claim above is asserted, not documented. `dotnet run --project benchmarks -c Release --
---verify` runs all 62 receipts before printing a single timing — with and without hardware
+--verify` runs all 63 receipts before printing a single timing — with and without hardware
 intrinsics:
 
 | receipts | what they pin down |
@@ -615,6 +616,7 @@ intrinsics:
 | `sense-column-matches-try-sense`, `changed-mask-matches-changed`, `sync-matches-move` | column batches equal the per-agent API bit for bit |
 | `warm-crowded-process-allocates-0-bytes`, `warm-column-batches-allocate-0-bytes` | 0 B for crowded `Process` and column batches, warm |
 | `source-batches-match-serial-and-allocate-0-bytes`, `source-batches-retract-across-layers` | sealed batch ingestion equals serial calls cell for cell and rewinds across layers, 0 B warm |
+| `transform-updates-match-ordered-calls` | `UpdateTransform` batches equal ordered `Move`+`Turn`+`Scale` on every cell while fades keep running, 0 B warm |
 | `parallel-deposit-prep-matches-serial` | pooled tile preparation equals the serial build on every cell across shapes, grids, layers, saturation, churn, and changed tiles, 0 B warm |
 
 ## Cookbook
@@ -718,7 +720,7 @@ dotnet run --project tools/stats -c Release -- stats                 # internals
 - `src/Gi` — the package (`net10.0` + `netstandard2.1`; Unity calls use non-Burst code)
 - `src/Gi.Validation` — optional validation for editors and tools
 - `tests/Gi.Tests` — oracle, crowd, and validation tests
-- `benchmarks` — the 62 receipts and all the numbers above
+- `benchmarks` — the 63 receipts and all the numbers above
 - `samples/world` — console walkthrough; `samples/unity-demo` — sheep/wolf ecosystem on
   `TrySense`, with turned vision cones, a derived comfort layer, and fading paint
 - `viz` — static HTML render (round stamps, derived layers, fades) + live WebSocket ecosystem

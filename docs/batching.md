@@ -30,6 +30,7 @@ new inputs. One coordinator owns each Gi world across all host systems and ECS w
 | `Stamp.New`, `Box`, `Tent`, `Bell`, `Disk`, `Cone`, `Dome`, `Free` | Runtime catalog owner | Register at runtime before producer jobs use byte handles. Catalog mutation is exclusive across worlds; a deferred request also retains its stamp until consumed/cancelled. |
 | `World.Place` | Spawn bursts, persistent emitters, transient effects | Existing direct API keeps its immediate integer result. Deferred recording returns a scoped ticket; creation produces a real source ID or explicit failure. Same-batch commands may target the ticket. |
 | `Move`, `Turn`, `Scale`, `SetGain` | Movement, facing, size, combat/AI systems | Preserve partial-field updates and stable command order. A full-state input is a fast path only when one producer owns all those fields. `SetGain`, including setting the existing value, cancels fading. |
+| `UpdateTransform` | Every-frame pose snapshots of existing emitters | Exactly ordered `Move`+`Turn`+`Scale` — position, heading, and scale with the direct calls' comparisons and quantization — while never assigning gain or cancelling a fade/expiry. Use it for movement while effects fade; keep `Update`/`SetGain` for real gain changes. |
 | `World.Sync` | Many existing sources changing position together | Extend the existing column ingestion in `Column.cs`. Its current loop batches positions but mutates shared pending operations serially. Preserve stale-handle validation and position-comparison behavior. |
 | `Remove` | Despawn, owner destruction, expiry cleanup | Order against updates, cancel pending creations, and retain cleanup until acknowledged. A recycled slot must not let a stale source ID affect its new occupant. |
 | `Fade`, `Expire` | Effects, gameplay scheduling | Ordered operations, not plain last-value fields. Preserve cancellation, start gain, relative tick, journal entries, and ordering against `SetGain`/`Remove`. |
@@ -114,7 +115,11 @@ Commands are 32-byte unmanaged values. Results contain the source ID and explici
 `CreatedBy` references a `Place` command index in this batch only. A failed creation returns
 `-1`; subsequent targets of that creation report `InvalidSource`. Existing IDs convert implicitly
 to `SourceTarget`. `Update` applies position, heading, scale, and gain in the serial API's order;
-its gain assignment cancels fading even when the gain is unchanged. `Turn` and `Scale` ignore
+its gain assignment cancels fading even when the gain is unchanged. `UpdateTransform` applies
+exactly ordered `Move`, `Turn`, then `Scale` — position compares with `==`, heading and scale
+ignore non-finite values and quantize exactly like `Turn`/`Scale` — and never assigns gain or
+touches fade/expiry state, so it is the movement snapshot that preserves a running fade.
+An unchanged transform is a no-op that reports no changed tiles. `Turn` and `Scale` ignore
 non-finite values and use the same quantization as their direct counterparts.
 
 Malformed commands, invalid creation references, an invalid world, insufficient result space,

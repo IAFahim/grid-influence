@@ -140,6 +140,8 @@ World.SourceCommand[] commands =
     World.SourceCommand.Fade(World.SourceTarget.CreatedBy(0), 0, 20),
     World.SourceCommand.Expire(World.SourceTarget.CreatedBy(0), 20),
     World.SourceCommand.Update(World.SourceTarget.Existing(me), 30.5f, 40.5f, 0f, 1f, 2),
+    World.SourceCommand.UpdateTransform(me, 31.5f, 41.5f, 0.5f, 1f),  // Move+Turn+Scale —
+                                                                    // gain, fades, expiry untouched
     World.SourceCommand.Remove(me)
 ];
 var results = new World.SourceResult[commands.Length];
@@ -154,6 +156,8 @@ Seal input and join producer jobs and Gi readers before calling. Input order is 
 Malformed structure rejects before output/source writes; stale sources and failed creations are
 per-command failures, so inspect result statuses even when the batch returns `Applied`. Ingestion
 does not tick; `Process` publishes the field. Native spans avoid the example's managed arrays.
+`UpdateTransform` is the every-frame movement snapshot: exactly `Move`+`Turn`+`Scale`, so an
+active fade keeps running (unlike `Update`, whose gain assignment cancels it).
 
 ## Time
 

@@ -4,6 +4,7 @@ internal enum SourceCommandKind : byte
 {
     Place = 1,
     Update,
+    UpdateTransform,
     Move,
     Turn,
     Scale,
@@ -93,6 +94,10 @@ public static partial class World
         public static SourceCommand Update(
             SourceTarget source, float positionX, float positionY, float headingRadians, float scale, sbyte gain)
             => new(SourceCommandKind.Update, source, positionX, positionY, headingRadians, scale, gain: gain);
+
+        public static SourceCommand UpdateTransform(
+            SourceTarget source, float positionX, float positionY, float headingRadians, float scale)
+            => new(SourceCommandKind.UpdateTransform, source, positionX, positionY, headingRadians, scale);
 
         public static SourceCommand Move(SourceTarget source, float positionX, float positionY)
             => new(SourceCommandKind.Move, source, positionX, positionY);

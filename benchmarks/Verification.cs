@@ -72,6 +72,7 @@ internal static partial class Verification
         Check("warm-column-batches-allocate-0-bytes", WarmColumnAllocationFree());
         Check("source-batches-match-serial-and-allocate-0-bytes", SourceBatchesMatchSerialAndAllocateNothing());
         Check("source-batches-retract-across-layers", SourceBatchesRetractAcrossLayers());
+        Check("transform-updates-match-ordered-calls", TransformUpdatesMatchOrderedCallsAndAllocateNothing());
         Check("parallel-deposit-prep-matches-serial", ParallelDepositPrepMatchesSerial());
 
         Console.WriteLine(failures == 0 ? "verification: all receipts green" : $"verification: {failures} failures");
