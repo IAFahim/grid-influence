@@ -79,7 +79,8 @@ internal static unsafe partial class Verification
             for (var index = 0; index < count; index++)
             {
                 var x = index % 250 + 3.5f;
-                var y = index / 250 % 250 + 3.5f;
+                var row = index / 250 % 250;
+                var y = row + 3.5f;
                 var source = World.Place(serialWorld, 0, x, y, stamp, 1);
                 World.Place(batchWorld, 0, x, y, stamp, 1);
                 World.Place(syncWorld, 0, x, y, stamp, 1);
@@ -121,7 +122,7 @@ internal static unsafe partial class Verification
             var words = (count + 63) >> 6;
             var mask = new ulong[words];
             long serialTicks = 0, batchTicks = 0, syncTicks = 0, checksum = 0;
-            long allocated = 0;
+            long allocated;
             var matches = true;
             var syncToken = World.Capture(syncWorld);
             fixed (int* idPointer = ids)

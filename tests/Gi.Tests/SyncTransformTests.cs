@@ -53,8 +53,9 @@ public sealed class SyncTransformTests : IDisposable
             var theirs = new int[count];
             for (var index = 0; index < count; index++)
             {
-                var x = 2f + (index % 60);
-                var y = 2f + (index / 60 % 60);
+                var x = 2f + index % 60;
+                var row = index / 60 % 60;
+                var y = 2f + row;
                 mine[index] = World.Place(_world, _layer, x, y, _stamp, 2);
                 theirs[index] = World.Place(twin, twinLayer, x, y, _stamp, 2);
             }
@@ -78,8 +79,9 @@ public sealed class SyncTransformTests : IDisposable
                 var invalid = index % 37 == 0;
                 ids[index] = invalid ? stale : mine[index];
                 twinIds[index] = invalid ? staleTwin : theirs[index];
-                xs[index] = 1f + (index % 61);
-                ys[index] = 1f + (index / 61 % 60);
+                xs[index] = 1f + index % 61;
+                var row = index / 61 % 60;
+                ys[index] = 1f + row;
             }
 
             ids[3] = mine[42];
@@ -154,13 +156,13 @@ public sealed class SyncTransformTests : IDisposable
             const int secondCount = 113;
             const int count = firstCount + secondCount;
             var mine = new int[count];
-            var theirs = new int[count];
             for (var index = 0; index < count; index++)
             {
-                var x = 2f + (index % 60);
-                var y = 2f + (index / 60 % 60);
+                var x = 2f + index % 60;
+                var row = index / 60 % 60;
+                var y = 2f + row;
                 mine[index] = World.Place(_world, _layer, x, y, _stamp, 3);
-                theirs[index] = World.Place(twin, twinLayer, x, y, _stamp, 3);
+                World.Place(twin, twinLayer, x, y, _stamp, 3);
             }
 
             var stale = World.Place(_world, _layer, 5f, 5f, _stamp, 3);
@@ -176,8 +178,10 @@ public sealed class SyncTransformTests : IDisposable
             for (var index = 0; index < count; index++)
             {
                 ids[index] = index % 29 == 0 ? stale : mine[index];
-                xs[index] = index % 11 == 0 ? 2f + (index % 60) : 1f + (index % 61);
-                ys[index] = index % 13 == 0 ? 2f + (index / 60 % 60) : 1f + (index / 61 % 60);
+                xs[index] = index % 11 == 0 ? 2f + index % 60 : 1f + index % 61;
+                var row = index / 60 % 60;
+                var column = index / 61 % 60;
+                ys[index] = index % 13 == 0 ? 2f + row : 1f + column;
                 headings[index] = index % 7 == 0 ? float.NaN : 0.25f * (index % 4);
                 scales[index] = index % 17 == 0 ? 0.001f : 1f + (index % 5) * 0.25f;
             }
@@ -263,8 +267,9 @@ public sealed class SyncTransformTests : IDisposable
             var theirs = new int[live];
             for (var index = 0; index < live; index++)
             {
-                var x = 1f + (index % 61);
-                var y = 1f + (index / 61 % 60);
+                var x = 1f + index % 61;
+                var row = index / 61 % 60;
+                var y = 1f + row;
                 mine[index] = World.Place(_world, _layer, x, y, _stamp, 1);
                 theirs[index] = World.Place(twin, twinLayer, x, y, _stamp, 1);
             }
@@ -298,8 +303,9 @@ public sealed class SyncTransformTests : IDisposable
                 var isStale = staleAt < staleRows.Length && staleRows[staleAt] == index;
                 if (isStale) staleAt++;
                 var liveIndex = index - staleAt;
-                var x = 1f + (index % 61);
-                var y = 1f + (index / 61 % 60);
+                var x = 1f + index % 61;
+                var row = index / 61 % 60;
+                var y = 1f + row;
                 bx[index] = x;
                 by[index] = y;
                 if (isStale)
@@ -431,8 +437,9 @@ public sealed class SyncTransformTests : IDisposable
             var scales = new float[count];
             for (var index = 0; index < count; index++)
             {
-                var x = 1f + (index % 61);
-                var y = 1f + (index / 61 % 60);
+                var x = 1f + index % 61;
+                var row = index / 61 % 60;
+                var y = 1f + row;
                 ids[index] = World.Place(pooled, pooledLayer, x, y, _stamp, 1);
                 World.Place(serial, serialLayer, x, y, _stamp, 1);
                 xs[index] = Math.Min(x + 0.5f, 61.5f);
@@ -501,8 +508,9 @@ public sealed class SyncTransformTests : IDisposable
             var by = new float[count];
             for (var index = 0; index < count; index++)
             {
-                var x = 1f + (index % 61);
-                var y = 1f + (index / 61 % 60);
+                var x = 1f + index % 61;
+                var row = index / 61 % 60;
+                var y = 1f + row;
                 ids[index] = World.Place(world, layer, x, y, _stamp, 1);
                 bx[index] = x;
                 by[index] = y;
@@ -577,8 +585,9 @@ public sealed class SyncTransformTests : IDisposable
             var theirs = new int[count];
             for (var index = 0; index < count; index++)
             {
-                var x = 2f + (index % 20);
-                var y = 2f + (index / 20 % 20);
+                var x = 2f + index % 20;
+                var row = index / 20 % 20;
+                var y = 2f + row;
                 mine[index] = World.Place(_world, _layer, x, y, _stamp, 2);
                 theirs[index] = World.Place(twin, twinLayer, x, y, _stamp, 2);
             }
@@ -590,10 +599,12 @@ public sealed class SyncTransformTests : IDisposable
             var ys = new float[count];
             for (var index = 0; index < count; index++)
             {
-                xs[index] = 1f + (index % 30);
-                ys[index] = 1f + (index / 30 % 30);
-                World.Move(_world, mine[index], 40f + index % 10, 40f + index / 10 % 10);
-                World.Move(twin, theirs[index], 40f + index % 10, 40f + index / 10 % 10);
+                xs[index] = 1f + index % 30;
+                var row = index / 30 % 30;
+                ys[index] = 1f + row;
+                var offset = index / 10 % 10;
+                World.Move(_world, mine[index], 40f + index % 10, 40f + offset);
+                World.Move(twin, theirs[index], 40f + index % 10, 40f + offset);
             }
 
             fixed (int* idPointer = mine)
@@ -632,8 +643,9 @@ public sealed class SyncTransformTests : IDisposable
             var theirs = new int[count];
             for (var index = 0; index < count; index++)
             {
-                var x = 2f + (index % 20);
-                var y = 2f + (index / 20 % 20);
+                var x = 2f + index % 20;
+                var row = index / 20 % 20;
+                var y = 2f + row;
                 mine[index] = World.Place(_world, _layer, x, y, _stamp, 4);
                 theirs[index] = World.Place(twin, twinLayer, x, y, _stamp, 4);
             }
@@ -660,8 +672,9 @@ public sealed class SyncTransformTests : IDisposable
             var headings = new float[count];
             for (var index = 0; index < count; index++)
             {
-                xs[index] = 1f + (index % 30);
-                ys[index] = 1f + (index / 30 % 30);
+                xs[index] = 1f + index % 30;
+                var row = index / 30 % 30;
+                ys[index] = 1f + row;
                 headings[index] = 0.5f;
             }
 
@@ -716,8 +729,9 @@ public sealed class SyncTransformTests : IDisposable
             var ys = new float[count];
             for (var index = 0; index < count; index++)
             {
-                var x = 1f + (index % 61);
-                var y = 1f + (index / 61 % 60);
+                var x = 1f + index % 61;
+                var row = index / 61 % 60;
+                var y = 1f + row;
                 ids[index] = World.Place(world, layer, x, y, _stamp, 1);
                 xs[index] = Math.Min(x + 0.5f, 61.5f);
                 ys[index] = Math.Min(y + 0.5f, 60.5f);
@@ -767,7 +781,10 @@ public sealed class SyncTransformTests : IDisposable
         const int thirdCount = 65;
         var mine = new int[firstCount + secondCount + thirdCount];
         for (var index = 0; index < mine.Length; index++)
-            mine[index] = World.Place(_world, _layer, 2f + index % 60, 2f + index / 60 % 60, _stamp, 1);
+        {
+            var lane = index / 60 % 60;
+            mine[index] = World.Place(_world, _layer, 2f + index % 60, 2f + lane, _stamp, 1);
+        }
         var stale = World.Place(_world, _layer, 5f, 5f, _stamp, 1);
         World.Remove(_world, stale);
         World.Process(_world);
@@ -779,7 +796,8 @@ public sealed class SyncTransformTests : IDisposable
         {
             ids[index] = mine[index];
             xs[index] = 3f + index % 50;
-            ys[index] = 3f + index / 50 % 50;
+            var lane = index / 50 % 50;
+            ys[index] = 3f + lane;
         }
 
         ids[0] = stale;
@@ -912,7 +930,7 @@ public sealed class SyncTransformTests : IDisposable
     public unsafe void StaleAndInvalidTokens_RejectWithoutTouchingMasksOrWorld()
     {
         var world = World.New();
-        var grid = Grid.New(world, 6, 0f, 0f, 64f);
+        Grid.New(world, 6, 0f, 0f, 64f);
         var layer = Layer.New(world);
         var stamp = Stamp.Box(2, 2, 1);
         try
@@ -1015,11 +1033,10 @@ public sealed class SyncTransformTests : IDisposable
         {
             const int count = 16;
             var mine = new int[count];
-            var theirs = new int[count];
             for (var index = 0; index < count; index++)
             {
                 mine[index] = World.Place(_world, _layer, 2f + index, 2f, _stamp, 2);
-                theirs[index] = World.Place(other, otherLayer, 2f + index, 2f, _stamp, 2);
+                World.Place(other, otherLayer, 2f + index, 2f, _stamp, 2);
             }
 
             World.Process(_world);

@@ -2,7 +2,7 @@ namespace Gi;
 
 public static unsafe partial class World
 {
-    public unsafe struct TransformRange
+    public struct TransformRange
     {
         public int* Sources;
         public float* Xs;
