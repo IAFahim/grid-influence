@@ -15,7 +15,7 @@ internal unsafe struct ResolveTask
     public int Chains;
 }
 
-internal static unsafe class ResolvePool
+internal static unsafe partial class ResolvePool
 {
     internal const int Threshold = 32;
     internal const int ApplyThreshold = 128;
@@ -348,6 +348,11 @@ internal static unsafe class ResolvePool
             {
                 ScatterShare(index);
                 Barrier(ref _scatterDone);
+            }
+            else if (phase == 6 || phase == 7)
+            {
+                SourceBatchShare(index, phase);
+                Interlocked.Decrement(ref _remaining);
             }
             else if (phase >= 2)
             {

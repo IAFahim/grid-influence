@@ -186,18 +186,33 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   processing (asserted: crowded output equals stepped incremental output cell for cell).
   Crowdedness is a per-layer, per-frame decision, derived layers never crowd (they recombine),
   and idle frames — an empty op queue — short-circuit before any counting.
-- **Columns** batch the per-agent API. `Column.SenseColumn(world, layer, xs, ys, count, values,
+  Slot reuse can merge removal on one layer with placement on another before processing.
+  Retraction counts against `FromLayer`, application against `ToLayer`; each side independently
+  emits incrementally or is covered by that side's crowded rebuild. Skipping the whole operation
+  because one layer rebuilds would leave stale influence on the other layer.
+- **Columns** batch the per-agent API. `World.SenseColumn(world, layer, xs, ys, count, values,
   whole)` walks the pointer arrays the way a kernel walks a column: it senses each agent's
   position (the same grid-picking, exclusion-free path as `TrySense`) and writes the `short`
   value, optionally a `ulong` word per 64 agents flagging whole-tile answers; it returns
-  `false` only when some agent stands off every grid. `Column.ChangedMask(world, layer, xs, ys,
+  `false` only when some agent stands off every grid. `World.ChangedMask(world, layer, xs, ys,
   reach, since, count, words)` writes one `ulong` per 64 agents — bit set when that agent's
   disk changed since the tick — zeros for quiet words, and returns the changed count.
-  `Column.Sync(world, sources, xs, ys, count)` is the fused column form of `Move`: it
+  `World.Sync(world, sources, xs, ys, count)` is the fused column form of `Move`: it
   validates generations, skips no-ops, and enqueues the same coalescing ops `Move` would,
   batch after batch, with zero managed allocation. At 8,192 rows or more (and a free pool) the
-  batches fan out over the worker pool in 1,024-row chunks aligned to word boundaries so every
+  query batches fan out over the worker pool in 1,024-row chunks aligned to word boundaries so every
   mask word has one writer; smaller or contended batches run the identical loop serially.
+- **Source batches** use `World.ApplyBatch` over a sealed `ReadOnlySpan<World.SourceCommand>`
+  and caller-owned result span. Input order defines command order; pending creation targets
+  reference an earlier `Place` index. Structural rejection writes no output and changes no source;
+  stale handles and failed creations are explicit per-command results and do not abort unrelated
+  commands. `Update` owns position, heading, scale, and gain, including fade cancellation. Partial
+  methods change only their named fields. Ingestion does not tick or touch tiles; a later `Process`
+  deposits the result. Small all-`Update` batches fuse validation and mutation on the caller.
+  Large unique all-`Update` batches avoid hash grouping; other batches group commands by source
+  slot, preserving command order and virtual free-chain/generation transitions. Preparation and
+  disjoint source writes reuse the resolve pool above 8,192 source rows. Timer and journal commits
+  stay on the caller. Footprint and sparse-map preparation still use the existing `Process` path.
 - **Process** applies the deferred op queue (fused or fragmented as above — the fragment
   apply rides one pooled phase with the drain, separated by a symmetric apply barrier), then
   drains the per-(grid,layer) dirty lists: each
@@ -621,7 +636,8 @@ pass behind them was `perf`-profile guided, receipts first.
 - **Lifetime**: the world arena (255 `WorldCtx`) and stamp catalog (256 `StampVariant`) are
   process-lifetime pools allocated by the first creation call (`World.New`, `Stamp.New`,
   `Stamp.Box`) — never by static construction, so no static constructor on the assembly performs
-  calls and Burst can compile `Query`/`QueryRegion` call graphs; world contents are
+  calls. This does not make mutable Gi statics callable from Burst through a precompiled DLL;
+  Unity records with Burst and invokes Gi from non-Burst code. World contents are
   `NativeHeap` blocks owned by the context (grid array, `LayerData` array,
   `InDirty`/`Dirty`/`Changed` per layer, `Prev` scratch, the deferred op queue with its per-slot
   pending index column, the fragment buffer, and the journal — op copies appended by
@@ -666,6 +682,12 @@ pass behind them was `perf`-profile guided, receipts first.
   and every handle-taking call reads a freed handle as absent. No pointer escapes an owner: handles
   are bytes, source ids carry a generation, and the resolve pool holds a world pointer only inside
   one `Process` or column call.
+  Source-batch rows, command links, lookup slots, and partition-local layer counters are
+  context-owned native buffers, retained for reuse and released by `World.Free`. `ApplyBatch`
+  pins managed input/output spans for its entire call, including every internal worker join;
+  native callers retain their buffers unchanged for the same interval. It retains no input or
+  result pointer after returning. Source-column and operation-buffer growth finishes before
+  write workers see pointers; preparation workers have joined before operation growth.
 - **Aliasing**: each block is written by deposits and resolved in place; during a pooled
   apply phase every (grid, layer, tile) fragment bucket is claimed by exactly one
   participant — the scatter assigns buckets by hash before signalling, so difference, tent,
@@ -687,6 +709,14 @@ pass behind them was `perf`-profile guided, receipts first.
   rectangle, so no slot past the grid's tile count is read as data; the SSE2 row compare in the
   descent may load past the valid prefix of a row but masks those lanes out of the match, and
   the loaded bytes stay inside the 128 B node.
+  Batch input bytes and the written result prefix must be disjoint; overlapping spans are
+  rejected before any writes. One batch row owns each distinct source slot, including all
+  remove/recreate operations on that slot. Preparation writes only its row's private state.
+  The caller assigns distinct operation indexes before source writers start, so source columns,
+  pending indexes, free links, and operations have one writer each. Layer counters use one padded
+  row per worker/caller and are reduced after joining. Repeated targets fall back to grouping;
+  the unique-update probe temporarily tags pending indexes and restores every tag before
+  preparing workers or falling back. No external Gi call may observe that probe.
 - **Alignment**: tile blocks, native buffers, page-map arrays, pool scratch, and prefix scratch
   use 64-byte aligned allocations. World/grid/layer/catalog metadata uses `AllocZeroed` with
   natural alignment; raster samples require only byte alignment. SIMD accesses use unaligned
@@ -722,7 +752,11 @@ pass behind them was `perf`-profile guided, receipts first.
   with platform-natural alignment instead of 64-byte `AlignedAlloc`, and no SIMD paths compile:
   every access in that build is a naturally aligned scalar load or store, so the weaker
   alignment guarantee cannot be observed.
-- **Concurrency**: `Place`/`Move`/`SetGain`/`Remove`/`Process`/`Record`/`StopRecording`/
+  Managed command/result arrays have their normal CLR alignment. Native spans must point to
+  naturally aligned `SourceCommand`/`SourceResult` storage; no SIMD loads depend on their address.
+  Batch scratch uses the same aligned native buffers, and the layer-delta stride is 48 integers
+  (192 bytes), keeping adjacent worker rows on separate cache lines.
+- **Concurrency**: `ApplyBatch`/`Sync`/`Place`/`Move`/`SetGain`/`Remove`/`Process`/`Record`/`StopRecording`/
   `Rewind` are serial per world; different
   worlds may run on different threads. `ProcessAll` is that serial-per-world rule walked over
   the allocated ids, ascending, on the calling thread — it adds no parallelism claim, it only
@@ -789,7 +823,7 @@ pass behind them was `perf`-profile guided, receipts first.
   never with mutation or process. Sensing writes nothing outside its own stack frame: each call
   stackallocs its scratch (span rows, under 9 KB of per-tile arrays for an excluded area,
   a single cell for an excluded point), so concurrent sensing threads never share scratch.
-  Every pool round — apply+resolve, crowded scatter, and the two column modes — hands off
+  Every pool round — apply+resolve, crowded scatter, column queries, and source batches — hands off
   through a parked gate: each worker publishes itself parked (a volatile flag per worker)
   immediately before blocking on its wake event, and a round initiator spins until every worker
   is parked before it writes any round state (cursors, counters, task tables, worker buffers).
@@ -797,6 +831,15 @@ pass behind them was `perf`-profile guided, receipts first.
   the worker consumes exactly one signal per round, an `AutoResetEvent`'s coalescing can never
   absorb a round: each round's signal reaches a thread that is at or past its park point, so
   every worker executes every round exactly once and each round's barrier arithmetic balances.
+  Source-batch rounds claim disjoint 128-row chunks. Pool acquisition protects their world and
+  command pointers, cursor, count, and phase; a contending world uses its own inline ranges and
+  does not read or modify these pool statics. Preparation is phase 6 and writes only batch rows;
+  source application is phase 7 and writes only preassigned source/operation ranges. Workers
+  decrement the remaining count after their last access, and the caller joins all workers before
+  clearing pointers, resizing buffers, committing schedules, returning borrowed spans, or releasing
+  pool ownership. No source worker changes a heap, journal length, free head, source count, or page
+  map. The caller commits those values after joining. Hosts may record independent buffers while
+  Gi readers run; they must join producer writes and Gi readers before `ApplyBatch` or `Process`.
   The crowded rebuild keeps one writer per arena: scatter workers and the caller each own a
   slot — per-slot tail table, per-slot placement buffer, per-slot chunk arena — and chunk
   references are 32-bit indices into the owning slot's arena, so arena growth (a realloc that
@@ -817,7 +860,16 @@ pass behind them was `perf`-profile guided, receipts first.
   written before it is read — band and span arrays are filled up to the count their readers
   use, cell scratch is cleared or fully emitted first, and the resolve rows are cleared when
   their store is absent.
-- **Bounds**: derived recombination reads exactly the 1,024 cells of each input page — the
+- **Bounds**: source batches reject more than 2^24 commands before multiplying byte lengths.
+  Creation references name earlier `Place` indexes, so results are initialized before those
+  references are read. Generation and liveness validation precede source-column access. The
+  planner reserves at most `min(command count, old source count + creation count)` rows and
+  stores at most one row per distinct slot. The hash table is a power of two with at least
+  twice that row capacity; command links point forward within the input. Source capacity is
+  capped at 2^24 slots. All source, operation, journal, and timer reservations finish before
+  workers can write their ranges; row chunks clamp to the actual affected-row count. Layer and
+  stamp validation precede new-source grouping. Result writes stop at the command count.
+  Derived recombination reads exactly the 1,024 cells of each input page — the
   shared zero page holds 4,096 B, so an absent input reads zeros in bounds — and writes the
   1,024 cells of its own page; `int32` totals stay inside `±2^31` by the weight bound above.
   Stamps clip to grid rects before marking (extents clamp to the grid size in Q8;
@@ -853,7 +905,7 @@ buffers and tent/bell sum stores, and returns a pointer-free value snapshot. Its
 is O(source slots + grids × layers + map slots + catalog stamps); it does not scan cells.
 Memory includes allocated capacity, retained source/dirty buffers after `Clear`, every live tile
 block plus its dense, tent, and bell buffers where they exist, the per-(grid, layer) max pyramids,
-the deferred
+source-batch scratch capacity, the deferred
 op queue plus its pending column, and shared
 world/stamp arenas plus padded rasters. The selected world and
 process-wide shared allocations are reported separately; allocator metadata, alignment slack,

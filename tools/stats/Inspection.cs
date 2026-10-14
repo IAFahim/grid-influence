@@ -65,7 +65,11 @@ internal static unsafe class Inspection
             SourceCapacity = s->X.Capacity,
             GridBytes = World.MaxGrids * sizeof(GridCtx),
             LayerBytes = World.MaxLayers * sizeof(LayerRecipe),
-            ScratchBytes = TileBake.TileSize * sizeof(int),
+            ScratchBytes = TileBake.TileSize * sizeof(int) +
+                (long)w->BatchSources.Capacity * sizeof(SourceBatchEntry) +
+                (long)w->BatchCommands.Capacity * sizeof(SourceBatchLink) +
+                (long)w->BatchLookup.Capacity * sizeof(int) +
+                (long)w->BatchLayerDeltas.Capacity * sizeof(int),
             SourceBytes = (long)s->X.Capacity * sizeof(float) + (long)s->Y.Capacity * sizeof(float) +
                 s->Stamp.Capacity + s->Layer.Capacity + s->Gain.Capacity + s->Alive.Capacity +
                 ((long)s->Angle.Capacity + s->Scale.Capacity) * sizeof(ushort) +

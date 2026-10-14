@@ -70,6 +70,8 @@ internal static partial class Verification
         Check("sync-matches-move", SyncMatchesMove());
         Check("warm-crowded-process-allocates-0-bytes", WarmCrowdAllocationFree());
         Check("warm-column-batches-allocate-0-bytes", WarmColumnAllocationFree());
+        Check("source-batches-match-serial-and-allocate-0-bytes", SourceBatchesMatchSerialAndAllocateNothing());
+        Check("source-batches-retract-across-layers", SourceBatchesRetractAcrossLayers());
 
         Console.WriteLine(failures == 0 ? "verification: all receipts green" : $"verification: {failures} failures");
         return failures == 0 ? 0 : 1;

@@ -113,6 +113,34 @@ Mutations queue per source — a turn, a scale, a move, and a gain change in one
 one retract-and-apply pair — and a source placed and removed inside one window never
 touches a tile. Source ids pack a generation over the slot, so stale ids are inert.
 
+## Sealed source batches
+
+```csharp
+World.SourceCommand[] commands =
+[
+    World.SourceCommand.Place(food, 10.5f, 20.5f, dome, 8),
+    World.SourceCommand.Move(World.SourceTarget.CreatedBy(0), 12.5f, 22.5f),
+    World.SourceCommand.Turn(World.SourceTarget.CreatedBy(0), MathF.PI / 2),
+    World.SourceCommand.Scale(World.SourceTarget.CreatedBy(0), 1.5f),
+    World.SourceCommand.SetGain(World.SourceTarget.CreatedBy(0), 4),
+    World.SourceCommand.Fade(World.SourceTarget.CreatedBy(0), 0, 20),
+    World.SourceCommand.Expire(World.SourceTarget.CreatedBy(0), 20),
+    World.SourceCommand.Update(World.SourceTarget.Existing(me), 30.5f, 40.5f, 0f, 1f, 2),
+    World.SourceCommand.Remove(me)
+];
+var results = new World.SourceResult[commands.Length];
+if (World.ApplyBatch(world, commands, results) == World.BatchStatus.Applied)
+{
+    if (results[0].Status == World.SourceResultStatus.Applied) me = results[0].SourceId;
+    World.Process(world);
+}
+```
+
+Seal input and join producer jobs and Gi readers before calling. Input order is command order.
+Malformed structure rejects before output/source writes; stale sources and failed creations are
+per-command failures, so inspect result statuses even when the batch returns `Applied`. Ingestion
+does not tick; `Process` publishes the field. Native spans avoid the example's managed arrays.
+
 ## Time
 
 ```csharp

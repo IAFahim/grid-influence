@@ -7,8 +7,9 @@ world. Zero dependencies, unmanaged data path, 0 B allocation on warm Process/Qu
 
 Targets `net10.0` (with SSE2/AVX2/Neon paths) and `netstandard2.1` for engines such as Unity —
 the netstandard build compiles the same scalar paths that the intrinsics-off verification run
-exercises. Query paths allocate nothing and perform no static-construction calls, so Burst jobs
-can call `World.Query` and `World.QueryRegion` directly.
+exercises. Unity can record source inputs in Burst jobs, then call Gi from non-Burst code after
+the producer/read dependencies complete. Mutable Gi statics in a precompiled DLL are not a
+Burst-compatible API.
 
 ```csharp
 byte world  = World.New();
@@ -34,6 +35,12 @@ tells an agent whether its neighbourhood changed since a tick.
 if (World.TrySense(world, layer, x, y, exclude: mySource, out short others)) React(others);
 World.TrySenseNearest(world, food, x, y, reach: 40f, threshold: 50, out var v, out var fx, out var fy);
 ```
+
+`World.ApplyBatch` borrows sealed source-command and result spans, supports ordered creation,
+updates, removal, fades, and expiry, and parallelizes large batches over disjoint source slots.
+It does not advance time or touch tiles: call `Process` afterward. Complete producer writes and
+Gi readers before ingestion; direct calls and batch calls remain exclusive per world.
+See the [batch contract](https://github.com/IAFahim/grid-influence/blob/main/docs/batching.md).
 
 Full semantics, receipts, and the unsafe proof:
 [docs/model.md](https://github.com/IAFahim/grid-influence/blob/main/docs/model.md).

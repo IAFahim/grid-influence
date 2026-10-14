@@ -56,6 +56,13 @@ deposit into every grid they overlap at each grid's own scale. Every public call
 the ones this page never quotes, has a runnable example in
 [`docs/examples.md`](docs/examples.md).
 
+`World.ApplyBatch(world, commands, results)` ingests sealed source commands with ordered partial
+updates, creation results, fades, and expiry. Large batches prepare and write disjoint source
+slots using Gi's worker pool; `Process` remains the explicit deposit/tick boundary. Hosts can
+record concurrently into their own buffers, then join producers and Gi readers before ingestion.
+See [the batching contract and C# example](docs/batching.md). This API is in the local
+`1.2.0-alpha.1` development version; the published `1.1.0` package does not include it.
+
 ## Seven stamp kinds
 
 These dumps are actual `Query` output — each stamp placed at `(15.5, 15.5)` on a 32² grid with
@@ -692,7 +699,7 @@ dotnet run --project viz -c Release --no-build -- live               # http://12
 dotnet run --project tools/stats -c Release -- stats                 # internals as JSON
 ```
 
-- `src/Gi` — the package (`net10.0` + `netstandard2.1`; Burst-callable query paths)
+- `src/Gi` — the package (`net10.0` + `netstandard2.1`; Unity calls use non-Burst code)
 - `src/Gi.Validation` — optional validation for editors and tools
 - `tests/Gi.Tests` — oracle, crowd, and validation tests
 - `benchmarks` — the 59 receipts and all the numbers above

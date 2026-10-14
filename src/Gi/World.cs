@@ -159,6 +159,10 @@ internal unsafe struct WorldCtx
     public NativeBuffer<int> RebuildTails;
     public NativeBuffer<Placement> RebuildPlacements;
     public NativeBuffer<byte> RebuildPresent;
+    public NativeBuffer<SourceBatchEntry> BatchSources;
+    public NativeBuffer<SourceBatchLink> BatchCommands;
+    public NativeBuffer<int> BatchLookup;
+    public NativeBuffer<int> BatchLayerDeltas;
 }
 
 public static unsafe partial class World
@@ -247,6 +251,10 @@ public static unsafe partial class World
         w->RebuildTails.Free();
         w->RebuildPlacements.Free();
         w->RebuildPresent.Free();
+        w->BatchSources.Free();
+        w->BatchCommands.Free();
+        w->BatchLookup.Free();
+        w->BatchLayerDeltas.Free();
         *w = default;
         return true;
     }
@@ -576,9 +584,10 @@ public static unsafe partial class World
         for (var i = 0; i < count && !deferred; i++)
         {
             var probe = ops + i;
-            if ((w->Crowded & (1u << probe->ToLayer)) != 0) continue;
-            if (probe->FromGain != 0 && Heavy(probe->FromStamp, probe->FromAngle)) deferred = true;
-            else if (probe->ToGain != 0 && Heavy(probe->ToStamp, probe->ToAngle)) deferred = true;
+            if (probe->FromGain != 0 && (w->Crowded & (1u << probe->FromLayer)) == 0 &&
+                Heavy(probe->FromStamp, probe->FromAngle)) deferred = true;
+            else if (probe->ToGain != 0 && (w->Crowded & (1u << probe->ToLayer)) == 0 &&
+                Heavy(probe->ToStamp, probe->ToAngle)) deferred = true;
         }
 
         w->Fragments.Resize(0);
@@ -594,15 +603,13 @@ public static unsafe partial class World
                 w->Journal.Pointer[journalIndex] = *op;
             }
 
-            if ((w->Crowded & (1u << op->ToLayer)) != 0) continue;
-
-            if (op->FromGain != 0)
+            if (op->FromGain != 0 && (w->Crowded & (1u << op->FromLayer)) == 0)
             {
                 if (deferred) BuildDeposits(w, op->FromX, op->FromY, op->FromStamp, op->FromLayer, -op->FromGain, op->FromAngle, op->FromScale);
                 else Deposit(w, op->FromX, op->FromY, op->FromStamp, op->FromLayer, -op->FromGain, op->FromAngle, op->FromScale);
             }
 
-            if (op->ToGain != 0)
+            if (op->ToGain != 0 && (w->Crowded & (1u << op->ToLayer)) == 0)
             {
                 if (deferred) BuildDeposits(w, op->ToX, op->ToY, op->ToStamp, op->ToLayer, op->ToGain, op->ToAngle, op->ToScale);
                 else Deposit(w, op->ToX, op->ToY, op->ToStamp, op->ToLayer, op->ToGain, op->ToAngle, op->ToScale);
@@ -629,9 +636,8 @@ public static unsafe partial class World
         for (var i = 0; i < count; i++)
         {
             var op = ops + i;
-            var layer = op->ToLayer;
-            if (op->FromGain != 0) deposits[layer]++;
-            if (op->ToGain != 0) deposits[layer]++;
+            if (op->FromGain != 0) deposits[op->FromLayer]++;
+            if (op->ToGain != 0) deposits[op->ToLayer]++;
         }
 
         var s = &w->Sources;
@@ -1498,8 +1504,14 @@ public static unsafe partial class World
 
     private static void GrowSources(SourceColumns* s, WorldCtx* w)
     {
-        var capacity = Math.Max(64, s->X.Length * 2);
-        var live = s->Count;
+        EnsureSourceCapacity(s, w, Math.Max(64, s->X.Length * 2));
+    }
+
+    private static void EnsureSourceCapacity(SourceColumns* s, WorldCtx* w, int required)
+    {
+        var initialized = s->X.Length;
+        if (required <= initialized) return;
+        var capacity = Math.Min(MaxSourceSlots, Math.Max(required, Math.Max(64, initialized * 2)));
         s->X.Resize(capacity);
         s->Y.Resize(capacity);
         s->Stamp.Resize(capacity);
@@ -1518,9 +1530,9 @@ public static unsafe partial class World
         s->Free.Resize(capacity);
         s->Gen.Resize(capacity);
         w->Pending.Resize(capacity);
-        new Span<byte>(s->Gen.Pointer + live, capacity - live).Clear();
-        new Span<byte>(s->Timed.Pointer + live, capacity - live).Clear();
-        new Span<int>(w->Pending.Pointer + live, capacity - live).Clear();
+        new Span<byte>(s->Gen.Pointer + initialized, capacity - initialized).Clear();
+        new Span<byte>(s->Timed.Pointer + initialized, capacity - initialized).Clear();
+        new Span<int>(w->Pending.Pointer + initialized, capacity - initialized).Clear();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
