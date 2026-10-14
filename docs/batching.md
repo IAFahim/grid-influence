@@ -1,10 +1,14 @@
 # Deferred batches for concurrent hosts
 
 Design and implementation tracker: [source batches #34](https://github.com/IAFahim/grid-influence/issues/34),
-[tile preparation #35](https://github.com/IAFahim/grid-influence/issues/35).
+[tile preparation #35](https://github.com/IAFahim/grid-influence/issues/35),
+[revision tokens #37](https://github.com/IAFahim/grid-influence/issues/37),
+[transform-only updates #38](https://github.com/IAFahim/grid-influence/issues/38),
+[borrowed transform ranges #39](https://github.com/IAFahim/grid-influence/issues/39).
 `World.ApplyBatch`, source commands, creation targets, per-command results, the `World.Revision`
-token, and parallel tile footprint preparation are implemented in `1.2.0-alpha.2`. Direct
-mutations and batch calls remain
+token, and parallel tile footprint preparation are implemented in `1.2.0-alpha.2`; checked
+consumption with `World.Token`, `UpdateTransform`, and `World.SyncTransforms` land in
+`1.2.0-alpha.3`. Direct mutations and batch calls remain
 exclusive per world. Concurrent submissions belong in host-owned buffers, not concurrent `Place` calls.
 
 ## Processing contract
@@ -31,7 +35,8 @@ new inputs. One coordinator owns each Gi world across all host systems and ECS w
 | `World.Place` | Spawn bursts, persistent emitters, transient effects | Existing direct API keeps its immediate integer result. Deferred recording returns a scoped ticket; creation produces a real source ID or explicit failure. Same-batch commands may target the ticket. |
 | `Move`, `Turn`, `Scale`, `SetGain` | Movement, facing, size, combat/AI systems | Preserve partial-field updates and stable command order. A full-state input is a fast path only when one producer owns all those fields. `SetGain`, including setting the existing value, cancels fading. |
 | `UpdateTransform` | Every-frame pose snapshots of existing emitters | Exactly ordered `Move`+`Turn`+`Scale` — position, heading, and scale with the direct calls' comparisons and quantization — while never assigning gain or cancelling a fade/expiry. Use it for movement while effects fade; keep `Update`/`SetGain` for real gain changes. |
-| `World.Sync` | Many existing sources changing position together | Extend the existing column ingestion in `Column.cs`. Its current loop batches positions but mutates shared pending operations serially. Preserve stale-handle validation and position-comparison behavior. |
+| `World.Sync` | Many existing sources changing position together | Position-only column ingestion stays as it is: stale-handle validation and bit-exact position comparison, one coalescing pending op per source. |
+| `World.SyncTransforms` | Every-frame pose columns owned by a native host | Borrows compact ID/X/Y (+ optional heading/scale) native columns per `World.TransformRange` in caller order; null heading/scale preserves; stale rows report one mask bit instead of per-row results; no host flattening, command records, or result arrays. |
 | `Remove` | Despawn, owner destruction, expiry cleanup | Order against updates, cancel pending creations, and retain cleanup until acknowledged. A recycled slot must not let a stale source ID affect its new occupant. |
 | `Fade`, `Expire` | Effects, gameplay scheduling | Ordered operations, not plain last-value fields. Preserve cancellation, start gain, relative tick, journal entries, and ordering against `SetGain`/`Remove`. |
 | `Process`, `ProcessAll` | Explicit simulation phase | Consume only sealed, accepted work; tick once per chosen processing step. No producer may mutate the batch being consumed. |
@@ -191,6 +196,63 @@ does not restore host-side entity ownership: a paired ECS rollback must restore 
 source mapping. The 7-bit source-generation wrap is a separate limit and is not solved by a
 world token.
 
+## Borrowed transform ranges
+
+`World.SyncTransforms(token, ranges)` consumes the pose columns a native host already owns —
+ECS chunks, job outputs, or any stable native storage — without flattening them into commands.
+Each `World.TransformRange` (56 bytes) borrows an ID column (`int*`), X and Y columns
+(`float*`), optional heading and scale columns (`float*`; null preserves the current value),
+a row count, and an optional invalid mask (`ulong*` with `InvalidWords` words). A
+position-only row is 12 bytes of column payload; a full pose row is 20. There are zero full
+input copies — one planning scan reads the borrowed columns directly:
+
+```csharp
+var token = World.Capture(world);
+// Producers finished; each descriptor borrows stable native columns.
+ReadOnlySpan<World.TransformRange> ranges = stackalloc[]
+{
+    new World.TransformRange
+    {
+        Sources = sourceIds, Xs = xs, Ys = ys, Headings = headings, Scales = scales,
+        Invalid = invalidRows, InvalidWords = (count + 63) >> 6, Count = count
+    }
+};
+var status = World.SyncTransforms(token, ranges);
+if (status == World.BatchStatus.Applied)
+    World.Process(token);
+```
+
+Semantics: each row is exactly `UpdateTransform` — ordered `Move`+`Turn`+`Scale` that never
+assigns gain or cancels a fade/expiry — with one documented difference from the ordered calls:
+positions compare bit-exactly as in `World.Sync`, so `-0.0` and `+0.0` are different poses and
+NaN payload bits copy verbatim, where ordered `Move`/`UpdateTransform` compare with `==`.
+Heading and scale ignore non-finite values and quantize exactly like `Turn`/`Scale`. Rows
+apply in range order then row order; duplicate source IDs fold last-writer-wins into one
+merged pending op per source, with no host-side dedup. Invalid rows — dead, stale-generation,
+or out-of-range IDs — set their mask bit (bit `row & 63` of word `row >> 6`; cleared words
+leave tail bits zero, words beyond `(Count + 63) / 64` untouched) and the call still returns
+`Applied`, so partial staleness stays distinguishable from whole-call rejection.
+
+Validation happens in a fixed order before any output write or state change: the token first
+(`StaleRevision`/`InvalidWorld` — before any payload byte is read), then descriptor structure
+(`InvalidRange`: negative counts, missing required pointers, or `InvalidWords` below
+`(Count + 63) / 64`), then overflow (`TooManyCommands` past 16,777,216 total rows), then
+aliasing (`OverlappingBuffers` when a writable mask overlaps any column or another mask —
+read-only columns may share storage). A rejected call writes nothing: masks keep their
+contents and the world stays byte-identical.
+
+Paths and scratch: under 8,192 total rows one inline pass on the caller enqueues the same
+coalescing ops `Move`/`Turn`/`Scale` would, with zero scratch. Above that, a sequential
+caller-thread scan folds rows into one entry per unique source — seeded from the current
+columns, or from the slot's pending op so an unprocessed earlier edit merges rather than
+chains, preserving that op's original `From*` for rewind — and the existing pooled batch-apply
+phase writes source columns and ops in parallel before the workers join. Invalid bits are all
+written during the caller-thread scan, so no mask word has two writers. The retained O(N)
+scratch of the large path is one 136-byte batch entry plus 4 bytes of hash lookup per unique
+source — no per-row command links, no result rows, no flattened copy. The columns are borrowed
+only for the synchronous call and no caller pointer survives the return; the host retains the
+storage through the consumer handle and a producer must never write a consumed range.
+
 ## Verification before throughput claims
 
 `BatchSemanticsTests` establishes observable serial behavior for deferred visibility,
@@ -210,3 +272,7 @@ rejection, large parallel batches, duplicate fallback, and concurrent independen
 `dotnet run --project benchmarks -c Release -- --batch` checks parity and warm allocation before
 printing serial-versus-batch ingestion timing. It excludes host recording and tile processing
 from the timed interval; transport and end-to-end Unity timing require the host consumer.
+`dotnet run --project benchmarks -c Release -- --sync` does the same for borrowed ranges:
+parity against ordered calls and `ApplyBatch`, 0 B warm, then serial/batch/borrowed ingestion
+timing at 64, 4,096, 65,536, and 100,000 rows over a mixed unchanged/moving population with
+sparse lifecycle events, plus the payload and scratch figures above.

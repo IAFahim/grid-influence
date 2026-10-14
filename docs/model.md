@@ -13,8 +13,9 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   and `Clear`, `Rewind`, `Free`, and slot reuse bump it; mutations, `Process`, and `ProcessAll`
   leave it alone. `World.Capture(world)` seals the id and that revision into a `World.Token`
   (`IsValid` is false for an unallocated or freed slot, whose stored revision stays nonzero —
-  nonzero never implies existence). `World.ApplyBatch(token, …)`, `World.Sync(token, …)`, and
-  `World.Process(token)` validate the token inside Gi before reading command payloads, writing
+nonzero never implies existence). `World.ApplyBatch(token, …)`, `World.Sync(token, …)`,
+`World.SyncTransforms(token, …)`, and `World.Process(token)` validate the token inside Gi
+before reading command payloads, writing
   results, or touching source state, timers, journals, pending work, or ticks: an allocated
   world with a different revision returns `BatchStatus.StaleRevision`, a dead or never-allocated
   slot returns `BatchStatus.InvalidWorld`, and rejection leaves the world byte-identical. The
@@ -231,6 +232,29 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   batch after batch, with zero managed allocation. At 8,192 rows or more (and a free pool) the
   query batches fan out over the worker pool in 1,024-row chunks aligned to word boundaries so every
   mask word has one writer; smaller or contended batches run the identical loop serially.
+  `World.SyncTransforms(token, ranges)` borrows compact native pose columns through the same
+  boundary: each `World.TransformRange` names ID/X/Y columns plus optional heading/scale
+  columns (null preserves the current value), a row count, and an optional invalid mask.
+  Rows apply in range order then row order — duplicates fold last-writer-wins into one pending
+  op — with `UpdateTransform`'s field semantics but `Sync`'s bit-exact position compare:
+  `-0.0` and `+0.0` are different poses and NaN payload bits copy verbatim, where ordered
+  `Move`/`UpdateTransform` compare with `==`. Gain, fades, and expiry are never touched.
+  Stale/dead rows set their mask bit (bit `row & 63` of word `row >> 6`; cleared words leave
+  tail bits zero and untouched words keep their contents) instead of producing a per-row
+  result, and the call still returns `Applied`. Validation runs in a fixed order before any
+  write — token (`StaleRevision`/`InvalidWorld`), descriptor structure (`InvalidRange` for
+  negative counts, missing required pointers, or a mask shorter than `(Count + 63) / 64`
+  words), total rows over 16,777,216 (`TooManyCommands`), then mask aliasing
+  (`OverlappingBuffers` when a mask overlaps any column or another mask; read-only columns
+  may share storage) — so a rejected call leaves masks and world byte-identical. The columns
+  are borrowed only for the synchronous call: under 8,192 total rows one inline pass on the
+  caller enqueues the same coalescing ops `Move`/`Turn`/`Scale` would with zero scratch;
+  above that a single sequential planning scan folds rows into one entry per unique source —
+  seeded from the current columns, or from the slot's pending op so an unprocessed earlier
+  edit merges rather than chains, preserving that op's original `From*` for rewind — and the
+  existing pooled batch-apply phase writes source columns and ops in parallel before the
+  workers join. Invalid bits are set during the caller-thread scan, so no mask word ever has
+  two writers, and no caller pointer survives the return.
 - **Source batches** use `World.ApplyBatch` over a sealed `ReadOnlySpan<World.SourceCommand>`
   and caller-owned result span. Input order defines command order; pending creation targets
   reference an earlier `Place` index. Structural rejection writes no output and changes no source;
@@ -783,9 +807,11 @@ pass behind them was `perf`-profile guided, receipts first.
   alignment guarantee cannot be observed.
   Managed command/result arrays have their normal CLR alignment. Native spans must point to
   naturally aligned `SourceCommand`/`SourceResult` storage; no SIMD loads depend on their address.
+  Borrowed `TransformRange` columns follow the same rule at their real widths — `int` ids,
+  `float` positions/headings/scales, `ulong` mask words — with no per-row packing or decoding.
   Batch scratch uses the same aligned native buffers, and the layer-delta stride is 48 integers
   (192 bytes), keeping adjacent worker rows on separate cache lines.
-- **Concurrency**: `ApplyBatch`/`Sync`/`Place`/`Move`/`SetGain`/`Remove`/`Process`/`Record`/`StopRecording`/
+- **Concurrency**: `ApplyBatch`/`Sync`/`SyncTransforms`/`Place`/`Move`/`SetGain`/`Remove`/`Process`/`Record`/`StopRecording`/
   `Rewind` are serial per world; different
   worlds may run on different threads. `ProcessAll` is that serial-per-world rule walked over
   the allocated ids, ascending, on the calling thread — it adds no parallelism claim, it only

@@ -42,7 +42,7 @@ World.TrySenseNearest(world, food, x, y, reach: 40f, threshold: 50,
 bool moved = World.Changed(world, threat, x, y, reach: 16f, since: lastTick);
 int  tick  = World.Tick(world);
 int  rev   = World.Revision(world);     // moves on clear/rewind/free/reuse
-World.Token tok = World.Capture(world); // checked at consumption — ApplyBatch/Sync/Process
+World.Token tok = World.Capture(world); // checked at consumption — ApplyBatch/Sync/SyncTransforms/Process
                                         // token overloads reject a stale world inside Gi
 
 World.Remove(world, me);                 // exact negation — no rebuild, no residue
@@ -68,6 +68,10 @@ Hosts can record concurrently into their own buffers, then join producers and Gi
 before ingestion; `World.Capture(world)` seals a checked token, and the token overloads of
 `ApplyBatch`, `Sync`, and `Process` reject work recorded against a cleared, rewound, freed, or
 reused world inside Gi — before reading payloads or touching state.
+`World.SyncTransforms(token, ranges)` extends the same boundary to borrowed native pose columns:
+ID + X + Y plus optional heading/scale per `World.TransformRange`, applied in range order with
+gain and timers untouched, and stale rows reported as one invalid bit per row instead of a
+per-entity result array.
 See [the batching contract and C# example](docs/batching.md).
 
 ## Seven stamp kinds
@@ -381,20 +385,26 @@ The same batching serves agent loops. Kernels can take a Gi column like any othe
 
 ```csharp
 // fill a kernel column straight from the field (returns false only off every grid)
-Column.SenseColumn(world, threat, agentXs, agentYs, agentCount, threats, null);
+World.SenseColumn(world, threat, agentXs, agentYs, agentCount, threats, null);
 
 // one call per swarm, not one Changed per agent — emits the 64-bit words kernels consume
-Column.ChangedMask(world, threat, agentXs, agentYs, reach: 24f, since: lastDecision,
-                   count: agentCount, words: changedWords);
+World.ChangedMask(world, threat, agentXs, agentYs, reach: 24f, since: lastDecision,
+                  count: agentCount, words: changedWords);
 
 // move every agent that has a position column (sv slot space, ECS chunk, your own SoA)
-Column.Sync(world, sourceIds, newXs, newYs, count);
+World.Sync(world, sourceIds, newXs, newYs, count);
+
+// borrow whole pose columns — optional heading/scale, null preserves; one invalid bit per row
+World.SyncTransforms(token, ranges);
 ```
 
 `SenseColumn` reads agent coordinates as `float*` and writes `short*` values (plus optional
 whole-tile flags); `ChangedMask` writes one `ulong` per 64 agents, zeros for the quiet ones;
 `Sync` is the fused form of `Move` for a whole column — gen-validated, coalescing, zero managed
-allocation. At 8,192+ rows they fan out over the same worker pool as resolve.
+allocation. At 8,192+ rows they fan out over the same worker pool as resolve. `SyncTransforms`
+consumes the same host-native columns for full poses — 12 B per position-only row, 20 B with
+heading and scale, no flattening into commands, no per-row results — and reports stale rows as
+one mask bit instead.
 
 ## Speed
 
@@ -415,6 +425,8 @@ unless noted; `process` rows include the mutations.
 | place/move 200 boxes + `Process` | ~80–95 µs | deferred ops, pooled resolve |
 | 4,000 bells 16×16 + 200 moves, `Process` stages | 280 µs total | prep 74 / apply 50 / resolve 156 — parallel build; serial build totals 818 µs (`--stages`) |
 | 65,536 transform updates via `ApplyBatch` | 2,061 µs | 31.8M rows/s — `UpdateTransform` snapshots preserve fades, 0 B warm (`--batch`) |
+| 65,536 borrowed transform rows via `SyncTransforms` | 2,183 µs | 30.0M rows/s — host-native columns, 20 B/row pose, 1 bit/row mask, 0 B warm (`--sync`) |
+| 100,000 borrowed transform rows | 3,389 µs | 29.5M rows/s — serial loop 1,854 µs, `ApplyBatch` 2,971 µs at this size (`--sync`) |
 | place 200 tents 16×16 + `Process` | ~110 µs | exact sums per cell |
 | place 200 bells 16×16 + `Process` | ~150–195 µs | exact sums per cell |
 | turn 200 vision cones (r=16, 90°) + `Process` | ~320 µs | per-cell round kernel |
@@ -594,7 +606,7 @@ Full semantics and the unsafe lifetime/aliasing/alignment/concurrency proof live
 ## Receipts
 
 Every claim above is asserted, not documented. `dotnet run --project benchmarks -c Release --
---verify` runs all 63 receipts before printing a single timing — with and without hardware
+--verify` runs all 64 receipts before printing a single timing — with and without hardware
 intrinsics:
 
 | receipts | what they pin down |
@@ -617,6 +629,7 @@ intrinsics:
 | `warm-crowded-process-allocates-0-bytes`, `warm-column-batches-allocate-0-bytes` | 0 B for crowded `Process` and column batches, warm |
 | `source-batches-match-serial-and-allocate-0-bytes`, `source-batches-retract-across-layers` | sealed batch ingestion equals serial calls cell for cell and rewinds across layers, 0 B warm |
 | `transform-updates-match-ordered-calls` | `UpdateTransform` batches equal ordered `Move`+`Turn`+`Scale` on every cell while fades keep running, 0 B warm |
+| `sync-transforms-match-ordered-calls` | borrowed `SyncTransforms` ranges equal ordered calls and `ApplyBatch` on every cell through stale rows, fades, and pending merges, 0 B warm |
 | `parallel-deposit-prep-matches-serial` | pooled tile preparation equals the serial build on every cell across shapes, grids, layers, saturation, churn, and changed tiles, 0 B warm |
 
 ## Cookbook
@@ -720,7 +733,7 @@ dotnet run --project tools/stats -c Release -- stats                 # internals
 - `src/Gi` — the package (`net10.0` + `netstandard2.1`; Unity calls use non-Burst code)
 - `src/Gi.Validation` — optional validation for editors and tools
 - `tests/Gi.Tests` — oracle, crowd, and validation tests
-- `benchmarks` — the 63 receipts and all the numbers above
+- `benchmarks` — the 64 receipts and all the numbers above
 - `samples/world` — console walkthrough; `samples/unity-demo` — sheep/wolf ecosystem on
   `TrySense`, with turned vision cones, a derived comfort layer, and fading paint
 - `viz` — static HTML render (round stamps, derived layers, fades) + live WebSocket ecosystem

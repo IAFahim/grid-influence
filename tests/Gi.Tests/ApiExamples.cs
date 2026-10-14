@@ -447,4 +447,46 @@ public sealed class ApiExamples
             World.Process(w);
         }
     }
+
+    [Fact]
+    public unsafe void Worlds_BorrowedTransformRanges()
+    {
+        var w = World.New();
+        var g = Grid.New(w, 8, 0f, 0f, 256f);
+        var l = Layer.New(w);
+        var ids = new int[65];
+        var xs = new float[65];
+        var ys = new float[65];
+        for (var i = 0; i < ids.Length; i++)
+        {
+            ids[i] = World.Place(w, l, 10f + i * 3, 10f, Box2, 4);
+            xs[i] = 10f + i * 3;
+            ys[i] = 20f;
+        }
+
+        World.Process(w);
+        World.Remove(w, ids[64]);
+        fixed (int* idp = ids)
+        fixed (float* xp = xs)
+        fixed (float* yp = ys)
+        {
+            var invalid = stackalloc ulong[2];
+            var range = stackalloc World.TransformRange[1];
+            range[0] = new World.TransformRange
+            {
+                Sources = idp, Xs = xp, Ys = yp,
+                Invalid = invalid, InvalidWords = 2, Count = ids.Length
+            };
+            Assert.Equal(
+                World.BatchStatus.Applied,
+                World.SyncTransforms(World.Capture(w), new ReadOnlySpan<World.TransformRange>(range, 1)));
+            Assert.Equal(0UL, invalid[0]);
+            Assert.Equal(1ul << 0, invalid[1]);
+            World.Process(w);
+            Assert.Equal(4 * 40, World.Query(w, g, l, 10, 20));
+            Assert.Equal(0, World.Query(w, g, l, 10, 10));
+        }
+
+        Assert.True(World.Free(w));
+    }
 }

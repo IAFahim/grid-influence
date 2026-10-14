@@ -31,7 +31,8 @@ int  rev  = World.Revision(world);     // changes on Clear, Rewind, Free, and ha
 World.Token token = World.Capture(world);   // seals (world id, revision); IsValid is false
                                             // for an unallocated or freed slot
 // Later, after producers finish and readers join:
-//   World.ApplyBatch(token, commands, results) and World.Sync(token, …) return
+//   World.ApplyBatch(token, commands, results), World.Sync(token, …), and
+//   World.SyncTransforms(token, ranges) return
 //   BatchStatus.StaleRevision for a cleared/rewound/freed/reused world and
 //   BatchStatus.InvalidWorld for a dead slot — before touching any state.
 //   World.Process(token) applies the same check before ticking.
@@ -158,6 +159,35 @@ per-command failures, so inspect result statuses even when the batch returns `Ap
 does not tick; `Process` publishes the field. Native spans avoid the example's managed arrays.
 `UpdateTransform` is the every-frame movement snapshot: exactly `Move`+`Turn`+`Scale`, so an
 active fade keeps running (unlike `Update`, whose gain assignment cancels it).
+
+## Borrowed transform ranges
+
+```csharp
+// host-owned native pose columns (ECS chunk, job output, your own SoA)
+ReadOnlySpan<World.TransformRange> ranges = stackalloc[]
+{
+    new World.TransformRange
+    {
+        Sources = ids, Xs = xs, Ys = ys,        // required — 12 B of payload per row
+        Headings = headings, Scales = scales,   // optional — null preserves; full pose 20 B
+        Invalid = staleRows, InvalidWords = (count + 63) >> 6,
+        Count = count
+    }
+};
+if (World.SyncTransforms(token, ranges) == World.BatchStatus.Applied)
+    World.Process(token);
+```
+
+Each row is `UpdateTransform` with `World.Sync`'s bit-exact position compare — `-0.0` and
+`+0.0` are different poses and NaN bits copy verbatim — while heading/scale ignore non-finite
+values and quantize exactly like `Turn`/`Scale`. Rows apply in range order then row order;
+duplicate ids fold into one merged pending op with the last row winning. Gain, fades, and
+expiry are never touched. Dead or stale-generation ids set their invalid mask bit — bit
+`row & 63` of word `row >> 6`, tail bits zero — instead of producing a result row, and the
+call still returns `Applied`. Malformed descriptors, short masks, mask/column aliasing, or a
+stale token reject the whole call before any write. Under 8,192 rows the loop runs inline with
+zero scratch; above it a planning scan and the pooled apply reuse the source-batch machinery,
+with workers joined before the call returns.
 
 ## Time
 
