@@ -418,16 +418,8 @@ internal static unsafe partial class TileBake
 
         *pageSum = (long)sumLo[0] + sumLo[1] + sumLo[2] + sumLo[3] +
             sumHi[0] + sumHi[1] + sumHi[2] + sumHi[3];
-        *pageMax = HorizontalMax16(maximum);
+        *pageMax = SimdOps.HorizontalMax(maximum);
         return !Vector256.EqualsAll(acc, Vector256<int>.Zero);
-    }
-
-    private static short HorizontalMax16(Vector128<short> v)
-    {
-        var best = v[0];
-        for (var i = 1; i < 8; i++)
-            if (v[i] > best) best = v[i];
-        return best;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

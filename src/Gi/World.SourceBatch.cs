@@ -108,15 +108,18 @@ public static unsafe partial class World
             if (float.IsFinite(command.HeadingRadians)) angle = QuantizeSourceBatchAngle(command.HeadingRadians);
             var scale = source->Scale.Pointer[slot];
             if (float.IsFinite(command.ScaleValue)) scale = QuantizeSourceBatchScale(command.ScaleValue);
+            var finitePosition = float.IsFinite(command.PositionX) && float.IsFinite(command.PositionY);
+            var positionX = finitePosition ? command.PositionX : source->X.Pointer[slot];
+            var positionY = finitePosition ? command.PositionY : source->Y.Pointer[slot];
             if (command.Kind == SourceCommandKind.UpdateTransform)
             {
-                if (command.PositionX != source->X.Pointer[slot] || command.PositionY != source->Y.Pointer[slot] ||
+                if (positionX != source->X.Pointer[slot] || positionY != source->Y.Pointer[slot] ||
                     angle != source->Angle.Pointer[slot] || scale != source->Scale.Pointer[slot])
                 {
-                    EnqueueMutation(context, source, slot, command.PositionX, command.PositionY,
+                    EnqueueMutation(context, source, slot, positionX, positionY,
                         (sbyte)source->Gain.Pointer[slot], angle, scale, true);
-                    source->X.Pointer[slot] = command.PositionX;
-                    source->Y.Pointer[slot] = command.PositionY;
+                    source->X.Pointer[slot] = positionX;
+                    source->Y.Pointer[slot] = positionY;
                     source->Angle.Pointer[slot] = angle;
                     source->Scale.Pointer[slot] = scale;
                 }
@@ -132,18 +135,18 @@ public static unsafe partial class World
                 source->Timed.Pointer[slot] &= unchecked((byte)~Fading);
             }
 
-            if (command.PositionX != source->X.Pointer[slot] || command.PositionY != source->Y.Pointer[slot] ||
+            if (positionX != source->X.Pointer[slot] || positionY != source->Y.Pointer[slot] ||
                 angle != source->Angle.Pointer[slot] || scale != source->Scale.Pointer[slot] || gain != source->Gain.Pointer[slot])
             {
-                EnqueueMutation(context, source, slot, command.PositionX, command.PositionY, (sbyte)gain, angle, scale, true);
+                EnqueueMutation(context, source, slot, positionX, positionY, (sbyte)gain, angle, scale, true);
                 if (gain != source->Gain.Pointer[slot])
                 {
                     if (gain == 0) context->LayerLive[source->Layer.Pointer[slot]]--;
                     else if (source->Gain.Pointer[slot] == 0) context->LayerLive[source->Layer.Pointer[slot]]++;
                 }
 
-                source->X.Pointer[slot] = command.PositionX;
-                source->Y.Pointer[slot] = command.PositionY;
+                source->X.Pointer[slot] = positionX;
+                source->Y.Pointer[slot] = positionY;
                 source->Angle.Pointer[slot] = angle;
                 source->Scale.Pointer[slot] = scale;
                 source->Gain.Pointer[slot] = gain;
@@ -235,6 +238,12 @@ public static unsafe partial class World
                 if (!StampCatalog.Valid(command.Stamp))
                 {
                     results[index] = new SourceResult(-1, SourceResultStatus.InvalidStamp);
+                    continue;
+                }
+
+                if (!float.IsFinite(command.PositionX) || !float.IsFinite(command.PositionY))
+                {
+                    results[index] = new SourceResult(-1, SourceResultStatus.InvalidSource);
                     continue;
                 }
 
@@ -517,6 +526,7 @@ public static unsafe partial class World
 
     private static void FoldSourceMove(SourceBatchEntry* entry, ref SourceBatchState state, float positionX, float positionY, int index)
     {
+        if (!float.IsFinite(positionX) || !float.IsFinite(positionY)) return;
         if (state.PositionX == positionX && state.PositionY == positionY) return;
         state.PositionX = positionX;
         state.PositionY = positionY;

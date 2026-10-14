@@ -28,5 +28,5 @@ internal static class ValidationRules
     internal static bool IsPower(int power) => power >= MinPower && power <= MaxPower;
     internal static bool IsWeight(int weight) => weight >= -MaxWeight && weight <= MaxWeight;
     internal static bool IsShift(int shift) => shift >= 0 && shift <= MaxShift;
-    internal static bool IsGridSize(float size) => size > 0f && !float.IsInfinity(size);
+    internal static bool IsGridSize(float size) => float.IsFinite(size) && size > 0f;
 }

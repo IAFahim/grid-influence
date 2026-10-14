@@ -1,7 +1,5 @@
 #if NET
 using System.Runtime.Intrinsics;
-using System.Runtime.Intrinsics.Arm;
-using System.Runtime.Intrinsics.X86;
 #endif
 
 namespace Gi;
@@ -251,27 +249,19 @@ internal unsafe struct MaxPyramid
         if (vx == FanOut && vy == FanOut)
         {
 #if NET
-            if (Avx2.IsSupported)
+            if (Vector256.IsHardwareAccelerated)
             {
-                var v = Avx.LoadVector256(slots);
-                v = Avx2.Max(v, Avx.LoadVector256(slots + 16));
-                v = Avx2.Max(v, Avx.LoadVector256(slots + 32));
-                v = Avx2.Max(v, Avx.LoadVector256(slots + 48));
-                return HorizontalMax(Sse2.Max(v.GetLower(), v.GetUpper()));
+                var v = Vector256.Max(Vector256.Load(slots), Vector256.Load(slots + 16));
+                v = Vector256.Max(v, Vector256.Load(slots + 32));
+                v = Vector256.Max(v, Vector256.Load(slots + 48));
+                return SimdOps.HorizontalMax(v);
             }
 
-            if (Sse2.IsSupported)
+            if (Vector128.IsHardwareAccelerated)
             {
-                var v = Sse2.LoadVector128(slots);
-                for (var i = 8; i < NodeSlots; i += 8) v = Sse2.Max(v, Sse2.LoadVector128(slots + i));
-                return HorizontalMax(v);
-            }
-
-            if (AdvSimd.IsSupported)
-            {
-                var v = AdvSimd.LoadVector128(slots);
-                for (var i = 8; i < NodeSlots; i += 8) v = AdvSimd.Max(v, AdvSimd.LoadVector128(slots + i));
-                return HorizontalMax(v);
+                var v = Vector128.Load(slots);
+                for (var i = 8; i < NodeSlots; i += 8) v = Vector128.Max(v, Vector128.Load(slots + i));
+                return SimdOps.HorizontalMax(v);
             }
 #endif
         }
@@ -287,32 +277,10 @@ internal unsafe struct MaxPyramid
         return best;
     }
 
-#if NET
-    private static short HorizontalMax(Vector128<short> v)
-    {
-        var best = v[0];
-        for (var i = 1; i < 8; i++)
-            if (v[i] > best) best = v[i];
-        return best;
-    }
-#endif
-
     private static int FirstEqual(short* slots, short target, int vx, int vy)
     {
 #if NET
-        if (Sse2.IsSupported)
-        {
-            var goal = Vector128.Create(target);
-            var lanes = (1 << (vx << 1)) - 1;
-            for (var y = 0; y < vy; y++)
-            {
-                var row = slots + y * FanOut;
-                var mask = Sse2.MoveMask(Sse2.CompareEqual(Sse2.LoadVector128(row), goal).AsByte()) & lanes;
-                if (mask != 0) return y * FanOut + TrailingZeros(mask) / 2;
-            }
-
-            return NodeSlots;
-        }
+        if (Vector128.IsHardwareAccelerated) return SimdOps.FirstEqualRows(slots, FanOut, target, vx, vy);
 #endif
         for (var y = 0; y < vy; y++)
         {
@@ -327,42 +295,10 @@ internal unsafe struct MaxPyramid
     private static int FirstEqualFlat(short* values, short target, int count)
     {
 #if NET
-        if (Avx2.IsSupported)
-        {
-            var goal = Vector256.Create(target);
-            for (var i = 0; i < count; i += 16)
-            {
-                var mask = Avx2.MoveMask(Avx2.CompareEqual(Avx.LoadVector256(values + i), goal).AsByte());
-                if (mask != 0) return i + TrailingZeros(mask) / 2;
-            }
-
-            return count;
-        }
-
-        if (Sse2.IsSupported)
-        {
-            var goal = Vector128.Create(target);
-            for (var i = 0; i < count; i += 8)
-            {
-                var mask = Sse2.MoveMask(Sse2.CompareEqual(Sse2.LoadVector128(values + i), goal).AsByte());
-                if (mask != 0) return i + TrailingZeros(mask) / 2;
-            }
-
-            return count;
-        }
+        if (Vector128.IsHardwareAccelerated || Vector256.IsHardwareAccelerated) return SimdOps.FirstEqualFlat(values, target, count);
 #endif
         for (var i = 0; i < count; i++)
             if (values[i] == target) return i;
         return count;
     }
-
-#if NET
-    private static int TrailingZeros(int value)
-    {
-        var isolate = value & -value;
-        var count = 0;
-        while ((isolate >>= 1) != 0) count++;
-        return count;
-    }
-#endif
 }

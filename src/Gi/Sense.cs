@@ -1,7 +1,6 @@
 using System.Runtime.CompilerServices;
 #if NET
 using System.Runtime.Intrinsics;
-using System.Runtime.Intrinsics.X86;
 #endif
 
 namespace Gi;
@@ -299,24 +298,7 @@ public static unsafe partial class World
     private static short SegmentMax(short* row, int a, int b)
     {
 #if NET
-        if (Avx2.IsSupported)
-        {
-            var low = Vector256.Create(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
-            var high = low + Vector256.Create((short)16);
-            var from = Vector256.Create((short)(a - 1));
-            var to = Vector256.Create((short)b);
-            var floor = Vector256.Create(short.MinValue);
-            var v0 = Avx2.BlendVariable(floor, Avx.LoadVector256(row),
-                (Avx2.CompareGreaterThan(low, from) & Avx2.CompareGreaterThan(to, low)).AsByte().AsInt16());
-            var v1 = Avx2.BlendVariable(floor, Avx.LoadVector256(row + 16),
-                (Avx2.CompareGreaterThan(high, from) & Avx2.CompareGreaterThan(to, high)).AsByte().AsInt16());
-            var m = Avx2.Max(v0, v1);
-            var h = Sse2.Max(m.GetLower(), m.GetUpper());
-            h = Sse2.Max(h, Sse2.ShuffleHigh(Sse2.ShuffleLow(h, 0x4e), 0x4e));
-            h = Sse2.Max(h, Sse2.Shuffle(h.AsInt32(), 0x4e).AsInt16());
-            h = Sse2.Max(h, Sse2.ShuffleLow(Sse2.ShuffleHigh(h, 0xb1), 0xb1));
-            return h.ToScalar();
-        }
+        if (Vector128.IsHardwareAccelerated || Vector256.IsHardwareAccelerated) return SimdOps.SegmentMax(row, a, b);
 #endif
         var best = row[a];
         for (var i = a + 1; i < b; i++)
@@ -327,6 +309,9 @@ public static unsafe partial class World
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int FirstEqual(short* row, int a, int b, short value)
     {
+#if NET
+        if (Vector128.IsHardwareAccelerated || Vector256.IsHardwareAccelerated) return SimdOps.FirstEqualSpan(row, a, b, value);
+#endif
         for (var i = a; i < b; i++)
             if (row[i] == value) return i;
         return b;
@@ -500,29 +485,7 @@ public static unsafe partial class World
     private static long RaggedSum(short* rows0, int tileX, int rows, int* lo, int* hi)
     {
 #if NET
-        if (Avx2.IsSupported)
-        {
-            var low = Vector256.Create(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
-            var high = low + Vector256.Create((short)16);
-            var ones = Vector256.Create((short)1);
-            var acc = Vector256<int>.Zero;
-            for (var r = 0; r < rows; r++)
-            {
-                var a = Math.Max(lo[r], tileX) - tileX;
-                var b = Math.Min(hi[r], tileX + TileBake.TileSize) - tileX;
-                if (b <= a) continue;
-
-                var from = Vector256.Create((short)(a - 1));
-                var to = Vector256.Create((short)b);
-                var row = rows0 + r * TileBake.TileSize;
-                var v0 = Avx.LoadVector256(row) & Avx2.CompareGreaterThan(low, from) & Avx2.CompareGreaterThan(to, low);
-                var v1 = Avx.LoadVector256(row + 16) & Avx2.CompareGreaterThan(high, from) & Avx2.CompareGreaterThan(to, high);
-                acc += Avx2.MultiplyAddAdjacent(v0, ones) + Avx2.MultiplyAddAdjacent(v1, ones);
-            }
-
-            var lanes = acc.GetLower() + acc.GetUpper();
-            return (long)lanes[0] + lanes[1] + lanes[2] + lanes[3];
-        }
+        if (Vector128.IsHardwareAccelerated || Vector256.IsHardwareAccelerated) return SimdOps.RaggedSum(rows0, tileX, rows, lo, hi);
 #endif
         var sum = 0L;
         for (var r = 0; r < rows; r++)
@@ -639,30 +602,15 @@ public static unsafe partial class World
     #endif
     private static long LinearDelta(short* page, int* core, int top, int rows, int* lo, int* hi)
     {
+#if NET
+        if (Vector128.IsHardwareAccelerated || Vector256.IsHardwareAccelerated) return SimdOps.LinearDelta(page, core, top, rows, lo, hi);
+#endif
         const int n = TileBake.TileSize;
         var delta = 0L;
         for (var r = 0; r < rows; r++)
         {
             var row = (top + r) * n;
-            var c = lo[r];
-#if NET
-            if (Avx2.IsSupported && page != null)
-            {
-                var floor = Vector256.Create((int)short.MinValue);
-                var ceiling = Vector256.Create((int)short.MaxValue);
-                var acc = Vector256<int>.Zero;
-                for (; c + 8 <= hi[r]; c += 8)
-                {
-                    var p = Avx2.ConvertToVector256Int32(page + row + c);
-                    var absent = Avx2.Min(Avx2.Max(p - Avx.LoadVector256(core + row + c), floor), ceiling);
-                    acc += absent - p;
-                }
-
-                var lanes = acc.GetLower() + acc.GetUpper();
-                delta += (long)lanes[0] + lanes[1] + lanes[2] + lanes[3];
-            }
-#endif
-            for (; c < hi[r]; c++)
+            for (var c = lo[r]; c < hi[r]; c++)
             {
                 var p = page == null ? (short)0 : page[row + c];
                 delta += Saturate((long)p - core[row + c]) - p;

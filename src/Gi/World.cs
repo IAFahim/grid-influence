@@ -263,6 +263,44 @@ public static unsafe partial class World
 
     public static int Revision(byte world) => world < _worldCount ? Runtime.WorldRevisions[world] : 0;
 
+    public readonly struct SourceSpec
+    {
+        public readonly float X;
+        public readonly float Y;
+        public readonly float HeadingRadians;
+        public readonly float Scale;
+        public readonly sbyte Gain;
+        public readonly byte Layer;
+        public readonly byte Stamp;
+
+        internal SourceSpec(float x, float y, float headingRadians, float scale, sbyte gain, byte layer, byte stamp)
+        {
+            X = x;
+            Y = y;
+            HeadingRadians = headingRadians;
+            Scale = scale;
+            Gain = gain;
+            Layer = layer;
+            Stamp = stamp;
+        }
+    }
+
+    public static bool TryGetSourceSpec(byte world, int source, out SourceSpec spec)
+    {
+        spec = default;
+        if (!TrySource(world, source, out var w, out var s, out var i)) return false;
+
+        spec = new SourceSpec(
+            s->X.Pointer[i],
+            s->Y.Pointer[i],
+            s->Angle.Pointer[i] * ((float)Math.PI * 2 / 65536),
+            s->Scale.Pointer[i] / 256f,
+            (sbyte)s->Gain.Pointer[i],
+            s->Layer.Pointer[i],
+            s->Stamp.Pointer[i]);
+        return true;
+    }
+
     public static int CopyWorldIds(Span<byte> destination)
     {
         var count = 0;
@@ -388,7 +426,8 @@ public static unsafe partial class World
     public static int Place(byte world, byte layer, float x, float y, byte stamp, sbyte gain)
     {
         var w = GetContext(world);
-        if (w == null || layer >= w->LayerCount || !StampCatalog.Valid(stamp) || IsDerived(w, layer)) return -1;
+        if (w == null || layer >= w->LayerCount || !StampCatalog.Valid(stamp) || IsDerived(w, layer) ||
+            !float.IsFinite(x) || !float.IsFinite(y)) return -1;
 
         var s = &w->Sources;
         int i;
@@ -424,6 +463,7 @@ public static unsafe partial class World
 
     public static void Move(byte world, int source, float x, float y)
     {
+        if (!float.IsFinite(x) || !float.IsFinite(y)) return;
         if (!TrySource(world, source, out var w, out var s, out var i)) return;
 
         var oldX = s->X.Pointer[i];

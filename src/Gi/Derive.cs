@@ -259,10 +259,7 @@ public static unsafe partial class World
         }
 
         *pageSum = Vector256.Sum(acc);
-        var max = short.MinValue;
-        for (var k = 0; k < Vector256<short>.Count; k++)
-            if (top.GetElement(k) > max) max = top.GetElement(k);
-        *pageMax = max;
+        *pageMax = SimdOps.HorizontalMax(top);
         return !Vector256.EqualsAll(any, Vector256<short>.Zero);
     }
 
@@ -321,10 +318,7 @@ public static unsafe partial class World
         }
 
         *pageSum = Vector128.Sum(acc);
-        var max = short.MinValue;
-        for (var k = 0; k < Vector128<short>.Count; k++)
-            if (top.GetElement(k) > max) max = top.GetElement(k);
-        *pageMax = max;
+        *pageMax = SimdOps.HorizontalMax(top);
         return !Vector128.EqualsAll(any, Vector128<short>.Zero);
     }
 #endif

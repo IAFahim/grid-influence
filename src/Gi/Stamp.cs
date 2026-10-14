@@ -249,6 +249,61 @@ internal static unsafe class StampCatalog
 
 public static unsafe class Stamp
 {
+    public enum Shape : byte
+    {
+        Box,
+        Raster,
+        Tent,
+        Bell,
+        Disk,
+        Cone,
+        Dome,
+    }
+
+    public readonly struct Spec
+    {
+        public readonly Shape StampShape;
+        public readonly int Width;
+        public readonly int Height;
+        public readonly sbyte Value;
+        public readonly int ArcDegrees;
+
+        internal Spec(Shape stampShape, int width, int height, sbyte value, int arcDegrees)
+        {
+            StampShape = stampShape;
+            Width = width;
+            Height = height;
+            Value = value;
+            ArcDegrees = arcDegrees;
+        }
+    }
+
+    public static bool TryGetSpec(byte stamp, out Spec spec)
+    {
+        spec = default;
+        if (!StampCatalog.Valid(stamp)) return false;
+
+        var v = StampCatalog.Get(stamp);
+        spec = new Spec(
+            ShapeOf(v->Kind),
+            v->Width,
+            v->Height,
+            v->Constant,
+            v->Arc == 0 ? ValidationRules.FullArc : (v->Arc * ValidationRules.FullArc + ValidationRules.FullArc - 1) / 32768);
+        return true;
+    }
+
+    private static Shape ShapeOf(StampKind kind) => kind switch
+    {
+        StampKind.ConstantRectangle => Shape.Box,
+        StampKind.Raster => Shape.Raster,
+        StampKind.Tent => Shape.Tent,
+        StampKind.Bell => Shape.Bell,
+        StampKind.Disk => Shape.Disk,
+        StampKind.Cone => Shape.Cone,
+        _ => Shape.Dome,
+    };
+
     public static byte New(sbyte* data, ushort width, ushort height)
         => StampCatalog.Bake(data, width, height);
 

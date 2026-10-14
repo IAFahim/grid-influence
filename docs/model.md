@@ -33,7 +33,9 @@ before reading command payloads, writing
   constructor arguments — the world extent is stored, not recovered from the truncated
   scale, so the spec round-trips bit-exact. `Layer.Count(world)` and
   `Layer.CopyIds(world, ids)` enumerate layers the same way, deposited and derived sharing
-  one dense id space. A layer
+  one dense id space, and `Layer.TryGetRecipe(world, layer, out recipe)` inspects any live
+  layer's `Layer.Recipe` (`Layer.Derivation` operator plus input layers, weights, shift, and
+  mask bounds). A layer
   (`Layer.New(world)`) is an independent field channel present on every grid. A layer either
   receives deposits (`Layer.New`) or is **derived** (`Layer.Sum`/`Min`/`Max`/
   `Mask`): its cells are a pure function of other layers' cells, maintained by `Process` (below).
@@ -103,9 +105,14 @@ before reading command payloads, writing
   `Stamp.Free(stamp)` returns a stamp's id to the catalog — only while no source in any world
   uses it, no pending op or journal entry names it — frees its samples, and the next creation
   reuses the lowest free id; a freed id places nothing (`Place` returns `-1`) until it is
-  reissued.
+  reissued. `Stamp.TryGetSpec(stamp, out spec)` returns a live stamp's `Stamp.Spec`
+  (`Stamp.Shape`, cell width and height, peak `sbyte` value, and exact `ArcDegrees` 1–360) and
+  `false` for `0` or a freed handle.
 - **Sources** are persistent placements: `World.Place(world, layer, x, y, stamp, gain)` returns an
-  int id; `Move`/`SetGain`/`Remove`/`Clear` mutate it. `gain` is an integer −16–16 (stored as one
+  int id (`-1` when the world, layer, or stamp is invalid, the layer is derived, or `x`/`y` is
+  non-finite); `Move`/`SetGain`/`Remove`/`Clear` mutate it (`Move` ignores non-finite `x`/`y`
+  coordinates; `World.TryGetSourceSpec(world, id, out spec)` reads a live source's current
+  position, quantized heading in radians, quantized scale, gain, layer, and stamp). `gain` is an integer −16–16 (stored as one
   `sbyte`-ranged byte; deltas deposit exactly, so a negative gain subtracts). The id packs a
   7-bit generation above a 24-bit slot index; `Remove` recycles the slot through a per-world free
   list and the next fill of that slot bumps its generation, so a stale id (dead slot, recycled
@@ -224,7 +231,13 @@ before reading command payloads, writing
   whole)` walks the pointer arrays the way a kernel walks a column: it senses each agent's
   position (the same grid-picking, exclusion-free path as `TrySense`) and writes the `short`
   value, optionally a `ulong` word per 64 agents flagging whole-tile answers; it returns
-  `false` only when some agent stands off every grid. `World.ChangedMask(world, layer, xs, ys,
+  `false` only when some agent stands off every grid. The overload
+  `World.SenseColumn(world, layer, xs, ys, excludes, count, values, whole)` adds an optional
+  per-row `excludes` column (`null` or `< 0` senses without exclusion; `>= 0` excludes that
+  source bit-exactly via `TrySense`), and `SenseGradientColumn`, `SenseAreaColumn`,
+  `SenseMaxColumn`, and `SenseNearestColumn` provide the matching columnar forms for
+  `TrySenseGradient`, `TrySenseArea`, `TrySenseMax`, and `TrySenseNearest` (writing `found`
+  bits where `value != short.MinValue`). `World.ChangedMask(world, layer, xs, ys,
   reach, since, count, words)` writes one `ulong` per 64 agents — bit set when that agent's
   disk changed since the tick — zeros for quiet words, and returns the changed count.
   `World.Sync(world, sources, xs, ys, count)` is the fused column form of `Move`: it
@@ -639,6 +652,9 @@ world rect at its own cell density; a source deposits into every grid it overlap
   `since` equals the oracle set, and `Clear` reads as a change.
 - `sense-nearest-matches-scan` — 1,200 probes over the four-grid sense world at nine thresholds:
   value, world position, and completeness equal a full disk scan on the picked grid.
+- `sense-columns-match-scalar` — `SenseColumn` (with `excludes`), `SenseGradientColumn`,
+  `SenseAreaColumn`, `SenseMaxColumn`, and `SenseNearestColumn` match their scalar `TrySense*`
+  counterparts value-for-value and mask-bit-for-mask-bit, and allocate 0 B warm.
 - `warm-derived-process-allocates-0-bytes`, `warm-turned-process-allocates-0-bytes`,
   `warm-fade-process-allocates-0-bytes` — steady-state frames with derived layers, turning and
   scaling sources, and fade/expire/replace churn allocate 0 B.
@@ -759,9 +775,14 @@ pass behind them was `perf`-profile guided, receipts first.
   outside their owning `LayerData`: each dirty tile touches exactly its own level-0 slot, and
   the propagation walk reads one 64-slot node plus one parent slot per level; `QueryMax` reads
   pyramid slots, page maps, and live pages only. Node scans honor the node's valid child
-  rectangle, so no slot past the grid's tile count is read as data; the SSE2 row compare in the
+  rectangle, so no slot past the grid's tile count is read as data; the `Vector128` row compare in the
   descent may load past the valid prefix of a row but masks those lanes out of the match, and
-  the loaded bytes stay inside the 128 B node.
+  the loaded bytes stay inside the 128 B node, while `FirstEqualFlat` and `FirstEqualSpan` loop
+  only over full 16-lane or 8-lane vector steps and finish any sub-vector remainder with scalar reads.
+  Columnar sensing (`SenseColumn`, `SenseGradientColumn`, `SenseAreaColumn`, `SenseMaxColumn`,
+  `SenseNearestColumn`) borrows caller input and output columns only for the synchronous call,
+  validates non-null pointers when `count > 0`, clears `(count + 63) >> 6` mask words when an
+  optional mask pointer is supplied, and writes only indices `0..count-1` of the output columns.
   Batch input bytes and the written result prefix must be disjoint; overlapping spans are
   rejected before any writes. One batch row owns each distinct source slot, including all
   remove/recreate operations on that slot. Preparation writes only its row's private state.

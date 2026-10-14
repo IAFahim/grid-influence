@@ -619,6 +619,62 @@ public sealed class EngineTests
         Assert.False(Stats.Inspection.Read(255).Valid);
     }
 
+    [Theory]
+    [InlineData(float.NaN, 8f)]
+    [InlineData(float.PositiveInfinity, 8f)]
+    [InlineData(float.NegativeInfinity, 8f)]
+    [InlineData(8f, float.NaN)]
+    [InlineData(8f, float.PositiveInfinity)]
+    [InlineData(8f, float.NegativeInfinity)]
+    public void NonFiniteCoordinates_AreRejectedOrIgnoredTotally(float x, float y)
+    {
+        var w = World.New();
+        var g = Grid.New(w, 6, 0f, 0f, 64f);
+        var l = Layer.New(w);
+        var stamp = Stamp.Box(4, 4, 100);
+        try
+        {
+            Assert.Equal(-1, World.Place(w, l, x, y, stamp, 2));
+            var source = World.Place(w, l, 32f, 32f, stamp, 2);
+            World.Move(w, source, x, y);
+            World.Process(w);
+            Assert.Equal(200, World.QueryAt(w, g, l, 32f, 32f));
+            Assert.Equal(0, World.Query(w, g, l, 0, 0, 64, 4));
+        }
+        finally
+        {
+            World.Free(w);
+            Assert.True(Stamp.Free(stamp));
+        }
+    }
+
+    [Fact]
+    public void NonFiniteBatchPlace_IsRejectedWithoutPartialState()
+    {
+        var w = World.New();
+        var l = Layer.New(w);
+        var stamp = Stamp.Box(4, 4, 100);
+        try
+        {
+            var commands = new[]
+            {
+                World.SourceCommand.Place(l, float.NaN, 8f, stamp, 2),
+                World.SourceCommand.Place(l, 8f, float.PositiveInfinity, stamp, 2),
+            };
+            var results = new World.SourceResult[commands.Length];
+            Assert.Equal(World.BatchStatus.Applied, World.ApplyBatch(w, commands, results));
+            Assert.Equal(World.SourceResultStatus.InvalidSource, results[0].Status);
+            Assert.Equal(World.SourceResultStatus.InvalidSource, results[1].Status);
+            World.Process(w);
+            Assert.Equal(0, World.Query(w, 0, l, 0, 0, 64, 64));
+        }
+        finally
+        {
+            World.Free(w);
+            Assert.True(Stamp.Free(stamp));
+        }
+    }
+
     [Fact]
     public void RegionQuery_ClipsWithoutIntegerOverflow()
     {

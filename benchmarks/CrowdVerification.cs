@@ -130,6 +130,116 @@ internal static partial class Verification
         return allWhole == (complete == count);
     }
 
+    private static unsafe bool SenseColumnsMatchScalar()
+    {
+        var s = Layered();
+        const int count = 256;
+        var rng = new Random(195);
+        var xs = new float[count];
+        var ys = new float[count];
+        var reaches = new float[count];
+        var excludes = new int[count];
+        var thresholds = new short[count];
+        for (var i = 0; i < count; i++)
+        {
+            xs[i] = (float)(rng.NextDouble() * 1100 - 30);
+            ys[i] = (float)(rng.NextDouble() * 1100 - 30);
+            reaches[i] = 4f + i % 24;
+            excludes[i] = i % 3 == 0 ? -1 : 1 + i % 16;
+            thresholds[i] = (short)(20 * (i % 5));
+        }
+
+        var pointBatch = new short[count];
+        var pointWhole = new ulong[(count + 63) >> 6];
+        var gxBatch = new float[count];
+        var gyBatch = new float[count];
+        var gradWhole = new ulong[(count + 63) >> 6];
+        var areaBatch = new long[count];
+        var areaWhole = new ulong[(count + 63) >> 6];
+        var maxBatch = new short[count];
+        var maxBx = new float[count];
+        var maxBy = new float[count];
+        var maxWhole = new ulong[(count + 63) >> 6];
+        var nearBatch = new short[count];
+        var nearNx = new float[count];
+        var nearNy = new float[count];
+        var nearFound = new ulong[(count + 63) >> 6];
+
+        bool pointOk, gradOk, areaOk, maxOk, nearOk;
+        fixed (float* xp = xs, yp = ys, rp = reaches, gxp = gxBatch, gyp = gyBatch, mbx = maxBx, mby = maxBy, nnx = nearNx, nny = nearNy)
+        fixed (int* ep = excludes)
+        fixed (short* tp = thresholds, pvp = pointBatch, mvp = maxBatch, nvp = nearBatch)
+        fixed (long* avp = areaBatch)
+        fixed (ulong* pwp = pointWhole, gwp = gradWhole, awp = areaWhole, mwp = maxWhole, nfp = nearFound)
+        {
+            pointOk = Gi.World.SenseColumn(s.World, s.Layer, xp, yp, ep, count, pvp, pwp);
+            gradOk = Gi.World.SenseGradientColumn(s.World, s.Layer, xp, yp, ep, count, gxp, gyp, gwp);
+            areaOk = Gi.World.SenseAreaColumn(s.World, s.Layer, xp, yp, rp, ep, count, avp, awp);
+            maxOk = Gi.World.SenseMaxColumn(s.World, s.Layer, xp, yp, rp, count, mvp, mbx, mby, mwp);
+            nearOk = Gi.World.SenseNearestColumn(s.World, s.Layer, xp, yp, rp, tp, count, nvp, nnx, nny, nfp);
+        }
+
+        var expectedPointAll = true;
+        var expectedGradAll = true;
+        var expectedAreaAll = true;
+        var expectedMaxAll = true;
+        var expectedNearAll = true;
+        for (var i = 0; i < count; i++)
+        {
+            var pComplete = excludes[i] >= 0
+                ? Gi.World.TrySense(s.World, s.Layer, xs[i], ys[i], excludes[i], out var pVal)
+                : Gi.World.TrySense(s.World, s.Layer, xs[i], ys[i], out pVal);
+            expectedPointAll &= pComplete;
+            if (pointBatch[i] != pVal || (((pointWhole[i >> 6] >> (i & 63)) & 1) == 1) != pComplete) return false;
+
+            var gComplete = excludes[i] >= 0
+                ? Gi.World.TrySenseGradient(s.World, s.Layer, xs[i], ys[i], excludes[i], out var gx, out var gy)
+                : Gi.World.TrySenseGradient(s.World, s.Layer, xs[i], ys[i], out gx, out gy);
+            expectedGradAll &= gComplete;
+            if (gxBatch[i] != gx || gyBatch[i] != gy || (((gradWhole[i >> 6] >> (i & 63)) & 1) == 1) != gComplete) return false;
+
+            var aComplete = excludes[i] >= 0
+                ? Gi.World.TrySenseArea(s.World, s.Layer, xs[i], ys[i], reaches[i], excludes[i], out var area)
+                : Gi.World.TrySenseArea(s.World, s.Layer, xs[i], ys[i], reaches[i], out area);
+            expectedAreaAll &= aComplete;
+            if (areaBatch[i] != area || (((areaWhole[i >> 6] >> (i & 63)) & 1) == 1) != aComplete) return false;
+
+            var mComplete = Gi.World.TrySenseMax(s.World, s.Layer, xs[i], ys[i], reaches[i], out var mVal, out var bx, out var by);
+            expectedMaxAll &= mComplete;
+            if (maxBatch[i] != mVal || maxBx[i] != bx || maxBy[i] != by || (((maxWhole[i >> 6] >> (i & 63)) & 1) == 1) != mComplete) return false;
+
+            var nComplete = Gi.World.TrySenseNearest(s.World, s.Layer, xs[i], ys[i], reaches[i], thresholds[i], out var nVal, out var nx, out var ny);
+            expectedNearAll &= nComplete;
+            if (nearBatch[i] != nVal || nearNx[i] != nx || nearNy[i] != ny || (((nearFound[i >> 6] >> (i & 63)) & 1) == 1) != (nVal != short.MinValue)) return false;
+        }
+
+        if (pointOk != expectedPointAll || gradOk != expectedGradAll || areaOk != expectedAreaAll ||
+            maxOk != expectedMaxAll || nearOk != expectedNearAll)
+            return false;
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        fixed (float* xp = xs, yp = ys, rp = reaches, gxp = gxBatch, gyp = gyBatch, mbx = maxBx, mby = maxBy, nnx = nearNx, nny = nearNy)
+        fixed (int* ep = excludes)
+        fixed (short* tp = thresholds, pvp = pointBatch, mvp = maxBatch, nvp = nearBatch)
+        fixed (long* avp = areaBatch)
+        fixed (ulong* pwp = pointWhole, gwp = gradWhole, awp = areaWhole, mwp = maxWhole, nfp = nearFound)
+        {
+            for (var r = 0; r < 8; r++)
+            {
+                Gi.World.SenseColumn(s.World, s.Layer, xp, yp, ep, count, pvp, pwp);
+                Gi.World.SenseGradientColumn(s.World, s.Layer, xp, yp, ep, count, gxp, gyp, gwp);
+                Gi.World.SenseAreaColumn(s.World, s.Layer, xp, yp, rp, ep, count, avp, awp);
+                Gi.World.SenseMaxColumn(s.World, s.Layer, xp, yp, rp, count, mvp, mbx, mby, mwp);
+                Gi.World.SenseNearestColumn(s.World, s.Layer, xp, yp, rp, tp, count, nvp, nnx, nny, nfp);
+            }
+        }
+
+        return GC.GetAllocatedBytesForCurrentThread() - before == 0;
+    }
+
     private static unsafe bool ChangedMaskMatchesChanged()
     {
         var (w, _, l, ids, _, _) = Crowd(600, 12, CrowdBox12, 8, 97);

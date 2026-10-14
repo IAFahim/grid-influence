@@ -66,6 +66,7 @@ internal static partial class Verification
         Check("crowded-small-boxes-match-stepped-incremental", CrowdedMatchesStepped(300, 4, CrowdBox4, 9, 4, 20));
         Check("crowded-unchanged-frames-report-no-changed-tiles", CrowdedIdleFramesReportNothing());
         Check("sense-column-matches-try-sense", SenseColumnMatchesTrySense());
+        Check("sense-columns-match-scalar", SenseColumnsMatchScalar());
         Check("changed-mask-matches-changed", ChangedMaskMatchesChanged());
         Check("sync-matches-move", SyncMatchesMove());
         Check("warm-crowded-process-allocates-0-bytes", WarmCrowdAllocationFree());
