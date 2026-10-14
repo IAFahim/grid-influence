@@ -6,9 +6,18 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
 
 - A **world** (`World.New`, up to 255 live at once) owns **grids** and **layers**. `World.Free(world)`
   releases the world's memory and its handle: `World.New` reuses the lowest free handle, and a freed
-  handle reads as absent to every call. A grid
+  handle reads as absent to every call. `World.CopyWorldIds(ids)` copies the allocated ids,
+  ascending, into a span and returns the live count; `World.ProcessAll()` processes every
+  allocated world in id order on the calling thread. A grid
   (`Grid.New(world, power, x, y, size)`, up to 32 per world) is a power-of-two cell grid,
-  `2^power` cells per side (power 5–14), laid over a world-space rect `x,y,size`. A layer
+  `2^power` cells per side (power 5–14), laid over a world-space rect `x,y,size`. Grids are
+  never freed singly, so their ids stay the dense range `0..Grid.Count(world)-1`;
+  `Grid.CopyIds(world, ids)` copies them into a span and returns the count, and
+  `Grid.TryGetSpec(world, grid, out power, out x, out y, out size)` returns the exact
+  constructor arguments — the world extent is stored, not recovered from the truncated
+  scale, so the spec round-trips bit-exact. `Layer.Count(world)` and
+  `Layer.CopyIds(world, ids)` enumerate layers the same way, deposited and derived sharing
+  one dense id space. A layer
   (`Layer.New(world)`) is an independent field channel present on every grid. A layer either
   receives deposits (`Layer.New`) or is **derived** (`Layer.Sum`/`Min`/`Max`/
   `Mask`): its cells are a pure function of other layers' cells, maintained by `Process` (below).
@@ -715,7 +724,16 @@ pass behind them was `perf`-profile guided, receipts first.
   alignment guarantee cannot be observed.
 - **Concurrency**: `Place`/`Move`/`SetGain`/`Remove`/`Process`/`Record`/`StopRecording`/
   `Rewind` are serial per world; different
-  worlds may run on different threads. Mutations only append to or merge within the owning
+  worlds may run on different threads. `ProcessAll` is that serial-per-world rule walked over
+  the allocated ids, ascending, on the calling thread — it adds no parallelism claim, it only
+  packages the loop, and freed slots read as absent to it exactly as they do to `Process`.
+  World creation, `World.Free`, `World.CopyWorldIds` (which reads the world count and each
+  slot's `Grids` pointer), `World.ProcessAll`, and stamp catalog mutation (`Stamp` creation
+  and `Stamp.Free`, which scans every world for references) are process-wide scans:
+  serialize them with one another. `Grid.Count`, `Grid.CopyIds`, `Grid.TryGetSpec`,
+  `Layer.Count`, and `Layer.CopyIds` read the owning world's counts and grid records —
+  per-world reads under the same serial-per-world rule as that world's other calls.
+  Mutations only append to or merge within the owning
   world's op queue — a merge targets the one op its slot's pending index names, an index that
   only `ApplyDeposits` clears. `Rewind` runs entirely on the owning thread: it writes source
   columns, merges into the same op queue, and rebuilds the free chain in place, and the

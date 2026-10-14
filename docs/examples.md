@@ -23,10 +23,15 @@ World.Clear(world);                // drop every source, op, and schedule; pages
                                    // grids, layers, and stamps survive
 World.Free(world);                 // release the world's memory and its handle
 int  budget = World.MaxLayers;     // 32 — deposited and derived layers share it
+
+var ids = new byte[64];
+int  live = World.CopyWorldIds(ids);  // fills allocated ids ascending; returns the live count
 ```
 
 `Free` only frees a live handle; a stale one is an inert no-op, like every stale handle in
-Gi.
+Gi. `CopyWorldIds` copies at most the span's length but always returns the live count —
+call it once with an empty span to size the buffer. It is a process-wide scan: serialize it
+with `World.New`, `World.Free`, and `Stamp.Free`.
 
 ## Grids
 
@@ -34,11 +39,21 @@ Gi.
 byte steering = Grid.New(world, power: 9, x: 0f, y: 0f, size: 512f);  // 512² cells
 byte minimap  = Grid.New(world, power: 7, x: 0f, y: 0f, size: 512f);  // 128² cells, 4 units/cell
 byte region   = Grid.New(world, power: 8, x: 256f, y: 256f, size: 128f); // offset sub-region
+
+int  grids = Grid.Count(world);                     // allocated ids are 0..count-1
+Grid.CopyIds(world, ids);                           // fills them, returns the count
+Grid.TryGetSpec(world, region,
+                out int power, out float x, out float y, out float size);
 ```
 
 `power` is log2 of the cell count — 5 (32²) through 14 (16384²). `size` is the world-space
 extent; the origin `(x, y)` places the grid anywhere in world space. Up to 32 grids per
-world; every source deposits into each grid it overlaps at that grid's own scale.
+world; every source deposits into each grid it overlaps at that grid's own scale. Grids are
+never freed singly, so their ids stay the dense range `0..Grid.Count(world)-1`;
+`Grid.CopyIds` copies at most the span's length but always returns the count, like
+`World.CopyWorldIds`. `Grid.TryGetSpec` returns the exact `power`, `x`, `y`, `size` a grid
+was created with, so a host draws or validates every grid without keeping a parallel
+registry.
 
 ## Stamps
 
@@ -72,11 +87,15 @@ byte calm    = Layer.Sum(world, threat, -1);                           // negate
 byte both    = Layer.Min(world, mine, theirs);                         // > 0 only where both
 byte either  = Layer.Max(world, contested, calm);                      // chains nest
 byte grazing = Layer.Mask(world, food, threat, short.MinValue, 40);    // food where threat ≤ 40
+
+int layers = Layer.Count(world);   // deposited and derived share one id space
+Layer.CopyIds(world, ids);         // fills the allocated ids, returns the count
 ```
 
 A derived layer's cells always equal the formula over its inputs — maintained by `Process`
 on the tiles whose inputs changed, readable by every query. Derived layers draw from the
-same 32-layer budget as deposited ones (`World.MaxLayers`).
+same 32-layer budget as deposited ones (`World.MaxLayers`). `Layer.Count` and
+`Layer.CopyIds` enumerate them exactly like the grid calls — dense ids `0..count-1`.
 
 ## Sources
 
@@ -109,13 +128,18 @@ actually steps. A tick where nothing steps costs nothing; schedules journal and 
 
 ```csharp
 World.Process(world);                     // apply the queue, resolve dirty tiles once
+World.ProcessAll();                       // the same, once per allocated world, id order
 World.Record(world);                      // start journaling applied ops and schedules
 World.StopRecording(world);               // change your mind: discard the journal, stop
 World.Rewind(world);                      // inverse ops; field and schedules return exactly
 ```
 
 `Process` once per frame is the whole contract: reads see the last `Process` (one frame of
-latency), and any number of mutations may queue between two calls.
+latency), and any number of mutations may queue between two calls. `ProcessAll` is the loop
+hosts otherwise hand-roll — every live world ticked in ascending id order on the calling
+thread, including worlds another subsystem created — so nothing silently freezes just
+because its id never reached your registry; to tick worlds yourself, on different threads,
+enumerate them with `World.CopyWorldIds`.
 
 ## Reading cells
 

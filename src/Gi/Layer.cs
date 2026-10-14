@@ -4,6 +4,11 @@ public static class Layer
 {
     public static byte New(byte world) => World.AddLayer(world);
 
+    public static int Count(byte world) => World.LayerCount(world);
+
+    public static int CopyIds(byte world, Span<byte> destination)
+        => World.CopyLayerIds(world, destination);
+
     public static byte Sum(byte world, byte a, int weightA, byte b, int weightB, int shift = 0)
         => World.AddDerived(world, LayerOp.Sum, a, b, weightA, weightB, shift, 0, 0);
 

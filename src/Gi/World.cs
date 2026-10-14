@@ -65,6 +65,7 @@ internal unsafe struct GridCtx
     public int Size;
     public float OriginX;
     public float OriginY;
+    public float WorldSize;
     public float Scale;
     public int ScaleQ8;
     public int TilesPerSide;
@@ -250,6 +251,74 @@ public static unsafe partial class World
         return true;
     }
 
+    public static int CopyWorldIds(Span<byte> destination)
+    {
+        var count = 0;
+        for (var i = 0; i < _worldCount; i++)
+        {
+            if ((Runtime.Worlds + i)->Grids == null) continue;
+            if (count < destination.Length) destination[count] = (byte)i;
+            count++;
+        }
+
+        return count;
+    }
+
+    public static void ProcessAll()
+    {
+        for (var i = 0; i < _worldCount; i++)
+            if ((Runtime.Worlds + i)->Grids != null) Process((byte)i);
+    }
+
+    internal static int GridCount(byte world)
+    {
+        var w = GetContext(world);
+        return w == null ? 0 : w->GridCount;
+    }
+
+    internal static int CopyGridIds(byte world, Span<byte> destination)
+    {
+        var w = GetContext(world);
+        if (w == null) return 0;
+
+        var count = w->GridCount;
+        for (var i = 0; i < count && i < destination.Length; i++) destination[i] = (byte)i;
+        return count;
+    }
+
+    internal static bool TryGetGridSpec(byte world, byte grid, out int power, out float x, out float y, out float size)
+    {
+        power = 0;
+        x = 0f;
+        y = 0f;
+        size = 0f;
+        var w = GetContext(world);
+        if (w == null || grid >= w->GridCount) return false;
+
+        var g = w->Grids + grid;
+        for (var s = g->Size; s > 1; s >>= 1) power++;
+        x = g->OriginX;
+        y = g->OriginY;
+        size = g->WorldSize;
+        return true;
+    }
+
+    internal static int LayerCount(byte world)
+    {
+        var w = GetContext(world);
+        return w == null ? 0 : w->LayerCount;
+    }
+
+    internal static int CopyLayerIds(byte world, Span<byte> destination)
+    {
+        var w = GetContext(world);
+        if (w == null) return 0;
+
+        var count = w->LayerCount;
+        for (var i = 0; i < count && i < destination.Length; i++) destination[i] = (byte)i;
+        return count;
+    }
+
     private static void FreeGrid(GridCtx* g, int layerCount)
     {
         for (var l = 0; l < layerCount; l++) FreeLayer(g->Layers + l);
@@ -285,6 +354,7 @@ public static unsafe partial class World
         g->Size = 1 << power;
         g->OriginX = x;
         g->OriginY = y;
+        g->WorldSize = size;
         g->Scale = g->Size / size;
         g->ScaleQ8 = (int)(g->Scale * 256f);
         g->TilesPerSide = g->Size >> TileBake.TileBits;

@@ -35,6 +35,95 @@ public sealed class ApiExamples
     }
 
     [Fact]
+    public void Worlds_ProcessAllAndEnumerateIds()
+    {
+        var before = World.CopyWorldIds(Span<byte>.Empty);
+
+        var first = World.New();
+        var firstGrid = Grid.New(first, 7, 0f, 0f, 128f);
+        var firstLayer = Layer.New(first);
+        World.Place(first, firstLayer, 64.5f, 64.5f, Box4, 4);
+
+        var second = World.New();
+        var secondGrid = Grid.New(second, 7, 0f, 0f, 128f);
+        var secondLayer = Layer.New(second);
+        World.Place(second, secondLayer, 64.5f, 64.5f, Box4, 2);
+
+        var ids = new byte[256];
+        var live = World.CopyWorldIds(ids);
+        Assert.Equal(before + 2, live);
+        Assert.True(ids.AsSpan(0, live).IndexOf(first) >= 0);
+        Assert.True(ids.AsSpan(0, live).IndexOf(second) >= 0);
+        Assert.Equal(live, World.CopyWorldIds(Span<byte>.Empty));
+
+        World.ProcessAll();
+        Assert.Equal(4 * 50, World.Query(first, firstGrid, firstLayer, 64, 64));
+        Assert.Equal(2 * 50, World.Query(second, secondGrid, secondLayer, 64, 64));
+        Assert.Equal(World.Tick(first), World.Tick(second));
+
+        Assert.True(World.Free(first));
+        Assert.True(World.Free(second));
+        Assert.Equal(before, World.CopyWorldIds(Span<byte>.Empty));
+    }
+
+    [Fact]
+    public void Grids_EnumerateIdsAndInspectSpecs()
+    {
+        var w = World.New();
+        Assert.Equal(0, Grid.Count(w));
+        Assert.Equal(0, Grid.CopyIds(w, Span<byte>.Empty));
+
+        var steering = Grid.New(w, 9, 0f, 0f, 512f);
+        var minimap = Grid.New(w, 7, 0f, 0f, 512f);
+        var region = Grid.New(w, 8, 256f, 256f, 128f);
+
+        Assert.Equal(3, Grid.Count(w));
+        var ids = new byte[4];
+        Assert.Equal(3, Grid.CopyIds(w, ids));
+        Assert.Equal(new byte[] { steering, minimap, region }, ids.AsSpan(0, 3).ToArray());
+        Assert.Equal(3, Grid.CopyIds(w, new byte[2]));
+
+        Assert.True(Grid.TryGetSpec(w, region, out var power, out var x, out var y, out var size));
+        Assert.Equal(8, power);
+        Assert.Equal(256f, x);
+        Assert.Equal(256f, y);
+        Assert.Equal(128f, size);
+        Assert.True(Grid.TryGetSpec(w, minimap, out power, out _, out _, out size));
+        Assert.Equal(7, power);
+        Assert.Equal(512f, size);
+
+        Assert.False(Grid.TryGetSpec(w, 31, out _, out _, out _, out _));
+        Assert.Equal(0, Grid.Count(byte.MaxValue));
+        Assert.False(Grid.TryGetSpec(byte.MaxValue, 0, out _, out _, out _, out _));
+
+        Assert.True(World.Free(w));
+        Assert.Equal(0, Grid.Count(w));
+        Assert.False(Grid.TryGetSpec(w, region, out _, out _, out _, out _));
+    }
+
+    [Fact]
+    public void Layers_CountAndEnumerateIds()
+    {
+        var w = World.New();
+        Assert.Equal(0, Layer.Count(w));
+
+        var food = Layer.New(w);
+        var threat = Layer.New(w);
+        var safety = Layer.Sum(w, food, 1, threat, -2);
+
+        Assert.Equal(3, Layer.Count(w));
+        var ids = new byte[3];
+        Assert.Equal(3, Layer.CopyIds(w, ids));
+        Assert.Equal(new byte[] { food, threat, safety }, ids);
+        Assert.Equal(3, Layer.CopyIds(w, Span<byte>.Empty));
+        Assert.Equal(0, Layer.Count(byte.MaxValue));
+        Assert.Equal(0, Layer.CopyIds(byte.MaxValue, ids));
+
+        Assert.True(World.Free(w));
+        Assert.Equal(0, Layer.Count(w));
+    }
+
+    [Fact]
     public void Grids_SeveralScalesAndOffsets()
     {
         var w = World.New();
