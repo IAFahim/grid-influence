@@ -24,6 +24,7 @@ public static partial class World
         InvalidReference,
         OverlappingBuffers,
         TooManyCommands,
+        StaleRevision,
     }
 
     public enum SourceResultStatus : byte

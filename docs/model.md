@@ -8,10 +8,22 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   releases the world's memory and its handle: `World.New` reuses the lowest free handle, and a freed
   handle reads as absent to every call. `World.CopyWorldIds(ids)` copies the allocated ids,
   ascending, into a span and returns the live count; `World.ProcessAll()` processes every
-  allocated world in id order on the calling thread. `World.Revision(world)` returns a token
+  allocated world in id order on the calling thread. `World.Revision(world)` returns an `int`
   that changes whenever queued work could be stale — `World.New` assigns it a fresh value,
-  and `Clear`, `Rewind`, `Free`, and slot reuse bump it; hosts capture it when recording work
-  for a world and drop the work when it changed. A grid
+  and `Clear`, `Rewind`, `Free`, and slot reuse bump it; mutations, `Process`, and `ProcessAll`
+  leave it alone. `World.Capture(world)` seals the id and that revision into a `World.Token`
+  (`IsValid` is false for an unallocated or freed slot, whose stored revision stays nonzero —
+  nonzero never implies existence). `World.ApplyBatch(token, …)`, `World.Sync(token, …)`, and
+  `World.Process(token)` validate the token inside Gi before reading command payloads, writing
+  results, or touching source state, timers, journals, pending work, or ticks: an allocated
+  world with a different revision returns `BatchStatus.StaleRevision`, a dead or never-allocated
+  slot returns `BatchStatus.InvalidWorld`, and rejection leaves the world byte-identical. The
+  revision is an `int` in both the token and the runtime store — never a widened copy — and
+  comparisons are equality, so the only wrap hazard is a stale token falsely matching after
+  exactly 2³² lifecycle transitions on one slot. Capture is legal whenever reading the world is
+  (between lifecycle controls, under the host's producer/reader fences); consumption runs in the
+  existing exclusive mutation phase — a token check is not a lock, and concurrent same-world
+  mutation or a `Free`/`Clear`/`Rewind` racing a consumer remains forbidden. A grid
   (`Grid.New(world, power, x, y, size)`, up to 32 per world) is a power-of-two cell grid,
   `2^power` cells per side (power 5–14), laid over a world-space rect `x,y,size`. Grids are
   never freed singly, so their ids stay the dense range `0..Grid.Count(world)-1`;

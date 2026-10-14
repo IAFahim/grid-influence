@@ -149,16 +149,42 @@ anything. Fragments never hold block pointers, so no pointer survives an arena r
 `dotnet run --project benchmarks -c Release --no-build -- --stages` reports preparation,
 application, and resolution costs per `Process` against the forced-serial build.
 
-## Rejecting stale queued work
+## Checked consumption with world tokens
 
 A host that queues work across frames cannot tell from a world id alone whether the world it
-recorded against is still the world that id names. `World.Revision(world)` returns an `int`
-token that changes on every observable world boundary: assignment in `World.New` (fresh or
-reused slot), `Clear`, `Rewind`, and `Free`. Mutations, `Process`, and `ProcessAll` leave it
-alone. Capture the token when work is recorded; before ingesting, re-read it and drop the
-queued work — or re-validate every command against current state — when it changed. The token
-is advisory and never throws: a dead slot keeps its last value, so a captured pair
-`(world, revision)` that no longer matches is always stale work.
+recorded against is still the world that id names. `World.Capture(world)` seals the id and the
+world's revision — an `int` that changes on every observable boundary: assignment in
+`World.New` (fresh or reused slot), `Clear`, `Rewind`, and `Free`. Mutations, `Process`, and
+`ProcessAll` leave it alone. Gi checks the token itself at consumption:
+
+```csharp
+var token = World.Capture(world);
+// Producers fill caller-owned native input; the host joins producers and Gi readers.
+var status = World.ApplyBatch(token, commands, results);   // World.Sync(token, …) matches
+if (status == World.BatchStatus.Applied)
+    World.Process(token);
+```
+
+`ApplyBatch(token, …)`, `Sync(token, …)`, and `Process(token)` validate that the world is
+allocated **and** its revision matches before reading command payloads, writing results, or
+changing source state, timers, journals, pending work, or ticks. A live slot whose revision
+moved returns `BatchStatus.StaleRevision`; an unallocated or freed slot returns
+`BatchStatus.InvalidWorld`. Rejection is total: results keep their prior contents and the
+world stays byte-identical, so a stale `Process(token)` never ticks a slot's new occupant.
+`World.Capture` never throws and never fails: capturing a dead or never-allocated slot yields
+a token with `IsValid == false` (revision 0 — real revisions start at 1, and a freed slot
+keeps its nonzero last value, so nonzero never implies existence). Validate once per consumed
+batch or range set; rows never repeat the revision.
+
+The revision is an `int` in the token and in the runtime store — no widened copy — and
+comparison is equality, so the only wrap hazard is a stale token falsely matching after exactly
+2³² lifecycle transitions on one slot. This is revision validation under the existing exclusive
+mutation phase: a token check is not a lock, concurrent same-world `ApplyBatch` calls remain
+unsafe, and `Free`/`Clear`/`Rewind` must not race a consumer — the host still joins producer,
+writer, and reader fences before lifecycle controls. `Rewind` rejects old queued epochs but
+does not restore host-side entity ownership: a paired ECS rollback must restore its own
+source mapping. The 7-bit source-generation wrap is a separate limit and is not solved by a
+world token.
 
 ## Verification before throughput claims
 

@@ -41,7 +41,9 @@ World.TrySenseNearest(world, food, x, y, reach: 40f, threshold: 50,
                       out short near, out float nx, out float ny);    // closest cell ≥ 50
 bool moved = World.Changed(world, threat, x, y, reach: 16f, since: lastTick);
 int  tick  = World.Tick(world);
-int  rev   = World.Revision(world);     // moves on clear/rewind/free/reuse — reject stale queued work
+int  rev   = World.Revision(world);     // moves on clear/rewind/free/reuse
+World.Token tok = World.Capture(world); // checked at consumption — ApplyBatch/Sync/Process
+                                        // token overloads reject a stale world inside Gi
 
 World.Remove(world, me);                 // exact negation — no rebuild, no residue
 World.Record(world);                     // checkpoint — journal applied ops and schedules
@@ -63,8 +65,9 @@ slots using Gi's worker pool; deferred deposit batches also build their tile foo
 page allocations, and dirty marks in parallel — one writer per (grid, layer) — with fragments
 carrying tile keys, never block pointers; `Process` remains the explicit deposit/tick boundary.
 Hosts can record concurrently into their own buffers, then join producers and Gi readers
-before ingestion, and reject work recorded against a cleared, rewound, freed, or reused world
-with `World.Revision(world)`.
+before ingestion; `World.Capture(world)` seals a checked token, and the token overloads of
+`ApplyBatch`, `Sync`, and `Process` reject work recorded against a cleared, rewound, freed, or
+reused world inside Gi — before reading payloads or touching state.
 See [the batching contract and C# example](docs/batching.md).
 
 ## Seven stamp kinds

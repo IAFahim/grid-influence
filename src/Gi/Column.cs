@@ -40,7 +40,14 @@ public static unsafe partial class World
     public static void Sync(byte world, int* sources, float* xs, float* ys, int count)
     {
         var w = GetContext(world);
-        if (w == null || count <= 0) return;
+        if (w == null) return;
+
+        SyncColumns(w, sources, xs, ys, count);
+    }
+
+    internal static void SyncColumns(WorldCtx* w, int* sources, float* xs, float* ys, int count)
+    {
+        if (count <= 0) return;
 
         var s = &w->Sources;
         for (var i = 0; i < count; i++)

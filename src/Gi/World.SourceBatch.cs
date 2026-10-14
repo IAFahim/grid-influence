@@ -9,7 +9,12 @@ public static unsafe partial class World
     public static BatchStatus ApplyBatch(byte world, ReadOnlySpan<SourceCommand> commands, Span<SourceResult> results)
     {
         var context = GetContext(world);
-        if (context == null) return BatchStatus.InvalidWorld;
+        return context == null ? BatchStatus.InvalidWorld : ApplyBatchCommands(context, commands, results);
+    }
+
+    internal static BatchStatus ApplyBatchCommands(
+        WorldCtx* context, ReadOnlySpan<SourceCommand> commands, Span<SourceResult> results)
+    {
         if (commands.Length > MaxSourceSlots) return BatchStatus.TooManyCommands;
         if (results.Length < commands.Length) return BatchStatus.InsufficientResults;
         if (MemoryMarshal.AsBytes(commands).Overlaps(MemoryMarshal.AsBytes(results.Slice(0, commands.Length))))
