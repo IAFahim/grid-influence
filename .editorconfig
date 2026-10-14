@@ -17,6 +17,9 @@ indent_size = 4
 # - World.cs: Move's early-out compares floats by == on purpose — it must
 #   skip only a bitwise-unchanged position, and Equals would flip NaN and
 #   -0.0. (075ce60)
+# - World.SourceBatch.cs: the batch fold's change checks compare floats by ==
+#   on purpose — the batch must match Move's bitwise-unchanged semantics
+#   exactly; Equals would flip NaN and -0.0. (#34)
 # - SenseVerification.cs: sensing receipts compare world positions and
 #   gradients by == on purpose — the oracle reproduces the engine's float ops
 #   exactly, so anything but bit equality is a failed receipt.
@@ -47,6 +50,9 @@ resharper_check_namespace_highlighting = none
 
 [src/Gi/World.cs]
 resharper_convert_if_statement_to_null_coalescing_assignment_highlighting = none
+resharper_compare_of_floats_by_equality_operator_highlighting = none
+
+[src/Gi/World.SourceBatch.cs]
 resharper_compare_of_floats_by_equality_operator_highlighting = none
 
 [src/Gi/Stamp.cs]

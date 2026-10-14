@@ -73,6 +73,7 @@ internal static unsafe partial class ResolvePool
 
     internal static bool TryAcquire()
     {
+        if (SerialOnly) return false;
         if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0) return false;
         if (!_created) Create();
         return true;
@@ -90,6 +91,10 @@ internal static unsafe partial class ResolvePool
         _scatterTails = (NativeBuffer<int>*)NativeHeap.AllocZeroed(slots * 64);
         _scatterPlacements = (NativeBuffer<Placement>*)NativeHeap.AllocZeroed(slots * 64);
         _scatterArenas = (NativeBuffer<RebuildChunk>*)NativeHeap.AllocZeroed(slots * 64);
+        _depositFragments = (NativeBuffer<DepositFragment>*)NativeHeap.AllocZeroed(slots * 64);
+        _depositKeys = (NativeBuffer<PrepKey>*)NativeHeap.AllocZeroed(slots * 64);
+        _prepScratch = (NativeBuffer<PrepKey>*)NativeHeap.AllocZeroed(slots * 64);
+        AllocPrepPools();
         _rebuildPlacements = (Placement**)NativeHeap.AllocZeroed(slots * (nuint)sizeof(Placement*));
         _rebuildArenas = (RebuildChunk**)NativeHeap.AllocZeroed(slots * (nuint)sizeof(RebuildChunk*));
         _tasks.Ensure(World.MaxGrids * WorldCtx.MaxLayers);
@@ -109,6 +114,7 @@ internal static unsafe partial class ResolvePool
     #endif
     internal static void ResolveWorld(WorldCtx* w, int total)
     {
+        var stamp = ProcessStages.Mark();
         WaitParked();
         PrepareTasks(w, total);
         Volatile.Write(ref _phase, 0);
@@ -117,10 +123,12 @@ internal static unsafe partial class ResolvePool
         Drain();
         Finish();
         CompactRebuilt();
+        ProcessStages.Measure(ref ProcessStages.ResolveTicks, stamp);
     }
 
     internal static void ApplyAndResolveWorld(WorldCtx* w, int fragmentCount, int total)
     {
+        var stamp = ProcessStages.Mark();
         WaitParked();
         ScatterFragments(w, fragmentCount);
         PrepareTasks(w, total);
@@ -129,10 +137,13 @@ internal static unsafe partial class ResolvePool
         for (var k = 0; k < _workers; k++) _wake[k].Set();
         ApplyShare();
         Barrier(ref _applyRemaining);
+        ProcessStages.Measure(ref ProcessStages.ApplyTicks, stamp);
+        stamp = ProcessStages.Mark();
         RunShare(w->Prev);
         Drain();
         Finish();
         CompactRebuilt();
+        ProcessStages.Measure(ref ProcessStages.ResolveTicks, stamp);
         Volatile.Write(ref _phase, 0);
     }
 
@@ -354,6 +365,16 @@ internal static unsafe partial class ResolvePool
                 SourceBatchShare(index, phase);
                 Interlocked.Decrement(ref _remaining);
             }
+            else if (phase == 8)
+            {
+                BuildShare(index);
+                Interlocked.Decrement(ref _remaining);
+            }
+            else if (phase == 9)
+            {
+                PrepTaskShare(index);
+                Interlocked.Decrement(ref _remaining);
+            }
             else if (phase >= 2)
             {
                 ColumnShare();
@@ -406,7 +427,7 @@ internal static unsafe partial class ResolvePool
     private static NativeBuffer<int>* ScatterTails(int index)
         => (NativeBuffer<int>*)((byte*)_scatterTails + (nuint)index * 64);
 
-    private static NativeBuffer<Placement>* ScatterPlacements(int index)
+    internal static NativeBuffer<Placement>* ScatterPlacements(int index)
         => (NativeBuffer<Placement>*)((byte*)_scatterPlacements + (nuint)index * 64);
 
     private static NativeBuffer<RebuildChunk>* ScatterArenas(int index)

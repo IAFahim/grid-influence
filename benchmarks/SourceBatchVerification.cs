@@ -108,7 +108,8 @@ internal static partial class Verification
             for (var index = 0; index < count; index++)
             {
                 var positionX = index % 250 + 3.5f;
-                var positionY = index / 250 % 250 + 3.5f;
+                var row = index / 250 % 250;
+                var positionY = row + 3.5f;
                 var source = World.Place(serialWorld, 0, positionX, positionY, stamp, 1);
                 creations[index] = World.SourceCommand.Place(0, positionX, positionY, stamp, 1);
                 var first = new SourceBatchInput(source, positionX + 0.25f, positionY + 0.25f, 0.25f, 0.75f, 2);

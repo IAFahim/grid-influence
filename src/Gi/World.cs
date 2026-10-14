@@ -95,14 +95,14 @@ internal struct DepositOp
     public ushort ToScale;
 }
 
-internal unsafe struct DepositFragment
+internal struct DepositFragment
 {
-    public byte* Block;
     public int Placement;
     public int Gain;
     public int Tile;
     public byte Grid;
     public byte Layer;
+    public byte Dense;
 }
 
 internal struct RebuildItem
@@ -217,6 +217,7 @@ public static unsafe partial class World
         Runtime.Ensure();
 
         var id = ReserveSlot();
+        Runtime.WorldRevisions[id]++;
         var w = Runtime.Worlds + id;
         w->Grids = (GridCtx*)NativeHeap.AllocZeroed((nuint)(MaxGrids * sizeof(GridCtx)));
         w->Recipes = (LayerRecipe*)NativeHeap.AllocZeroed((nuint)(MaxLayers * sizeof(LayerRecipe)));
@@ -256,8 +257,11 @@ public static unsafe partial class World
         w->BatchLookup.Free();
         w->BatchLayerDeltas.Free();
         *w = default;
+        Runtime.WorldRevisions[world]++;
         return true;
     }
+
+    public static int Revision(byte world) => world < _worldCount ? Runtime.WorldRevisions[world] : 0;
 
     public static int CopyWorldIds(Span<byte> destination)
     {
@@ -574,7 +578,7 @@ public static unsafe partial class World
         w->Pending.Pointer[slot] = n + 1;
     }
 
-    private static int ApplyDeposits(WorldCtx* w)
+    private static int ApplyDeposits(WorldCtx* w, ref bool pooled)
     {
         var count = w->Ops.Length;
         if (count == 0) return 0;
@@ -592,6 +596,12 @@ public static unsafe partial class World
 
         w->Fragments.Resize(0);
         w->Placements.Resize(0);
+        if (deferred && ResolvePool.TryAcquire())
+        {
+            pooled = true;
+            return BuildDepositsPooled(w, ops, count);
+        }
+
         for (var i = 0; i < count; i++)
         {
             var op = ops + i;
@@ -732,29 +742,18 @@ public static unsafe partial class World
 
                 var tile = ty * tps + tx;
                 var block = TileBlock(ld, tile, dense);
-                if (dense)
-                {
-                    var grown = EnsureDense(ld, tile, block);
-                    if (grown != block)
-                    {
-                        var built = w->Fragments.Pointer;
-                        for (var k = 0; k < w->Fragments.Length; k++)
-                            if (built[k].Block == block) built[k].Block = grown;
-                        block = grown;
-                    }
-                }
-
+                if (dense) EnsureDense(ld, tile, block);
                 MarkDirty(ld, tile);
                 var n = w->Fragments.Length;
                 w->Fragments.Resize(n + 1);
                 w->Fragments.Pointer[n] = new DepositFragment
                 {
-                    Block = block,
                     Placement = placement,
                     Gain = gain,
                     Tile = tile,
                     Grid = (byte)gi,
                     Layer = layer,
+                    Dense = (byte)(dense ? 1 : 0),
                 };
             }
         }
@@ -767,9 +766,10 @@ public static unsafe partial class World
     {
         if (f->Gain == 0) return;
 
-        var tps = w->Grids[f->Grid].TilesPerSide;
-        Emit(w->Placements.Pointer + f->Placement, f->Block,
-            (f->Tile % tps) << TileBake.TileBits, (f->Tile / tps) << TileBake.TileBits, f->Gain);
+        var g = w->Grids + f->Grid;
+        if (!g->Layers[f->Layer].Pages.TryGet(f->Tile, out var block)) return;
+        Emit(w->Placements.Pointer + f->Placement, block,
+            (f->Tile % g->TilesPerSide) << TileBake.TileBits, (f->Tile / g->TilesPerSide) << TileBake.TileBits, f->Gain);
     }
 
     #if NET
@@ -1042,6 +1042,7 @@ public static unsafe partial class World
     {
         var w = GetContext(world);
         if (w == null) return;
+        Runtime.WorldRevisions[world]++;
         var s = &w->Sources;
         new Span<byte>(s->Alive.Pointer, s->Count).Clear();
         s->Count = 0;
@@ -1115,6 +1116,7 @@ public static unsafe partial class World
     {
         var w = GetContext(world);
         if (w == null) return;
+        Runtime.WorldRevisions[world]++;
         var s = &w->Sources;
         w->LiveStale = 1;
 
@@ -1346,7 +1348,9 @@ public static unsafe partial class World
             w->LiveStale = 1;
         }
         w->Crowded = ScanCrowding(w);
-        var fragmentCount = ApplyDeposits(w);
+        var stamp = ProcessStages.Mark();
+        var pooled = false;
+        var fragmentCount = ApplyDeposits(w, ref pooled);
 
         w->RebuildChains.Resize(0);
         w->RebuildDense.Resize(0);
@@ -1355,8 +1359,8 @@ public static unsafe partial class World
         w->RebuildArena.Resize(0);
         new Span<int>(w->Rebuilds, 2 * w->GridCount * MaxLayers).Fill(0);
 
-        var pooled = w->Crowded != 0 && ResolvePool.TryAcquire();
-        if (pooled)
+        if (w->Crowded != 0 && !pooled) pooled = ResolvePool.TryAcquire();
+        if (w->Crowded != 0 && pooled)
         {
             var stride = 0;
             for (var gi = 0; gi < w->GridCount; gi++)
@@ -1391,6 +1395,8 @@ public static unsafe partial class World
             }
         }
 
+        ProcessStages.Measure(ref ProcessStages.PrepareTicks, stamp);
+
         var total = 0;
         for (var gi = 0; gi < w->GridCount; gi++)
         {
@@ -1407,8 +1413,11 @@ public static unsafe partial class World
         }
         else
         {
+            stamp = ProcessStages.Mark();
             ApplyFragments(w, fragmentCount);
             w->Fragments.Resize(0);
+            ProcessStages.Measure(ref ProcessStages.ApplyTicks, stamp);
+            stamp = ProcessStages.Mark();
 
             if (pooled)
             {
@@ -1483,6 +1492,8 @@ public static unsafe partial class World
                     }
                 }
             }
+
+            ProcessStages.Measure(ref ProcessStages.ResolveTicks, stamp);
         }
 
         if (w->DerivedCount != 0) Derive(w);

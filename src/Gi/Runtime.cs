@@ -9,6 +9,7 @@ internal static unsafe class Runtime
     internal static WorldCtx* Worlds;
     internal static StampVariant* Stamps;
     internal static byte* ZeroDense;
+    internal static int* WorldRevisions;
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     internal static void Ensure()
@@ -19,5 +20,6 @@ internal static unsafe class Runtime
         Stamps = (StampVariant*)NativeHeap.AllocZeroed((nuint)(StampCatalog.MaxStamps * sizeof(StampVariant)));
         ZeroDense = (byte*)NativeHeap.AlignedAlloc(World.DenseBytes);
         new Span<byte>(ZeroDense, World.DenseBytes).Clear();
+        WorldRevisions = (int*)NativeHeap.AllocZeroed((nuint)World.MaxWorlds * sizeof(int));
     }
 }

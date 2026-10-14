@@ -41,6 +41,7 @@ World.TrySenseNearest(world, food, x, y, reach: 40f, threshold: 50,
                       out short near, out float nx, out float ny);    // closest cell ≥ 50
 bool moved = World.Changed(world, threat, x, y, reach: 16f, since: lastTick);
 int  tick  = World.Tick(world);
+int  rev   = World.Revision(world);     // moves on clear/rewind/free/reuse — reject stale queued work
 
 World.Remove(world, me);                 // exact negation — no rebuild, no residue
 World.Record(world);                     // checkpoint — journal applied ops and schedules
@@ -58,10 +59,13 @@ the ones this page never quotes, has a runnable example in
 
 `World.ApplyBatch(world, commands, results)` ingests sealed source commands with ordered partial
 updates, creation results, fades, and expiry. Large batches prepare and write disjoint source
-slots using Gi's worker pool; `Process` remains the explicit deposit/tick boundary. Hosts can
-record concurrently into their own buffers, then join producers and Gi readers before ingestion.
-See [the batching contract and C# example](docs/batching.md). This API is in the local
-`1.2.0-alpha.1` development version; the published `1.1.0` package does not include it.
+slots using Gi's worker pool; deferred deposit batches also build their tile footprints,
+page allocations, and dirty marks in parallel — one writer per (grid, layer) — with fragments
+carrying tile keys, never block pointers; `Process` remains the explicit deposit/tick boundary.
+Hosts can record concurrently into their own buffers, then join producers and Gi readers
+before ingestion, and reject work recorded against a cleared, rewound, freed, or reused world
+with `World.Revision(world)`.
+See [the batching contract and C# example](docs/batching.md).
 
 ## Seven stamp kinds
 
@@ -406,6 +410,7 @@ unless noted; `process` rows include the mutations.
 | `Changed` r=16 | 58 ns | tile epochs since a tick |
 | `exclude: self` point / area r=24 bell | 0.03–0.04 / 2.7 µs | exact aura removal, no rebuild |
 | place/move 200 boxes + `Process` | ~80–95 µs | deferred ops, pooled resolve |
+| 4,000 bells 16×16 + 200 moves, `Process` stages | 280 µs total | prep 74 / apply 50 / resolve 156 — parallel build; serial build totals 818 µs (`--stages`) |
 | place 200 tents 16×16 + `Process` | ~110 µs | exact sums per cell |
 | place 200 bells 16×16 + `Process` | ~150–195 µs | exact sums per cell |
 | turn 200 vision cones (r=16, 90°) + `Process` | ~320 µs | per-cell round kernel |
@@ -540,13 +545,17 @@ a full 512² region scan, and the 600-tick loop allocates 0 B.
   `int32` difference array. `Place`/`Move`/`Turn`/`Scale`/`SetGain`/`Remove` only merge into a
   per-world op queue — one net op per source per window — and `Process` applies a
   retract-and-apply pair per op. Integer adds commute, so any mutation sequence collapses
-  exactly, and a source placed and removed inside one window never touches a tile.
+  exactly, and a source placed and removed inside one window never touches a tile. Light
+  box batches emit fused on the calling thread; heavy or large deferred batches build
+  footprints, page allocations, and dirty marks in parallel — per-worker scratch, an
+  owning-thread stitch, then one writer per (grid, layer) — with fragments carrying tile
+  keys instead of block pointers, and dirty lists still deterministic and ascending.
 - **Each stamp kind deposits at its own sparsity.** A box is 4 corner writes per tile band. A
   raster samples bilinearly into the tile's dense buffer. Tents and bells add their exact
   `value·gain·C·Wx·Wy` products into per-tile `int64` sum stores, rounded once per cell at
   resolve — so self-exclusion reads a cell's unrounded sum with one load. Turned and round
   stamps evaluate each cell of their rotated bounds with integer math. One placement per grid
-  per op is shared by the fused path, 24 B fragments, and sensing.
+  per op is shared by the fused path, 16 B fragments, and sensing.
 - **Resolve is per dirty tile.** A 2D prefix sum turns the difference array into cells, dense
   and smooth sums add theirs, the sum saturates to `short` *after* summation (so cancellation
   stays exact), and the page's sum and max are recorded. Tiles that resolve to zero free their
@@ -581,7 +590,7 @@ Full semantics and the unsafe lifetime/aliasing/alignment/concurrency proof live
 ## Receipts
 
 Every claim above is asserted, not documented. `dotnet run --project benchmarks -c Release --
---verify` runs all 59 receipts before printing a single timing — with and without hardware
+--verify` runs all 62 receipts before printing a single timing — with and without hardware
 intrinsics:
 
 | receipts | what they pin down |
@@ -602,6 +611,8 @@ intrinsics:
 | `crowded-rebuild-matches-stepped-incremental`, `crowded-small-boxes-match-stepped-incremental`, `crowded-unchanged-frames-report-no-changed-tiles` | the rebuild equals stepped incremental on every cell; no-change frames report no changed tiles |
 | `sense-column-matches-try-sense`, `changed-mask-matches-changed`, `sync-matches-move` | column batches equal the per-agent API bit for bit |
 | `warm-crowded-process-allocates-0-bytes`, `warm-column-batches-allocate-0-bytes` | 0 B for crowded `Process` and column batches, warm |
+| `source-batches-match-serial-and-allocate-0-bytes`, `source-batches-retract-across-layers` | sealed batch ingestion equals serial calls cell for cell and rewinds across layers, 0 B warm |
+| `parallel-deposit-prep-matches-serial` | pooled tile preparation equals the serial build on every cell across shapes, grids, layers, saturation, churn, and changed tiles, 0 B warm |
 
 ## Cookbook
 
@@ -695,6 +706,8 @@ dotnet run --project benchmarks -c Release --no-build -- --timing    # every num
 dotnet run --project benchmarks -c Release --no-build -- --compare   # Gi vs the naive grid
 dotnet run --project benchmarks -c Release --no-build -- --crowd     # crowded rebuild sweep
 dotnet run --project benchmarks -c Release --no-build -- --daily     # the day-to-day tick loop
+dotnet run --project benchmarks -c Release --no-build -- --batch     # sealed batch ingestion
+dotnet run --project benchmarks -c Release --no-build -- --stages    # prep/apply/resolve per Process
 dotnet run --project viz -c Release --no-build -- live               # http://127.0.0.1:8740
 dotnet run --project tools/stats -c Release -- stats                 # internals as JSON
 ```
@@ -702,7 +715,7 @@ dotnet run --project tools/stats -c Release -- stats                 # internals
 - `src/Gi` — the package (`net10.0` + `netstandard2.1`; Unity calls use non-Burst code)
 - `src/Gi.Validation` — optional validation for editors and tools
 - `tests/Gi.Tests` — oracle, crowd, and validation tests
-- `benchmarks` — the 59 receipts and all the numbers above
+- `benchmarks` — the 62 receipts and all the numbers above
 - `samples/world` — console walkthrough; `samples/unity-demo` — sheep/wolf ecosystem on
   `TrySense`, with turned vision cones, a derived comfort layer, and fading paint
 - `viz` — static HTML render (round stamps, derived layers, fades) + live WebSocket ecosystem

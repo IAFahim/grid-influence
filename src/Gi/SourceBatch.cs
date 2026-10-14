@@ -13,7 +13,7 @@ internal enum SourceCommandKind : byte
     Expire,
 }
 
-public static unsafe partial class World
+public static partial class World
 {
     public enum BatchStatus : byte
     {

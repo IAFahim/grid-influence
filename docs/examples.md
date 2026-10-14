@@ -26,12 +26,16 @@ int  budget = World.MaxLayers;     // 32 — deposited and derived layers share 
 
 var ids = new byte[64];
 int  live = World.CopyWorldIds(ids);  // fills allocated ids ascending; returns the live count
+int  rev  = World.Revision(world);     // changes on Clear, Rewind, Free, and handle reuse —
+                                       // capture when queueing work, drop the work when it moves
 ```
 
 `Free` only frees a live handle; a stale one is an inert no-op, like every stale handle in
 Gi. `CopyWorldIds` copies at most the span's length but always returns the live count —
 call it once with an empty span to size the buffer. It is a process-wide scan: serialize it
-with `World.New`, `World.Free`, and `Stamp.Free`.
+with `World.New`, `World.Free`, and `Stamp.Free`. `Revision` never changes on mutation or
+`Process`; a dead slot keeps its last value, so a captured `(world, revision)` pair never
+matches again until the slot is reused — which bumps it once more.
 
 ## Grids
 

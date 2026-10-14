@@ -2,10 +2,10 @@
 
 Design and implementation tracker: [source batches #34](https://github.com/IAFahim/grid-influence/issues/34),
 [tile preparation #35](https://github.com/IAFahim/grid-influence/issues/35).
-`World.ApplyBatch`, source commands, creation targets, and per-command results are implemented
-in the local `1.2.0-alpha.1` development version. Direct mutations and batch calls remain
-exclusive per world. Host recording and the structural tile-preparation extension remain
-separate work; concurrent submissions belong in host-owned buffers, not concurrent `Place` calls.
+`World.ApplyBatch`, source commands, creation targets, per-command results, the `World.Revision`
+token, and parallel tile footprint preparation are implemented in `1.2.0-alpha.2`. Direct
+mutations and batch calls remain
+exclusive per world. Concurrent submissions belong in host-owned buffers, not concurrent `Place` calls.
 
 ## Processing contract
 
@@ -140,8 +140,25 @@ and application now count/skip against their respective layers rather than treat
 operation as belonging to its target layer ([#36](https://github.com/IAFahim/grid-influence/issues/36)).
 No public mutation replay loop or new scheduler is used.
 
-Tile footprint calculation and sparse-map preparation still use the existing serial build in
-`Process`; tile deposit and resolve already parallelize. That extension is tracked by #35.
+Tile footprint preparation is parallel too (#35): when a deferred batch acquires the pool,
+workers claim 64-op chunks and write per-worker placements, 16 B key-carrying fragments, and
+(grid, layer, tile) prep keys; the owning thread stitches them by prefix offsets and a
+counting sort; a second round gives each (grid, layer) task one writer, which sorts its tiles,
+allocates and grows blocks, and marks dirty in ascending order before apply workers see
+anything. Fragments never hold block pointers, so no pointer survives an arena resize.
+`dotnet run --project benchmarks -c Release --no-build -- --stages` reports preparation,
+application, and resolution costs per `Process` against the forced-serial build.
+
+## Rejecting stale queued work
+
+A host that queues work across frames cannot tell from a world id alone whether the world it
+recorded against is still the world that id names. `World.Revision(world)` returns an `int`
+token that changes on every observable world boundary: assignment in `World.New` (fresh or
+reused slot), `Clear`, `Rewind`, and `Free`. Mutations, `Process`, and `ProcessAll` leave it
+alone. Capture the token when work is recorded; before ingesting, re-read it and drop the
+queued work — or re-validate every command against current state — when it changed. The token
+is advisory and never throws: a dead slot keeps its last value, so a captured pair
+`(world, revision)` that no longer matches is always stale work.
 
 ## Verification before throughput claims
 

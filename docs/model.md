@@ -8,7 +8,10 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   releases the world's memory and its handle: `World.New` reuses the lowest free handle, and a freed
   handle reads as absent to every call. `World.CopyWorldIds(ids)` copies the allocated ids,
   ascending, into a span and returns the live count; `World.ProcessAll()` processes every
-  allocated world in id order on the calling thread. A grid
+  allocated world in id order on the calling thread. `World.Revision(world)` returns a token
+  that changes whenever queued work could be stale — `World.New` assigns it a fresh value,
+  and `Clear`, `Rewind`, `Free`, and slot reuse bump it; hosts capture it when recording work
+  for a world and drop the work when it changed. A grid
   (`Grid.New(world, power, x, y, size)`, up to 32 per world) is a power-of-two cell grid,
   `2^power` cells per side (power 5–14), laid over a world-space rect `x,y,size`. Grids are
   never freed singly, so their ids stay the dense range `0..Grid.Count(world)-1`;
@@ -154,11 +157,25 @@ Sparse tiled integer influence fields for .NET. One library, no dependencies.
   round bounds cannot touch before allocating anything.
   Batches whose ops are all unturned `ConstantRectangle` below `ops × grids < 512` emit fused on
   the calling thread; anything larger, or any batch containing another kind or a turned source,
-  splits into a serial build phase (placements, block growth, dirty marking, and 24 B per-tile
-  fragments that capture the block pointer plus their placement's index — growth republishes
-  to earlier fragments of the same batch by patching the captured pointer) and an apply phase
-  that runs on the resolve pool when the fragment count crosses 128, hash-bucketed by
-  (grid, layer, tile) into 64 buckets claimed one at a time through an atomic counter, so no
+  splits into a build phase and an apply phase. The build phase fans out over the resolve pool
+  when the pool is free: workers claim 64-op chunks through an atomic cursor and, per deposit,
+  per grid, resolve the placement and append into per-worker scratch that only its owner grows —
+  one placement per (deposit, grid), one 16 B key-carrying fragment per touched tile, and one
+  prep key naming (grid, layer, tile) and whether the tile needs its dense buffer. Fragments
+  hold tile keys and placement indexes, never block pointers. The owning thread then stitches:
+  fragment and placement ranges are reserved by per-worker prefix offsets and copied in — each
+  fragment's placement index rebased to its worker's range — and the prep keys are
+  counting-sorted into contiguous per-(grid, layer) task ranges. A second pool round prepares
+  structure: each task — one (grid, layer) pair, so one page map and one writer — sorts its
+  keys by tile (insertion sort small, three 8-bit radix passes large, per-task scratch),
+  allocates each tile's block sized for dense when any of its fragments needs it, attaches
+  dense to previously-placed blocks, and marks dirty in ascending tile order, so dirty lists
+  and `ChangedTiles` output are deterministic run to run, exactly as the serial and crowded
+  paths produce. With the pool busy the same contract runs on the calling thread: blocks are
+  allocated before apply, and no fragment holds a block pointer across growth. The apply phase
+  runs on the resolve pool when the fragment count crosses 128, hash-bucketed by
+  (grid, layer, tile) into 64 buckets claimed one at a time through an atomic counter — each
+  fragment resolves its block by a page-map lookup at apply time — so no
   two participants share a tile while a participant that finishes early takes the remaining
   buckets, fenced by a symmetric barrier
   before the resolve drain. Integer adds commute and the bucket scatter is stable, so pooled
@@ -771,10 +788,22 @@ pass behind them was `perf`-profile guided, receipts first.
   world's op queue — a merge targets the one op its slot's pending index names, an index that
   only `ApplyDeposits` clears. `Rewind` runs entirely on the owning thread: it writes source
   columns, merges into the same op queue, and rebuilds the free chain in place, and the
-  inverse ops it enqueues reach workers only through a later `Process`. `Process` runs the serial build phase on the owning
-  thread — footprints, page-map `Put`, dense/tent attach and growth, dirty marking, and
-  fragment appends — so map and block mutation stay on one thread per world and every block
-  pointer a fragment captured is published before signalling. The apply phase is either
+  inverse ops it enqueues reach workers only through a later `Process`. `Process`'s deferred
+  build runs as two pool rounds plus an owning-thread stitch. The scatter round claims 64-op
+  chunks through an atomic cursor; each participant appends only to its own slot's placement,
+  fragment, and prep-key buffers (one writer per buffer, indices never pointers), clears its
+  ops' pending indexes — disjoint, one op per slot per window — and, when recording, writes its
+  journal slot by op index, so journal order is the op order regardless of claim interleave.
+  The stitch runs on the owning thread alone once the round joins: ranges are reserved by
+  per-slot prefix offsets, fragments and placements are copied into the world buffers (each
+  fragment's placement index rebased to its slot's range), and prep keys are counting-sorted
+  into contiguous per-(grid, layer) task ranges. The preparation round then claims tasks — one
+  (grid, layer) pair, so exactly one writer per page map, per dirty list, and per `InDirty`
+  byte — and each task sorts its keys by tile, performs every `Put`, dense attach, and growth,
+  and marks dirty in ascending tile order before any apply worker is signalled, so no map
+  mutation races a reader, every tile's dense buffer exists before its fragments apply, and
+  dirty-list order is deterministic. Tent and bell buffers still attach lazily inside apply,
+  but only inside the one bucket that owns that tile. The apply phase is either
   fused on that same thread (box-only batches under the threshold) or scattered over the
   pool by (grid, layer, tile) hash bucket, each bucket claimed once through an atomic
   counter; a symmetric barrier — every participant,

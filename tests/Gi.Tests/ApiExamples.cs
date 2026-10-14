@@ -67,6 +67,41 @@ public sealed class ApiExamples
     }
 
     [Fact]
+    public void Worlds_RevisionTokenMovesOnClearRewindFreeAndReuse()
+    {
+        Assert.Equal(0, World.Revision(byte.MaxValue));
+        var w = World.New();
+        Grid.New(w, 6, 0f, 0f, 64f);
+        var l = Layer.New(w);
+        var revision = World.Revision(w);
+
+        var source = World.Place(w, l, 10.5f, 10.5f, Box1, 4);
+        World.Process(w);
+        World.Move(w, source, 20.5f, 20.5f);
+        Assert.Equal(revision, World.Revision(w));
+
+        World.Clear(w);
+        Assert.NotEqual(revision, World.Revision(w));
+
+        var cleared = World.Revision(w);
+        World.Record(w);
+        World.Place(w, l, 20.5f, 20.5f, Box1, 4);
+        World.Process(w);
+        World.Rewind(w);
+        World.Process(w);
+        Assert.NotEqual(cleared, World.Revision(w));
+
+        var rewound = World.Revision(w);
+        Assert.True(World.Free(w));
+        Assert.NotEqual(rewound, World.Revision(w));
+
+        var freed = World.Revision(w);
+        var reused = World.New();
+        if (reused == w) Assert.NotEqual(freed, World.Revision(reused));
+        Assert.True(World.Free(reused));
+    }
+
+    [Fact]
     public void Grids_EnumerateIdsAndInspectSpecs()
     {
         var w = World.New();
@@ -80,7 +115,7 @@ public sealed class ApiExamples
         Assert.Equal(3, Grid.Count(w));
         var ids = new byte[4];
         Assert.Equal(3, Grid.CopyIds(w, ids));
-        Assert.Equal(new byte[] { steering, minimap, region }, ids.AsSpan(0, 3).ToArray());
+        Assert.Equal(new[] { steering, minimap, region }, ids.AsSpan(0, 3).ToArray());
         Assert.Equal(3, Grid.CopyIds(w, new byte[2]));
 
         Assert.True(Grid.TryGetSpec(w, region, out var power, out var x, out var y, out var size));
@@ -114,7 +149,7 @@ public sealed class ApiExamples
         Assert.Equal(3, Layer.Count(w));
         var ids = new byte[3];
         Assert.Equal(3, Layer.CopyIds(w, ids));
-        Assert.Equal(new byte[] { food, threat, safety }, ids);
+        Assert.Equal(new[] { food, threat, safety }, ids);
         Assert.Equal(3, Layer.CopyIds(w, Span<byte>.Empty));
         Assert.Equal(0, Layer.Count(byte.MaxValue));
         Assert.Equal(0, Layer.CopyIds(byte.MaxValue, ids));
