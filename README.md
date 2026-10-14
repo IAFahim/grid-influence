@@ -52,7 +52,9 @@ World.Free(world);                       // release the world's memory and its h
 
 One world can hold many grids and many layers — a 1024² grid for steering plus a 64² grid for
 the minimap, a threat channel next to a food channel, and derived channels over both. Sources
-deposit into every grid they overlap at each grid's own scale.
+deposit into every grid they overlap at each grid's own scale. Every public call, including
+the ones this page never quotes, has a runnable example in
+[`docs/examples.md`](docs/examples.md).
 
 ## Seven stamp kinds
 
@@ -443,6 +445,87 @@ changed) and reads maintained state. Memory flips too — the naive grid allocat
 layer up front (1 GB at 16384²); Gi allocates ~6.5 KB per live tile (2.1 KB for a derived
 tile), so an empty world of any size costs zero.
 
+## A day in the life
+
+The tables above time one operation at a time. Real use is a whole tick: agents move and aim,
+a few spawn and die, scent is dropped and fades, the field processes once, and every agent
+asks one or two questions. `--daily` runs exactly that (abridged below; the full loop is
+`benchmarks/DailyTiming.cs`) — a 512² world with a 512² steering grid and a 128² minimap
+grid, four deposited layers (240 food bells that drift, 20 wolves sweeping 110° vision cones,
+200 sheep auras, 4 scent crumbs dropped per tick and fading out over 240 ticks), one derived
+`safety = food − 2·threat`, and spawn/death churn every 8 ticks — about 1,420 live sources,
+~205 queued ops and ~395 agent reads per tick:
+
+```csharp
+for (var tick = 0; tick < frames; tick++)
+{
+    for (var i = 0; i < 20; i++)                              // wolves steer, face, walk
+    {
+        wolfHeading[i] += Wander();
+        World.Turn(world, wolf[i], wolfHeading[i]);
+        World.Move(world, wolf[i], wolfX[i], wolfY[i]);
+    }
+
+    for (var s = 0; s < 150; s++)                             // 150 sheep wander, 50 sleep on
+        World.Move(world, sheep[WalkIndex(tick, s)], sheepX, sheepY);
+
+    if (tick % 8 == 0)                                        // two die, two are born
+        for (var j = 0; j < 2; j++)
+        {
+            World.Remove(world, sheep[rot]);
+            sheep[rot] = World.Place(world, herd, rx, ry, aura, gain: 4);
+        }
+
+    for (var c = 0; c < 4; c++)                               // scent fades and vanishes alone
+    {
+        var crumb = World.Place(world, scent, cx, cy, crumbStamp, gain: 16);
+        World.Fade(world, crumb, 0, ticks: 240);
+        World.Expire(world, crumb, ticks: 240);
+    }
+
+    World.Process(world);                                     // once per frame
+
+    for (var a = 0; a < 200; a++)                             // sheep sleep through calm ticks
+        if (World.Changed(world, threat, sheepX[a], sheepY[a], reach: 20f, since: tick - 6))
+            World.TrySenseNearest(world, food, sheepX[a], sheepY[a], reach: 40f, threshold: 60,
+                                  out var meal, out _, out _);
+
+    for (var i = 0; i < 20; i++)                              // wolves hunt the herd edge
+        World.TrySenseNearest(world, herd, wolfX[i], wolfY[i], reach: 48f, threshold: 30,
+                              out _, out _, out _);
+
+    for (var b = 0; b < 60; b++)                              // graze along the safety slope
+        World.TrySenseGradient(world, safety, grazeX[b], grazeY[b], out var dx, out var dy);
+
+    if (tick % 4 == 0)                                        // minimap refresh
+        World.QueryRegion(world, map, safety, 0, 0, 128, 128, page);
+
+    if (tick % 10 == 0)                                       // strategic best cell
+        World.QueryMax(world, fine, safety, out _, out _);
+}
+```
+
+Measured over 600 ticks after a 300-tick warm-up (tiered JIT settles; the engine itself has
+no warm-up — idle frames cost 0). 58% of sheep decisions woke to a real change near them;
+42% slept through:
+
+| day-to-day tick, 512² world | AVX2 | intrinsics off |
+| --- | ---: | ---: |
+| **whole tick, mean** | **390 µs** | 610 µs |
+| whole tick, worst | 820 µs | 1.7 ms |
+| mutations (~208 ops) | 3 µs | 3 µs |
+| `Process` (4 deposited layers + derived safety) | 230 µs | 450 µs |
+| agent reads (~395) | 155 µs | 160 µs |
+
+The whole simulation — field upkeep plus every agent's senses — is 2.4% of a 16.6 ms frame,
+leaving the rest for rendering and game code. The herd and wolf layers sit above the crowd
+threshold, so most of `Process` is the bit-identical crowded rebuild; `Changed`-gated
+sleeping is why reads stay cheap while the world moves.
+
+`--daily` prints its own receipts before the timings: the replay's checksum is identical
+across two fresh worlds and across SIMD on and off (13,600,833), the derived argmax equals
+a full 512² region scan, and the 600-tick loop allocates 0 B.
+
 ## How it works
 
 - **Deposits are incremental and deferred.** Each live tile owns one 6,528 B block: a 32×32
@@ -604,6 +687,7 @@ DOTNET_EnableHWIntrinsic=0 dotnet run --project benchmarks -c Release --no-build
 dotnet run --project benchmarks -c Release --no-build -- --timing    # every number above
 dotnet run --project benchmarks -c Release --no-build -- --compare   # Gi vs the naive grid
 dotnet run --project benchmarks -c Release --no-build -- --crowd     # crowded rebuild sweep
+dotnet run --project benchmarks -c Release --no-build -- --daily     # the day-to-day tick loop
 dotnet run --project viz -c Release --no-build -- live               # http://127.0.0.1:8740
 dotnet run --project tools/stats -c Release -- stats                 # internals as JSON
 ```
