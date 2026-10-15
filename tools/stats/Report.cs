@@ -90,20 +90,24 @@ internal static class Report
             writer.WriteNumber("layers_bytes"u8, snapshot.LayerBytes);
             writer.WriteNumber("sources_bytes"u8, snapshot.SourceBytes);
             writer.WriteNumber("scratch_bytes"u8, snapshot.ScratchBytes);
+            writer.WriteNumber("prepared_sources_bytes"u8, snapshot.PreparedBytes);
+            writer.WriteNumber("tile_source_bins_bytes"u8, snapshot.BinBytes);
+            writer.WriteNumber("schedule_bytes"u8, snapshot.ScheduleBytes);
+            writer.WriteNumber("deposit_queues_bytes"u8, snapshot.DepositQueueBytes);
             writer.WriteNumber("dirty_flags_bytes"u8, snapshot.DirtyFlagBytes);
             writer.WriteNumber("dirty_queues_bytes"u8, snapshot.DirtyQueueBytes);
             writer.WriteNumber("page_maps_bytes"u8, snapshot.MapBytes);
-            writer.WriteNumber("difference_arrays_bytes"u8, snapshot.DifferenceBytes);
-            writer.WriteNumber("dense_buffers_bytes"u8, snapshot.DenseBytes);
-            writer.WriteNumber("dense_pointer_bytes"u8, snapshot.DensePointerBytes);
-            writer.WriteNumber("raster_tiles"u8, snapshot.RasterTiles);
+            writer.WriteNumber("tile_directories_bytes"u8, snapshot.DirectoryBytes);
             writer.WriteNumber("derived_tiles"u8, snapshot.DerivedTiles);
             writer.WriteNumber("query_pages_bytes"u8, snapshot.PageBytes);
             writer.WriteNumber("page_sums_bytes"u8, snapshot.PageSumBytes);
+            writer.WriteNumber("row_summaries_bytes"u8, snapshot.RowSummaryBytes);
             writer.WriteNumber("max_pyramids_bytes"u8, snapshot.PyramidBytes);
             writer.WriteEndObject();
             writer.WriteStartObject("shared"u8);
             writer.WriteNumber("world_arena_bytes"u8, snapshot.WorldArenaBytes);
+            writer.WriteNumber("world_revision_bytes"u8, snapshot.WorldRevisionBytes);
+            writer.WriteNumber("zero_page_bytes"u8, snapshot.ZeroPageBytes);
             writer.WriteNumber("stamp_arena_bytes"u8, snapshot.StampArenaBytes);
             writer.WriteNumber("raster_samples_bytes"u8, snapshot.StampRasterBytes);
             writer.WriteEndObject();
@@ -148,7 +152,7 @@ internal static class Report
             Console.WriteLine($"native requested bytes: {snapshot.NativeBytes}; selected world: {snapshot.WorldBytes}; shared arenas + stamps: {snapshot.SharedBytes}");
             Console.WriteLine($"grids: {snapshot.GridBytes}; layers: {snapshot.LayerBytes}; sources: {snapshot.SourceBytes}; scratch: {snapshot.ScratchBytes}");
             Console.WriteLine($"dirty flags: {snapshot.DirtyFlagBytes}; queues: {snapshot.DirtyQueueBytes}; maps: {snapshot.MapBytes}");
-            Console.WriteLine($"difference arrays: {snapshot.DifferenceBytes}; dense buffers: {snapshot.DenseBytes} ({snapshot.RasterTiles} raster tiles); query pages: {snapshot.PageBytes}; page sums: {snapshot.PageSumBytes}; max pyramids: {snapshot.PyramidBytes}");
+            Console.WriteLine($"query pages: {snapshot.PageBytes}; page sums: {snapshot.PageSumBytes}; row summaries: {snapshot.RowSummaryBytes}; max pyramids: {snapshot.PyramidBytes}");
             using var process = Process.GetCurrentProcess();
             Console.WriteLine($"managed heap: {GC.GetTotalMemory(false)}; working set: {process.WorkingSet64}; private process: {process.PrivateMemorySize64}");
         }

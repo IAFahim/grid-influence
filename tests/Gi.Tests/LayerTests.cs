@@ -152,10 +152,9 @@ public sealed class LayerTests
         var snapshot = Stats.Inspection.Read(w);
         Assert.Equal(2, snapshot.LiveTiles);
         Assert.Equal(1, snapshot.DerivedTiles);
-        Assert.Equal(World.BlockBytes - World.HeaderBytes, snapshot.DifferenceBytes);
         Assert.Equal(2 * World.PageBytes, snapshot.PageBytes);
-        Assert.Equal(World.BlockBytes + World.HeaderBytes,
-            snapshot.DifferenceBytes + snapshot.DensePointerBytes + snapshot.PageBytes + snapshot.PageSumBytes);
+        Assert.Equal(2 * World.HeaderBytes,
+            snapshot.PageBytes + snapshot.PageSumBytes + snapshot.RowSummaryBytes);
         Assert.Equal(240, World.Query(w, 0, d, 16, 16));
     }
 }

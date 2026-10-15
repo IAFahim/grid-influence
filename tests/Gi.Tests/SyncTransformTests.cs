@@ -100,7 +100,7 @@ public sealed class SyncTransformTests : IDisposable
             var mask = new ulong[words + 1];
             var expected = new ulong[words];
             for (var index = 0; index < count; index++)
-                if (twinIds[index] == staleTwin)
+                if (twinIds[index] == staleTwin || !float.IsFinite(xs[index]) || !float.IsFinite(ys[index]))
                     expected[index >> 6] |= 1ul << (index & 63);
 
             fixed (int* idPointer = ids)

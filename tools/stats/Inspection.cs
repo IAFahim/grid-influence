@@ -20,30 +20,29 @@ internal struct Snapshot
     public long LayerBytes;
     public long SourceBytes;
     public long ScratchBytes;
+    public long PreparedBytes;
+    public long BinBytes;
+    public long ScheduleBytes;
     public long DirtyFlagBytes;
     public long DirtyQueueBytes;
     public long MapBytes;
-    public long DifferenceBytes;
-    public long DenseBytes;
-    public long DensePointerBytes;
-    public long TentBytes;
-    public long TentTiles;
-    public long BellBytes;
-    public long BellTiles;
+    public long DirectoryBytes;
     public long PageBytes;
     public long PageSumBytes;
+    public long RowSummaryBytes;
     public long PyramidBytes;
     public long DepositQueueBytes;
-    public long RasterTiles;
     public long WorldArenaBytes;
+    public long WorldRevisionBytes;
+    public long ZeroPageBytes;
     public long StampArenaBytes;
     public long StampRasterBytes;
 
     public readonly long WorldBytes => GridBytes + LayerBytes + SourceBytes + ScratchBytes +
-        DirtyFlagBytes + DirtyQueueBytes + MapBytes + DifferenceBytes + DenseBytes + DensePointerBytes +
-        TentBytes + BellBytes + PageBytes + PageSumBytes + PyramidBytes + DepositQueueBytes;
+        PreparedBytes + BinBytes + ScheduleBytes + DirtyFlagBytes + DirtyQueueBytes + MapBytes + DirectoryBytes +
+        PageBytes + PageSumBytes + RowSummaryBytes + PyramidBytes + DepositQueueBytes;
 
-    public readonly long SharedBytes => WorldArenaBytes + StampArenaBytes + StampRasterBytes;
+    public readonly long SharedBytes => WorldArenaBytes + WorldRevisionBytes + ZeroPageBytes + StampArenaBytes + StampRasterBytes;
 
     public readonly long NativeBytes => WorldBytes + SharedBytes;
 }
@@ -65,11 +64,12 @@ internal static unsafe class Inspection
             SourceCapacity = s->X.Capacity,
             GridBytes = World.MaxGrids * sizeof(GridCtx),
             LayerBytes = World.MaxLayers * sizeof(LayerRecipe),
-            ScratchBytes = TileBake.TileSize * sizeof(int) +
-                (long)w->BatchSources.Capacity * sizeof(SourceBatchEntry) +
+            ScratchBytes = (long)w->BatchSources.Capacity * sizeof(SourceBatchEntry) +
                 (long)w->BatchCommands.Capacity * sizeof(SourceBatchLink) +
-                (long)w->BatchLookup.Capacity * sizeof(int) +
-                (long)w->BatchLayerDeltas.Capacity * sizeof(int),
+                (long)w->BatchLookup.Capacity * sizeof(int),
+            ScheduleBytes = (long)w->Timers.Capacity * sizeof(Alarm) +
+                ((long)w->TimerPositions.Capacity + w->TimerExpired.Capacity + w->TimerSort.Capacity) * sizeof(int) +
+                (long)w->ScheduleJournal.Capacity * sizeof(ScheduleRecord),
             SourceBytes = (long)s->X.Capacity * sizeof(float) + (long)s->Y.Capacity * sizeof(float) +
                 s->Stamp.Capacity + s->Layer.Capacity + s->Gain.Capacity + s->Alive.Capacity +
                 ((long)s->Angle.Capacity + s->Scale.Capacity) * sizeof(ushort) +
@@ -77,12 +77,12 @@ internal static unsafe class Inspection
                 ((long)s->FadeStart.Capacity + s->FadeTicks.Capacity + s->ExpireAt.Capacity + s->Due.Capacity) * sizeof(int) +
                 (long)s->Free.Capacity * sizeof(int) + s->Gen.Capacity,
             WorldArenaBytes = World.MaxWorlds * sizeof(WorldCtx),
+            WorldRevisionBytes = World.MaxWorlds * sizeof(int),
+            ZeroPageBytes = World.PageBytes,
             StampArenaBytes = StampCatalog.MaxStamps * sizeof(StampVariant),
 
             DepositQueueBytes = (long)w->Ops.Capacity * sizeof(DepositOp) + (long)w->Pending.Capacity * sizeof(int) +
-                (long)w->Fragments.Capacity * sizeof(DepositFragment) + (long)w->Placements.Capacity * sizeof(Placement) +
-                (long)w->Journal.Capacity * sizeof(DepositOp) + (long)w->ScheduleJournal.Capacity * sizeof(ScheduleRecord) +
-                (long)w->Timers.Capacity * sizeof(Alarm),
+                (long)w->Journal.Capacity * sizeof(DepositOp),
         };
 
         for (var i = 0; i < s->Count; i++)
@@ -92,6 +92,8 @@ internal static unsafe class Inspection
         {
             var g = w->Grids + gi;
             result.LayerBytes += World.MaxLayers * sizeof(LayerData);
+            result.PreparedBytes += (long)g->Prepared.Capacity * sizeof(Placement) +
+                (long)g->Footprints.Capacity * sizeof(PreparedFootprint);
             result.PossibleTiles += (long)g->TileCount * w->LayerCount;
             for (var li = 0; li < w->LayerCount; li++)
             {
@@ -102,40 +104,18 @@ internal static unsafe class Inspection
                 result.MapSlots += ld->Pages.SlotCount;
                 result.Tombstones += ld->Pages.TombstoneCount;
                 result.MapBytes += (long)ld->Pages.SlotCount * (sizeof(int) + sizeof(byte*) + sizeof(byte));
+                result.DirectoryBytes += ld->Pages.DirectoryBytes;
+                result.BinBytes += (long)ld->Bins.Capacity * sizeof(SourceBin) + (long)ld->BinEntries.Capacity * sizeof(int);
                 result.DirtyQueueBytes += (long)(ld->Dirty.Capacity + ld->Changed.Capacity) * sizeof(int);
                 result.PyramidBytes += ld->Max.Bytes;
-                if (ld->InDirty != null) result.DirtyFlagBytes += (long)g->TileCount * (1 + sizeof(int));
-
-                var used = ld->Pages.Used;
-                var blocks = ld->Pages.Blocks;
-                for (var slot = 0; slot < ld->Pages.SlotCount; slot++)
-                {
-                    if (used[slot] != PageMap.Live) continue;
-                    if (*(byte**)(blocks[slot] + World.DensePtrOffset) != null)
-                    {
-                        result.RasterTiles++;
-                        result.DenseBytes += World.DenseBytes;
-                    }
-
-                    if (*(byte**)(blocks[slot] + World.TentPtrOffset) != null)
-                    {
-                        result.TentTiles++;
-                        result.TentBytes += World.TentBytes;
-                    }
-
-                    if (*(byte**)(blocks[slot] + World.BellPtrOffset) != null)
-                    {
-                        result.BellTiles++;
-                        result.BellBytes += World.BellBytes;
-                    }
-                }
+                if (ld->InDirty != null) result.DirtyFlagBytes += g->TileCount;
+                if (ld->Epochs != null) result.DirtyFlagBytes += (long)g->TileCount * sizeof(int);
             }
         }
 
-        result.DifferenceBytes = (result.LiveTiles - result.DerivedTiles) * (World.BlockBytes - World.HeaderBytes);
-        result.DensePointerBytes = result.LiveTiles * (World.HeaderBytes - World.DensePtrOffset);
         result.PageBytes = result.LiveTiles * World.PageBytes;
-        result.PageSumBytes = result.LiveTiles * (World.DensePtrOffset - World.SumOffset);
+        result.PageSumBytes = result.LiveTiles * (World.RowSumOffset - World.SumOffset);
+        result.RowSummaryBytes = result.LiveTiles * (World.HeaderBytes - World.RowSumOffset);
 
         for (var i = 1; i < StampCatalog.Count; i++)
         {

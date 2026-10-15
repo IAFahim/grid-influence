@@ -8,7 +8,7 @@ internal static unsafe class Runtime
 {
     internal static WorldCtx* Worlds;
     internal static StampVariant* Stamps;
-    internal static byte* ZeroDense;
+    internal static byte* ZeroPage;
     internal static int* WorldRevisions;
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -18,8 +18,8 @@ internal static unsafe class Runtime
 
         Worlds = (WorldCtx*)NativeHeap.AllocZeroed((nuint)(World.MaxWorlds * sizeof(WorldCtx)));
         Stamps = (StampVariant*)NativeHeap.AllocZeroed((nuint)(StampCatalog.MaxStamps * sizeof(StampVariant)));
-        ZeroDense = (byte*)NativeHeap.AlignedAlloc(World.DenseBytes);
-        new Span<byte>(ZeroDense, World.DenseBytes).Clear();
+        ZeroPage = (byte*)NativeHeap.AlignedAlloc(World.PageBytes);
+        new Span<byte>(ZeroPage, World.PageBytes).Clear();
         WorldRevisions = (int*)NativeHeap.AllocZeroed((nuint)World.MaxWorlds * sizeof(int));
     }
 }

@@ -18,6 +18,8 @@ internal unsafe struct PageMap
     private int _shift;
     private int _count;
     private int _tombstones;
+    private int* _directory;
+    private int _tileCount;
 
     public readonly int SlotCount => _used == null ? 0 : _mask + 1;
 
@@ -25,11 +27,15 @@ internal unsafe struct PageMap
 
     public readonly int TombstoneCount => _tombstones;
 
+    public readonly long DirectoryBytes => _directory == null ? 0 : (long)_tileCount * sizeof(int);
+
     public readonly byte* Used => _used;
 
     public readonly byte** Blocks => _blocks;
 
     public readonly int* Keys => _keys;
+
+    public void Configure(int tileCount) => _tileCount = tileCount;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private readonly int SlotOf(int key) => (int)((uint)key * 2654435761u >> _shift);
@@ -66,6 +72,13 @@ internal unsafe struct PageMap
 
     public void Put(int tile, byte* block)
     {
+        if (_directory == null && _tileCount != 0)
+            _directory = (int*)NativeHeap.AllocZeroed((nuint)_tileCount * sizeof(int));
+        if (_directory != null && _directory[tile] != 0)
+        {
+            _blocks[_directory[tile] - 1] = block;
+            return;
+        }
         if (_mask == 0 || (_count + _tombstones + 1) * 4 >= (_mask + 1) * 3)
             GrowTo(Math.Max(SlotCount, (_count + 1) * 2));
 
@@ -99,6 +112,7 @@ internal unsafe struct PageMap
         if (index < 0) return false;
 
         _used[index] = Tombstone;
+        if (_directory != null) _directory[tile] = 0;
         _count--;
         _tombstones++;
         return true;
@@ -106,6 +120,7 @@ internal unsafe struct PageMap
 
     private readonly int IndexOf(int tile)
     {
+        if (_directory != null) return (uint)tile < (uint)_tileCount ? _directory[tile] - 1 : -1;
         if (_mask == 0) return -1;
 
         var index = SlotOf(tile);
@@ -126,9 +141,11 @@ internal unsafe struct PageMap
         NativeHeap.AlignedFree(_keys);
         NativeHeap.AlignedFree(_blocks);
         NativeHeap.AlignedFree(_used);
+        NativeHeap.Free(_directory);
         _keys = null;
         _blocks = null;
         _used = null;
+        _directory = null;
         _mask = 0;
         _count = 0;
         _tombstones = 0;
@@ -152,6 +169,7 @@ internal unsafe struct PageMap
         _count = 0;
         _tombstones = 0;
         new Span<byte>(_used, capacity).Clear();
+        if (_directory != null) new Span<int>(_directory, _tileCount).Clear();
 
         if (oldUsed != null)
         {
@@ -170,6 +188,7 @@ internal unsafe struct PageMap
         _keys[index] = key;
         _blocks[index] = block;
         _used[index] = Live;
+        if (_directory != null) _directory[key] = index + 1;
         _count++;
     }
 

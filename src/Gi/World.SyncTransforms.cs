@@ -99,6 +99,7 @@ public static unsafe partial class World
                 var id = sources[i];
                 var slot = id & SourceIndexMask;
                 if (id < 0 || slot >= source->Count || source->Alive.Pointer[slot] == 0 ||
+                    !float.IsFinite(xs[i]) || !float.IsFinite(ys[i]) ||
                     (uint)id >> 24 != source->Gen.Pointer[slot])
                 {
                     if (invalid != null) invalid[i >> 6] |= 1ul << (i & 63);
@@ -152,6 +153,7 @@ public static unsafe partial class World
                 var id = sources[i];
                 var slot = id & SourceIndexMask;
                 if (id < 0 || slot >= source->Count || source->Alive.Pointer[slot] == 0 ||
+                    !float.IsFinite(xs[i]) || !float.IsFinite(ys[i]) ||
                     (uint)id >> 24 != source->Gen.Pointer[slot])
                 {
                     if (invalid != null) invalid[i >> 6] |= 1ul << (i & 63);
@@ -163,9 +165,6 @@ public static unsafe partial class World
                 {
                     var state = ReadSourceBatchState(source, slot);
                     entry->State = state;
-                    entry->InitialAlive = state.Alive;
-                    entry->InitialLayer = state.Layer;
-                    entry->InitialGain = state.Gain;
                     entry->Operation = entry->OriginalPending != 0
                         ? context->Ops.Pointer[entry->OriginalPending - 1]
                         : SeedTransformOperation(slot, in state);
@@ -224,14 +223,12 @@ public static unsafe partial class World
         }
 
         context->Ops.Resize(assigned);
-        context->BatchLayerDeltas.Resize(ResolvePool.MaximumSlots * SourceBatchLayerStride);
-        context->BatchLayerDeltas.Span.Clear();
         if (entries >= ResolvePool.ColumnThreshold && ResolvePool.TryAcquire())
         {
             ResolvePool.ApplySourceBatch(context);
             ResolvePool.Release();
         }
-        else ApplySourceBatchRange(context, 0, entries, 0);
+        else ApplySourceBatchRange(context, 0, entries);
     }
 
     private static DepositOp SeedTransformOperation(int slot, in SourceBatchState state) => new()

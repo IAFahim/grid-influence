@@ -62,8 +62,8 @@ internal static partial class Verification
         Check("warm-fade-process-allocates-0-bytes", WarmFadeProcessAllocationFree());
         Check("changed-since-matches-epochs", ChangedSinceMatchesEpochs());
         Check("sense-nearest-matches-scan", SenseNearestMatchesScan());
-        Check("crowded-rebuild-matches-stepped-incremental", CrowdedMatchesStepped(3000, 8, CrowdBox8, 10, 4, 500));
-        Check("crowded-small-boxes-match-stepped-incremental", CrowdedMatchesStepped(300, 4, CrowdBox4, 9, 4, 20));
+        Check("crowded-window-matches-stepped-processing", CrowdedMatchesStepped(3000, 8, CrowdBox8, 10, 4, 500));
+        Check("crowded-small-boxes-match-stepped-processing", CrowdedMatchesStepped(300, 4, CrowdBox4, 9, 4, 20));
         Check("crowded-unchanged-frames-report-no-changed-tiles", CrowdedIdleFramesReportNothing());
         Check("sense-column-matches-try-sense", SenseColumnMatchesTrySense());
         Check("sense-columns-match-scalar", SenseColumnsMatchScalar());
@@ -75,7 +75,7 @@ internal static partial class Verification
         Check("source-batches-retract-across-layers", SourceBatchesRetractAcrossLayers());
         Check("transform-updates-match-ordered-calls", TransformUpdatesMatchOrderedCallsAndAllocateNothing());
         Check("sync-transforms-match-ordered-calls", SyncTransformsMatchOrderedCallsAndAllocateNothing());
-        Check("parallel-deposit-prep-matches-serial", ParallelDepositPrepMatchesSerial());
+        Check("pooled-source-batch-matches-serial", PooledSourceBatchMatchesSerial());
 
         Console.WriteLine(failures == 0 ? "verification: all receipts green" : $"verification: {failures} failures");
         return failures == 0 ? 0 : 1;

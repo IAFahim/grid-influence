@@ -43,12 +43,13 @@ use the same workload and CPU affinity and set `DOTNET_TieredCompilation=0` for 
 including hosts with different runtime defaults.
 Timing and runtime memory values vary even though the workload and JSON layout are deterministic.
 
-Measured on the i9-14900K with .NET 10.0.12, CPU 0, tiered compilation disabled, median of
-three runs: 4,000 box sources, three layers, 256 cells per side, 200 moves per frame,
-12,000 frames, and 10,000 queries per frame. Comparing the previous library with the AVX2 and
-bounds/churn fixes, move-plus-process fell from 76,944 to 55,565 ns/frame (27.8%). Cell query
-measured 3.59 versus 3.40 ns/query. All phase checksums matched and every phase allocated 0 B.
-These figures describe this machine and workload; the CLI can repeat the measurement on others.
+Measured on the Ryzen 5 8500G with .NET 10.0.12, CPU 0, tiered compilation disabled, repeated
+runs within a few percent: 4,000 box sources, three layers, 256 cells per side, 200 moves per
+frame, 12,000 frames, and 10,000 queries per frame. Idle process measures ~25–38 ns per call,
+cell query ~3.8 ns, and move-plus-process ~850 µs per frame — the serial snapshot resolve
+re-sums every dirty tile's full source bin, so a dense world where most tiles touch movers is
+the worst case. All phase checksums matched and every phase allocated 0 B. These figures
+describe this machine and workload; the CLI can repeat the measurement on others.
 
 JSON is written directly to stdout using `Utf8JsonWriter` and static UTF-8 property names.
 There is no DTO traversal, serializer metadata, reflection, or UTF-16 JSON string construction.

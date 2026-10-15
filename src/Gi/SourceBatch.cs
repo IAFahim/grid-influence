@@ -175,7 +175,4 @@ internal struct SourceBatchEntry
     public int OperationIndex;
     public byte PlannedGeneration;
     public byte PlannedAlive;
-    public byte InitialLayer;
-    public byte InitialGain;
-    public byte InitialAlive;
 }

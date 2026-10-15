@@ -22,14 +22,18 @@ internal static unsafe class Receipts
             pending.SourceCapacity == 64 && pending.LiveTiles == 0 && pending.DirtyTiles == 0 &&
             pending.GridBytes == World.MaxGrids * sizeof(GridCtx) &&
             pending.LayerBytes == 2 * World.MaxLayers * sizeof(LayerData) + World.MaxLayers * sizeof(LayerRecipe) &&
-            pending.SourceBytes == 64 * 40 && pending.MapBytes == 0 &&
+            pending.SourceBytes == 64 * 40 && pending.MapBytes == 0 && pending.DirectoryBytes == 0 &&
+            pending.PreparedBytes == 0 && pending.BinBytes == 0 && pending.ScheduleBytes == 0 &&
             pending.DirtyFlagBytes == 0 && pending.DirtyQueueBytes == 0 &&
-            pending.DifferenceBytes == 0 && pending.DenseBytes == 0 && pending.RasterTiles == 0 &&
             pending.DepositQueueBytes == 16 * sizeof(DepositOp) + 64 * sizeof(int) &&
-            pending.StampRasterBytes - empty.StampRasterBytes == 25 && pending.Stamps - empty.Stamps == 2;
+            pending.StampRasterBytes - empty.StampRasterBytes == 25 && pending.Stamps - empty.Stamps == 2 &&
+            pending.WorldBytes - empty.WorldBytes == 64 * 40 + 16 * sizeof(DepositOp) + 64 * sizeof(int) &&
+            pending.WorldRevisionBytes == World.MaxWorlds * sizeof(int) && pending.ZeroPageBytes == World.PageBytes;
 
         World.Process(world);
         var processed = Inspection.Read(world);
+        var preparedBytes = 2L * 16 * (sizeof(Placement) + sizeof(PreparedFootprint));
+        var binBytes = 2L * 16 * (sizeof(SourceBin) + sizeof(int));
         var fieldOk = World.Query(world, grid, layer, 16, 16) == 120 &&
             World.Query(world, grid, layer, 0, 0, 64, 64) == 1920 &&
             World.Query(world, grid, other, 47, 47) == -20 &&
@@ -37,21 +41,22 @@ internal static unsafe class Receipts
             World.Query(world, grid, other, 0, 0, 64, 64) == 20 &&
             processed.LiveTiles == 2 && processed.DirtyTiles == 0 &&
             processed.MapBytes == 32 * (sizeof(int) + sizeof(byte*) + 1) &&
+            processed.DirectoryBytes == 2 * 4 * sizeof(int) &&
+            processed.PreparedBytes == preparedBytes && processed.BinBytes == binBytes &&
             processed.DirtyFlagBytes == 40 && processed.DirtyQueueBytes == 128 &&
-            processed.RasterTiles == 1 &&
-            processed.DifferenceBytes + processed.DenseBytes + processed.DensePointerBytes +
-                processed.PageBytes + processed.PageSumBytes == 2 * World.BlockBytes + World.DenseBytes &&
+            processed.PageBytes + processed.PageSumBytes + processed.RowSummaryBytes == 2 * World.HeaderBytes &&
+            processed.RowSummaryBytes == 2 * TileBake.TileSize * (sizeof(int) + sizeof(short)) &&
             processed.PyramidBytes == 2 * (64 * 2 + 2 * 16 * 4) &&
-            processed.DepositQueueBytes == 16 * sizeof(DepositOp) + 64 * sizeof(int) + 16 * sizeof(DepositFragment) + 16 * sizeof(Placement) &&
-            processed.NativeBytes == pending.NativeBytes + 2 * World.BlockBytes + World.DenseBytes +
-                32 * (sizeof(int) + sizeof(byte*) + 1) + 40 + 128 + processed.PyramidBytes +
-                16 * sizeof(DepositFragment) + 16 * sizeof(Placement);
+            processed.DepositQueueBytes == pending.DepositQueueBytes &&
+            processed.NativeBytes == pending.NativeBytes + 2 * World.HeaderBytes +
+                32 * (sizeof(int) + sizeof(byte*) + 1) + processed.DirectoryBytes + 40 + 128 + processed.PyramidBytes +
+                preparedBytes + binBytes;
 
         World.Remove(world, a);
         World.Process(world);
         var removed = Inspection.Read(world);
         var removalOk = removed.LiveSources == 1 && removed.SourceSlots == 2 && removed.LiveTiles == 1 &&
-            removed.Tombstones == 1 && processed.WorldBytes - removed.WorldBytes == World.BlockBytes - 64 &&
+            removed.Tombstones == 1 && processed.WorldBytes - removed.WorldBytes == World.HeaderBytes - 64 &&
             World.Query(world, grid, layer, 0, 0, 64, 64) == 0;
 
         World.Move(world, b, 16f, 16f);
@@ -85,35 +90,42 @@ internal static unsafe class Receipts
         var mutationOk = World.Query(world, grid, other, 16, 16) == 80 &&
             World.Query(world, grid, other, 48, 48) == 0;
 
+        var beforeTent = Inspection.Read(world);
         var t = World.Place(world, layer, 48f, 48f, Stamp.Tent(8, 8, 40), 3);
         World.Process(world);
         var tented = Inspection.Read(world);
-        var tentOk = tented.TentTiles == 1 && tented.TentBytes == World.TentBytes &&
+        var tentOk = tented.LiveTiles == beforeTent.LiveTiles + 1 &&
+            tented.PageBytes - beforeTent.PageBytes == World.PageBytes &&
+            tented.RowSummaryBytes - beforeTent.RowSummaryBytes == TileBake.TileSize * (sizeof(int) + sizeof(short)) &&
             World.Query(world, grid, layer, 48, 48) > 0;
         World.Remove(world, t);
         World.Process(world);
         var tentGone = Inspection.Read(world);
-        tentOk = tentOk && tentGone.TentTiles == 0 && tentGone.TentBytes == 0;
+        tentOk = tentOk && tentGone.LiveTiles == tented.LiveTiles - 1;
 
         var bell = World.Place(world, layer, 48f, 48f, Stamp.Bell(12, 12, 40), 3);
         World.Process(world);
         var belled = Inspection.Read(world);
-        var bellOk = belled.BellTiles == 1 && belled.BellBytes == World.BellBytes &&
+        var bellOk = belled.LiveTiles == tentGone.LiveTiles + 1 &&
+            belled.PageBytes - tentGone.PageBytes == World.PageBytes &&
+            belled.RowSummaryBytes - tentGone.RowSummaryBytes == TileBake.TileSize * (sizeof(int) + sizeof(short)) &&
             World.Query(world, grid, layer, 48, 48) > 0;
         World.Remove(world, bell);
         World.Process(world);
         var bellGone = Inspection.Read(world);
-        bellOk = bellOk && bellGone.BellTiles == 0 && bellGone.BellBytes == 0;
+        bellOk = bellOk && bellGone.LiveTiles == belled.LiveTiles - 1;
 
         World.Clear(world);
         var cleared = Inspection.Read(world);
         var clearOk = cleared.LiveSources == 0 && cleared.SourceSlots == 0 && cleared.SourceCapacity == 64 &&
             cleared.LiveTiles == 0 && cleared.DirtyTiles == 0 && cleared.MapSlots == 0 &&
-            cleared.MapBytes == 0 && cleared.PyramidBytes == 0 && cleared.RasterTiles == 0 &&
-            cleared.DepositQueueBytes == 16 * sizeof(DepositOp) + 64 * sizeof(int) + 16 * sizeof(DepositFragment) + 16 * sizeof(Placement) &&
+            cleared.MapBytes == 0 && cleared.DirectoryBytes == 0 && cleared.PyramidBytes == 0 &&
+            cleared.RowSummaryBytes == 0 && cleared.PreparedBytes == preparedBytes && cleared.BinBytes == binBytes &&
+            cleared.DepositQueueBytes == 16 * sizeof(DepositOp) + 64 * sizeof(int) &&
             cleared.WorldBytes == empty.WorldBytes + 64 * 40 + 40 + 256 + 16 * sizeof(DepositOp) +
-                64 * sizeof(int) + 16 * sizeof(DepositFragment) + 16 * sizeof(Placement) &&
+                64 * sizeof(int) + preparedBytes + binBytes &&
             World.Query(world, grid, other, 0, 0, 64, 64) == 0;
+        World.Free(world);
 
         return
         [
@@ -126,8 +138,8 @@ internal static unsafe class Receipts
             new("warm-process-allocates-0-bytes", processBytes == 0 && processOk, processBytes),
             new("warm-query-allocates-0-bytes", queryBytes == 0 && checksum == 100256L * 80, queryBytes),
             new("warm-move-process-allocates-0-bytes", mutationBytes == 0 && mutationOk, mutationBytes),
-            new("tent-buffer-accounted", tentOk, tented.TentBytes),
-            new("bell-buffer-accounted", bellOk, belled.BellBytes),
+            new("tent-pages-use-compact-storage", tentOk, tented.PageBytes - beforeTent.PageBytes),
+            new("bell-pages-use-compact-storage", bellOk, belled.PageBytes - tentGone.PageBytes),
             new("clear-frees-pages-retains-capacity", clearOk, cleared.WorldBytes),
         ];
     }

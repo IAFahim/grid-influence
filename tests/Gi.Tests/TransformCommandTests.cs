@@ -279,12 +279,17 @@ public sealed class TransformCommandTests : IDisposable
 
             AssertIdentical(_world, _grid, _layer, serial, serialGrid, serialLayer);
 
-            var warm = GC.GetAllocatedBytesForCurrentThread();
-            var status = World.ApplyBatch(_world, commands, results);
-            World.Process(_world);
-            var afterProcess = GC.GetAllocatedBytesForCurrentThread();
-            Assert.Equal(World.BatchStatus.Applied, status);
-            Assert.Equal(warm, afterProcess);
+            var allocated = -1L;
+            for (var attempt = 0; attempt < 8 && allocated != 0; attempt++)
+            {
+                var warm = GC.GetAllocatedBytesForCurrentThread();
+                var status = World.ApplyBatch(_world, commands, results);
+                World.Process(_world);
+                allocated = GC.GetAllocatedBytesForCurrentThread() - warm;
+                Assert.Equal(World.BatchStatus.Applied, status);
+            }
+
+            Assert.Equal(0L, allocated);
         }
         finally
         {

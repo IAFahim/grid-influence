@@ -147,18 +147,24 @@ internal static unsafe class SimdOps
     }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    internal static long RaggedSum(short* rows, int tileX, int rowCount, int* rowLow, int* rowHigh)
+    internal static long RaggedSum(short* rows, int* rowSums, int tileX, int rowCount, int* rowLow, int* rowHigh)
     {
         if (Vector256.IsHardwareAccelerated)
         {
             var indicesLow = Vector256.Create((short)0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
             var indicesHigh = indicesLow + Vector256.Create((short)16);
             var total = Vector256<int>.Zero;
+            var complete = 0L;
             for (var r = 0; r < rowCount; r++)
             {
                 var first = Math.Max(rowLow[r], tileX) - tileX;
                 var end = Math.Min(rowHigh[r], tileX + TileBake.TileSize) - tileX;
                 if (end <= first) continue;
+                if (first == 0 && end == TileBake.TileSize)
+                {
+                    complete += rowSums[r];
+                    continue;
+                }
 
                 var from = Vector256.Create((short)first);
                 var to = Vector256.Create((short)end);
@@ -170,7 +176,7 @@ internal static unsafe class SimdOps
                 total += w0 + w1 + w2 + w3;
             }
 
-            return Vector256.Sum(total);
+            return complete + Vector256.Sum(total);
         }
 
         if (Vector128.IsHardwareAccelerated)
@@ -178,11 +184,17 @@ internal static unsafe class SimdOps
             var baseIndices = Vector128.Create((short)0, 1, 2, 3, 4, 5, 6, 7);
             var step = Vector128.Create((short)8);
             var total = Vector128<int>.Zero;
+            var complete = 0L;
             for (var r = 0; r < rowCount; r++)
             {
                 var first = Math.Max(rowLow[r], tileX) - tileX;
                 var end = Math.Min(rowHigh[r], tileX + TileBake.TileSize) - tileX;
                 if (end <= first) continue;
+                if (first == 0 && end == TileBake.TileSize)
+                {
+                    complete += rowSums[r];
+                    continue;
+                }
 
                 var from = Vector128.Create((short)first);
                 var to = Vector128.Create((short)end);
@@ -199,7 +211,7 @@ internal static unsafe class SimdOps
                 }
             }
 
-            return Vector128.Sum(total);
+            return complete + Vector128.Sum(total);
         }
 
         var sum = 0L;
@@ -207,6 +219,12 @@ internal static unsafe class SimdOps
         {
             var first = Math.Max(rowLow[r], tileX) - tileX;
             var end = Math.Min(rowHigh[r], tileX + TileBake.TileSize) - tileX;
+            if (first == 0 && end == TileBake.TileSize)
+            {
+                sum += rowSums[r];
+                continue;
+            }
+
             var row = rows + r * TileBake.TileSize;
             for (var i = first; i < end; i++) sum += row[i];
         }

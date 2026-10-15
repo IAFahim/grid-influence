@@ -178,8 +178,8 @@ public static unsafe partial class World
     #endif
     private static bool Combine(LayerRecipe* r, short* inputA, short* inputB, short* output, long* pageSum, short* pageMax)
     {
-        var a = inputA == null ? (short*)Runtime.ZeroDense : inputA;
-        var b = inputB == null ? (short*)Runtime.ZeroDense : inputB;
+        var a = inputA == null ? (short*)Runtime.ZeroPage : inputA;
+        var b = inputB == null ? (short*)Runtime.ZeroPage : inputB;
 #if NET
         if (Vector256.IsHardwareAccelerated) return Combine256(r, a, b, output, pageSum, pageMax);
         if (Vector128.IsHardwareAccelerated) return Combine128(r, a, b, output, pageSum, pageMax);

@@ -17,6 +17,7 @@ internal static class ValidationRules
     internal const int MaxPower = 14;
     internal const int MaxWeight = short.MaxValue;
     internal const int MaxShift = 15;
+    internal const int MaxGridScaleQ8 = 1 << 20;
 
     internal static bool IsAxis(int axis) => axis >= 1 && axis <= MaxAxis;
     internal static bool IsRadius(int radius) => radius >= 1 && radius <= MaxRadius;
@@ -29,4 +30,10 @@ internal static class ValidationRules
     internal static bool IsWeight(int weight) => weight >= -MaxWeight && weight <= MaxWeight;
     internal static bool IsShift(int shift) => shift >= 0 && shift <= MaxShift;
     internal static bool IsGridSize(float size) => float.IsFinite(size) && size > 0f;
+    internal static bool IsGrid(int power, float size)
+    {
+        if (!IsPower(power) || !IsGridSize(size)) return false;
+        var scale = (1 << power) / size * 256f;
+        return scale >= 1f && scale <= MaxGridScaleQ8;
+    }
 }

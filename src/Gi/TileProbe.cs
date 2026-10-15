@@ -56,6 +56,37 @@ internal static unsafe partial class TileBake
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
+    internal static long BoxSpans(Placement* p, int gain, int tileX, int tileY, int top, int rows, int* lo, int* hi)
+    {
+        var xLo = stackalloc int[3];
+        var xHi = stackalloc int[3];
+        var xWeight = stackalloc int[3];
+        var yLo = stackalloc int[3];
+        var yHi = stackalloc int[3];
+        var yWeight = stackalloc int[3];
+        var liveX = ClipBands(p->Px, p->Fx, p->ExtentX, tileX, tileX + TileSize, xLo, xHi, xWeight);
+        var liveY = ClipBands(p->Py, p->Fy, p->ExtentY, tileY, tileY + TileSize, yLo, yHi, yWeight);
+        var sum = 0L;
+        for (var y = 0; y < liveY; y++)
+        for (var x = 0; x < liveX; x++)
+        {
+            var value = (long)RoundQ16(p->V->Constant * xWeight[x] * yWeight[y]) * gain;
+            if (value == 0) continue;
+
+            var end = Math.Min(yHi[y], top + rows);
+            for (var row = Math.Max(yLo[y], top); row < end; row++)
+            {
+                var width = Math.Min(xHi[x], hi[row - top]) - Math.Max(xLo[x], lo[row - top]);
+                if (width > 0) sum += value * width;
+            }
+        }
+
+        return sum;
+    }
+
+    #if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    #endif
     internal static void SmoothWeights(StampKind kind, int origin, int phase, int extent, int lo, int count, long* weights)
     {
         var axis = Axis(kind, origin, phase, extent);

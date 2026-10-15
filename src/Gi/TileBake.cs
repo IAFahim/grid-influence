@@ -24,7 +24,7 @@ internal static unsafe partial class TileBake
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static int RoundQ40(long value)
-        => (int)((value + 549755813888L + (value >> 63)) >> 40);
+        => (int)((value >> 40) + (((value & 1099511627775L) + (value >> 63)) >= 549755813888L ? 1 : 0));
 
     private const long MaxExtent = 1L << 30;
     private const long MaxTentExtent = (1L << 23) - 2;
@@ -110,7 +110,9 @@ internal static unsafe partial class TileBake
         int origin, int phase, int extent, int tileLo, int tileHi,
         int* bandLo, int* bandHi, int* bandWeight)
     {
+        if (extent <= 0) return 0;
         var end = phase + extent;
+        if (end <= 256) return Band(origin, 0, 1, extent, tileLo, tileHi, bandLo, bandHi, bandWeight, 0);
         var full = end >> 8;
         var tail = end & 255;
         var live = 0;
@@ -203,6 +205,7 @@ internal static unsafe partial class TileBake
         {
             var vq = (v0 + (gy - py) * step) >> level;
             var iy = (int)(vq >> 16);
+            if (iy < -1 || iy >= h) continue;
             var fy2 = (int)((vq >> 8) & 255);
             var row0 = data + iy * pitch;
             var row1 = row0 + pitch;
@@ -211,6 +214,7 @@ internal static unsafe partial class TileBake
             {
                 var uq = (u0 + (gx - px) * step) >> level;
                 var ix = (int)(uq >> 16);
+                if (ix < -1 || ix >= w) continue;
                 var fx2 = (int)((uq >> 8) & 255);
                 var top = row0[ix] * (256 - fx2) + row0[ix + 1] * fx2;
                 var bottom = row1[ix] * (256 - fx2) + row1[ix + 1] * fx2;

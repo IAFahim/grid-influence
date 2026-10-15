@@ -14,16 +14,15 @@ public static unsafe partial class World
         if (w == null || layer >= w->LayerCount) return false;
         if (count <= 0) return true;
         if (xs == null || ys == null || values == null) return false;
-        if (excludes == null) return SenseColumn(world, layer, xs, ys, count, values, whole);
 
-        if (whole != null) new Span<ulong>(whole, (count + 63) >> 6).Clear();
+        ClearColumnMask(whole, count);
+        if (excludes == null) return SenseColumn(w, layer, xs, ys, count, values, whole);
 
         var complete = true;
+        var single = w->GridCount == 1 ? w->Grids : null;
         for (var i = 0; i < count; i++)
         {
-            var filled = excludes[i] >= 0
-                ? TrySense(world, layer, xs[i], ys[i], excludes[i], out values[i])
-                : TrySense(world, layer, xs[i], ys[i], out values[i]);
+            var filled = SensePointAt(w, single, layer, xs[i], ys[i], excludes[i], out values[i]);
             complete &= filled;
             if (filled && whole != null) whole[i >> 6] |= 1ul << (i & 63);
         }
@@ -43,16 +42,14 @@ public static unsafe partial class World
         if (count <= 0) return true;
         if (xs == null || ys == null || gradientXs == null || gradientYs == null) return false;
 
-        if (whole != null) new Span<ulong>(whole, (count + 63) >> 6).Clear();
+        ClearColumnMask(whole, count);
 
         var complete = true;
+        var single = w->GridCount == 1 ? w->Grids : null;
         for (var i = 0; i < count; i++)
         {
-            bool filled;
-            if (excludes != null && excludes[i] >= 0)
-                filled = TrySenseGradient(world, layer, xs[i], ys[i], excludes[i], out gradientXs[i], out gradientYs[i]);
-            else
-                filled = TrySenseGradient(world, layer, xs[i], ys[i], out gradientXs[i], out gradientYs[i]);
+            var filled = SenseGradientAt(w, single, layer, xs[i], ys[i], excludes == null ? -1 : excludes[i],
+                out gradientXs[i], out gradientYs[i]);
             complete &= filled;
             if (filled && whole != null) whole[i >> 6] |= 1ul << (i & 63);
         }
@@ -71,7 +68,7 @@ public static unsafe partial class World
         if (count <= 0) return true;
         if (xs == null || ys == null || reaches == null || totals == null) return false;
 
-        if (whole != null) new Span<ulong>(whole, (count + 63) >> 6).Clear();
+        ClearColumnMask(whole, count);
 
         var complete = true;
         for (var i = 0; i < count; i++)
@@ -100,7 +97,7 @@ public static unsafe partial class World
         if (count <= 0) return true;
         if (xs == null || ys == null || reaches == null || values == null || bestXs == null || bestYs == null) return false;
 
-        if (whole != null) new Span<ulong>(whole, (count + 63) >> 6).Clear();
+        ClearColumnMask(whole, count);
 
         var complete = true;
         for (var i = 0; i < count; i++)
@@ -126,7 +123,7 @@ public static unsafe partial class World
         if (xs == null || ys == null || reaches == null || thresholds == null ||
             values == null || nearestXs == null || nearestYs == null) return false;
 
-        if (found != null) new Span<ulong>(found, (count + 63) >> 6).Clear();
+        ClearColumnMask(found, count);
 
         var complete = true;
         for (var i = 0; i < count; i++)

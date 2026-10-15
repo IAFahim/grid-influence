@@ -121,24 +121,57 @@ public static unsafe partial class World
         }
     }
 
+    private static void EnsureTimerPositions(WorldCtx* w, int count)
+    {
+        var old = w->TimerPositions.Length;
+        if (count <= old) return;
+        w->TimerPositions.Resize(count);
+        new Span<int>(w->TimerPositions.Pointer + old, count - old).Clear();
+    }
+
     private static void Schedule(WorldCtx* w, SourceColumns* s, int slot)
     {
-        if (!NextDue(s, slot, w->Tick, out var due)) return;
+        if (s->Alive.Pointer[slot] == 0 || !NextDue(s, slot, w->Tick, out var due))
+        {
+            if (slot < w->TimerPositions.Length) RemoveTimer(w, slot);
+            return;
+        }
 
+        EnsureTimerPositions(w, s->Count);
         s->Due.Pointer[slot] = due;
-        if (w->Timers.Length >= 2 * s->Count + 64) RebuildTimers(w);
-        else Push(w, due, slot);
+        var index = w->TimerPositions.Pointer[slot] - 1;
+        if (index < 0)
+        {
+            index = w->Timers.Length;
+            w->Timers.Resize(index + 1);
+            w->TimerPositions.Pointer[slot] = index + 1;
+        }
+        w->Timers.Pointer[index] = new Alarm { Due = due, Slot = slot };
+    }
+
+    private static void RemoveTimer(WorldCtx* w, int slot)
+    {
+        var index = w->TimerPositions.Pointer[slot] - 1;
+        if (index < 0) return;
+        var last = w->Timers.Length - 1;
+        var tail = w->Timers.Pointer[last];
+        w->Timers.Resize(last);
+        w->TimerPositions.Pointer[slot] = 0;
+        if (index == last) return;
+        w->Timers.Pointer[index] = tail;
+        w->TimerPositions.Pointer[tail.Slot] = index + 1;
     }
 
     private static void RebuildTimers(WorldCtx* w)
     {
         var s = &w->Sources;
         w->Timers.Resize(0);
+        EnsureTimerPositions(w, s->Count);
+        w->TimerPositions.Span.Clear();
         for (var i = 0; i < s->Count; i++)
         {
-            if (s->Alive.Pointer[i] == 0 || s->Timed.Pointer[i] == 0 || !NextDue(s, i, w->Tick, out var due)) continue;
-            s->Due.Pointer[i] = due;
-            Push(w, due, i);
+            if (s->Alive.Pointer[i] == 0 || s->Timed.Pointer[i] == 0) continue;
+            Schedule(w, s, i);
         }
     }
 
@@ -196,80 +229,92 @@ public static unsafe partial class World
     {
         var s = &w->Sources;
         var now = w->Tick;
-        while (w->Timers.Length > 0 && w->Timers.Pointer[0].Due - now <= 0)
+        w->TimerExpired.Resize(0);
+        var index = 0;
+        while (index < w->Timers.Length)
         {
-            var timer = Pop(w);
+            var timer = w->Timers.Pointer[index];
             var slot = timer.Slot;
-            if ((uint)slot >= (uint)s->Count || s->Alive.Pointer[slot] == 0 || s->Timed.Pointer[slot] == 0 ||
-                s->Due.Pointer[slot] != timer.Due) continue;
+            if ((uint)slot >= (uint)s->Count || s->Alive.Pointer[slot] == 0 || s->Timed.Pointer[slot] == 0)
+            {
+                RemoveTimer(w, slot);
+                continue;
+            }
+            if (timer.Due - now <= 0)
+            {
+                var count = w->TimerExpired.Length;
+                w->TimerExpired.Resize(count + 1);
+                w->TimerExpired.Pointer[count] = slot;
+            }
+            index++;
+        }
 
+        var dueSlots = OrderedTimerSlots(w);
+        for (var i = 0; i < w->TimerExpired.Length; i++)
+        {
+            var slot = dueSlots[i];
             var timed = s->Timed.Pointer[slot];
             if ((timed & Expiring) != 0 && s->ExpireAt.Pointer[slot] - now <= 0)
             {
                 EnqueueMutation(w, s, slot, s->X.Pointer[slot], s->Y.Pointer[slot], 0, s->Angle.Pointer[slot], s->Scale.Pointer[slot], false);
                 s->Alive.Pointer[slot] = 0;
-                s->Free.Pointer[slot] = w->FreeHead;
-                w->FreeHead = slot;
+                EnqueueFree(w, s, slot);
+                RemoveTimer(w, slot);
                 continue;
             }
 
             if ((timed & Fading) != 0)
             {
                 var gain = FadeGain(s, slot, now);
-                if (gain != (sbyte)s->Gain.Pointer[slot])
+                var previous = (sbyte)s->Gain.Pointer[slot];
+                if (gain != previous)
                 {
                     EnqueueMutation(w, s, slot, s->X.Pointer[slot], s->Y.Pointer[slot], gain, s->Angle.Pointer[slot], s->Scale.Pointer[slot], true);
                     s->Gain.Pointer[slot] = (byte)gain;
                 }
             }
 
-            Schedule(w, s, slot);
+            var timerIndex = w->TimerPositions.Pointer[slot] - 1;
+            if (NextDue(s, slot, now, out var due))
+            {
+                s->Due.Pointer[slot] = due;
+                w->Timers.Pointer[timerIndex].Due = due;
+            }
+            else RemoveTimer(w, slot);
         }
     }
 
-    private static void Push(WorldCtx* w, int due, int slot)
+    private static int* OrderedTimerSlots(WorldCtx* w)
     {
-        var n = w->Timers.Length;
-        w->Timers.Resize(n + 1);
-        var heap = w->Timers.Pointer;
-        var i = n;
-        while (i > 0)
+        var count = w->TimerExpired.Length;
+        var source = w->TimerExpired.Pointer;
+        var ordered = true;
+        for (var i = 1; i < count; i++)
+            if (source[i - 1] > source[i]) { ordered = false; break; }
+        if (ordered) return source;
+        w->TimerSort.Resize(count);
+        var destination = w->TimerSort.Pointer;
+        var offsets = stackalloc int[256];
+        for (var shift = 0; shift < 24; shift += 8)
         {
-            var parent = (i - 1) >> 1;
-            if (!Before(due, slot, heap[parent])) break;
-            heap[i] = heap[parent];
-            i = parent;
+            new Span<int>(offsets, 256).Clear();
+            for (var i = 0; i < count; i++) offsets[(source[i] >> shift) & 255]++;
+            var first = 0;
+            for (var bucket = 0; bucket < 256; bucket++)
+            {
+                var size = offsets[bucket];
+                offsets[bucket] = first;
+                first += size;
+            }
+            for (var i = 0; i < count; i++)
+            {
+                var slot = source[i];
+                destination[offsets[(slot >> shift) & 255]++] = slot;
+            }
+            var swap = source;
+            source = destination;
+            destination = swap;
         }
-
-        heap[i] = new Alarm { Due = due, Slot = slot };
-    }
-
-    private static Alarm Pop(WorldCtx* w)
-    {
-        var heap = w->Timers.Pointer;
-        var top = heap[0];
-        var n = w->Timers.Length - 1;
-        var last = heap[n];
-        w->Timers.Resize(n);
-        var i = 0;
-        while (true)
-        {
-            var child = 2 * i + 1;
-            if (child >= n) break;
-            if (child + 1 < n && Before(heap[child + 1].Due, heap[child + 1].Slot, heap[child])) child++;
-            if (!Before(heap[child].Due, heap[child].Slot, last)) break;
-            heap[i] = heap[child];
-            i = child;
-        }
-
-        if (n > 0) heap[i] = last;
-        return top;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool Before(int due, int slot, Alarm other)
-    {
-        var order = due - other.Due;
-        return order < 0 || (order == 0 && slot < other.Slot);
+        return source;
     }
 }

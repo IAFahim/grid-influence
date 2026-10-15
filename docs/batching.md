@@ -4,9 +4,10 @@ Design and implementation tracker: [source batches #34](https://github.com/IAFah
 [tile preparation #35](https://github.com/IAFahim/grid-influence/issues/35),
 [revision tokens #37](https://github.com/IAFahim/grid-influence/issues/37),
 [transform-only updates #38](https://github.com/IAFahim/grid-influence/issues/38),
-[borrowed transform ranges #39](https://github.com/IAFahim/grid-influence/issues/39).
+[borrowed transform ranges #39](https://github.com/IAFahim/grid-influence/issues/39),
+[snapshot processing #40](https://github.com/IAFahim/grid-influence/issues/40).
 `World.ApplyBatch`, source commands, creation targets, per-command results, the `World.Revision`
-token, and parallel tile footprint preparation are implemented in `1.2.0-alpha.2`; checked
+token, and pooled source-slot ingestion are implemented in `1.2.0-alpha.2`; checked
 consumption with `World.Token`, `UpdateTransform`, and `World.SyncTransforms` land in
 `1.2.0-alpha.3`. Direct mutations and batch calls remain
 exclusive per world. Concurrent submissions belong in host-owned buffers, not concurrent `Place` calls.
@@ -77,13 +78,13 @@ afterward. Do not lose the result just because the original entity no longer has
    desired state in one pending operation per slot. Reduce partition-local counters afterward;
    do not increment shared lengths/free lists from workers.
 5. Commit ordered timer/journal work without concurrent heap/list mutation. Keep the existing
-   timer-before-deposit processing semantics and rewind parity.
-6. Calculate footprints into partition-owned ranges. Gather tile requirements by key, prepare
-   sparse maps and buffers, then publish stable pointers. No pointer survives an arena resize.
-7. Reuse Gi's current adaptive deposit, crowded-rebuild, and tile resolution machinery. One
-   worker owns a `(grid, layer, tile)` while different tiles execute concurrently. Shared map
-   removal/freeing and index publication happen after worker joins; derived layers follow inputs.
-8. Publish result IDs and field availability. Reclaim input memory only after every relevant
+   timers-before-ops processing order and rewind parity.
+6. Let `Process` do the tile work serially: prepare each changed source's placement per grid,
+   diff old and new footprints into the dirty set, bin every live source per touched tile,
+   then re-resolve each dirty tile from its bin through transient scratch. Shared map
+   removal/freeing, summary publication, and derived-layer recombination all stay on the
+   calling thread, in that order.
+7. Publish result IDs and field availability. Reclaim input memory only after every relevant
    producer, consumer, result publisher, and reader is finished.
 
 The core stays dependency-free. Synchronous batch methods borrow native ranges only until all
@@ -132,7 +133,7 @@ overlapping input/output, or more than 16,777,216 commands reject the whole batc
 mutation or result writes. Valid structure may still contain stale sources, invalid layers/stamps,
 or source-slot exhaustion: inspect every `SourceResult.Status`. Unrelated valid commands apply.
 `Applied` does not mean every command succeeded. The API borrows buffers only until it returns.
-It preserves pending deposits and rewind schedules, but does not call `Process` or advance time.
+It preserves pending ops and rewind schedules, but does not call `Process` or advance time.
 
 The application owns sealing, producer order, durable backlog, cancellation, and lifetime epochs.
 No host API is added to Gi. Exclusive direct calls remain available between batch calls.
@@ -145,19 +146,19 @@ against a virtual free chain, validate generation-tagged IDs, and retain one row
 Two worker phases prepare final states and write disjoint columns/operation ranges using the
 existing `ResolvePool`. The caller commits timer heaps and schedule journals after joining.
 Fresh placement undo records preserve the direct `Place` layer and identity semantics, including
-reused slots. Cross-layer slot reuse also fixes an existing crowded-processing defect: retraction
-and application now count/skip against their respective layers rather than treating the whole
-operation as belonging to its target layer ([#36](https://github.com/IAFahim/grid-influence/issues/36)).
+reused slots. Cross-layer slot reuse also fixes an existing crowded-processing defect: a source
+that hops layers now marks both its old and new layers' tiles dirty through the footprint diff
+rather than treating the whole operation as belonging to its target layer
+([#36](https://github.com/IAFahim/grid-influence/issues/36)).
 No public mutation replay loop or new scheduler is used.
 
-Tile footprint preparation is parallel too (#35): when a deferred batch acquires the pool,
-workers claim 64-op chunks and write per-worker placements, 16 B key-carrying fragments, and
-(grid, layer, tile) prep keys; the owning thread stitches them by prefix offsets and a
-counting sort; a second round gives each (grid, layer) task one writer, which sorts its tiles,
-allocates and grows blocks, and marks dirty in ascending order before apply workers see
-anything. Fragments never hold block pointers, so no pointer survives an arena resize.
-`dotnet run --project benchmarks -c Release --no-build -- --stages` reports preparation,
-application, and resolution costs per `Process` against the forced-serial build.
+Footprint preparation is no longer a batch stage (#35): deferred commands only write source
+columns and coalesced ops. `Process` prepares placements for exactly the op-touched sources,
+marks dirty tiles from each op's old/new footprint pair, bins live sources per touched tile in
+ascending slot order, and resolves every dirty tile serially from its bin — none of it leaves
+the calling thread, so pages are identical whether or not the pool exists.
+`dotnet run --project benchmarks -c Release --no-build -- --stages` reports the preparation and
+resolution costs inside a `Process`.
 
 ## Checked consumption with world tokens
 
@@ -263,7 +264,7 @@ owner destruction, pending ticket cancellation, shutdown, and batches spanning m
 
 Verify warm allocation bounds, the complete unsafe proof, tests, samples, and both intrinsic
 modes before reporting stage timings. Report recording, normalization/reservation, source
-ingestion, structural tile preparation, and tile processing separately. Reuse the existing
+ingestion, and `Process` (placement prep plus tile resolve) separately. Reuse the existing
 small-work inline path instead of paying parallel setup cost for every batch.
 
 `SourceBatchTests` compares batches with ordered direct calls across every stamp shape, multiple

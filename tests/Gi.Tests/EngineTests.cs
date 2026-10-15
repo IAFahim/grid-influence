@@ -791,13 +791,13 @@ public sealed class EngineTests
         Assert.Equal(0, pending.LiveTiles);
         Assert.Equal(0, pending.DirtyTiles);
         Assert.Equal(64 * 40, pending.SourceBytes);
-        Assert.Equal(0, pending.MapBytes + pending.DifferenceBytes + pending.DenseBytes + pending.PageBytes);
+        Assert.Equal(0, pending.MapBytes + pending.PageBytes + pending.PageSumBytes + pending.RowSummaryBytes);
         World.Process(w);
         var processed = Stats.Inspection.Read(w);
         Assert.Equal(1, processed.LiveTiles);
         Assert.Equal(0, processed.DirtyTiles);
-        Assert.Equal(World.BlockBytes, 6528);
-        Assert.Equal(World.BlockBytes, processed.DifferenceBytes + processed.DenseBytes + processed.DensePointerBytes + processed.PageBytes + processed.PageSumBytes);
+        Assert.Equal(World.HeaderBytes, 2304);
+        Assert.Equal(World.HeaderBytes, processed.PageBytes + processed.PageSumBytes + processed.RowSummaryBytes);
         Assert.Equal(20, processed.DirtyFlagBytes);
         Assert.Equal(1920, World.Query(w, g, l, 0, 0, 64, 64));
         World.Clear(w);
@@ -806,11 +806,12 @@ public sealed class EngineTests
         Assert.Equal(64, cleared.SourceCapacity);
         Assert.Equal(0, cleared.LiveTiles);
         Assert.Equal(0, cleared.MapBytes);
-        Assert.Equal(empty.WorldBytes + 64 * 40 + 20 + 64 + 16 * sizeof(DepositOp) + 64 * sizeof(int), cleared.WorldBytes);
+        Assert.Equal(empty.WorldBytes + 64 * 40 + 20 + 64 + 16 * sizeof(DepositOp) + 64 * sizeof(int) +
+            16 * (sizeof(Placement) + sizeof(PreparedFootprint) + sizeof(SourceBin) + sizeof(int)), cleared.WorldBytes);
     }
 
     [Fact]
-    public void Inspection_DenseAllocatesLazilyPerRasterTile()
+    public void Inspection_RasterAndBoxTilesShareHeaderOnlyBlocks()
     {
         var w = World.New();
         var g = Grid.New(w, 6, 0f, 0f, 64f);
@@ -822,16 +823,14 @@ public sealed class EngineTests
 
         var pending = Stats.Inspection.Read(w);
         Assert.Equal(0, pending.LiveTiles);
-        Assert.Equal(0, pending.RasterTiles);
-        Assert.Equal(0, pending.DenseBytes);
-        Assert.Equal(0, pending.DensePointerBytes);
+        Assert.Equal(0, pending.PageBytes + pending.PageSumBytes + pending.RowSummaryBytes);
 
         World.Process(w);
         var processed = Stats.Inspection.Read(w);
         Assert.Equal(2, processed.LiveTiles);
-        Assert.Equal(1, processed.RasterTiles);
-        Assert.Equal(World.DenseBytes, processed.DenseBytes);
-        Assert.Equal(2 * (World.HeaderBytes - World.DensePtrOffset), processed.DensePointerBytes);
+        Assert.Equal(2 * World.PageBytes, processed.PageBytes);
+        Assert.Equal(2 * (World.RowSumOffset - World.SumOffset), processed.PageSumBytes);
+        Assert.Equal(2 * World.HeaderBytes, processed.PageBytes + processed.PageSumBytes + processed.RowSummaryBytes);
         var expected = 0;
         for (var y = 0; y < 6; y++)
         for (var x = 0; x < 6; x++) expected += samples[y * 6 + x];
@@ -839,8 +838,8 @@ public sealed class EngineTests
 
         World.Clear(w);
         var cleared = Stats.Inspection.Read(w);
-        Assert.Equal(0, cleared.RasterTiles);
-        Assert.Equal(0, cleared.DenseBytes);
+        Assert.Equal(0, cleared.LiveTiles);
+        Assert.Equal(0, cleared.PageBytes + cleared.PageSumBytes + cleared.RowSummaryBytes);
     }
 
     [Fact]

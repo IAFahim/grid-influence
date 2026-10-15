@@ -1,4 +1,5 @@
 var mode = args.Length > 0 ? args[0] : "";
+if (mode == "--budget") return BudgetVerification.Run(args);
 if (mode == "--place") { Verification.PlaceProfile(); return 0; }
 if (mode == "--daily") { Verification.Daily(); return 0; }
 if (mode == "--batch") return Verification.SourceBatchTiming();

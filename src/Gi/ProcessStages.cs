@@ -6,13 +6,11 @@ internal static class ProcessStages
 {
     internal static bool Measuring;
     internal static long PrepareTicks;
-    internal static long ApplyTicks;
     internal static long ResolveTicks;
 
     internal static void Reset()
     {
         PrepareTicks = 0;
-        ApplyTicks = 0;
         ResolveTicks = 0;
     }
 

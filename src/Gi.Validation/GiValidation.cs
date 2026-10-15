@@ -74,9 +74,16 @@ public static class GiValidation
 
     public static bool TryGrid(int power, float size, out string? error)
     {
-        if (!ValidationRules.IsPower(power) || !ValidationRules.IsGridSize(size))
-            return Reject("Grid power must be between 5 and 14 and size must be finite and positive.", out error);
+        if (!ValidationRules.IsGrid(power, size))
+            return Reject("Grid power must be between 5 and 14 and its finite positive size must produce a Q8 cell scale between 1 and 1048576.", out error);
         return Accept(out error);
+    }
+
+    public static bool TryGrid(int power, float x, float y, float size, out string? error)
+    {
+        if (!float.IsFinite(x) || !float.IsFinite(y))
+            return Reject("Grid origins must be finite.", out error);
+        return TryGrid(power, size, out error);
     }
 
     private static bool Accept(out string? error)

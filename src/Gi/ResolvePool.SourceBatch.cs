@@ -24,14 +24,14 @@ internal static unsafe partial class ResolvePool
         _remaining = _workers;
         Volatile.Write(ref _phase, phase);
         for (var index = 0; index < _workers; index++) _wake[index].Set();
-        SourceBatchShare(_workers, phase);
+        SourceBatchShare(phase);
         Drain();
         Volatile.Write(ref _phase, 0);
         _sourceBatchWorld = null;
         _sourceBatchCommands = null;
     }
 
-    private static void SourceBatchShare(int partition, int phase)
+    private static void SourceBatchShare(int phase)
     {
         while (true)
         {
@@ -42,7 +42,7 @@ internal static unsafe partial class ResolvePool
             var first = claimed < 0 ? 0 : claimed;
             if (phase == 6)
                 World.PrepareSourceBatchRange(_sourceBatchWorld, _sourceBatchCommands, first, last);
-            else World.ApplySourceBatchRange(_sourceBatchWorld, first, last, partition);
+            else World.ApplySourceBatchRange(_sourceBatchWorld, first, last);
         }
     }
 }

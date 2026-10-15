@@ -4,8 +4,6 @@ namespace Gi;
 
 public static unsafe partial class World
 {
-    internal const int SourceBatchLayerStride = MaxLayers + 16;
-
     public static BatchStatus ApplyBatch(byte world, ReadOnlySpan<SourceCommand> commands, Span<SourceResult> results)
     {
         var context = GetContext(world);
@@ -54,8 +52,9 @@ public static unsafe partial class World
         {
             var sourceCount = context->Sources.Count;
             var freeHead = context->FreeHead;
+            var freeTail = context->FreeTail;
             if (!onlyUpdates || !TryPlanSourceUpdates(context, input, output, commands.Length))
-                PlanSourceBatch(context, input, output, commands.Length, creationCount, ref sourceCount, ref freeHead);
+                PlanSourceBatch(context, input, output, commands.Length, creationCount, ref sourceCount, ref freeHead, ref freeTail);
             if (context->BatchSources.Length == 0) return BatchStatus.Applied;
             EnsureSourceCapacity(&context->Sources, context, sourceCount);
 
@@ -68,21 +67,18 @@ public static unsafe partial class World
             else PrepareSourceBatchRange(context, input, 0, context->BatchSources.Length);
 
             ReserveSourceBatchOperations(context, commands.Length);
-            context->BatchLayerDeltas.Resize(ResolvePool.MaximumSlots * SourceBatchLayerStride);
-            context->BatchLayerDeltas.Span.Clear();
             pooled = context->BatchSources.Length >= ResolvePool.ColumnThreshold && ResolvePool.TryAcquire();
-            var partitions = pooled ? ResolvePool.Slots : 1;
-
             if (pooled)
             {
                 ResolvePool.ApplySourceBatch(context);
                 ResolvePool.Release();
             }
-            else ApplySourceBatchRange(context, 0, context->BatchSources.Length, 0);
+            else ApplySourceBatchRange(context, 0, context->BatchSources.Length);
 
             context->Sources.Count = sourceCount;
             context->FreeHead = freeHead;
-            FinishSourceBatch(context, commands.Length, partitions);
+            context->FreeTail = freeTail;
+            FinishSourceBatch(context, commands.Length);
         }
 
         return BatchStatus.Applied;
@@ -133,18 +129,13 @@ public static unsafe partial class World
             {
                 JournalSchedule(context, source, slot);
                 source->Timed.Pointer[slot] &= unchecked((byte)~Fading);
+                Schedule(context, source, slot);
             }
 
             if (positionX != source->X.Pointer[slot] || positionY != source->Y.Pointer[slot] ||
                 angle != source->Angle.Pointer[slot] || scale != source->Scale.Pointer[slot] || gain != source->Gain.Pointer[slot])
             {
                 EnqueueMutation(context, source, slot, positionX, positionY, (sbyte)gain, angle, scale, true);
-                if (gain != source->Gain.Pointer[slot])
-                {
-                    if (gain == 0) context->LayerLive[source->Layer.Pointer[slot]]--;
-                    else if (source->Gain.Pointer[slot] == 0) context->LayerLive[source->Layer.Pointer[slot]]++;
-                }
-
                 source->X.Pointer[slot] = positionX;
                 source->Y.Pointer[slot] = positionY;
                 source->Angle.Pointer[slot] = angle;
@@ -208,9 +199,9 @@ public static unsafe partial class World
 
     private static void PlanSourceBatch(
         WorldCtx* context, SourceCommand* commands, SourceResult* results, int count, int creationCount,
-        ref int sourceCount, ref int freeHead)
+        ref int sourceCount, ref int freeHead, ref int freeTail)
     {
-        var entryCapacity = Math.Min(count, context->Sources.Count + creationCount);
+        var entryCapacity = Math.Min(count * 2, context->Sources.Count + creationCount);
         context->BatchSources.Resize(entryCapacity);
         context->BatchCommands.Resize(count);
         var lookupSize = 16;
@@ -252,6 +243,8 @@ public static unsafe partial class World
                     slot = freeHead;
                     entryIndex = GetSourceBatchEntry(context, slot, ref entryCount);
                     freeHead = context->BatchSources.Pointer[entryIndex].FreeNext;
+                    if (freeHead < 0) freeTail = -1;
+                    context->BatchSources.Pointer[entryIndex].FreeNext = -1;
                 }
                 else
                 {
@@ -300,8 +293,14 @@ public static unsafe partial class World
                 {
                     var entry = context->BatchSources.Pointer + entryIndex;
                     entry->PlannedAlive = 0;
-                    entry->FreeNext = freeHead;
-                    freeHead = slot;
+                    entry->FreeNext = -1;
+                    if (freeTail >= 0)
+                    {
+                        var tailIndex = GetSourceBatchEntry(context, freeTail, ref entryCount);
+                        context->BatchSources.Pointer[tailIndex].FreeNext = slot;
+                    }
+                    else freeHead = slot;
+                    freeTail = slot;
                 }
 
                 results[index] = new SourceResult(sourceId, SourceResultStatus.Applied);
@@ -367,9 +366,6 @@ public static unsafe partial class World
                 Generation = source->Gen.Pointer[slot],
                 Scale = UnitScale
             };
-            entry->InitialAlive = state.Alive;
-            entry->InitialLayer = state.Layer;
-            entry->InitialGain = state.Gain;
             entry->ScheduleBefore = new ScheduleRecord
             {
                 Slot = slot, FadeStart = state.FadeStart, FadeTicks = state.FadeTicks,
@@ -595,25 +591,17 @@ public static unsafe partial class World
         context->Ops.Resize(operationCount);
         if (context->Recording != 0) context->ScheduleJournal.Ensure(context->ScheduleJournal.Length + scheduleCount);
         context->Timers.Ensure(context->Timers.Length + scheduleCount);
+        EnsureTimerPositions(context, context->Sources.Count);
     }
 
-    internal static void ApplySourceBatchRange(WorldCtx* context, int first, int last, int partition)
+    internal static void ApplySourceBatchRange(WorldCtx* context, int first, int last)
     {
         var source = &context->Sources;
-        var deltas = context->BatchLayerDeltas.Pointer + partition * SourceBatchLayerStride;
         for (var index = first; index < last; index++)
         {
             var entry = context->BatchSources.Pointer + index;
             ref readonly var state = ref entry->State;
             var slot = entry->Slot;
-            var previousCounted = entry->InitialAlive != 0 && entry->InitialGain != 0;
-            var nextCounted = state.Alive != 0 && state.Gain != 0;
-            if (previousCounted != nextCounted || entry->InitialLayer != state.Layer)
-            {
-                if (previousCounted) deltas[entry->InitialLayer]--;
-                if (nextCounted) deltas[state.Layer]++;
-            }
-
             source->X.Pointer[slot] = state.PositionX;
             source->Y.Pointer[slot] = state.PositionY;
             source->Angle.Pointer[slot] = state.Angle;
@@ -637,14 +625,8 @@ public static unsafe partial class World
         }
     }
 
-    private static void FinishSourceBatch(WorldCtx* context, int commandCount, int partitions)
+    private static void FinishSourceBatch(WorldCtx* context, int commandCount)
     {
-        for (var partition = 0; partition < partitions; partition++)
-        {
-            var deltas = context->BatchLayerDeltas.Pointer + partition * SourceBatchLayerStride;
-            for (var layer = 0; layer < context->LayerCount; layer++) context->LayerLive[layer] += deltas[layer];
-        }
-
         for (var index = 0; index < commandCount; index++)
         {
             var entryIndex = context->BatchCommands.Pointer[index].Entry;
@@ -658,8 +640,7 @@ public static unsafe partial class World
                 context->ScheduleJournal.Pointer[journalIndex] = entry->ScheduleBefore;
             }
 
-            if (entry->State.Alive != 0 && entry->State.Timed != 0)
-                Schedule(context, &context->Sources, entry->Slot);
+            Schedule(context, &context->Sources, entry->Slot);
         }
     }
 }
