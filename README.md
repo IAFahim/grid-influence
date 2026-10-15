@@ -473,6 +473,51 @@ changed) and reads maintained state. Memory flips too — the naive grid allocat
 layer up front (1 GB at 16384²); Gi allocates ~6.5 KB per live tile (2.1 KB for a derived
 tile), so an empty world of any size costs zero.
 
+## The 100 ns budget
+
+The tables above time one operation at a time. Deployments are judged per entity. The goal:
+
+**One million entities — every operation they issue, the mutations, a full `Process`, and
+all of their reads included — costs a user at most 100 ns per entity per frame, all-in. That
+is the whole frame budget. It must hold with no optimization on the user's side: no
+staggering, no LOD grids, no throttled senses.**
+
+What each user-issued call costs today (same machine and mode as the tables above):
+
+| user-issued call | cost | note |
+| --- | ---: | --- |
+| `World.Place` | 18 ns | deferred — journals the deposit, no tile work |
+| `World.Move` / `Turn` / `Scale` / `SetGain` | 2.5–3.5 ns | deferred |
+| place + remove pair | 16 ns | both commands, collapse when co-scheduled |
+| `ApplyBatch` source update | 22 ns | 4,096-command batches, 44.6M updates/s |
+| `SyncTransforms` row | 14 ns | 4,096 borrowed rows, 71.6M rows/s |
+| `Stamp.Box`/`Tent`/`Disk`/`Cone`/`Dome` | 10–13 ns | once per stamp, not per frame |
+| `Stamp.Bell` 16×16 / raster `New` 16×16 | 0.71 / 0.25 µs | kernel and mip bake, once per stamp |
+| `TryGetSourceSpec`/`TryGetRecipe`/`TryGetSpec` | 1.6–3.2 ns | introspection |
+| `Count` / `CopyIds` / `Tick` / `Revision` / `Covers` | 0.5–2.9 ns | |
+| world lifecycle `New`+`Grid`+`Layer`+`Free` | 0.42 µs | once |
+| `Clear` + re-place 2,000 sources | 35 µs | retained-capacity clear, no realloc |
+
+Where a million entities land against the budget today (1024², single layer, boxes, crowd
+harness — `--crowd` reproduces the mover rows):
+
+| 1M-entity frame | per active source | frame total | budget |
+| --- | ---: | ---: | --- |
+| placed once, then idle | 0 ns | 0 µs | met |
+| 100k movers (10% active), `Process` | ~57 ns | 5.7 ms | met |
+| 100k movers + 10k batched point senses | ~58 ns | 5.9 ms | met |
+| 1M movers, every frame | ~50–90 ns | 50–90 ms | per-entity met; 60 Hz not |
+| 1M `TrySenseArea` r=64, every frame | 1.35 µs | 1.35 s | not met |
+
+Status: mutations, batched point senses, idle worlds, and up to ~100k active movers per
+frame all sit under 100 ns all-in. What does not: dense large-radius `Area`/`Max`/`Nearest`
+senses (pyramid descents that cannot yet amortize below ~0.6–1.4 µs per call) and wall-clock
+frame totals once all million sources move every frame — the per-entity line holds, the
+16.6 ms line does not. The two structural paths are query-driven lazy resolve — dirty tiles
+resolve on first read, moving cost from movers to readers — and a GPU field, where the CPU
+writes positions at ~2–5 ns per entity and shaders deposit and resolve. Both preserve this
+API and its exact-integer guarantees.
+
 ## A day in the life
 
 The tables above time one operation at a time. Real use is a whole tick: agents move and aim,
