@@ -60,6 +60,8 @@ internal unsafe struct LayerData
     public MaxPyramid Max;
     public NativeBuffer<SourceBin> Bins;
     public NativeBuffer<int> BinEntries;
+    public NativeBuffer<SourceBucket> BucketLists;
+    public int BucketReach;
 }
 
 internal unsafe struct GridCtx
@@ -75,7 +77,26 @@ internal unsafe struct GridCtx
     public LayerData* Layers;
     public NativeBuffer<Placement> Prepared;
     public NativeBuffer<PreparedFootprint> Footprints;
+    public NativeBuffer<int> BucketPos;
     public WorldCtx* Owner;
+}
+
+internal unsafe struct SourceBucket
+{
+    public BucketEntry* Items;
+    public int Count;
+    public int Capacity;
+}
+
+internal struct BucketEntry
+{
+    public int Slot;
+    public ushort X0;
+    public ushort Y0;
+    public ushort X1;
+    public ushort Y1;
+    public byte Planes;
+    public byte Reserved;
 }
 
 internal struct DepositOp
@@ -321,6 +342,7 @@ public static unsafe partial class World
     {
         g->Prepared.Free();
         g->Footprints.Free();
+        g->BucketPos.Free();
         for (var l = 0; l < layerCount; l++) FreeLayer(g->Layers + l);
         NativeHeap.Free(g->Layers);
     }
@@ -340,6 +362,9 @@ public static unsafe partial class World
         ld->Max.Reset();
         ld->Bins.Free();
         ld->BinEntries.Free();
+        for (var i = 0; i < ld->BucketLists.Length; i++)
+            if (ld->BucketLists.Pointer[i].Items != null) NativeHeap.AlignedFree(ld->BucketLists.Pointer[i].Items);
+        ld->BucketLists.Free();
     }
 
     internal static byte AddGrid(byte world, int power, float x, float y, float size)
@@ -607,6 +632,7 @@ public static unsafe partial class World
             var g = w->Grids + gi;
             g->Prepared.Resize(0);
             g->Footprints.Resize(0);
+            g->BucketPos.Resize(0);
             for (var l = 0; l < w->LayerCount; l++)
             {
                 var ld = g->Layers + l;
@@ -631,6 +657,9 @@ public static unsafe partial class World
                 ld->Max.Reset();
                 ld->Bins.Span.Clear();
                 ld->BinEntries.Resize(0);
+                var buckets = ld->BucketLists.Pointer;
+                for (var i = 0; i < ld->BucketLists.Length; i++) buckets[i].Count = 0;
+                ld->BucketReach = 0;
             }
         }
     }

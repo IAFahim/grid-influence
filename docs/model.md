@@ -176,14 +176,28 @@ before reading command payloads, writing
   `Process` per mutation.
   For every (grid, layer) with a non-empty dirty list, `Process` rebuilds the layer's
   **source bins**: a per-tile record holding the count of covering sources and their combined
-  plane bitmask, plus a slice of a flat slot array. Three passes fill it — every live footprint
-  on the layer increments the count and plane mask of each tile it touches (`TileBake.Touches`,
-  the same cell-support test the emitters clip to), a prefix pass assigns each tile its array
-  range, and a final pass writes the slots in ascending order — so a tile's bin is exactly the
-  set of sources contributing to it, ordered deterministically. Binning walks **every** live
-  footprint on a dirty layer, not just the changed ones — a layer that moves one source out of
-  thousands still pays the full scan, which is why `Process` cost is O(changed placements) for
-  preparation but O(layer sources) for any layer with a non-empty dirty list. The op queue
+  plane bitmask, plus a slice of a flat slot array — a tile's bin is exactly the set of
+  sources contributing to it. Sources are indexed spatially by a persistent **bucket index**:
+  each layer keeps one `SourceBucket` per tile — a dense unmanaged array of `BucketEntry`
+  records (slot, the source's footprint tile bounds, and its plane mask) — and each source
+  joins exactly one bucket under its footprint's center tile (the **anchor**). A per-slot
+  `BucketPos` column tracks each member's index inside its bucket, so detach is a swap-remove
+  and attach an append, both O(1) on the commit path. A source whose footprint keeps its
+  anchor keeps its bucket seat and rewrites the entry in place. The layer also carries
+  `BucketReach`, the maximum tile distance any member's anchor has had to its footprint edge
+  since the last `Clear` — a monotone bound, so a removed behemoth leaves the walk wider than
+  needed until then, never narrower. Every source touching a tile is anchored within `reach`
+  of it. Binning then picks one
+  of two fills by density — the dirty count times the `(2·reach + 1)²` walk neighborhood
+  against the tile count: when the neighborhoods exceed four times the layer's tile
+  count, three passes over **every** live footprint do it (count touches per tile with
+  `TileBake.Touches`, prefix-assign ranges, then fill slots in ascending order — sequential
+  reads win when most tiles are dirty); below that, each dirty tile walks the dense member
+  arrays of its `(2·reach + 1)²` bucket neighborhood alone, keeping entries whose stored
+  bounds cover the tile and pass `Touches` — sparse cost scales with the dirty tiles'
+  neighborhoods, not the population, so one mover among a million sources costs ~10 µs
+  instead of a full scan. Either fill yields the same member set; integer accumulation is
+  order-insensitive, so bins and output are bit-identical between paths. The op queue
   then commits:
   appended to the journal while recording, per-slot pending indexes cleared, queue emptied.
   Each dirty tile resolves on the calling thread from its bin alone, emitting every binned
@@ -697,9 +711,13 @@ pass behind them was `perf`-profile guided, receipts first.
   zeroed at column growth so fresh slots read "no op" and the whole column wiped by `Clear`),
   the timer heap and schedule journal (reset by `Clear`, capacity retained), and the
   source-batch scratch (row, link, and lookup buffers). Per grid, the snapshot state: the
-  per-slot `Placement` array and `PreparedFootprint` array, sized to the source count and kept.
+  per-slot `Placement` array, `PreparedFootprint` array, and `BucketPos` bucket-seat column,
+  sized to the source count and kept.
   Per (grid, layer): the `PageMap` arrays (keys, block pointers, used bytes, and the optional
-  tile directory), the `SourceBin` array plus its flat `BinEntries` slot list, the dirty and
+  tile directory), the `SourceBin` array plus its flat `BinEntries` slot list, the
+  `BucketLists` tile array of `SourceBucket` records and each bucket's retained `Items`
+  member array (allocated on a bucket's first member, grown geometrically, freed only with
+  the layer), the dirty and
   changed lists, the dirty flags and tile epochs (allocated together by the layer's first marked
   tile on that grid and kept until `World.Free`), and
   the max pyramid: a flat `int16` slot array plus per-level offset and side tables, allocated
@@ -722,7 +740,8 @@ pass behind them was `perf`-profile guided, receipts first.
   destination; `ChangedTiles` copies from the changed list (stable between `Process` calls,
   swapped — never written in place — on the owning thread) into the caller's buffer. `World.Free` releases each allocation listed above exactly once on the
   owning thread: every live tile block through `FreeBlock`, then per layer the page map, dirty
-  flags, epochs, dirty and changed lists, bins, and max pyramid, then the layer array of each
+  flags, epochs, dirty and changed lists, bins, bucket lists with every bucket's member
+  array, and max pyramid, then the layer array of each
   grid, the grid array, the recipe table, and every `SourceColumns` and world buffer. It then zeroes
   the context; a context without a grid array is not a world, so `GetContext` returns null for it
   and every handle-taking call reads a freed handle as absent. No pointer escapes an owner: handles
@@ -739,7 +758,11 @@ pass behind them was `perf`-profile guided, receipts first.
   share scratch and no plane outlives its writer. The bins a resolve reads were built earlier
   in the same `Process` on the same thread, and the `Prepared`/`Footprints` arrays it reads
   are written by the prepare step before any resolve runs — within one `Process`, each buffer
-  has exactly one writer phase then one reader phase. The per-tile `previous`-row accumulator
+  has exactly one writer phase then one reader phase. Bucket member arrays and `BucketPos`
+  seats are written only during that same prepare step (attach, detach, and in-place entry
+  rewrites) and read only by the subsequent bin walk and exclusion senses on the same thread;
+  a bucket's `Items` block is reallocated only by its own append while no reader holds it.
+  The per-tile `previous`-row accumulator
   is a cleared stack row per resolve call. `PageMap` mutation happens only through its owning `LayerData`
   pointer on the thread that called `Process`. A derived recombination reads input pages (and
   the never-written shared zero page) and writes only its own layer's blocks, pyramid, and

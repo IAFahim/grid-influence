@@ -67,6 +67,7 @@ public static unsafe partial class World
         var previous = g->Prepared.Length;
         g->Prepared.Resize(source->Count);
         g->Footprints.Resize(source->Count);
+        g->BucketPos.Resize(source->Count);
         if (source->Count > previous)
         {
             new Span<Placement>(g->Prepared.Pointer + previous, source->Count - previous).Clear();
@@ -114,6 +115,87 @@ public static unsafe partial class World
         g->Prepared.Pointer[slot] = p;
         *footprint = next;
         if (next.Gain != 0) MarkFootprint(g, &p, in next);
+        var anchored = old.Gain != 0 && next.Gain != 0 && old.Layer == next.Layer &&
+            AnchorOf(in old, g->TilesPerSide) == AnchorOf(in next, g->TilesPerSide);
+        if (!anchored && old.Gain != 0) AnchorDetach(g, slot, in old);
+        if (next.Gain != 0)
+        {
+            var ld = EnsureBuckets(g, next.Layer);
+            var reach = ReachOf(in next);
+            if (reach > ld->BucketReach) ld->BucketReach = reach;
+            if (anchored)
+            {
+                var b = ld->BucketLists.Pointer + AnchorOf(in next, g->TilesPerSide);
+                var entry = b->Items + g->BucketPos.Pointer[slot];
+                entry->X0 = next.X0;
+                entry->Y0 = next.Y0;
+                entry->X1 = next.X1;
+                entry->Y1 = next.Y1;
+                entry->Planes = next.Planes;
+            }
+            else AnchorAttach(g, ld, slot, in next);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int AnchorOf(in PreparedFootprint f, int tps)
+        => ((f.Y0 + f.Y1 - 1) >> 1) * tps + ((f.X0 + f.X1 - 1) >> 1);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int ReachOf(in PreparedFootprint f)
+    {
+        var ax = (f.X0 + f.X1 - 1) >> 1;
+        var ay = (f.Y0 + f.Y1 - 1) >> 1;
+        return Math.Max(Math.Max(ax - f.X0, f.X1 - 1 - ax), Math.Max(ay - f.Y0, f.Y1 - 1 - ay));
+    }
+
+    private static LayerData* EnsureBuckets(GridCtx* g, byte layer)
+    {
+        var ld = g->Layers + layer;
+        if (ld->BucketLists.Length != 0) return ld;
+        ld->BucketLists.Resize(g->TileCount);
+        ld->BucketLists.Span.Clear();
+        return ld;
+    }
+
+    private static void AnchorDetach(GridCtx* g, int slot, in PreparedFootprint f)
+    {
+        var ld = g->Layers + f.Layer;
+        var b = ld->BucketLists.Pointer + AnchorOf(in f, g->TilesPerSide);
+        var positions = g->BucketPos.Pointer;
+        var pos = positions[slot];
+        var last = --b->Count;
+        var moved = b->Items[last];
+        if (pos != last)
+        {
+            b->Items[pos] = moved;
+            positions[moved.Slot] = pos;
+        }
+    }
+
+    private static void AnchorAttach(GridCtx* g, LayerData* ld, int slot, in PreparedFootprint f)
+    {
+        var b = ld->BucketLists.Pointer + AnchorOf(in f, g->TilesPerSide);
+        if (b->Count == b->Capacity)
+        {
+            var capacity = Math.Max(16, b->Capacity * 2);
+            var items = (BucketEntry*)NativeHeap.AlignedAlloc((nuint)capacity * (nuint)sizeof(BucketEntry));
+            if (b->Items != null)
+            {
+                Buffer.MemoryCopy(b->Items, items, (long)capacity * sizeof(BucketEntry), (long)b->Count * sizeof(BucketEntry));
+                NativeHeap.AlignedFree(b->Items);
+            }
+
+            b->Items = items;
+            b->Capacity = capacity;
+        }
+
+        var pos = b->Count++;
+        b->Items[pos] = new BucketEntry
+        {
+            Slot = slot, X0 = f.X0, Y0 = f.Y0, X1 = f.X1, Y1 = f.Y1, Planes = f.Planes
+        };
+        g->BucketPos.Pointer[slot] = pos;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -140,47 +222,108 @@ public static unsafe partial class World
     {
         var ld = g->Layers + layer;
         ld->Bins.Resize(g->TileCount);
-        ld->Bins.Span.Clear();
+        var bins = ld->Bins.Pointer;
+        var dirty = ld->Dirty.Span;
+        foreach (var tile in dirty) bins[tile] = default;
+        if (ld->BucketLists.Length == 0)
+        {
+            ld->BinEntries.Resize(0);
+            return;
+        }
+
+        var tps = g->TilesPerSide;
         var footprints = g->Footprints.Pointer;
         var prepared = g->Prepared.Pointer;
-        var bins = ld->Bins.Pointer;
-        for (var slot = 0; slot < g->Footprints.Length; slot++)
+        var reach = ld->BucketReach;
+        var bucketArea = Math.Min((long)(reach + reach + 1) * (reach + reach + 1), g->TileCount);
+        if (dirty.Length * bucketArea > (long)g->TileCount * 4)
         {
-            var f = footprints + slot;
-            if (f->Gain == 0 || f->Layer != layer) continue;
-            for (var ty = f->Y0; ty < f->Y1; ty++)
-            for (var tx = f->X0; tx < f->X1; tx++)
+            for (var slot = 0; slot < g->Footprints.Length; slot++)
             {
-                if (!TileBake.Touches(prepared + slot, tx << TileBake.TileBits, ty << TileBake.TileBits)) continue;
-                var bin = bins + ty * g->TilesPerSide + tx;
-                bin->Count++;
-                bin->Planes |= f->Planes;
+                var f = footprints + slot;
+                if (f->Gain == 0 || f->Layer != layer) continue;
+                for (var ty = f->Y0; ty < f->Y1; ty++)
+                for (var tx = f->X0; tx < f->X1; tx++)
+                {
+                    var tile = ty * tps + tx;
+                    if (ld->InDirty[tile] == 0 ||
+                        !TileBake.Touches(prepared + slot, tx << TileBake.TileBits, ty << TileBake.TileBits)) continue;
+                    var bin = bins + tile;
+                    bin->Count++;
+                    bin->Planes |= f->Planes;
+                }
             }
+
+            var total = 0;
+            foreach (var tile in dirty)
+            {
+                var bin = bins + tile;
+                bin->Start = total;
+                total += bin->Count;
+                bin->Count = 0;
+            }
+
+            ld->BinEntries.Resize(total);
+            for (var slot = 0; slot < g->Footprints.Length; slot++)
+            {
+                var f = footprints + slot;
+                if (f->Gain == 0 || f->Layer != layer) continue;
+                for (var ty = f->Y0; ty < f->Y1; ty++)
+                for (var tx = f->X0; tx < f->X1; tx++)
+                {
+                    var tile = ty * tps + tx;
+                    if (ld->InDirty[tile] == 0 ||
+                        !TileBake.Touches(prepared + slot, tx << TileBake.TileBits, ty << TileBake.TileBits)) continue;
+                    var bin = bins + tile;
+                    ld->BinEntries.Pointer[bin->Start + bin->Count++] = slot;
+                }
+            }
+
+            return;
         }
 
-        var total = 0;
-        for (var tile = 0; tile < g->TileCount; tile++)
+        var lists = ld->BucketLists.Pointer;
+        ld->BinEntries.Resize(0);
+        foreach (var tile in dirty)
         {
+            var tx = tile % tps;
+            var ty = tile / tps;
+            var x0 = Math.Max(tx - reach, 0);
+            var y0 = Math.Max(ty - reach, 0);
+            var x1 = Math.Min(tx + reach, tps - 1);
+            var y1 = Math.Min(ty + reach, tps - 1);
             var bin = bins + tile;
-            bin->Start = total;
-            total += bin->Count;
-            bin->Count = 0;
-        }
-
-        ld->BinEntries.Resize(total);
-        for (var slot = 0; slot < g->Footprints.Length; slot++)
-        {
-            var f = footprints + slot;
-            if (f->Gain == 0 || f->Layer != layer) continue;
-            for (var ty = f->Y0; ty < f->Y1; ty++)
-            for (var tx = f->X0; tx < f->X1; tx++)
+            bin->Start = ld->BinEntries.Length;
+            for (var by = y0; by <= y1; by++)
+            for (var bx = x0; bx <= x1; bx++)
             {
-                if (!TileBake.Touches(prepared + slot, tx << TileBake.TileBits, ty << TileBake.TileBits)) continue;
-                var bin = bins + ty * g->TilesPerSide + tx;
-                ld->BinEntries.Pointer[bin->Start + bin->Count++] = slot;
+                var b = lists + by * tps + bx;
+                var items = b->Items;
+                var count = b->Count;
+                for (var i = 0; i < count; i++)
+                {
+                    var e = items + i;
+                    if (tx < e->X0 || tx >= e->X1 || ty < e->Y0 || ty >= e->Y1 ||
+                        !TileBake.Touches(prepared + e->Slot, tx << TileBake.TileBits, ty << TileBake.TileBits)) continue;
+                    var n = ld->BinEntries.Length;
+                    ld->BinEntries.Resize(n + 1);
+                    ld->BinEntries.Pointer[n] = e->Slot;
+                    bin->Planes |= e->Planes;
+                }
             }
+
+            bin->Count = ld->BinEntries.Length - bin->Start;
         }
     }
+
+
+#if NET
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void Prefetch(void* pointer)
+    {
+        if (System.Runtime.Intrinsics.X86.Sse.IsSupported) System.Runtime.Intrinsics.X86.Sse.Prefetch0(pointer);
+    }
+#endif
 
     private static void CommitSourceSnapshot(WorldCtx* w)
     {
@@ -258,6 +401,9 @@ public static unsafe partial class World
         byte impulses = 0;
         for (var i = 0; i < bin->Count; i++)
         {
+#if NET
+            if (i + 4 < bin->Count) Prefetch(g->Prepared.Pointer + entries[i + 4]);
+#endif
             var slot = entries[i];
             impulses |= TileBake.EmitTransient(g->Prepared.Pointer + slot, g->Footprints.Pointer[slot].Gain, x, y,
                 difference, dense, tent, bell, tentImpulses, bellImpulses);
@@ -286,6 +432,9 @@ public static unsafe partial class World
         byte impulses = 0;
         for (var i = 0; i < bin->Count; i++)
         {
+#if NET
+            if (i + 4 < bin->Count) Prefetch(g->Prepared.Pointer + entries[i + 4]);
+#endif
             var slot = entries[i];
             impulses |= TileBake.EmitTransientWide(g->Prepared.Pointer + slot, g->Footprints.Pointer[slot].Gain, x, y,
                 core, core + TileBake.DiffRows * TileBake.DiffPitch, smooth, smooth + Cells, smooth + Cells * 2, smooth + Cells * 3);
@@ -328,22 +477,36 @@ public static unsafe partial class World
     {
         if ((uint)cx >= (uint)g->Size || (uint)cy >= (uint)g->Size) return 0;
         var ld = g->Layers + layer;
-        if (ld->Bins.Length == 0) return 0;
-        var bin = ld->Bins.Pointer + (cy >> TileBake.TileBits) * g->TilesPerSide + (cx >> TileBake.TileBits);
-        var entries = ld->BinEntries.Pointer + bin->Start;
+        if (ld->BucketLists.Length == 0) return 0;
+        var tps = g->TilesPerSide;
+        var reach = ld->BucketReach;
+        var tx = cx >> TileBake.TileBits;
+        var ty = cy >> TileBake.TileBits;
+        var x0 = Math.Max(tx - reach, 0);
+        var y0 = Math.Max(ty - reach, 0);
+        var x1 = Math.Min(tx + reach, tps - 1);
+        var y1 = Math.Min(ty + reach, tps - 1);
+        var lists = ld->BucketLists.Pointer;
         var core = 0L;
         var tent = default(WideSum);
         var bell = default(WideSum);
-        for (var i = 0; i < bin->Count; i++)
+        for (var by = y0; by <= y1; by++)
+        for (var bx = x0; bx <= x1; bx++)
         {
-            var slot = entries[i];
-            if (slot == excludedSlot) continue;
-            var placement = g->Prepared.Pointer + slot;
-            if (!placement->Reaches(cx, cy)) continue;
-            SourceAt(placement, g->Footprints.Pointer[slot].Gain, cx, cy, out var integer, out var smooth);
-            core += integer;
-            if (placement->Plane == Plane.Tent) tent.Add(smooth);
-            else if (placement->Plane == Plane.Bell) bell.Add(smooth);
+            var b = lists + by * tps + bx;
+            for (var i = 0; i < b->Count; i++)
+            {
+                var e = b->Items + i;
+                var slot = e->Slot;
+                if (slot == excludedSlot) continue;
+                if (tx < e->X0 || tx >= e->X1 || ty < e->Y0 || ty >= e->Y1) continue;
+                var placement = g->Prepared.Pointer + slot;
+                if (!placement->Reaches(cx, cy)) continue;
+                SourceAt(placement, g->Footprints.Pointer[slot].Gain, cx, cy, out var integer, out var smooth);
+                core += integer;
+                if (placement->Plane == Plane.Tent) tent.Add(smooth);
+                else if (placement->Plane == Plane.Bell) bell.Add(smooth);
+            }
         }
 
         return Saturate(core + tent.RoundQ40() + bell.RoundQ40());

@@ -32,8 +32,8 @@ internal static unsafe class Receipts
 
         World.Process(world);
         var processed = Inspection.Read(world);
-        var preparedBytes = 2L * 16 * (sizeof(Placement) + sizeof(PreparedFootprint));
-        var binBytes = 2L * 16 * (sizeof(SourceBin) + sizeof(int));
+        var preparedBytes = 2L * 16 * (sizeof(Placement) + sizeof(PreparedFootprint) + sizeof(int));
+        var binBytes = 2L * 16 * (sizeof(SourceBin) + sizeof(int) + sizeof(SourceBucket)) + 2L * 16 * sizeof(BucketEntry);
         var fieldOk = World.Query(world, grid, layer, 16, 16) == 120 &&
             World.Query(world, grid, layer, 0, 0, 64, 64) == 1920 &&
             World.Query(world, grid, other, 47, 47) == -20 &&
@@ -120,10 +120,11 @@ internal static unsafe class Receipts
         var clearOk = cleared.LiveSources == 0 && cleared.SourceSlots == 0 && cleared.SourceCapacity == 64 &&
             cleared.LiveTiles == 0 && cleared.DirtyTiles == 0 && cleared.MapSlots == 0 &&
             cleared.MapBytes == 0 && cleared.DirectoryBytes == 0 && cleared.PyramidBytes == 0 &&
-            cleared.RowSummaryBytes == 0 && cleared.PreparedBytes == preparedBytes && cleared.BinBytes == binBytes &&
+            cleared.RowSummaryBytes == 0 && cleared.PreparedBytes == preparedBytes &&
+            cleared.BinBytes == binBytes + 2L * 16 * sizeof(BucketEntry) &&
             cleared.DepositQueueBytes == 16 * sizeof(DepositOp) + 64 * sizeof(int) &&
             cleared.WorldBytes == empty.WorldBytes + 64 * 40 + 40 + 256 + 16 * sizeof(DepositOp) +
-                64 * sizeof(int) + preparedBytes + binBytes &&
+                64 * sizeof(int) + preparedBytes + binBytes + 2L * 16 * sizeof(BucketEntry) &&
             World.Query(world, grid, other, 0, 0, 64, 64) == 0;
         World.Free(world);
 

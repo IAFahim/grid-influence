@@ -377,8 +377,9 @@ cancel).
 ## Crowds re-resolve, sensors batch
 
 There is no separate crowd engine. When most of a layer moves in one window, `Process` does the
-same thing it always does — diff each op's footprints into a dirty set, bin every live source
-per touched tile, re-sum each dirty tile from its bin through transient scratch. What changes is
+same thing it always does — diff each op's footprints into a dirty set, gather each touched
+tile's covering sources through the bucket index (or a full-layer scan once most tiles are
+dirty), re-sum each dirty tile from its bin through transient scratch. What changes is
 the arithmetic: a dirty tile pays for every source overlapping it, movers and bystanders alike,
 so once a dense layer dirties most of its tiles the per-frame cost flattens toward a full
 re-resolve — and can sit above a naive clear-and-redraw of the same workload (`--crowd` below
@@ -465,11 +466,16 @@ against a naive clear-and-redraw of all sources (best of 10):
 
 A dirty tile re-sums every source overlapping it — movers and bystanders alike — so once a
 quarter of a dense layer moves, nearly every tile is dirty and the curve flattens. On these
-all-moving workloads a naive full redraw is cheaper per frame. One honest caveat on scaling:
-building the bins scans every live source in a dirty layer twice per `Process` (~30 ns each),
-so a single mover in a million-source layer pays ~25 ms while the same move among four
-thousand sources pays tens of microseconds — sparse changes scale with population, not just
-movers. The same harness shows idle frames at 0 µs.
+all-moving workloads a naive full redraw is cheaper per frame. Sparse changes scale with the
+dirty tiles' neighborhoods, not the population: a persistent per-layer bucket index (one
+dense member array per tile, O(1) attach/detach on commit) lets binning touch only the
+buckets that can reach a dirty tile — one mover among a million sources costs ~10 µs a
+frame, and only when the dirty tiles' reach neighborhoods would exceed four times the
+layer's tile count (~44% of tiles at the common one-tile reach) does binning fall back to a
+full sequential scan, which is cheaper there anyway. The residual cost is the
+resolve itself: at million-source density each dirty tile re-sums a ~hundred-member bin, so
+200 movers in a 1M world run ~6 ms where the old incremental engine took ~0.17 ms — the
+price of keeping only compact saturated pages. The same harness shows idle frames at 0 µs.
 `--crowd` reproduces the table and the receipts that pin a crowded window to stepped
 per-window processing cell for cell.
 
@@ -483,10 +489,10 @@ cleared and redrawn from every source each frame (4,000 sources, 200 moves, same
 | full-grid sum | 426 µs | 1.1 µs |
 
 The gap is structural in both directions: naive pays O(grid + sources×stamp-area) every frame
-even when nothing changed; Gi pays O(live sources in dirty layers) to build the bins plus
-O(dirty tiles × the sources overlapping them) to resolve, and reads maintained state — so a
-quiet world is free and queries are microseconds, while a frame that dirties most of a dense
-layer is this engine's worst case. Memory flips too — the naive grid
+even when nothing changed; Gi pays O(dirty tiles × the source density around them) to rebuild
+the bins plus O(dirty tiles × the sources overlapping them) to resolve, and reads maintained
+state — so a quiet world is free and queries are microseconds, while a frame that dirties
+most of a dense layer is this engine's worst case. Memory flips too — the naive grid
 allocates N² ints per layer up front (1 GB at 16384²); Gi allocates 2,304 B per live tile, so
 an empty world of any size costs zero.
 
@@ -524,14 +530,16 @@ allocated every frame):
 | entities, all moving every frame | per entity | frame total | budget |
 | --- | ---: | ---: | --- |
 | placed once, then idle | ~0 ns | ~0 µs | met |
-| 100k, canonical | 668 ns | 66.8 ms | not met |
-| 1M, canonical | 431 ns | 431 ms | not met |
+| 100k, canonical | 700 ns | 70.0 ms | not met |
+| 1M, canonical | 484 ns | 484 ms | not met |
 | 1M + 100k `TrySenseArea` r=64 | 801 ns | 801 ms | not met |
 
 Status: the write path and idle worlds are essentially free (`Sync` write ≈ 8 ns/entity, idle
-`Process` ≈ 0), and batched column reads cost ~135 ns/entity of the canonical 431. `Process`
-dominates at ~293 ns/entity — a dirty tile re-sums its whole source bin, so a dense
-all-moving frame is this engine's worst case and the 100 ns line is missed roughly 4×.
+`Process` ≈ 0), and batched column reads cost ~143 ns/entity of the canonical 484. `Process`
+dominates at ~333 ns/entity — a dirty tile re-sums its whole source bin, so a dense
+all-moving frame is this engine's worst case and the 100 ns line is missed roughly 5×.
+(Bucket-index upkeep on every moved source is part of that 333; the index is what makes
+sparse frames cheap.)
 Per-entity wide reads miss it further: a `QueryRegion` 256² costs ~8.9 µs of read time per
 call and a self-excluding `TrySenseArea` r=64 ~2.4 µs, so abuse mixes sit ~10–40 µs per
 entity — tens to hundreds of times over.
@@ -630,10 +638,14 @@ a full 512² region scan, and the 600-tick loop allocates 0 B.
   into a dirty-tile set (both layers when a source hops layers), commits the ops, then
   resolves each dirty tile once. A source placed and removed inside one window never touches
   a tile.
-- **Dirty tiles resolve from source bins.** For each dirty base layer, a count-prefix-fill
-  pass bins every live source whose footprint touches each tile — ascending slot order,
-  deterministic. Binning walks the layer's whole footprint list, so it costs O(layer sources)
-  whenever the layer has any dirty tile at all. The tile then re-sums its whole bin through
+- **Dirty tiles resolve from source bins.** A persistent per-(grid,layer) bucket index —
+  one dense member array per tile keyed on each source's footprint anchor, plus a per-slot
+  seat column for O(1) swap-remove — is maintained as ops commit. While the dirty tiles'
+  reach neighborhoods stay under four times the layer's tile count, each dirty tile's bin is
+  rebuilt by scanning only the dense member arrays of the buckets within its neighborhood; past that the layer
+  falls back to a count-prefix-fill pass over every live source, which sequential reads make
+  cheaper there. Either way a tile's bin is exactly the set of covering sources, and integer
+  summation makes the result order-insensitive. The tile then re-sums its whole bin through
   transient stack planes: a 33×33
   `int64` difference plane for boxes, a dense `int64` plane for rasters and turned stamps,
   and exact `int64` (or 128-bit `WideSum` past 4,088 sources) planes for tent and bell

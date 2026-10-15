@@ -93,7 +93,8 @@ internal static unsafe class Inspection
             var g = w->Grids + gi;
             result.LayerBytes += World.MaxLayers * sizeof(LayerData);
             result.PreparedBytes += (long)g->Prepared.Capacity * sizeof(Placement) +
-                (long)g->Footprints.Capacity * sizeof(PreparedFootprint);
+                (long)g->Footprints.Capacity * sizeof(PreparedFootprint) +
+                (long)g->BucketPos.Capacity * sizeof(int);
             result.PossibleTiles += (long)g->TileCount * w->LayerCount;
             for (var li = 0; li < w->LayerCount; li++)
             {
@@ -105,7 +106,11 @@ internal static unsafe class Inspection
                 result.Tombstones += ld->Pages.TombstoneCount;
                 result.MapBytes += (long)ld->Pages.SlotCount * (sizeof(int) + sizeof(byte*) + sizeof(byte));
                 result.DirectoryBytes += ld->Pages.DirectoryBytes;
-                result.BinBytes += (long)ld->Bins.Capacity * sizeof(SourceBin) + (long)ld->BinEntries.Capacity * sizeof(int);
+                result.BinBytes += (long)ld->Bins.Capacity * sizeof(SourceBin) + (long)ld->BinEntries.Capacity * sizeof(int) +
+                    (long)ld->BucketLists.Capacity * sizeof(SourceBucket);
+                var lists = ld->BucketLists.Pointer;
+                for (var bi = 0; bi < ld->BucketLists.Length; bi++)
+                    result.BinBytes += (long)lists[bi].Capacity * sizeof(BucketEntry);
                 result.DirtyQueueBytes += (long)(ld->Dirty.Capacity + ld->Changed.Capacity) * sizeof(int);
                 result.PyramidBytes += ld->Max.Bytes;
                 if (ld->InDirty != null) result.DirtyFlagBytes += g->TileCount;

@@ -80,7 +80,8 @@ afterward. Do not lose the result just because the original entity no longer has
 5. Commit ordered timer/journal work without concurrent heap/list mutation. Keep the existing
    timers-before-ops processing order and rewind parity.
 6. Let `Process` do the tile work serially: prepare each changed source's placement per grid,
-   diff old and new footprints into the dirty set, bin every live source per touched tile,
+   diff old and new footprints into the dirty set, gather each touched tile's covering
+   sources through the per-layer bucket index (full-layer scan when most tiles are dirty),
    then re-resolve each dirty tile from its bin through transient scratch. Shared map
    removal/freeing, summary publication, and derived-layer recombination all stay on the
    calling thread, in that order.

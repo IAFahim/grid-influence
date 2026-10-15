@@ -807,7 +807,7 @@ public sealed class EngineTests
         Assert.Equal(0, cleared.LiveTiles);
         Assert.Equal(0, cleared.MapBytes);
         Assert.Equal(empty.WorldBytes + 64 * 40 + 20 + 64 + 16 * sizeof(DepositOp) + 64 * sizeof(int) +
-            16 * (sizeof(Placement) + sizeof(PreparedFootprint) + sizeof(SourceBin) + sizeof(int)), cleared.WorldBytes);
+            16 * (sizeof(Placement) + sizeof(PreparedFootprint) + sizeof(SourceBin) + 2 * sizeof(int) + sizeof(SourceBucket) + sizeof(BucketEntry)), cleared.WorldBytes);
     }
 
     [Fact]
