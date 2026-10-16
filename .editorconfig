@@ -30,10 +30,17 @@ indent_size = 4
 # - SkipLocalsInitAttribute.cs: the netstandard2.1 polyfill must be declared in
 #   System.Runtime.CompilerServices — the compiler honors the attribute by its
 #   full name only.
-# - LayerVerification.cs, ShapeVerification.cs, TimeVerification.cs: receipts
-#   compare gradients and world positions by == on purpose, like
-#   SenseVerification.cs — the engine must match its oracle bit for bit.
+# - LayerVerification.cs, ShapeVerification.cs, TimeVerification.cs,
+#   CrowdVerification.cs, FloorReads.cs: receipts compare gradients and world
+#   positions by == on purpose, like SenseVerification.cs — the engine must
+#   match its oracle bit for bit.
+# - World.cs: SourceSpec.Scale is the public field name on the nested struct.
+# - SimdOps.cs: the explicit (short) cast on the first argument of
+#   Vector128.Create/Vector256.Create selects the short overload.
 [benchmarks/SenseVerification.cs]
+resharper_compare_of_floats_by_equality_operator_highlighting = none
+
+[benchmarks/Verification.cs]
 resharper_compare_of_floats_by_equality_operator_highlighting = none
 
 [benchmarks/LayerVerification.cs]
@@ -45,12 +52,22 @@ resharper_compare_of_floats_by_equality_operator_highlighting = none
 [benchmarks/TimeVerification.cs]
 resharper_compare_of_floats_by_equality_operator_highlighting = none
 
+[benchmarks/CrowdVerification.cs]
+resharper_compare_of_floats_by_equality_operator_highlighting = none
+
+[benchmarks/FloorReads.cs]
+resharper_compare_of_floats_by_equality_operator_highlighting = none
+
 [src/Gi/SkipLocalsInitAttribute.cs]
 resharper_check_namespace_highlighting = none
 
 [src/Gi/World.cs]
 resharper_convert_if_statement_to_null_coalescing_assignment_highlighting = none
 resharper_compare_of_floats_by_equality_operator_highlighting = none
+resharper_member_hides_static_from_outer_class_highlighting = none
+
+[src/Gi/SimdOps.cs]
+resharper_redundant_cast_highlighting = none
 
 [src/Gi/World.SourceBatch.cs]
 resharper_compare_of_floats_by_equality_operator_highlighting = none

@@ -8,6 +8,7 @@ namespace Gi;
 public static unsafe partial class World
 {
     private const long MaxReachQ8 = 1L << 24;
+    private const float MaxCellQ8 = 1073741824f;
 
     public static bool Covers(byte world, float x, float y)
     {
@@ -56,7 +57,7 @@ public static unsafe partial class World
         value = Query(world, (byte)gi, layer, cx, cy);
         if (!Applied(w, exclude, layer, out var source)) return complete;
 
-        var shape = ShapeOf(g, source);
+        var shape = ShapeOf(w, g, source);
         if (shape.P.Reaches(cx, cy)) value = ExcludedValue(w, g, layer, source.Layer, &shape, cx, cy, value);
         return complete;
     }
@@ -74,8 +75,8 @@ public static unsafe partial class World
         out short value, out float bestX, out float bestY)
     {
         value = 0;
-        bestX = x;
-        bestY = y;
+        bestX = 0;
+        bestY = 0;
         var w = GetContext(world);
         if (w == null || layer >= w->LayerCount) return false;
         if (!Pick(w, x, y, reach, 0, true, out var gi, out var complete)) return false;
@@ -157,8 +158,8 @@ public static unsafe partial class World
         out short value, out float nearestX, out float nearestY)
     {
         value = short.MinValue;
-        nearestX = x;
-        nearestY = y;
+        nearestX = 0;
+        nearestY = 0;
         var w = GetContext(world);
         if (w == null || layer >= w->LayerCount) return false;
         if (!Pick(w, x, y, reach, 0, true, out var gi, out var complete)) return false;
@@ -195,7 +196,12 @@ public static unsafe partial class World
             }
         }
 
-        if (best == long.MaxValue) return complete;
+        if (best == long.MaxValue)
+        {
+            nearestX = x;
+            nearestY = y;
+            return complete;
+        }
 
         value = Cell(g, layer, bx, by);
         nearestX = g->OriginX + ((bx << 8) + 128) / (float)g->ScaleQ8;
@@ -361,7 +367,7 @@ public static unsafe partial class World
         var cx = (int)(CellQ8(x, g->OriginX, g->ScaleQ8) >> 8);
         var cy = (int)(CellQ8(y, g->OriginY, g->ScaleQ8) >> 8);
         var excluding = Applied(w, exclude, layer, out var source);
-        var shape = excluding ? ShapeOf(g, source) : default;
+        var shape = excluding ? ShapeOf(w, g, source) : default;
         var perUnit = g->ScaleQ8 / 512f;
         gx = (Others(w, g, layer, excluding, source.Layer, &shape, cx + 1, cy) -
             Others(w, g, layer, excluding, source.Layer, &shape, cx - 1, cy)) * perUnit;
@@ -471,7 +477,7 @@ public static unsafe partial class World
 
         if (Applied(w, exclude, layer, out var source))
         {
-            var shape = ShapeOf(g, source);
+            var shape = ShapeOf(w, g, source);
             sum += IsDerived(w, layer) ? ExcludedMix(w, g, layer, source.Layer, disk, &shape) : ExcludedArea(g, layer, disk, &shape);
         }
 
@@ -519,11 +525,11 @@ public static unsafe partial class World
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    private static Shape ShapeOf(GridCtx* g, in Placed source)
+    private static Shape ShapeOf(WorldCtx* w, GridCtx* g, in Placed source)
     {
         var shape = new Shape { Gain = source.Gain };
         TileBake.Place(source.X, source.Y, g->OriginX, g->OriginY, g->ScaleQ8, g->Size, StampCatalog.Get(source.Stamp),
-            source.Angle, source.Size, out shape.P);
+            source.Angle, source.Size, LayerPrecision(w, source.Layer), out shape.P);
         return shape;
     }
 
@@ -593,7 +599,7 @@ public static unsafe partial class World
             return Saturate(page - core);
         }
 
-        var boxes = (int)TileBake.Quadrant(DiffOf(block), lx, ly) + DenseOf(block)[cell];
+        var boxes = TileBake.Quadrant(DiffOf(block), lx, ly) + DenseOf(block)[cell];
         return Saturate(Absent(boxes, tents, bells, plane, core, smooth));
     }
 
@@ -621,7 +627,7 @@ public static unsafe partial class World
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int Absent(int boxes, long tents, long bells, Plane plane, int core, long smooth)
+    private static long Absent(long boxes, long tents, long bells, Plane plane, int core, long smooth)
         => boxes - core +
             TileBake.RoundQ40(tents - (plane == Plane.Tent ? smooth : 0)) +
             TileBake.RoundQ40(bells - (plane == Plane.Bell ? smooth : 0));
@@ -646,7 +652,7 @@ public static unsafe partial class World
         var lo = stackalloc int[n];
         var hi = stackalloc int[n];
         var core = stackalloc int[n * n];
-        var boxes = stackalloc int[n * n];
+        var boxes = stackalloc long[n * n];
         var wx = stackalloc long[n];
         var wy = stackalloc long[n];
         var plane = p->Plane;
@@ -793,6 +799,7 @@ public static unsafe partial class World
     {
         grid = -1;
         complete = false;
+        if (disk && !float.IsFinite(reach)) return false;
         var bestScale = 0;
         for (var gi = 0; gi < w->GridCount; gi++)
         {
@@ -938,7 +945,12 @@ public static unsafe partial class World
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static long CellQ8(float value, float origin, int scaleQ8)
-        => (int)MathF.Floor((value - origin) * scaleQ8);
+    {
+        var q = (value - origin) * scaleQ8;
+        if (MathF.Abs(q) <= MaxCellQ8) return (int)MathF.Floor(q);
+
+        return q > 0f ? (long)MaxCellQ8 : -(long)MaxCellQ8;
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool Contains(GridCtx* g, long qx, long qy)

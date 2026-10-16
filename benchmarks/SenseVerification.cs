@@ -227,7 +227,7 @@ internal static partial class Verification
             var ok = Gi.World.TrySenseMax(s.World, s.Layer, x, y, reach, out var value, out var bx, out var by);
             if (expected < 0)
             {
-                if (ok || value != 0 || bx != x || by != y) return false;
+                if (ok || value != 0 || bx != 0 || by != 0) return false;
                 continue;
             }
 

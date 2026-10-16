@@ -68,17 +68,26 @@ public sealed class ValidationTests
     [Theory]
     [InlineData(4, 1f, false)]
     [InlineData(5, 1f, true)]
-    [InlineData(14, 1f, true)]
+    [InlineData(14, 16384f, true)]
+    [InlineData(14, 4f, true)]
+    [InlineData(14, 3.9999f, false)]
+    [InlineData(14, 1f, false)]
     [InlineData(15, 1f, false)]
     [InlineData(5, 0f, false)]
     [InlineData(5, -1f, false)]
     [InlineData(5, float.NaN, false)]
     [InlineData(5, float.PositiveInfinity, false)]
     [InlineData(5, float.NegativeInfinity, false)]
-    public void Grid_requires_supported_power_and_finite_positive_size(int power, float size, bool valid)
+    [InlineData(5, 8192f, true)]
+    [InlineData(5, 8193f, false)]
+    [InlineData(5, 1e-30f, false)]
+    [InlineData(5, 3e38f, false)]
+    public void Grid_requires_supported_power_finite_positive_size_and_representable_scale(int power, float size, bool valid)
     {
         Assert.Equal(valid, GiValidation.TryGrid(power, size, out var error));
         Assert.Equal(valid, error == null);
+        Assert.Equal(valid, GiValidation.TryGrid(power, 0f, 0f, size, out var originError));
+        Assert.Equal(valid, originError == null);
     }
 
     [Theory]

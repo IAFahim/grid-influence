@@ -5,28 +5,26 @@ namespace Gi.Tests;
 public sealed class ColumnSenseTests : IDisposable
 {
     private readonly byte _world = World.New();
-    private readonly byte _grid;
     private readonly byte _layer;
     private readonly byte _derived;
     private readonly byte _box = Stamp.Box(8, 8, 100);
     private readonly byte _dome = Stamp.Dome(6, 90);
     private readonly byte _cone = Stamp.Cone(5, -80, 270);
-    private readonly int _first;
     private readonly int _second;
     private readonly int _third;
 
     public ColumnSenseTests()
     {
-        _grid = Grid.New(_world, 7, 0f, 0f, 128f);
+        Grid.New(_world, 7, 0f, 0f, 128f);
         _layer = Layer.New(_world);
         _derived = Layer.Sum(_world, _layer, 1, _layer, 2);
-        _first = World.Place(_world, _layer, 40f, 40f, _box, 3);
+        var first = World.Place(_world, _layer, 40f, 40f, _box, 3);
         _second = World.Place(_world, _layer, 44f, 44f, _dome, 2);
         _third = World.Place(_world, _layer, 60f, 40f, _cone, -2);
         World.Turn(_world, _third, 1.1f);
         World.Scale(_world, _third, 1.5f);
         World.Process(_world);
-        Assert.True(_first >= 0 && _second >= 0 && _third >= 0);
+        Assert.True(first >= 0 && _second >= 0 && _third >= 0);
     }
 
     public void Dispose()

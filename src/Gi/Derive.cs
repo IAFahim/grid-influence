@@ -20,6 +20,10 @@ internal struct LayerRecipe
     public byte A;
     public byte B;
     public byte Shift;
+    public byte PhaseBits;
+    public byte TurnBits;
+    public ushort TurnMask;
+    public int AnchorMask;
     public int WeightA;
     public int WeightB;
     public short Low;
@@ -42,7 +46,7 @@ public static unsafe partial class World
         if (low > high) throw new ArgumentOutOfRangeException(nameof(low));
 
         var reads = w->Recipes[a].Reads | w->Recipes[b].Reads;
-        var id = AddLayer(world);
+        var id = AddLayer(world, Layer.Precision.Exact);
         for (var gi = 0; gi < w->GridCount; gi++)
         {
             var g = w->Grids + gi;
@@ -92,6 +96,7 @@ public static unsafe partial class World
                 if (r->B != r->A) MarkAll(ld, lb);
                 var dirty = ld->Dirty.Pointer;
                 var count = ld->Dirty.Length;
+                var kept = 0;
                 for (var i = 0; i < count; i++)
                 {
                     var tile = dirty[i];
@@ -99,8 +104,10 @@ public static unsafe partial class World
                     var pa = la->Pages.TryGet(tile, out var ba) ? (short*)(ba + PageOffset) : null;
                     var pb = lb->Pages.TryGet(tile, out var bb) ? (short*)(bb + PageOffset) : null;
                     var exists = ld->Pages.TryGet(tile, out var block);
+                    ResolveOutcome outcome;
                     if (pa == null && pb == null)
                     {
+                        outcome = exists && PageAny((short*)(block + PageOffset)) ? ResolveOutcome.Changed : ResolveOutcome.None;
                         if (exists)
                         {
                             ld->Pages.Remove(tile);
@@ -108,21 +115,28 @@ public static unsafe partial class World
                         }
 
                         ld->Max.Update(g->TilesPerSide, tile, 0);
-                        continue;
                     }
-
-                    var target = exists ? block : NewHeader();
-                    if (Combine(r, pa, pb, (short*)(target + PageOffset), (long*)(target + SumOffset), (short*)(target + MaxOffset)))
+                    else
                     {
-                        if (!exists) ld->Pages.Put(tile, target);
-                        ld->Max.Update(g->TilesPerSide, tile, *(short*)(target + MaxOffset));
-                        continue;
+                        var target = exists ? block : NewHeader();
+                        outcome = Combine(r, pa, pb, (short*)(target + PageOffset), (long*)(target + SumOffset), (short*)(target + MaxOffset));
+                        if ((outcome & ResolveOutcome.Empty) == 0)
+                        {
+                            if (!exists) ld->Pages.Put(tile, target);
+                            ld->Max.Update(g->TilesPerSide, tile, *(short*)(target + MaxOffset));
+                        }
+                        else
+                        {
+                            if (exists) ld->Pages.Remove(tile);
+                            FreeBlock(target);
+                            ld->Max.Update(g->TilesPerSide, tile, 0);
+                        }
                     }
 
-                    if (exists) ld->Pages.Remove(tile);
-                    FreeBlock(target);
-                    ld->Max.Update(g->TilesPerSide, tile, 0);
+                    if ((outcome & ResolveOutcome.Changed) != 0) dirty[kept++] = tile;
                 }
+
+                ld->Dirty.Resize(kept);
             }
         }
     }
@@ -149,7 +163,7 @@ public static unsafe partial class World
     private static byte* NewHeader()
     {
         var block = (byte*)NativeHeap.AlignedAlloc(HeaderBytes);
-        new Span<byte>(block + SumOffset, HeaderBytes - SumOffset).Clear();
+        new Span<byte>(block + PageOffset, HeaderBytes - PageOffset).Clear();
         return block;
     }
 
@@ -176,7 +190,7 @@ public static unsafe partial class World
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    private static bool Combine(LayerRecipe* r, short* inputA, short* inputB, short* output, long* pageSum, short* pageMax)
+    private static ResolveOutcome Combine(LayerRecipe* r, short* inputA, short* inputB, short* output, long* pageSum, short* pageMax)
     {
         var a = inputA == null ? (short*)Runtime.ZeroDense : inputA;
         var b = inputB == null ? (short*)Runtime.ZeroDense : inputB;
@@ -185,11 +199,13 @@ public static unsafe partial class World
         if (Vector128.IsHardwareAccelerated) return Combine128(r, a, b, output, pageSum, pageMax);
 #endif
         var any = false;
+        var changed = false;
         var sum = 0L;
         var max = short.MinValue;
         for (var i = 0; i < Cells; i++)
         {
             var cell = CombineCell(r, a[i], b[i]);
+            changed |= cell != output[i];
             output[i] = cell;
             any |= cell != 0;
             sum += cell;
@@ -198,16 +214,17 @@ public static unsafe partial class World
 
         *pageSum = sum;
         *pageMax = max;
-        return any;
+        return TileBake.Outcome(any, changed);
     }
 
 #if NET
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    private static bool Combine256(LayerRecipe* r, short* a, short* b, short* output, long* pageSum, short* pageMax)
+    private static ResolveOutcome Combine256(LayerRecipe* r, short* a, short* b, short* output, long* pageSum, short* pageMax)
     {
         var any = Vector256<short>.Zero;
+        var differs = Vector256<short>.Zero;
         var top = Vector256.Create(short.MinValue);
         var acc = Vector256<int>.Zero;
         var wa = Vector256.Create(r->WeightA);
@@ -251,6 +268,7 @@ public static unsafe partial class World
                 cells = va & Vector256.GreaterThanOrEqual(vb, low) & Vector256.LessThanOrEqual(vb, high);
             }
 
+            differs |= ~Vector256.Equals(Vector256.Load(output + i), cells);
             cells.Store(output + i);
             any |= cells;
             top = Vector256.Max(top, cells);
@@ -260,13 +278,15 @@ public static unsafe partial class World
 
         *pageSum = Vector256.Sum(acc);
         *pageMax = SimdOps.HorizontalMax(top);
-        return !Vector256.EqualsAll(any, Vector256<short>.Zero);
+        return TileBake.Outcome(!Vector256.EqualsAll(any, Vector256<short>.Zero),
+            !Vector256.EqualsAll(differs, Vector256<short>.Zero));
     }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    private static bool Combine128(LayerRecipe* r, short* a, short* b, short* output, long* pageSum, short* pageMax)
+    private static ResolveOutcome Combine128(LayerRecipe* r, short* a, short* b, short* output, long* pageSum, short* pageMax)
     {
         var any = Vector128<short>.Zero;
+        var differs = Vector128<short>.Zero;
         var top = Vector128.Create(short.MinValue);
         var acc = Vector128<int>.Zero;
         var wa = Vector128.Create(r->WeightA);
@@ -310,6 +330,7 @@ public static unsafe partial class World
                 cells = va & Vector128.GreaterThanOrEqual(vb, low) & Vector128.LessThanOrEqual(vb, high);
             }
 
+            differs |= ~Vector128.Equals(Vector128.Load(output + i), cells);
             cells.Store(output + i);
             any |= cells;
             top = Vector128.Max(top, cells);
@@ -319,7 +340,8 @@ public static unsafe partial class World
 
         *pageSum = Vector128.Sum(acc);
         *pageMax = SimdOps.HorizontalMax(top);
-        return !Vector128.EqualsAll(any, Vector128<short>.Zero);
+        return TileBake.Outcome(!Vector128.EqualsAll(any, Vector128<short>.Zero),
+            !Vector128.EqualsAll(differs, Vector128<short>.Zero));
     }
 #endif
 }

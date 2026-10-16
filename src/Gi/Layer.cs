@@ -11,6 +11,39 @@ public static class Layer
         Mask,
     }
 
+    public readonly struct Precision
+    {
+        public readonly byte PhaseBits;
+        public readonly byte TurnBits;
+
+        internal Precision(byte phaseBits, byte turnBits)
+        {
+            PhaseBits = phaseBits;
+            TurnBits = turnBits;
+        }
+
+        public static readonly Precision Exact = new(8, 16);
+        public static readonly Precision Half = new(1, 16);
+        public static readonly Precision Quarter = new(2, 16);
+        public static readonly Precision Cell = new(0, 16);
+
+        internal int AnchorMask => ~((1 << (8 - PhaseBits)) - 1);
+
+        internal ushort TurnMask => (ushort)(0xFFFF & ~((1 << (16 - TurnBits)) - 1));
+
+        public static bool TryCreate(int phaseBits, int turnBits, out Precision precision)
+        {
+            if (!ValidationRules.IsPhaseBits(phaseBits) || !ValidationRules.IsTurnBits(turnBits))
+            {
+                precision = Exact;
+                return false;
+            }
+
+            precision = new Precision((byte)phaseBits, (byte)turnBits);
+            return true;
+        }
+    }
+
     public readonly struct Recipe
     {
         public readonly Derivation Op;
@@ -35,12 +68,25 @@ public static class Layer
         }
     }
 
-    public static byte New(byte world) => World.AddLayer(world);
+    public static byte New(byte world) => World.AddLayer(world, Precision.Exact);
+
+    public static byte New(byte world, Precision precision) => World.AddLayer(world, precision);
 
     public static int Count(byte world) => World.LayerCount(world);
 
     public static int CopyIds(byte world, Span<byte> destination)
         => World.CopyLayerIds(world, destination);
+
+    public static unsafe bool TryGetPrecision(byte world, byte layer, out Precision precision)
+    {
+        precision = default;
+        var w = World.GetContext(world);
+        if (w == null || layer >= w->LayerCount || World.IsDerived(w, layer)) return false;
+
+        var r = w->Recipes + layer;
+        precision = new Precision(r->PhaseBits, r->TurnBits);
+        return true;
+    }
 
     public static unsafe bool TryGetRecipe(byte world, byte layer, out Recipe recipe)
     {

@@ -1,3 +1,7 @@
+#if NET
+using System.Runtime.CompilerServices;
+#endif
+
 namespace Gi;
 
 public static unsafe partial class World
@@ -5,10 +9,11 @@ public static unsafe partial class World
     public static bool SenseColumn(byte world, byte layer, float* xs, float* ys, int count, short* values, ulong* whole)
     {
         var w = GetContext(world);
-        if (w == null || layer >= w->LayerCount) return false;
+        if (w == null || layer >= w->LayerCount) return Unfilled(values, whole, count);
         if (count <= 0) return true;
+        if (xs == null || ys == null || values == null) return Unfilled(values, whole, count);
 
-        if (whole != null) new Span<ulong>(whole, (count + 63) >> 6).Clear();
+        ClearBits(whole, count);
 
         if (count >= ResolvePool.ColumnThreshold && ResolvePool.TryAcquire())
         {
@@ -23,9 +28,15 @@ public static unsafe partial class World
     public static int ChangedMask(byte world, byte layer, float* xs, float* ys, float reach, int since, int count, ulong* words)
     {
         var w = GetContext(world);
-        if (w == null || layer >= w->LayerCount || count <= 0) return 0;
+        if (w == null || layer >= w->LayerCount || xs == null || ys == null || words == null || !float.IsFinite(reach))
+        {
+            ClearBits(words, count);
+            return 0;
+        }
 
-        new Span<ulong>(words, (count + 63) >> 6).Clear();
+        if (count <= 0) return 0;
+
+        ClearBits(words, count);
 
         if (count >= ResolvePool.ColumnThreshold && ResolvePool.TryAcquire())
         {
@@ -45,11 +56,49 @@ public static unsafe partial class World
         SyncColumns(w, sources, xs, ys, count);
     }
 
+#if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+#endif
     internal static void SyncColumns(WorldCtx* w, int* sources, float* xs, float* ys, int count)
     {
-        if (count <= 0) return;
+        if (count <= 0 || sources == null || xs == null || ys == null) return;
 
         var s = &w->Sources;
+        if (w->GridCount == 1)
+        {
+            var g0 = w->Grids;
+            var ox = g0->OriginX;
+            var oy = g0->OriginY;
+            var scaleQ8 = g0->ScaleQ8;
+            if (scaleQ8 != 0)
+            {
+                var recipes = w->Recipes;
+                for (var i = 0; i < count; i++)
+                {
+                    var id = sources[i];
+                    var slot = id & SourceIndexMask;
+                    if ((uint)slot >= (uint)s->Count || s->Alive.Pointer[slot] == 0) continue;
+                    if ((id & ~SourceIndexMask) != (s->Gen.Pointer[slot] << 24)) continue;
+
+                    var x = xs[i];
+                    var y = ys[i];
+                    var oldX = s->X.Pointer[slot];
+                    var oldY = s->Y.Pointer[slot];
+                    if (*(int*)&x == *(int*)&oldX && *(int*)&y == *(int*)&oldY) continue;
+                    if (!float.IsFinite(x) || !float.IsFinite(y)) continue;
+                    var mask = recipes[s->Layer.Pointer[slot]].AnchorMask;
+                    var dx = TileBake.AnchorQ8(oldX, ox, scaleQ8, mask) ^ TileBake.AnchorQ8(x, ox, scaleQ8, mask);
+                    var dy = TileBake.AnchorQ8(oldY, oy, scaleQ8, mask) ^ TileBake.AnchorQ8(y, oy, scaleQ8, mask);
+                    if ((dx | dy) != 0)
+                        EnqueueMutation(w, s, slot, x, y, (sbyte)s->Gain.Pointer[slot], s->Angle.Pointer[slot], s->Scale.Pointer[slot], true);
+                    s->X.Pointer[slot] = x;
+                    s->Y.Pointer[slot] = y;
+                }
+
+                return;
+            }
+        }
+
         for (var i = 0; i < count; i++)
         {
             var id = sources[i];
@@ -59,8 +108,12 @@ public static unsafe partial class World
 
             var x = xs[i];
             var y = ys[i];
-            if (*(int*)&x == *(int*)&s->X.Pointer[slot] && *(int*)&y == *(int*)&s->Y.Pointer[slot]) continue;
-            EnqueueMutation(w, s, slot, x, y, (sbyte)s->Gain.Pointer[slot], s->Angle.Pointer[slot], s->Scale.Pointer[slot], true);
+            var oldX = s->X.Pointer[slot];
+            var oldY = s->Y.Pointer[slot];
+            if (*(int*)&x == *(int*)&oldX && *(int*)&y == *(int*)&oldY) continue;
+            if (!float.IsFinite(x) || !float.IsFinite(y)) continue;
+            if (PositionChanged(w, s->Layer.Pointer[slot], oldX, oldY, x, y))
+                EnqueueMutation(w, s, slot, x, y, (sbyte)s->Gain.Pointer[slot], s->Angle.Pointer[slot], s->Scale.Pointer[slot], true);
             s->X.Pointer[slot] = x;
             s->Y.Pointer[slot] = y;
         }

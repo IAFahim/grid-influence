@@ -7,6 +7,14 @@ using System.Runtime.Intrinsics.X86;
 
 namespace Gi;
 
+[Flags]
+internal enum ResolveOutcome : byte
+{
+    None = 0,
+    Empty = 1,
+    Changed = 2,
+}
+
 internal static unsafe partial class TileBake
 {
     internal const int TileBits = 5;
@@ -27,26 +35,40 @@ internal static unsafe partial class TileBake
         => (int)((value + 549755813888L + (value >> 63)) >> 40);
 
     private const long MaxExtent = 1L << 30;
+    private const float MaxPositionQ8 = 1073741824f;
     private const long MaxTentExtent = (1L << 23) - 2;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static int AnchorQ8(float value, float origin, int scaleQ8, int anchorMask)
+    {
+        var position = (value - origin) * scaleQ8;
+        var bounded = MathF.Abs(position) <= MaxPositionQ8
+            ? position
+            : position > 0f ? MaxPositionQ8 : -MaxPositionQ8;
+        return (int)MathF.Floor(bounded) & anchorMask;
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Footprint(
         float wx, float wy, float originX, float originY, int scaleQ8, int sampling, int size,
-        StampVariant* v, bool clip,
+        int anchorMask, StampVariant* v, bool clip,
         out int px, out int py, out int fx, out int fy,
         out int extentX, out int extentY,
         out int x0, out int y0, out int x1, out int y1)
     {
         var cap = v->Kind == StampKind.Tent ? MaxTentExtent : MaxExtent;
-        Span((wx - originX) * scaleQ8, v->OriginQ8X, v->Width, sampling, size, clip, cap, out px, out fx, out extentX, out x0, out x1);
-        Span((wy - originY) * scaleQ8, v->OriginQ8Y, v->Height, sampling, size, clip, cap, out py, out fy, out extentY, out y0, out y1);
+        Span((wx - originX) * scaleQ8, anchorMask, v->OriginQ8X, v->Width, sampling, size, clip, cap, out px, out fx, out extentX, out x0, out x1);
+        Span((wy - originY) * scaleQ8, anchorMask, v->OriginQ8Y, v->Height, sampling, size, clip, cap, out py, out fy, out extentY, out y0, out y1);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void Span(float position, int originQ8, int length, int sampling, int size, bool clip, long cap,
+    private static void Span(float position, int anchorMask, int originQ8, int length, int sampling, int size, bool clip, long cap,
         out int cell, out int phase, out int extent, out int first, out int end)
     {
-        var lead = (int)MathF.Floor(position) + ((long)originQ8 * sampling >> 8);
+        var bounded = MathF.Abs(position) <= MaxPositionQ8
+            ? position
+            : position > 0f ? MaxPositionQ8 : -MaxPositionQ8;
+        var lead = ((int)MathF.Floor(bounded) & anchorMask) + ((long)originQ8 * sampling >> 8);
         var full = Math.Min((long)length * sampling, cap);
         if (clip)
         {
@@ -294,25 +316,38 @@ internal static unsafe partial class TileBake
         for (var x = 0; x < TileSize; x++) output[x] = RoundQ40(row[x]);
     }
 
+#if NET
+    private const int ExactBound = 1 << 29;
+    private const int ExactMask = int.MinValue | (1 << 30);
+#endif
+
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    internal static bool Resolve(int* difference, int* dense, int* previousRow, long* tent, long* bell, short* output, long* pageSum, short* pageMax)
+    internal static ResolveOutcome Resolve(int* difference, int* dense, int* previousRow, long* tent, long* bell, short* output, long* pageSum, short* pageMax)
+    {
+#if NET
+        if (Avx2.IsSupported) return Resolve256(difference, dense, previousRow, tent, bell, output, pageSum, pageMax);
+        if (Vector) return Resolve128(difference, dense, previousRow, tent, bell, output, pageSum, pageMax);
+#endif
+        return ResolveScalar(difference, dense, previousRow, tent, bell, output, pageSum, pageMax);
+    }
+
+    internal static ResolveOutcome Outcome(bool any, bool changed)
+        => (any ? ResolveOutcome.None : ResolveOutcome.Empty) | (changed ? ResolveOutcome.Changed : ResolveOutcome.None);
+
+    #if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    #endif
+    internal static ResolveOutcome ResolveScalar(int* difference, int* dense, int* previousRow, long* tent, long* bell, short* output, long* pageSum, short* pageMax)
     {
         var tentOut = stackalloc int[TileSize];
         var bellOut = stackalloc int[TileSize];
         if (tent == null) new Span<int>(tentOut, TileSize).Clear();
         if (bell == null) new Span<int>(bellOut, TileSize).Clear();
 
-#if NET
-        if (Avx2.IsSupported) return Resolve256(difference, dense, previousRow, tent, bell, tentOut, bellOut, output, pageSum, pageMax);
-
-        var acc = Vector128<int>.Zero;
-        var sum = Vector128<int>.Zero;
-        var maximum = Vector128.Create(int.MinValue);
-        var vector = Vector;
-#endif
         var any = false;
+        var changed = false;
         var cellSum = 0L;
         var cellMax = short.MinValue;
         for (var y = 0; y < TileSize; y++)
@@ -323,66 +358,96 @@ internal static unsafe partial class TileBake
             if (tent != null) SmoothRow(tent, y, tentOut);
             if (bell != null) SmoothRow(bell, y, bellOut);
             var carry = 0;
-            var x = 0;
-#if NET
-            if (vector)
+            for (var x = 0; x < TileSize; x++)
             {
-                for (; x + 4 <= TileSize; x += 4)
-                {
-                    var d = Load128(diffRow + x);
-                    var h = Prefix128(d) + Vector128.Create(carry);
-                    carry = h[3];
-                    var boxes = h + Load128(previousRow + x);
-                    Store128(previousRow + x, boxes);
-                    var total = boxes + Load128(denseRow + x) + Load128(tentOut + x) + Load128(bellOut + x);
-                    acc |= total;
-                    Pack4(outRow + x, total);
-                    var widened4 = Widened4(total);
-                    sum += widened4;
-                    maximum = Vector128.Max(maximum, widened4);
-                }
-            }
-            else
-#endif
-            {
-                for (; x < TileSize; x++)
-                {
-                    carry += diffRow[x];
-                    var boxes = carry + previousRow[x];
-                    previousRow[x] = boxes;
-                    var total = boxes + denseRow[x] + tentOut[x] + bellOut[x];
-                    any |= total != 0;
-                    var cell = (short)Math.Clamp(total, short.MinValue, short.MaxValue);
-                    outRow[x] = cell;
-                    if (cell > cellMax) cellMax = cell;
-                    cellSum += cell;
-                }
+                carry += diffRow[x];
+                var boxes = carry + previousRow[x];
+                previousRow[x] = boxes;
+                var total = (long)boxes + denseRow[x] + tentOut[x] + bellOut[x];
+                any |= total != 0;
+                var cell = (short)Math.Clamp(total, short.MinValue, short.MaxValue);
+                changed |= cell != outRow[x];
+                outRow[x] = cell;
+                if (cell > cellMax) cellMax = cell;
+                cellSum += cell;
             }
         }
-
-#if NET
-        if (vector)
-        {
-            *pageSum = sum[0] + sum[1] + sum[2] + sum[3];
-            *pageMax = (short)Math.Max(Math.Max(maximum[0], maximum[1]), Math.Max(maximum[2], maximum[3]));
-            return !Vector128.EqualsAll(acc, Vector128<int>.Zero);
-        }
-#endif
 
         *pageSum = cellSum;
         *pageMax = cellMax;
-        return any;
+        return Outcome(any, changed);
     }
 
 #if NET
-    #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    #endif
-    private static bool Resolve256(int* difference, int* dense, int* previousRow, long* tent, long* bell, int* tentOut, int* bellOut, short* output, long* pageSum, short* pageMax)
+    internal static ResolveOutcome Resolve128(int* difference, int* dense, int* previousRow, long* tent, long* bell, short* output, long* pageSum, short* pageMax)
     {
+        var tentOut = stackalloc int[TileSize];
+        var bellOut = stackalloc int[TileSize];
+        var entry = stackalloc int[TileSize];
+        var fresh = stackalloc short[TileSize * TileSize];
+        if (tent == null) new Span<int>(tentOut, TileSize).Clear();
+        if (bell == null) new Span<int>(bellOut, TileSize).Clear();
+        for (var x = 0; x < TileSize; x += 4) Store128(entry + x, Load128(previousRow + x));
+
+        var acc = Vector128<int>.Zero;
+        var sum = Vector128<int>.Zero;
+        var maximum = Vector128.Create(int.MinValue);
+        var bound = Vector128.Create(ExactBound);
+        var wide = Vector128<int>.Zero;
+        for (var y = 0; y < TileSize; y++)
+        {
+            var diffRow = difference + y * DiffPitch;
+            var denseRow = dense + y * TileSize;
+            var freshRow = fresh + y * TileSize;
+            if (tent != null) SmoothRow(tent, y, tentOut);
+            if (bell != null) SmoothRow(bell, y, bellOut);
+            var carry = 0;
+            for (var x = 0; x < TileSize; x += 4)
+            {
+                var d = Load128(diffRow + x);
+                var h = Prefix128(d) + Vector128.Create(carry);
+                carry = h[3];
+                var boxes = h + Load128(previousRow + x);
+                Store128(previousRow + x, boxes);
+                var stored = Load128(denseRow + x);
+                wide |= (boxes + bound) | (stored + bound);
+                var total = boxes + stored + Load128(tentOut + x) + Load128(bellOut + x);
+                acc |= total;
+                Pack4(freshRow + x, total);
+                var widened4 = Widened4(total);
+                sum += widened4;
+                maximum = Vector128.Max(maximum, widened4);
+            }
+        }
+
+        if (!Vector128.EqualsAll(wide & Vector128.Create(ExactMask), Vector128<int>.Zero))
+        {
+            for (var x = 0; x < TileSize; x += 4) Store128(previousRow + x, Load128(entry + x));
+            return ResolveScalar(difference, dense, previousRow, tent, bell, output, pageSum, pageMax);
+        }
+
+        *pageSum = sum[0] + sum[1] + sum[2] + sum[3];
+        *pageMax = (short)Math.Max(Math.Max(maximum[0], maximum[1]), Math.Max(maximum[2], maximum[3]));
+        return Outcome(!Vector128.EqualsAll(acc, Vector128<int>.Zero), MergePage(fresh, output));
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    internal static ResolveOutcome Resolve256(int* difference, int* dense, int* previousRow, long* tent, long* bell, short* output, long* pageSum, short* pageMax)
+    {
+        var tentOut = stackalloc int[TileSize];
+        var bellOut = stackalloc int[TileSize];
+        var entry = stackalloc int[TileSize];
+        var fresh = stackalloc short[TileSize * TileSize];
+        if (tent == null) new Span<int>(tentOut, TileSize).Clear();
+        if (bell == null) new Span<int>(bellOut, TileSize).Clear();
+        for (var x = 0; x < TileSize; x += 8) Avx.Store(entry + x, Avx.LoadVector256(previousRow + x));
+
         var acc = Vector256<int>.Zero;
         var fourth = Vector256.Create(3);
         var last = Vector256.Create(7);
+        var bound = Vector256.Create(ExactBound);
+        var wide = Vector256<int>.Zero;
         var sumLo = Vector128<int>.Zero;
         var sumHi = Vector128<int>.Zero;
         var maximum = Vector128.Create(short.MinValue);
@@ -390,7 +455,7 @@ internal static unsafe partial class TileBake
         {
             var diffRow = difference + y * DiffPitch;
             var denseRow = dense + y * TileSize;
-            var outRow = output + y * TileSize;
+            var freshRow = fresh + y * TileSize;
             if (tent != null) SmoothRow(tent, y, tentOut);
             if (bell != null) SmoothRow(bell, y, bellOut);
             var carry = Vector256<int>.Zero;
@@ -404,11 +469,13 @@ internal static unsafe partial class TileBake
                 carry = Avx2.PermuteVar8x32(h, last);
                 var boxes = h + Avx.LoadVector256(previousRow + x);
                 Avx.Store(previousRow + x, boxes);
-                var total = boxes + Avx.LoadVector256(denseRow + x) + Avx.LoadVector256(tentOut + x) + Avx.LoadVector256(bellOut + x);
+                var stored = Avx.LoadVector256(denseRow + x);
+                wide |= (boxes + bound) | (stored + bound);
+                var total = boxes + stored + Avx.LoadVector256(tentOut + x) + Avx.LoadVector256(bellOut + x);
                 acc |= total;
                 var packed = Avx2.PackSignedSaturate(total, total);
                 var cells = Avx2.Permute4x64(packed.AsInt64(), 0xd8).GetLower().AsInt16();
-                Sse2.Store(outRow + x, cells);
+                Sse2.Store(freshRow + x, cells);
                 maximum = Sse2.Max(maximum, cells);
                 var widened = Vector128.Widen(cells);
                 sumLo += widened.Item1;
@@ -416,10 +483,44 @@ internal static unsafe partial class TileBake
             }
         }
 
+        if (!Vector256.EqualsAll(wide & Vector256.Create(ExactMask), Vector256<int>.Zero))
+        {
+            for (var x = 0; x < TileSize; x += 8) Avx.Store(previousRow + x, Avx.LoadVector256(entry + x));
+            return ResolveScalar(difference, dense, previousRow, tent, bell, output, pageSum, pageMax);
+        }
+
         *pageSum = (long)sumLo[0] + sumLo[1] + sumLo[2] + sumLo[3] +
             sumHi[0] + sumHi[1] + sumHi[2] + sumHi[3];
         *pageMax = SimdOps.HorizontalMax(maximum);
-        return !Vector256.EqualsAll(acc, Vector256<int>.Zero);
+        return Outcome(!Vector256.EqualsAll(acc, Vector256<int>.Zero), MergePage256(fresh, output));
+    }
+
+    private static bool MergePage(short* fresh, short* output)
+    {
+        var differs = Vector128<short>.Zero;
+        for (var i = 0; i < TileSize * TileSize; i += 8)
+        {
+            var published = LoadShorts(output + i);
+            var resolved = LoadShorts(fresh + i);
+            differs |= ~Vector128.Equals(published, resolved);
+            StoreShorts(output + i, resolved);
+        }
+
+        return !Vector128.EqualsAll(differs, Vector128<short>.Zero);
+    }
+
+    private static bool MergePage256(short* fresh, short* output)
+    {
+        var differs = Vector256<short>.Zero;
+        for (var i = 0; i < TileSize * TileSize; i += 16)
+        {
+            var published = Avx.LoadVector256(output + i);
+            var resolved = Avx.LoadVector256(fresh + i);
+            differs |= ~Vector256.Equals(published, resolved);
+            Avx.Store(output + i, resolved);
+        }
+
+        return !Vector256.EqualsAll(differs, Vector256<short>.Zero);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -438,6 +539,20 @@ internal static unsafe partial class TileBake
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Store128(int* p, Vector128<int> v)
+    {
+        if (Sse2.IsSupported) Sse2.Store(p, v);
+        else AdvSimd.Store(p, v);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector128<short> LoadShorts(short* p)
+    {
+        if (Sse2.IsSupported) return Sse2.LoadVector128(p);
+        return AdvSimd.LoadVector128(p);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void StoreShorts(short* p, Vector128<short> v)
     {
         if (Sse2.IsSupported) Sse2.Store(p, v);
         else AdvSimd.Store(p, v);

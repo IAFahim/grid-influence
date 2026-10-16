@@ -54,10 +54,11 @@ public static unsafe partial class World
         if (gain == 0) return;
 
         var v = StampCatalog.Get(stampId);
+        var precision = LayerPrecision(w, layer);
         for (var gi = 0; gi < w->GridCount; gi++)
         {
             var g = w->Grids + gi;
-            if (g->ScaleQ8 == 0 || !TileBake.Place(x, y, g->OriginX, g->OriginY, g->ScaleQ8, g->Size, v, angle, scale, out var p))
+            if (g->ScaleQ8 == 0 || !TileBake.Place(x, y, g->OriginX, g->OriginY, g->ScaleQ8, g->Size, v, angle, scale, precision, out var p))
                 continue;
 
             var cx0 = Math.Max(p.X0, 0);

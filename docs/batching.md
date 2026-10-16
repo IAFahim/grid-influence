@@ -141,7 +141,7 @@ No host API is added to Gi. Exclusive direct calls remain available between batc
 
 Small full-state batches validate and apply in one inline pass. Large unique full-state batches
 avoid hashing; repeated sources fall back to ordered grouping. General batches reserve slots
-against a virtual free chain, validate generation-tagged IDs, and retain one row per affected slot.
+against a virtual free ring, validate generation-tagged IDs, and retain one row per affected slot.
 Two worker phases prepare final states and write disjoint columns/operation ranges using the
 existing `ResolvePool`. The caller commits timer heaps and schedule journals after joining.
 Fresh placement undo records preserve the direct `Place` layer and identity semantics, including
@@ -224,13 +224,14 @@ if (status == World.BatchStatus.Applied)
 
 Semantics: each row is exactly `UpdateTransform` — ordered `Move`+`Turn`+`Scale` that never
 assigns gain or cancels a fade/expiry — with one documented difference from the ordered calls:
-positions compare bit-exactly as in `World.Sync`, so `-0.0` and `+0.0` are different poses and
-NaN payload bits copy verbatim, where ordered `Move`/`UpdateTransform` compare with `==`.
-Heading and scale ignore non-finite values and quantize exactly like `Turn`/`Scale`. Rows
+positions compare bit-exactly as in `World.Sync`, so `-0.0` and `+0.0` are different poses,
+where ordered `Move`/`UpdateTransform` compare with `==`. Heading and scale ignore non-finite
+values and quantize exactly like `Turn`/`Scale`. A row whose x or y is not finite is rejected
+whole, with its heading and scale ignored. Rows
 apply in range order then row order; duplicate source IDs fold last-writer-wins into one
 merged pending op per source, with no host-side dedup. Invalid rows — dead, stale-generation,
-or out-of-range IDs — set their mask bit (bit `row & 63` of word `row >> 6`; cleared words
-leave tail bits zero, words beyond `(Count + 63) / 64` untouched) and the call still returns
+or out-of-range IDs, or non-finite x or y — set their mask bit (bit `row & 63` of word `row >> 6`;
+cleared words leave tail bits zero, words beyond `(Count + 63) / 64` untouched) and the call still returns
 `Applied`, so partial staleness stays distinguishable from whole-call rejection.
 
 Validation happens in a fixed order before any output write or state change: the token first

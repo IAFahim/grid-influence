@@ -71,6 +71,9 @@ internal static partial class Verification
 
         var stamps = MixStamps();
         byte[] bases = [food, threat, herd];
+        var layerCount = mixes[^1].Id + 1;
+        var priors = new short[specs.Length][][];
+        for (var gi = 0; gi < specs.Length; gi++) priors[gi] = new short[layerCount][];
         var rng = new Random(707);
         var ids = new List<int>();
         for (var i = 0; i < 40; i++) ids.Add(Gi.World.Place(w, food, 90.5f, 70.25f, stamps[0], 16));
@@ -100,10 +103,15 @@ internal static partial class Verification
             for (var gi = 0; gi < specs.Length; gi++)
             {
                 var side = 1 << specs[gi].Power;
-                var layers = new short[mixes[^1].Id + 1][];
-                foreach (var layer in bases) layers[layer] = Read(w, (byte)gi, layer, side);
-                var changed = new HashSet<int>[layers.Length];
-                foreach (var layer in bases) changed[layer] = Changed(w, (byte)gi, layer, side);
+                var prior = priors[gi];
+                var layers = new short[layerCount][];
+                foreach (var layer in bases)
+                {
+                    layers[layer] = Read(w, (byte)gi, layer, side);
+                    if (!BytesChanged(w, (byte)gi, layer, side, prior[layer], layers[layer])) return MixFail(null, gi, -6, layer, 0);
+                    prior[layer] = layers[layer];
+                }
+
                 foreach (var m in mixes)
                 {
                     var expected = new short[side * side];
@@ -112,6 +120,8 @@ internal static partial class Verification
                     for (var c = 0; c < expected.Length; c++)
                         if (actual[c] != expected[c]) return MixFail(m, gi, c, actual[c], expected[c]);
                     layers[m.Id] = expected;
+                    if (!BytesChanged(w, (byte)gi, m.Id, side, prior[m.Id], expected)) return MixFail(m, gi, -5, m.Id, 0);
+                    prior[m.Id] = expected;
 
                     var full = 0L;
                     var top = short.MinValue;
@@ -142,11 +152,6 @@ internal static partial class Verification
                     var rectBest = Gi.World.QueryMax(w, (byte)gi, m.Id, rx, ry, rw, rh, out var qx, out var qy);
                     if (rectBest != rectTop || qx < rx || qy < ry || qx >= rx + rw || qy >= ry + rh ||
                         Gi.World.Query(w, (byte)gi, m.Id, qx, qy) != rectTop) return MixFail(m, gi, -4, rectBest, rectTop);
-
-                    var union = new HashSet<int>(changed[m.A]);
-                    union.UnionWith(changed[m.B]);
-                    changed[m.Id] = Changed(w, (byte)gi, m.Id, side);
-                    if (!changed[m.Id].SetEquals(union)) return MixFail(m, gi, -5, changed[m.Id].Count, union.Count);
                 }
             }
         }
@@ -169,9 +174,38 @@ internal static partial class Verification
         return [.. tiles.AsSpan(0, count).ToArray()];
     }
 
-    private static bool MixFail(Mix m, int grid, int cell, int actual, int expected)
+    private static bool BytesChanged(byte w, byte g, byte l, int side, short[]? prior, short[] current)
     {
-        Console.WriteLine($"  derived layer {m.Id} (op {m.Op}) grid {grid} check {cell}: {actual} vs {expected}");
+        var perSide = side >> 5;
+        var expected = new HashSet<int>();
+        for (var ty = 0; ty < perSide; ty++)
+        for (var tx = 0; tx < perSide; tx++)
+        {
+            for (var y = ty * 32; y < ty * 32 + 32; y++)
+            {
+                var row = y * side + tx * 32;
+                var differs = false;
+                for (var x = 0; x < 32; x++)
+                    if (current[row + x] != (prior?[row + x] ?? 0))
+                    {
+                        differs = true;
+                        break;
+                    }
+
+                if (differs)
+                {
+                    expected.Add(ty * perSide + tx);
+                    break;
+                }
+            }
+        }
+
+        return Changed(w, g, l, side).SetEquals(expected);
+    }
+
+    private static bool MixFail(Mix? m, int grid, int cell, int actual, int expected)
+    {
+        Console.WriteLine($"  derived layer {m?.Id.ToString() ?? "base"} grid {grid} check {cell}: {actual} vs {expected}");
         return false;
     }
 

@@ -43,12 +43,13 @@ use the same workload and CPU affinity and set `DOTNET_TieredCompilation=0` for 
 including hosts with different runtime defaults.
 Timing and runtime memory values vary even though the workload and JSON layout are deterministic.
 
-Measured on the i9-14900K with .NET 10.0.12, CPU 0, tiered compilation disabled, median of
-three runs: 4,000 box sources, three layers, 256 cells per side, 200 moves per frame,
-12,000 frames, and 10,000 queries per frame. Comparing the previous library with the AVX2 and
-bounds/churn fixes, move-plus-process fell from 76,944 to 55,565 ns/frame (27.8%). Cell query
-measured 3.59 versus 3.40 ns/query. All phase checksums matched and every phase allocated 0 B.
-These figures describe this machine and workload; the CLI can repeat the measurement on others.
+Measured on the Ryzen 5 8500G with .NET 10.0.12, CPU 0 (Zen 4), tiered compilation disabled,
+4,000 box sources, three layers, 256 cells per side, 200 moves per frame, and 10,000 queries
+per frame: idle process ~31 ns/call, cell query ~5.2 ns/query, and move-plus-process ~112 µs/frame
+(the pre-P0-12 README figure of 55.6 µs on i9-14900K passed bare slot indices instead of the
+generation-encoded handles `Place` returns, so `Move` rejected every handle and timed an idle
+`Process`). All phase checksums matched and every phase allocated 0 B. These figures describe
+this machine and workload; the CLI can repeat the measurement on others.
 
 JSON is written directly to stdout using `Utf8JsonWriter` and static UTF-8 property names.
 There is no DTO traversal, serializer metadata, reflection, or UTF-16 JSON string construction.
@@ -72,6 +73,6 @@ scene construction, warmup, and reporting; the JSON timings cover only measured 
 longer runs to make warm operations dominate sampling. Perf maps and recording must use the
 same PID namespace to resolve managed symbols.
 
-The Gi package remains at `0.2.0-alpha.1`: internal friend access and compatible bounds/SIMD
-fixes add no public types or methods and no dependency. Review the release version before
-publishing; no package or existing tag is published or moved by this tool.
+The tool uses internal friend access and adds no public types, methods, or dependencies.
+Review the release version before publishing; no package or existing tag is published or moved
+by this tool.

@@ -22,8 +22,11 @@ internal static unsafe partial class ResolvePool
     private const int Chunk = 8;
     private const int Buckets = 64;
     internal const int ColumnThreshold = 8192;
-    private const int ColumnChunk = 1024;
+    private const int ColumnWordsPerChunk = 16;
+    private const int ColumnChunk = ColumnWordsPerChunk * 64;
     private const int ScatterChunk = 2048;
+
+    internal static int Processors = Environment.ProcessorCount;
 
     private static int _busy;
     private static int _workers;
@@ -71,9 +74,11 @@ internal static unsafe partial class ResolvePool
     private static int _remaining;
     private static int _deadCount;
 
+    internal static bool Created => Volatile.Read(ref _created);
+
     internal static bool TryAcquire()
     {
-        if (SerialOnly) return false;
+        if (SerialOnly || Processors < 2) return false;
         if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0) return false;
         if (!_created) Create();
         return true;
@@ -232,8 +237,6 @@ internal static unsafe partial class ResolvePool
         for (var t = 0; t < _taskCount; t++)
         {
             var task = tasks + t;
-            if (task->Slots == 0) continue;
-
             var dirty = task->Layer->Dirty.Pointer;
             var kept = 0;
             for (var i = 0; i < task->Count; i++)
@@ -492,7 +495,7 @@ internal static unsafe partial class ResolvePool
     private static void RunColumns(int mode)
     {
         WaitParked();
-        _columnCursor = _columnCount;
+        _columnCursor = 0;
         _remaining = _workers;
         Volatile.Write(ref _phase, mode);
         for (var k = 0; k < _workers; k++) _wake[k].Set();
@@ -503,13 +506,13 @@ internal static unsafe partial class ResolvePool
 
     private static void ColumnShare()
     {
+        var count = _columnCount;
         while (true)
         {
-            var claimed = Interlocked.Add(ref _columnCursor, -ColumnChunk);
-            var hi = claimed + ColumnChunk;
-            if (hi <= 0) return;
-            if (hi > _columnCount) hi = _columnCount;
-            var lo = claimed < 0 ? 0 : claimed;
+            var first = (long)(Interlocked.Increment(ref _columnCursor) - 1) * ColumnChunk;
+            if (first >= count) return;
+            var lo = (int)first;
+            var hi = (int)Math.Min(first + ColumnChunk, count);
             var gaps = _columnMode == 2
                 ? World.SenseRange(_columnWorld, _columnLayer, _columnXs, _columnYs, _columnValues, _columnWhole, lo, hi)
                 : World.ChangedRange(_columnWorld, _columnLayer, _columnXs, _columnYs, _columnReach, _columnSince, _columnWords, lo, hi);
@@ -547,11 +550,17 @@ internal static unsafe partial class ResolvePool
 
                 ld->InDirty[tile] = 0;
                 var pages = &ld->Pages;
-                if (!pages->TryGet(tile, out var block)) continue;
+                if (!pages->TryGet(tile, out var block))
+                {
+                    _outcome.Pointer[i] = 0;
+                    continue;
+                }
 
                 new Span<int>(prev, TileBake.TileSize).Clear();
-                if (!TileBake.Resolve(World.DiffOf(block), World.DenseOf(block), prev, World.TentOf(block), World.BellOf(block),
-                    (short*)(block + World.PageOffset), (long*)(block + World.SumOffset), (short*)(block + World.MaxOffset)))
+                var outcome = TileBake.Resolve(World.DiffOf(block), World.DenseOf(block), prev, World.TentOf(block), World.BellOf(block),
+                    (short*)(block + World.PageOffset), (long*)(block + World.SumOffset), (short*)(block + World.MaxOffset));
+                _outcome.Pointer[i] = (byte)((outcome & ResolveOutcome.Changed) != 0 ? 1 : 0);
+                if ((outcome & ResolveOutcome.Empty) != 0)
                     _dead.Pointer[Interlocked.Increment(ref _deadCount) - 1] = i;
             }
         }
