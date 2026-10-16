@@ -26,6 +26,8 @@ internal static unsafe partial class ResolvePool
     private const int ColumnChunk = ColumnWordsPerChunk * 64;
     private const int ScatterChunk = 2048;
 
+    internal static int Processors = Environment.ProcessorCount;
+
     private static int _busy;
     private static int _workers;
     private static bool _created;
@@ -72,9 +74,11 @@ internal static unsafe partial class ResolvePool
     private static int _remaining;
     private static int _deadCount;
 
+    internal static bool Created => Volatile.Read(ref _created);
+
     internal static bool TryAcquire()
     {
-        if (SerialOnly) return false;
+        if (SerialOnly || Processors < 2) return false;
         if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0) return false;
         if (!_created) Create();
         return true;

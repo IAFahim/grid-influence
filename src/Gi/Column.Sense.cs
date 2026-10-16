@@ -11,12 +11,12 @@ public static unsafe partial class World
         byte world, byte layer, float* xs, float* ys, int* excludes, int count, short* values, ulong* whole)
     {
         var w = GetContext(world);
-        if (w == null || layer >= w->LayerCount) return false;
+        if (w == null || layer >= w->LayerCount) return Unfilled(values, whole, count);
         if (count <= 0) return true;
-        if (xs == null || ys == null || values == null) return false;
+        if (xs == null || ys == null || values == null) return Unfilled(values, whole, count);
         if (excludes == null) return SenseColumn(world, layer, xs, ys, count, values, whole);
 
-        if (whole != null) new Span<ulong>(whole, (count + 63) >> 6).Clear();
+        ClearBits(whole, count);
 
         var complete = true;
         for (var i = 0; i < count; i++)
@@ -39,11 +39,12 @@ public static unsafe partial class World
         float* gradientXs, float* gradientYs, ulong* whole)
     {
         var w = GetContext(world);
-        if (w == null || layer >= w->LayerCount) return false;
+        if (w == null || layer >= w->LayerCount) return UnfilledGradient(gradientXs, gradientYs, whole, count);
         if (count <= 0) return true;
-        if (xs == null || ys == null || gradientXs == null || gradientYs == null) return false;
+        if (xs == null || ys == null || gradientXs == null || gradientYs == null)
+            return UnfilledGradient(gradientXs, gradientYs, whole, count);
 
-        if (whole != null) new Span<ulong>(whole, (count + 63) >> 6).Clear();
+        ClearBits(whole, count);
 
         var complete = true;
         for (var i = 0; i < count; i++)
@@ -67,11 +68,11 @@ public static unsafe partial class World
         byte world, byte layer, float* xs, float* ys, float* reaches, int* excludes, int count, long* totals, ulong* whole)
     {
         var w = GetContext(world);
-        if (w == null || layer >= w->LayerCount) return false;
+        if (w == null || layer >= w->LayerCount) return UnfilledArea(totals, whole, count);
         if (count <= 0) return true;
-        if (xs == null || ys == null || reaches == null || totals == null) return false;
+        if (xs == null || ys == null || reaches == null || totals == null) return UnfilledArea(totals, whole, count);
 
-        if (whole != null) new Span<ulong>(whole, (count + 63) >> 6).Clear();
+        ClearBits(whole, count);
 
         var complete = true;
         for (var i = 0; i < count; i++)
@@ -96,11 +97,12 @@ public static unsafe partial class World
         short* values, float* bestXs, float* bestYs, ulong* whole)
     {
         var w = GetContext(world);
-        if (w == null || layer >= w->LayerCount) return false;
+        if (w == null || layer >= w->LayerCount) return UnfilledMax(xs, ys, values, bestXs, bestYs, whole, count);
         if (count <= 0) return true;
-        if (xs == null || ys == null || reaches == null || values == null || bestXs == null || bestYs == null) return false;
+        if (xs == null || ys == null || reaches == null || values == null || bestXs == null || bestYs == null)
+            return UnfilledMax(xs, ys, values, bestXs, bestYs, whole, count);
 
-        if (whole != null) new Span<ulong>(whole, (count + 63) >> 6).Clear();
+        ClearBits(whole, count);
 
         var complete = true;
         for (var i = 0; i < count; i++)
@@ -121,12 +123,13 @@ public static unsafe partial class World
         short* values, float* nearestXs, float* nearestYs, ulong* found)
     {
         var w = GetContext(world);
-        if (w == null || layer >= w->LayerCount) return false;
+        if (w == null || layer >= w->LayerCount) return UnfilledNearest(xs, ys, values, nearestXs, nearestYs, found, count);
         if (count <= 0) return true;
         if (xs == null || ys == null || reaches == null || thresholds == null ||
-            values == null || nearestXs == null || nearestYs == null) return false;
+            values == null || nearestXs == null || nearestYs == null)
+            return UnfilledNearest(xs, ys, values, nearestXs, nearestYs, found, count);
 
-        if (found != null) new Span<ulong>(found, (count + 63) >> 6).Clear();
+        ClearBits(found, count);
 
         var complete = true;
         for (var i = 0; i < count; i++)

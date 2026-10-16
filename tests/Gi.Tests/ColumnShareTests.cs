@@ -53,8 +53,9 @@ public sealed unsafe class ColumnShareTests : IDisposable
     public void Pool_IsAvailableForColumnBatches()
     {
         Assert.False(ResolvePool.SerialOnly);
-        Assert.True(ResolvePool.TryAcquire());
-        ResolvePool.Release();
+        var acquired = ResolvePool.TryAcquire();
+        if (acquired) ResolvePool.Release();
+        Assert.Equal(Environment.ProcessorCount > 1, acquired);
     }
 
     [Fact]
