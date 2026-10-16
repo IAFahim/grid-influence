@@ -140,10 +140,10 @@ public static unsafe partial class World
     {
         var source = &context->Sources;
         var capacity = Math.Min(totalRows, source->Count);
-        context->BatchSources.Resize(capacity);
+        context->BatchSources.ResizeUninitialized(capacity);
         var lookupSize = 16;
         while (lookupSize < capacity * 2) lookupSize <<= 1;
-        context->BatchLookup.Resize(lookupSize);
+        context->BatchLookup.ResizeUninitialized(lookupSize);
         context->BatchLookup.Span.Clear();
 
         var entries = 0;
@@ -231,8 +231,8 @@ public static unsafe partial class World
             entry->OperationIndex = entry->OriginalPending != 0 ? entry->OriginalPending - 1 : assigned++;
         }
 
-        context->Ops.Resize(assigned);
-        context->BatchLayerDeltas.Resize(SourceBatchLayerStride);
+        context->Ops.ResizeUninitialized(assigned);
+        context->BatchLayerDeltas.ResizeUninitialized(SourceBatchLayerStride);
         context->BatchLayerDeltas.Span.Clear();
         ApplySourceBatchRange(context, 0, entries, 0);
     }

@@ -108,6 +108,39 @@ public static unsafe partial class World
     internal static int SenseRange(WorldCtx* w, byte layer, float* xs, float* ys, short* values, ulong* whole, int from, int to)
     {
         var gaps = 0;
+        if (w->GridCount == 1)
+        {
+            var only = w->Grids;
+            var scaleQ8 = only->ScaleQ8;
+            if (scaleQ8 != 0)
+            {
+                var ox = only->OriginX;
+                var oy = only->OriginY;
+                var ld = only->Layers + layer;
+                for (var i = from; i < to; i++)
+                {
+                    var qx = CellQ8(xs[i], ox, scaleQ8);
+                    var qy = CellQ8(ys[i], oy, scaleQ8);
+                    if (!Contains(only, qx, qy))
+                    {
+                        values[i] = 0;
+                        gaps++;
+                        continue;
+                    }
+
+                    var cx = (int)(qx >> 8);
+                    var cy = (int)(qy >> 8);
+                    var block = ld->PageOf((cy >> TileBake.TileBits) * only->TilesPerSide + (cx >> TileBake.TileBits));
+                    values[i] = block == null
+                        ? (short)0
+                        : ((short*)(block + PageOffset))[(cy & (TileBake.TileSize - 1)) * TileBake.TileSize + (cx & (TileBake.TileSize - 1))];
+                    if (whole != null) whole[i >> 6] |= 1ul << (i & 63);
+                }
+
+                return gaps;
+            }
+        }
+
         for (var i = from; i < to; i++)
         {
             var x = xs[i];
@@ -137,8 +170,9 @@ public static unsafe partial class World
             {
                 var cx = (int)(qx >> 8);
                 var cy = (int)(qy >> 8);
-                if (picked->Layers[layer].Pages.TryGet(
-                        (cy >> TileBake.TileBits) * picked->TilesPerSide + (cx >> TileBake.TileBits), out var block))
+                var block = picked->Layers[layer].PageOf(
+                    (cy >> TileBake.TileBits) * picked->TilesPerSide + (cx >> TileBake.TileBits));
+                if (block != null)
                     value = ((short*)(block + PageOffset))[(cy & (TileBake.TileSize - 1)) * TileBake.TileSize + (cx & (TileBake.TileSize - 1))];
             }
 

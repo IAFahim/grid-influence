@@ -83,7 +83,7 @@ public static unsafe partial class World
 
         var g = w->Grids + gi;
         var disk = Disk(g, x, y, reach);
-        var pages = &g->Layers[layer].Pages;
+        var ld = g->Layers + layer;
         var tps = g->TilesPerSide;
         var lo = stackalloc int[TileBake.TileSize];
         var hi = stackalloc int[TileBake.TileSize];
@@ -94,7 +94,8 @@ public static unsafe partial class World
         {
             if (Outside(disk, tx, ty)) continue;
 
-            var m = pages->TryGet(ty * tps + tx, out var block) ? *(short*)(block + MaxOffset) : (short)0;
+            var topBlock = ld->PageOf(ty * tps + tx);
+            var m = topBlock != null ? *(short*)(topBlock + MaxOffset) : (short)0;
             if (top >= 0 && m <= topMax) continue;
             top = ty * tps + tx;
             topMax = m;
@@ -104,17 +105,18 @@ public static unsafe partial class World
         var best = short.MinValue;
         var bx = 0;
         var by = 0;
-        ScanDiskTile(g, pages, disk, top % tps, top / tps, lo, hi, ref found, ref best, ref bx, ref by);
+        ScanDiskTile(g, ld, disk, top % tps, top / tps, lo, hi, ref found, ref best, ref bx, ref by);
         for (var ty = disk.Y0 >> TileBake.TileBits; ty <= disk.Y1 >> TileBake.TileBits; ty++)
         for (var tx = disk.X0 >> TileBake.TileBits; tx <= disk.X1 >> TileBake.TileBits; tx++)
         {
             var tile = ty * tps + tx;
             if (tile == top || Outside(disk, tx, ty)) continue;
 
-            var m = pages->TryGet(tile, out var block) ? *(short*)(block + MaxOffset) : (short)0;
+            var ringBlock = ld->PageOf(tile);
+            var m = ringBlock != null ? *(short*)(ringBlock + MaxOffset) : (short)0;
             if (m < best) continue;
             if (m == best && (ty << TileBake.TileBits) > by) continue;
-            ScanDiskTile(g, pages, disk, tx, ty, lo, hi, ref found, ref best, ref bx, ref by);
+            ScanDiskTile(g, ld, disk, tx, ty, lo, hi, ref found, ref best, ref bx, ref by);
         }
 
         value = best;
@@ -166,7 +168,7 @@ public static unsafe partial class World
 
         var g = w->Grids + gi;
         var disk = Disk(g, x, y, reach);
-        var pages = &g->Layers[layer].Pages;
+        var ld = g->Layers + layer;
         var tps = g->TilesPerSide;
         var originX = disk.Cx >> TileBake.TileBits;
         var originY = disk.Cy >> TileBake.TileBits;
@@ -189,7 +191,8 @@ public static unsafe partial class World
                 {
                     if (tx < disk.X0 >> TileBake.TileBits || tx > disk.X1 >> TileBake.TileBits || Outside(disk, tx, ty)) continue;
 
-                    var live = pages->TryGet(ty * tps + tx, out var block);
+                    var block = ld->PageOf(ty * tps + tx);
+                    var live = block != null;
                     if ((live ? *(short*)(block + MaxOffset) : 0) < threshold) continue;
                     NearestInTile(disk, live ? (short*)(block + PageOffset) : null, tx, ty, threshold, ref best, ref bx, ref by);
                 }
@@ -269,7 +272,7 @@ public static unsafe partial class World
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    private static void ScanDiskTile(GridCtx* g, PageMap* pages, in Circle disk, int tx, int ty, int* lo, int* hi,
+    private static void ScanDiskTile(GridCtx* g, LayerData* ld, in Circle disk, int tx, int ty, int* lo, int* hi,
         ref bool found, ref short best, ref int bx, ref int by)
     {
         var tileX = tx << TileBake.TileBits;
@@ -278,7 +281,8 @@ public static unsafe partial class World
         var rows = Math.Min(tileY + TileBake.TileSize - 1, disk.Y1) - rowLo + 1;
         Spans(disk, rowLo, rows, lo, hi);
         short* page = null;
-        if (pages->TryGet(ty * g->TilesPerSide + tx, out var block)) page = (short*)(block + PageOffset);
+        var block = ld->PageOf(ty * g->TilesPerSide + tx);
+        if (block != null) page = (short*)(block + PageOffset);
         for (var r = 0; r < rows; r++)
         {
             var a = Math.Max(lo[r], tileX);
@@ -343,12 +347,15 @@ public static unsafe partial class World
         if (!Pick(w, x, y, 0f, 1, false, out var gi, out var complete)) return false;
 
         var g = w->Grids + gi;
-        var grid = (byte)gi;
+        var ld = g->Layers + layer;
         var cx = (int)(CellQ8(x, g->OriginX, g->ScaleQ8) >> 8);
         var cy = (int)(CellQ8(y, g->OriginY, g->ScaleQ8) >> 8);
+        var tile = (cy >> TileBake.TileBits) * g->TilesPerSide + (cx >> TileBake.TileBits);
+        var block = ld->PageOf(tile);
+        var page = block == null ? null : (short*)(block + PageOffset);
         var perUnit = g->ScaleQ8 / 512f;
-        gx = (Query(world, grid, layer, cx + 1, cy) - Query(world, grid, layer, cx - 1, cy)) * perUnit;
-        gy = (Query(world, grid, layer, cx, cy + 1) - Query(world, grid, layer, cx, cy - 1)) * perUnit;
+        gx = (CellNear(g, ld, tile, page, cx + 1, cy) - CellNear(g, ld, tile, page, cx - 1, cy)) * perUnit;
+        gy = (CellNear(g, ld, tile, page, cx, cy + 1) - CellNear(g, ld, tile, page, cx, cy - 1)) * perUnit;
         return complete;
     }
 
@@ -387,9 +394,18 @@ public static unsafe partial class World
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static short Cell(GridCtx* g, byte layer, int cx, int cy)
     {
-        if (!g->Layers[layer].Pages.TryGet((cy >> TileBake.TileBits) * g->TilesPerSide + (cx >> TileBake.TileBits), out var block))
-            return 0;
+        var block = g->Layers[layer].PageOf((cy >> TileBake.TileBits) * g->TilesPerSide + (cx >> TileBake.TileBits));
+        if (block == null) return 0;
         return ((short*)(block + PageOffset))[(cy & (TileBake.TileSize - 1)) * TileBake.TileSize + (cx & (TileBake.TileSize - 1))];
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static short CellNear(GridCtx* g, LayerData* ld, int tile, short* page, int cx, int cy)
+    {
+        if ((uint)cx >= (uint)g->Size || (uint)cy >= (uint)g->Size) return 0;
+        if (page != null && (cy >> TileBake.TileBits) * g->TilesPerSide + (cx >> TileBake.TileBits) == tile)
+            return page[(cy & (TileBake.TileSize - 1)) * TileBake.TileSize + (cx & (TileBake.TileSize - 1))];
+        return Cell(g, (byte)(ld - g->Layers), cx, cy);
     }
 
     #if NET
@@ -398,7 +414,7 @@ public static unsafe partial class World
     private static short ExcludedValue(WorldCtx* w, GridCtx* g, byte layer, byte source, Shape* s, int cx, int cy, short page)
     {
         var r = w->Recipes + layer;
-        if (r->Op == LayerOp.Base) return layer == source ? ExcludeCell(g, layer, s, cx, cy, page) : page;
+        if (r->Op == LayerOp.Base) return layer == source ? ExcludeCell(g, g->Layers + layer, s, cx, cy, page) : page;
         if ((r->Reads & (1u << source)) == 0) return page;
 
         var a = ExcludedValue(w, g, r->A, source, s, cx, cy, Cell(g, r->A, cx, cy));
@@ -443,7 +459,7 @@ public static unsafe partial class World
 
         var g = w->Grids + gi;
         var disk = Disk(g, x, y, reach);
-        var pages = &g->Layers[layer].Pages;
+        var ld = g->Layers + layer;
         var tps = g->TilesPerSide;
         var lo = stackalloc int[TileBake.TileSize];
         var hi = stackalloc int[TileBake.TileSize];
@@ -456,7 +472,10 @@ public static unsafe partial class World
             var spans = false;
             for (var tx = disk.X0 >> TileBake.TileBits; tx <= disk.X1 >> TileBake.TileBits; tx++)
             {
-                if (Outside(disk, tx, ty) || !pages->TryGet(ty * tps + tx, out var block)) continue;
+                if (Outside(disk, tx, ty)) continue;
+
+                var block = ld->PageOf(ty * tps + tx);
+                if (block == null) continue;
 
                 if (Inside(disk, tx, ty))
                 {
@@ -578,18 +597,19 @@ public static unsafe partial class World
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    private static short ExcludeCell(GridCtx* g, byte layer, Shape* s, int cx, int cy, short page)
+    private static short ExcludeCell(GridCtx* g, LayerData* ld, Shape* s, int cx, int cy, short page)
     {
         SourceAt(s, cx, cy, out var core, out var smooth);
         var lx = cx & (TileBake.TileSize - 1);
         var ly = cy & (TileBake.TileSize - 1);
         var plane = s->P.Plane;
-        if (!g->Layers[layer].Pages.TryGet((cy >> TileBake.TileBits) * g->TilesPerSide + (cx >> TileBake.TileBits), out var block))
+        var block = ld->PageOf((cy >> TileBake.TileBits) * g->TilesPerSide + (cx >> TileBake.TileBits));
+        if (block == null)
             return Saturate(Absent(0, 0, 0, plane, core, smooth));
 
         var cell = ly * TileBake.TileSize + lx;
-        var tent = TentOf(block);
-        var bell = BellOf(block);
+        var tent = TentOf(ld, block);
+        var bell = BellOf(ld, block);
         var tents = tent == null ? 0 : tent[cell];
         var bells = bell == null ? 0 : bell[cell];
         if (page > short.MinValue && page < short.MaxValue)
@@ -599,7 +619,7 @@ public static unsafe partial class World
             return Saturate(page - core);
         }
 
-        var boxes = TileBake.Quadrant(DiffOf(block), lx, ly) + DenseOf(block)[cell];
+        var boxes = TileBake.Quadrant(DiffOf(block), lx, ly) + DenseOf(ld, block)[cell];
         return Saturate(Absent(boxes, tents, bells, plane, core, smooth));
     }
 
@@ -659,7 +679,7 @@ public static unsafe partial class World
         var smooth = plane is Plane.Tent or Plane.Bell;
         var separable = smooth && !p->Turned;
         var scale = separable ? (long)p->V->Constant * gain * p->Curve : 0;
-        var pages = &g->Layers[layer].Pages;
+        var ld = g->Layers + layer;
         var delta = 0L;
         for (var ty = fy0 >> TileBake.TileBits; ty <= fy1 >> TileBake.TileBits; ty++)
         for (var tx = fx0 >> TileBake.TileBits; tx <= fx1 >> TileBake.TileBits; tx++)
@@ -682,7 +702,8 @@ public static unsafe partial class World
 
             if (cols == 0) continue;
 
-            var live = pages->TryGet(ty * g->TilesPerSide + tx, out var block);
+            var block = ld->PageOf(ty * g->TilesPerSide + tx);
+            var live = block != null;
             var page = live ? (short*)(block + PageOffset) : null;
             var saturated = false;
             for (var r = 0; r < rows && live; r++)
@@ -708,9 +729,9 @@ public static unsafe partial class World
                 TileBake.SmoothWeights(p->Kind, p->Py, p->Fy, p->ExtentY, tileY, top + rows, wy);
             }
 
-            var tents = live ? TentOf(block) : null;
-            var bells = live ? BellOf(block) : null;
-            if (saturated) TileBake.IntegrateBoxes(DiffOf(block), DenseOf(block), top + rows, cols, boxes);
+            var tents = live ? TentOf(ld, block) : null;
+            var bells = live ? BellOf(ld, block) : null;
+            if (saturated) TileBake.IntegrateBoxes(DiffOf(block), DenseOf(ld, block), top + rows, cols, boxes);
 
             if (!saturated && !smooth)
             {

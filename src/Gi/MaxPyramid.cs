@@ -104,7 +104,7 @@ internal unsafe struct MaxPyramid
         }
     }
 
-    public short Best(int tilesPerSide, PageMap* pages, out int x, out int y)
+    public short Best(int tilesPerSide, LayerData* ld, out int x, out int y)
     {
         if (_levels == 0)
         {
@@ -134,7 +134,8 @@ internal unsafe struct MaxPyramid
             {
                 x = childX << TileBake.TileBits;
                 y = childY << TileBake.TileBits;
-                if (!pages->TryGet(childY * tilesPerSide + childX, out var block)) return target;
+                var block = ld->PageOf(childY * tilesPerSide + childX);
+                if (block == null) return target;
 
                 var page = (short*)(block + World.PageOffset);
                 var count = TileBake.TileSize * TileBake.TileSize;
@@ -166,7 +167,7 @@ internal unsafe struct MaxPyramid
         return target;
     }
 
-    public short Best(int tilesPerSide, PageMap* pages,
+    public short Best(int tilesPerSide, LayerData* ld,
         int cellX0, int cellY0, int cellX1, int cellY1, out int x, out int y)
     {
         x = cellX0;
@@ -178,12 +179,12 @@ internal unsafe struct MaxPyramid
         var tx1 = (cellX1 - 1) >> TileBake.TileBits;
         var ty1 = (cellY1 - 1) >> TileBake.TileBits;
         var best = int.MinValue;
-        Visit(tilesPerSide, pages, _levels - 1, 0, 0, tx0, ty0, tx1, ty1,
+        Visit(tilesPerSide, ld, _levels - 1, 0, 0, tx0, ty0, tx1, ty1,
             cellX0, cellY0, cellX1, cellY1, ref best, ref x, ref y);
         return best == int.MinValue ? (short)0 : (short)best;
     }
 
-    private void Visit(int tilesPerSide, PageMap* pages, int level, int nodeX, int nodeY,
+    private void Visit(int tilesPerSide, LayerData* ld, int level, int nodeX, int nodeY,
         int tx0, int ty0, int tx1, int ty1, int cellX0, int cellY0, int cellX1, int cellY1,
         ref int best, ref int x, ref int y)
     {
@@ -206,7 +207,7 @@ internal unsafe struct MaxPyramid
             var childY = (nodeY << 3) + cy;
             if (level != 0)
             {
-                Visit(tilesPerSide, pages, level - 1, childX, childY,
+                Visit(tilesPerSide, ld, level - 1, childX, childY,
                     tx0, ty0, tx1, ty1, cellX0, cellY0, cellX1, cellY1, ref best, ref x, ref y);
                 continue;
             }
@@ -217,7 +218,8 @@ internal unsafe struct MaxPyramid
             var oy0 = Math.Max(cellY0, tileY0);
             var ox1 = Math.Min(cellX1 - 1, tileX0 + TileBake.TileSize - 1);
             var oy1 = Math.Min(cellY1 - 1, tileY0 + TileBake.TileSize - 1);
-            if (!pages->TryGet(childY * tilesPerSide + childX, out var block))
+            var block = ld->PageOf(childY * tilesPerSide + childX);
+            if (block == null)
             {
                 if (0 > best)
                 {

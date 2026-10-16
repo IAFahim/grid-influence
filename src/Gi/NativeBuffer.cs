@@ -27,6 +27,32 @@ internal unsafe struct NativeBuffer<T> where T : unmanaged
             return;
         }
 
+        var oldLength = _length;
+        Grow(length);
+        new Span<byte>(_pointer + oldLength, (int)((nuint)(_capacity - oldLength) * (nuint)sizeof(T))).Clear();
+    }
+
+    public void ResizeUninitialized(int length)
+    {
+        if (length <= _capacity)
+        {
+            _length = length;
+            return;
+        }
+
+        Grow(length);
+    }
+
+    public void Ensure(int capacity)
+    {
+        if (capacity <= _capacity) return;
+        var length = _length;
+        Resize(capacity);
+        _length = length;
+    }
+
+    private void Grow(int length)
+    {
         var capacity = (nuint)Math.Max(length, Math.Max(16, _capacity * 2)) * (nuint)sizeof(T);
         var pointer = (T*)NativeHeap.AlignedAlloc(capacity);
         if (_pointer != null)
@@ -37,14 +63,6 @@ internal unsafe struct NativeBuffer<T> where T : unmanaged
 
         _pointer = pointer;
         _capacity = (int)(capacity / (nuint)sizeof(T));
-        _length = length;
-    }
-
-    public void Ensure(int capacity)
-    {
-        if (capacity <= _capacity) return;
-        var length = _length;
-        Resize(capacity);
         _length = length;
     }
 

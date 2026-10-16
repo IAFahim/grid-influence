@@ -50,6 +50,7 @@ public static unsafe partial class World
         for (var gi = 0; gi < w->GridCount; gi++)
         {
             var g = w->Grids + gi;
+            g->Layers[id].Derived = 1;
             MarkLive(g, id, g->Layers + a);
             if (b != a) MarkLive(g, id, g->Layers + b);
         }
@@ -101,34 +102,44 @@ public static unsafe partial class World
                 {
                     var tile = dirty[i];
                     ld->InDirty[tile] = 0;
-                    var pa = la->Pages.TryGet(tile, out var ba) ? (short*)(ba + PageOffset) : null;
-                    var pb = lb->Pages.TryGet(tile, out var bb) ? (short*)(bb + PageOffset) : null;
-                    var exists = ld->Pages.TryGet(tile, out var block);
+                    var paBlock = la->PageOf(tile);
+                    var pa = paBlock == null ? null : (short*)(paBlock + PageOffset);
+                    var pbBlock = lb->PageOf(tile);
+                    var pb = pbBlock == null ? null : (short*)(pbBlock + PageOffset);
+                    var block = ld->PageOf(tile);
+                    var exists = block != null;
                     ResolveOutcome outcome;
                     if (pa == null && pb == null)
                     {
                         outcome = exists && PageAny((short*)(block + PageOffset)) ? ResolveOutcome.Changed : ResolveOutcome.None;
-                        if (exists)
-                        {
-                            ld->Pages.Remove(tile);
-                            FreeBlock(block);
-                        }
+                        if (exists) DropPage(ld, tile);
 
                         ld->Max.Update(g->TilesPerSide, tile, 0);
                     }
                     else
                     {
-                        var target = exists ? block : NewHeader();
+                        int index;
+                        byte* target;
+                        if (exists)
+                        {
+                            target = block;
+                            index = ld->Directory[tile];
+                        }
+                        else
+                        {
+                            target = NewPage(g, ld, out index);
+                        }
+
                         outcome = Combine(r, pa, pb, (short*)(target + PageOffset), (long*)(target + SumOffset), (short*)(target + MaxOffset));
                         if ((outcome & ResolveOutcome.Empty) == 0)
                         {
-                            if (!exists) ld->Pages.Put(tile, target);
+                            if (!exists) AdmitPage(ld, tile, index);
                             ld->Max.Update(g->TilesPerSide, tile, *(short*)(target + MaxOffset));
                         }
                         else
                         {
-                            if (exists) ld->Pages.Remove(tile);
-                            FreeBlock(target);
+                            if (exists) DropPage(ld, tile);
+                            else DiscardPage(ld, index);
                             ld->Max.Update(g->TilesPerSide, tile, 0);
                         }
                     }
@@ -143,14 +154,12 @@ public static unsafe partial class World
 
     private static void MarkLive(GridCtx* g, byte layer, LayerData* source)
     {
-        var pages = &source->Pages;
-        if (pages->Count == 0) return;
+        if (source->LivePages == 0) return;
 
         var target = EnsureDirty(g, layer);
-        var used = pages->Used;
-        var keys = pages->Keys;
-        for (var i = 0; i < pages->SlotCount; i++)
-            if (used[i] == PageMap.Live) MarkDirty(target, keys[i]);
+        var directory = source->Directory;
+        for (var tile = 0; tile < g->TileCount; tile++)
+            if (directory[tile] >= 0) MarkDirty(target, tile);
     }
 
     private static void MarkAll(LayerData* target, LayerData* source)
@@ -158,13 +167,6 @@ public static unsafe partial class World
         var tiles = source->Dirty.Pointer;
         var count = source->Dirty.Length;
         for (var i = 0; i < count; i++) MarkDirty(target, tiles[i]);
-    }
-
-    private static byte* NewHeader()
-    {
-        var block = (byte*)NativeHeap.AlignedAlloc(HeaderBytes);
-        new Span<byte>(block + PageOffset, HeaderBytes - PageOffset).Clear();
-        return block;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

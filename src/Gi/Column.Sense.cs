@@ -47,15 +47,82 @@ public static unsafe partial class World
             return UnfilledGradient(gradientXs, gradientYs, whole, count);
 
         ClearBits(whole, count);
+        if (excludes == null) return GradientRange(w, layer, xs, ys, gradientXs, gradientYs, whole, 0, count);
 
         var complete = true;
         for (var i = 0; i < count; i++)
         {
             bool filled;
-            if (excludes != null && excludes[i] >= 0)
+            if (excludes[i] >= 0)
                 filled = TrySenseGradient(world, layer, xs[i], ys[i], excludes[i], out gradientXs[i], out gradientYs[i]);
             else
                 filled = TrySenseGradient(world, layer, xs[i], ys[i], out gradientXs[i], out gradientYs[i]);
+            complete &= filled;
+            if (filled && whole != null) whole[i >> 6] |= 1ul << (i & 63);
+        }
+
+        return complete;
+    }
+
+#if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+#endif
+    internal static bool GradientRange(WorldCtx* w, byte layer, float* xs, float* ys,
+        float* gradientXs, float* gradientYs, ulong* whole, int from, int to)
+    {
+        var complete = true;
+        if (w->GridCount == 1)
+        {
+            var g = w->Grids;
+            var scaleQ8 = g->ScaleQ8;
+            if (scaleQ8 != 0)
+            {
+                var ox = g->OriginX;
+                var oy = g->OriginY;
+                var size = g->Size;
+                var ld = g->Layers + layer;
+                var perUnit = scaleQ8 / 512f;
+                for (var i = from; i < to; i++)
+                {
+                    var x = xs[i];
+                    var y = ys[i];
+                    var qx = CellQ8(x, ox, scaleQ8);
+                    var qy = CellQ8(y, oy, scaleQ8);
+                    if (!Contains(g, qx, qy))
+                    {
+                        gradientXs[i] = 0f;
+                        gradientYs[i] = 0f;
+                        complete = false;
+                        continue;
+                    }
+
+                    var cx = (int)(qx >> 8);
+                    var cy = (int)(qy >> 8);
+                    var tile = (cy >> TileBake.TileBits) * g->TilesPerSide + (cx >> TileBake.TileBits);
+                    var block = ld->PageOf(tile);
+                    var page = block == null ? null : (short*)(block + PageOffset);
+                    gradientXs[i] = (CellNear(g, ld, tile, page, cx + 1, cy) -
+                        CellNear(g, ld, tile, page, cx - 1, cy)) * perUnit;
+                    gradientYs[i] = (CellNear(g, ld, tile, page, cx, cy + 1) -
+                        CellNear(g, ld, tile, page, cx, cy - 1)) * perUnit;
+                    if (cx - 1 >= 0 && cy - 1 >= 0 && cx + 1 < size && cy + 1 < size)
+                    {
+                        if (whole != null) whole[i >> 6] |= 1ul << (i & 63);
+                    }
+                    else
+                    {
+                        complete = false;
+                    }
+                }
+
+                return complete;
+            }
+        }
+
+        var world = (byte)(w - Runtime.Worlds);
+        for (var i = from; i < to; i++)
+        {
+            var filled = TrySenseGradient(world, layer, xs[i], ys[i], out gradientXs[i], out gradientYs[i]);
             complete &= filled;
             if (filled && whole != null) whole[i >> 6] |= 1ul << (i & 63);
         }

@@ -214,7 +214,7 @@ before reading command payloads, writing
   `ChangedTiles` output are deterministic run to run, exactly as the crowded path produces.
   Fragments hold tile keys and placement indexes, never block pointers, and blocks are
   allocated before apply, so no fragment can hold a block pointer across growth. The apply
-  phase applies every fragment in op order, each resolving its block by a page-map lookup at
+  phase applies every fragment in op order, each resolving its block by a directory lookup at
   apply time. Integer adds commute, so the application order within a window is
   immaterial. The queue, the
   per-slot pending indexes, and the fragment buffer live in unmanaged storage,
@@ -864,19 +864,38 @@ digits. Concurrency: single thread.
   (grid, layer), the dirty flags and tile epochs (allocated together by the layer's first marked
   tile on that grid and kept until `World.Free`), and
   the max pyramid: a flat `int16` slot array plus per-level offset and side tables, allocated
-  zeroed by the layer's first resolved tile and freed by `World.Clear` and `World.Free`) or by a `PageMap`
-  (each tile block — 6,528 B, or 10,624 B once a raster deposit attached the dense buffer at its
-  tail, or a 2,112 B header for a derived-layer tile — is owned by its slot and
-  freed exactly when the tile resolves to zero, the world is cleared, or the map is disposed;
-  attaching or growing dense happens only on the deposit path, which republishes the
-  block pointer through the map before any later fragment apply or resolve can observe it.
-  The 8,192 B tent and
-  bell buffers are separate allocations referenced from the block's tent and bell pointer
-  slots: each is created on the tile's first deposit of its kind, by the fragment apply that
-  owns the block, and is
-  freed with it). The per-window placement buffer lives beside the fragment buffer, is reset by
-  every `Process`, keeps its capacity, and is read only during the fragment apply. The shared zero dense
+  zeroed by the layer's first resolved tile and freed by `World.Clear` and `World.Free`) or by
+  that (grid, layer)'s directory and slabs. The directory is one dense `int` per tile of the
+  grid, −1 meaning absent, allocated zeroed-to-−1 with the layer's first page on that grid and
+  kept until `World.Free` (`World.Clear` empties it but retains it). Each tile block — 6,528 B,
+  or a 2,112 B header for a derived-layer tile — is a fixed-size unit of the layer's block
+  (or header) slab, addressed only by its unit index, owned by its directory slot, and returned
+  to the slab's free list exactly when the tile resolves to zero or the world is cleared. The
+  4,096 B dense and 8,192 B tent/bell attachments are units of the layer's dense and plane
+  slabs, named by unit indices in the block's dense, tent, and bell slots (−1 when absent):
+  each is created on the tile's first deposit of its kind, by the fragment apply that owns the
+  block, and is returned with it; a slab unit is zero-filled by the taker before any of its
+  bytes are read. Slab regions grow by doubling — copying units and freeing the old base —
+  which is safe because every reference into a slab is a unit index, never a pointer; free
+  lists recycle indices, so a freed unit is handed out again only whole. `World.Clear` returns
+  every unit to its slab's free list and retains the regions, so repopulating after a clear
+  makes no heap calls. The per-window placement buffer lives beside the fragment buffer, is
+  reset by every `Process`, keeps its capacity, and is read only during the fragment apply.
+  The per-round rebuild working set — chain heads, dense flags, present flags, and scatter
+  tails — is carved from the world's bump scratch: reserved at 64 B alignment during the
+  crowded stage, read by the resolve of the same `Process`, with the offset reset to zero at
+  the end of every `Process` and by `Clear`; the arena holding it doubles only when a round
+  needs more than any earlier round, copying live bytes because regions reserved earlier in
+  the same frame are still pending. The chunk arena stays a separate retained buffer, reset by
+  every `Process`. The shared zero dense
   page is allocated once with the arenas and never written afterwards.
+  `NativeBuffer` growth zero-fills the newly committed region, so every buffer that reads
+  beyond its written length — the source pending column and the generation and timed bytes
+  after a column growth — reads zeros without a separate clearing pass; `ResizeUninitialized`
+  is the audited exception, used only where the caller initializes the whole grown region
+  before any read: the slab free lists (push then write), and the batch source, command,
+  lookup, layer-delta, and operation buffers (every planned row, link, probe slot, and
+  counter is written before the phase that reads it).
   The layer recipe table (32 entries per world) is allocated by `World.New` and freed by
   `World.Free`. `Stamp` variants — base samples, mip chain, and box constants — are catalog-owned until
   `Stamp.Free` succeeds (no live source, pending op, or journal entry in any world names the
@@ -884,10 +903,12 @@ digits. Concurrency: single thread.
   the process. `QueryRegion` writes only the caller's
   destination; `ChangedTiles` copies from the changed list (stable between `Process` calls,
   swapped — never written in place — on the owning thread) into the caller's buffer. `World.Free` releases each allocation listed above exactly once on the
-  owning thread: every live tile block through `FreeBlock` (which also frees the block's dense,
-  tent, and bell attachments), then per layer the page map, dirty flags, epochs, dirty and changed
+  owning thread: every live tile unit back to its slab, then per layer the slabs (block,
+  header, dense, plane — each releasing its region and free list), the directory, dirty flags,
+  epochs, dirty and changed
   lists, and max pyramid, then the layer array of each grid, the grid array, the recipe table, the
-  `Prev` scratch, the rebuild table, and every `SourceColumns` and world buffer. It then zeroes
+  `Prev` scratch, the bump scratch, the chunk arena and placement buffer, the rebuild table,
+  and every `SourceColumns` and world buffer. It then zeroes
   the context; a context without a grid array is not a world, so `GetContext` returns null for it
   and every handle-taking call reads a freed handle as absent. No pointer escapes an owner: handles
   are bytes and source ids carry a generation.
@@ -907,21 +928,27 @@ digits. Concurrency: single thread.
   thread; difference, tent, bell, and dense writes land on their own tile, and
   `previousRow` is the world's `Prev` scratch, cleared per tile before use, with the
   resolve-time `tentOut`/`bellOut` rows stack-allocated per call; sources are read-only
-  during deposits of other sources. `PageMap` mutation happens only through its owning `LayerData`
-  pointer on the thread that called `Process`. A derived recombination reads input pages (and
+  during deposits of other sources. Directory, slab, and scratch mutation happens only through
+  its owning `LayerData` or `WorldCtx` pointer on the thread that called `Process`; every
+  pointer derived from a slab (`Unit(index)`) is recomputed from the index at each use, so a
+  doubling that moves the region cannot leave a stale pointer in the block header slots, which
+  hold indices, or in any local across a `Take`. A derived recombination reads input pages (and
   the never-written shared zero page) and writes only its own layer's blocks, pyramid, and
   dirty list; its inputs have lower ids and are complete before it runs, and it never runs
   concurrently with a resolve. The partial-region sum reads page rows only
   inside `[0,32)×[0,32)` of a live block and writes nothing. Pyramid updates alias nothing
   outside their owning `LayerData`: each dirty tile touches exactly its own level-0 slot, and
   the propagation walk reads one 64-slot node plus one parent slot per level; `QueryMax` reads
-  pyramid slots, page maps, and live pages only. Node scans honor the node's valid child
+  pyramid slots, directories, and live pages only. Node scans honor the node's valid child
   rectangle, so no slot past the grid's tile count is read as data; the `Vector128` row compare in the
   descent may load past the valid prefix of a row but masks those lanes out of the match, and
   the loaded bytes stay inside the 128 B node, while `FirstEqualFlat` and `FirstEqualSpan` loop
   only over full 16-lane or 8-lane vector steps and finish any sub-vector remainder with scalar reads.
   Columnar sensing (`SenseColumn`, `SenseGradientColumn`, `SenseAreaColumn`, `SenseMaxColumn`,
   `SenseNearestColumn`) borrows caller input and output columns only for the synchronous call,
+  with `SenseRange` and `GradientRange` hoisting the world and, for a single-grid world, its
+  origin, scale, and layer pointer out of the per-row loop — the row math (Q8 conversion,
+  directory probe, page extract, interior-margin mask bit) is identical to the per-agent form,
   validates non-null pointers when `count > 0`, clears `(count + 63) >> 6` mask words when an
   optional mask pointer is supplied, and writes only indices `0..count-1` of the output columns.
   Batch input bytes and the written result prefix must be disjoint; overlapping spans are
@@ -938,8 +965,10 @@ digits. Concurrency: single thread.
   the entries from head through head plus count (modulo the ring size) are distinct slots. The
   batch planner's copy writes only the positions at or after its own tail and is committed
   unconditionally before the call proceeds.
-- **Alignment**: tile blocks, native buffers, page-map arrays, and prefix scratch
-  use 64-byte aligned allocations. World/grid/layer/catalog metadata uses `AllocZeroed` with
+- **Alignment**: slab regions, directories, native buffers, the bump scratch, and prefix scratch
+  use 64-byte aligned allocations. A slab's stride is a multiple of 64 B — 6,528 B blocks,
+  2,112 B headers, 4,096 B dense, 8,192 B tent/bell — so every unit base off the 64 B aligned
+  region base is itself 64 B aligned, and directory entries are whole aligned `int`s. World/grid/layer/catalog metadata uses `AllocZeroed` with
   natural alignment; raster samples require only byte alignment. SIMD accesses use unaligned
   load/store semantics. AVX2 resolves eight `int32` cells per group: each 128-bit lane computes
   its own prefix, the low lane's final sum carries into the high lane, and the eighth sum carries
@@ -956,19 +985,18 @@ digits. Concurrency: single thread.
   total. The sum
   slot sits at a 64 B block offset and is written as one naturally aligned `int64`; the page max
   sits at `SumOffset + 8` as one naturally aligned `int16` inside the same padded slot. The
-  dense, tent, and bell pointer slots sit side by side at `DensePtrOffset`/`TentPtrOffset`/
-  `BellPtrOffset` — 8 B each, naturally aligned — in the same slot after the max, and the
+  dense, tent, and bell unit-index slots sit side by side at `DensePtrOffset`/`TentPtrOffset`/
+  `BellPtrOffset` — 4 B each, naturally aligned — in the same slot after the max, and the
   difference array starts at `DiffOffset`, the 64 B multiple after the slot. Derived combines
   load and store 16 or 8 cells per step at cell offsets that are multiples of the vector width
   from a 64 B aligned page, through unaligned-safe loads and stores. Max
   pyramid nodes are 64 `int16` values at 128 B offsets inside a 64 B aligned buffer, so the
-  full-node AVX2 max loads stay inside the allocation; partial nodes scan scalar. The
-  dense
-  tail of a raster block starts at `BlockBytes` — a multiple of 64 — so its rows are 64 B
-  aligned; tiles without dense read the shared zero page, itself a 64 B aligned allocation.
-  The tent buffer is its own 64 B aligned allocation of `int64` cells at a 32-cell pitch, so
-  every element is naturally aligned; it is only ever read and written by scalar 8-byte
-  accesses. The bell buffer is identical in size, pitch, alignment, and access pattern. On
+  full-node AVX2 max loads stay inside the allocation; partial nodes scan scalar. A raster
+  block's dense unit is a whole slab unit — 4,096 B on a 64 B aligned base — so its rows are
+  64 B aligned; tiles without dense read the shared zero page, itself a 64 B aligned
+  allocation. The tent and bell units are 8,192 B slab units of `int64` cells at a 32-cell
+  pitch, so every element is naturally aligned; they are only ever read and written by scalar
+  8-byte accesses. On
   netstandard2.1 (Unity) `NativeHeap` backs onto `Marshal.AllocHGlobal`
   with platform-natural alignment instead of 64-byte `AlignedAlloc`, and no SIMD paths compile:
   every access in that build is a naturally aligned scalar load or store, so the weaker
@@ -999,16 +1027,21 @@ digits. Concurrency: single thread.
   inverse ops it enqueues reach the field only through a later `Process`. `Process`'s deferred
   build runs on the owning thread: it walks the op queue in order, clears each op's pending
   index — one op per slot per window — writes its journal slot by op index when recording, so
-  journal order is the op order, resolves each deposit's placements, performs every page-map
-  `Put`, dense attach, and growth, and marks dirty in ascending tile order. Tent and bell
-  buffers attach lazily inside apply, on the same thread. The apply phase is either fused on
+  journal order is the op order, resolves each deposit's placements, performs every directory
+  admit, slab take, and dense/tent/bell attach, and marks dirty in ascending tile order.
+  Tent and bell units attach lazily inside apply, on the same thread. The apply phase is either fused on
   that thread (box-only batches under the threshold) or applies every fragment in order
   before the drain. Deposits therefore mutate blocks only on the owning thread, never
   concurrently with resolve.
   `Process` drains the world sequentially: every dirty tile resolves on the owning thread,
-  `InDirty` clears are single bytes, tiles that resolve to zero perform their own `Remove` and
-  `AlignedFree` and leave the dirty list inside the same pass, and the dirty lists are then
-  walked again, on the owning thread alone, to fold each tile's page max into its max pyramid.
+  `InDirty` clears are single bytes, tiles that resolve to zero perform their own directory
+  drop and slab give-back and leave the dirty list inside the same pass, and the dirty lists
+  are then walked again, on the owning thread alone, to fold each tile's page max into its max
+  pyramid; the bump scratch offset resets to zero after the last epoch write of the same
+  `Process`, so no reservation survives into the next frame. Warm `Process` and warm reads make
+  no `NativeHeap` calls at all: slabs, directories, scratch, and every queue are sized by
+  grow-to-max before steady state, and the hook counter (`NativeHeap.Calls`) is asserted flat
+  by a test across warm frames that crowd, move, and read.
   Determinism is unaffected: tiles are
   independent, arithmetic is integer-exact, the dead set is a pure function of page content, and
   the order of removals has no observable effect on map contents. Warm `Process`
@@ -1044,16 +1077,17 @@ digits. Concurrency: single thread.
   calling thread is the only one to hold these pointers on a rejected call.
   Source-batch preparation and application run on the calling thread in fixed phases —
   plan, prepare rows, write source columns and operations, commit — and only the caller
-  changes a heap, journal length, free ring, source count, or page map, between phases.
+  changes a heap, journal length, free ring, source count, or directory, between phases.
   Hosts may record independent buffers while
   Gi readers run; they must join producer writes and Gi readers before `ApplyBatch` or `Process`.
   The crowded rebuild owns one arena: chunk references are 32-bit indices into that arena,
   so arena growth (a realloc that frees the old base) never invalidates a live reference —
   the writer re-reads the arena base after growing before linking the fresh chunk. Chain
-  heads live in a per-round region of a world buffer, written once per tile when its first
-  chunk is allocated and read only after the scatter completes, and each tile's chain is
-  walked by the resolve that owns that dirty tile, so rebuild writes are tile-local like
-  ordinary resolve writes. The per-layer
+  heads, dense flags, present flags, and scatter tails live in per-round regions of the
+  world's bump scratch, recorded as byte offsets, written once per tile when its first chunk
+  is allocated and read only after the scatter completes (a scratch growth mid-round copies
+  live bytes, so earlier regions stay valid), and each tile's chain is walked by the resolve
+  that owns that dirty tile, so rebuild writes are tile-local like ordinary resolve writes. The per-layer
   live counts are world state mutated only by the world's owning thread (mutators, timers,
   `Rewind`, `Clear`); the rebuild reads them on that same thread inside `Process`, so the
   cache needs no synchronization beyond the world's serial-mutation rule. The count adjustment
@@ -1208,12 +1242,13 @@ the same headings. All probe state lives in the suites themselves, and every tim
 
 `tools/stats` reads internal state through friend access, without reflection, counters on the
 data path, or additional public types. `Inspection.Read` validates the world handle, scans
-source liveness and grid/layer metadata, walks live page-map slots to count raster-tile dense
-buffers and tent/bell sum stores, and returns a pointer-free value snapshot. Its cost
-is O(source slots + grids × layers + map slots + catalog stamps); it does not scan cells.
-Memory includes allocated capacity, retained source/dirty buffers after `Clear`, every live tile
+source liveness and grid/layer metadata, walks each (grid, layer) directory to count
+raster-tile dense buffers and tent/bell sum stores, and returns a pointer-free value snapshot.
+Its cost is O(source slots + grids × layers + tiles + catalog stamps); it does not scan cells.
+Memory includes allocated capacity, retained slab regions and directories after `Clear`, a
+live-plane breakdown of every live tile
 block plus its dense, tent, and bell buffers where they exist, the per-(grid, layer) max pyramids,
-source-batch scratch capacity, the deferred
+the bump scratch and chunk-arena capacity, source-batch scratch capacity, the deferred
 op queue plus its pending column, and shared
 world/stamp arenas plus padded rasters. The selected world and
 process-wide shared allocations are reported separately; allocator metadata, alignment slack,

@@ -12,8 +12,8 @@ internal struct Snapshot
     public long LiveTiles;
     public long DerivedTiles;
     public long DirtyTiles;
-    public long MapSlots;
-    public long Tombstones;
+    public long Directories;
+    public long SlabFreeUnits;
     public int Stamps;
     public int RasterStamps;
     public long GridBytes;
@@ -22,7 +22,8 @@ internal struct Snapshot
     public long ScratchBytes;
     public long DirtyFlagBytes;
     public long DirtyQueueBytes;
-    public long MapBytes;
+    public long DirectoryBytes;
+    public long SlabBytes;
     public long DifferenceBytes;
     public long DenseBytes;
     public long DensePointerBytes;
@@ -42,8 +43,7 @@ internal struct Snapshot
     public long StampRasterBytes;
 
     public readonly long WorldBytes => GridBytes + LayerBytes + SourceBytes + ScratchBytes +
-        DirtyFlagBytes + DirtyQueueBytes + MapBytes + DifferenceBytes + DenseBytes + DensePointerBytes +
-        TentBytes + BellBytes + PageBytes + PageSumBytes + PyramidBytes + DepositQueueBytes;
+        DirtyFlagBytes + DirtyQueueBytes + DirectoryBytes + SlabBytes + PyramidBytes + DepositQueueBytes;
 
     public readonly long SharedBytes => WorldArenaBytes + WorldRevisionBytes + ZeroDenseBytes +
         StampArenaBytes + StampRasterBytes;
@@ -68,11 +68,13 @@ internal static unsafe class Inspection
             SourceCapacity = s->X.Capacity,
             GridBytes = World.MaxGrids * sizeof(GridCtx),
             LayerBytes = World.MaxLayers * sizeof(LayerRecipe),
-            ScratchBytes = TileBake.TileSize * sizeof(int) +
+            ScratchBytes = TileBake.TileSize * sizeof(int) + w->Scratch.Bytes +
                 (long)w->BatchSources.Capacity * sizeof(SourceBatchEntry) +
                 (long)w->BatchCommands.Capacity * sizeof(SourceBatchLink) +
                 (long)w->BatchLookup.Capacity * sizeof(int) +
-                (long)w->BatchLayerDeltas.Capacity * sizeof(int),
+                (long)w->BatchLayerDeltas.Capacity * sizeof(int) +
+                (long)w->RebuildArena.Capacity * sizeof(RebuildChunk) +
+                (long)w->RebuildPlacements.Capacity * sizeof(Placement),
             SourceBytes = (long)s->X.Capacity * sizeof(float) + (long)s->Y.Capacity * sizeof(float) +
                 s->Stamp.Capacity + s->Layer.Capacity + s->Gain.Capacity + s->Alive.Capacity +
                 ((long)s->Angle.Capacity + s->Scale.Capacity) * sizeof(ushort) +
@@ -101,34 +103,42 @@ internal static unsafe class Inspection
             for (var li = 0; li < w->LayerCount; li++)
             {
                 var ld = g->Layers + li;
-                result.LiveTiles += ld->Pages.Count;
-                if (World.IsDerived(w, li)) result.DerivedTiles += ld->Pages.Count;
+                result.LiveTiles += ld->LivePages;
+                if (World.IsDerived(w, li)) result.DerivedTiles += ld->LivePages;
                 result.DirtyTiles += ld->Dirty.Length;
-                result.MapSlots += ld->Pages.SlotCount;
-                result.Tombstones += ld->Pages.TombstoneCount;
-                result.MapBytes += (long)ld->Pages.SlotCount * (sizeof(int) + sizeof(byte*) + sizeof(byte));
+                if (ld->Directory != null)
+                {
+                    result.Directories++;
+                    result.DirectoryBytes += (long)g->TileCount * sizeof(int);
+                }
+
+                result.SlabBytes += ld->Blocks.Bytes + ld->Headers.Bytes + ld->Denses.Bytes + ld->Planes.Bytes;
+                result.SlabFreeUnits += ld->Blocks.FreeCount + ld->Headers.FreeCount +
+                    ld->Denses.FreeCount + ld->Planes.FreeCount;
                 result.DirtyQueueBytes += (long)(ld->Dirty.Capacity + ld->Changed.Capacity) * sizeof(int);
                 result.PyramidBytes += ld->Max.Bytes;
                 if (ld->InDirty != null) result.DirtyFlagBytes += (long)g->TileCount * (1 + sizeof(int));
 
-                var used = ld->Pages.Used;
-                var blocks = ld->Pages.Blocks;
-                for (var slot = 0; slot < ld->Pages.SlotCount; slot++)
+                var directory = ld->Directory;
+                if (directory == null) continue;
+                for (var tile = 0; tile < g->TileCount; tile++)
                 {
-                    if (used[slot] != PageMap.Live) continue;
-                    if (*(byte**)(blocks[slot] + World.DensePtrOffset) != null)
+                    var index = directory[tile];
+                    if (index < 0) continue;
+                    var block = ld->Pages->Unit(index);
+                    if (*(int*)(block + World.DensePtrOffset) >= 0)
                     {
                         result.RasterTiles++;
                         result.DenseBytes += World.DenseBytes;
                     }
 
-                    if (*(byte**)(blocks[slot] + World.TentPtrOffset) != null)
+                    if (*(int*)(block + World.TentPtrOffset) >= 0)
                     {
                         result.TentTiles++;
                         result.TentBytes += World.TentBytes;
                     }
 
-                    if (*(byte**)(blocks[slot] + World.BellPtrOffset) != null)
+                    if (*(int*)(block + World.BellPtrOffset) >= 0)
                     {
                         result.BellTiles++;
                         result.BellBytes += World.BellBytes;

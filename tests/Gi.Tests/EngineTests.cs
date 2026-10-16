@@ -706,26 +706,31 @@ public sealed class EngineTests
     }
 
     [Fact]
-    public unsafe void PageMap_TombstoneChurnKeepsCapacityBounded()
+    public unsafe void FixedSlab_RecyclesFreedUnitsAndKeepsIndicesStable()
     {
-        var map = new PageMap();
-        byte block = 1;
+        var slab = new FixedSlab();
         try
         {
-            map.Put(0, &block);
-            for (var i = 1; i < 10000; i++)
-            {
-                map.Put(i, &block);
-                Assert.True(map.Remove(i));
-                Assert.Equal(16, map.SlotCount);
-                Assert.Equal(1, map.Count);
-                Assert.True(map.TryGet(0, out var found));
-                Assert.True(found == &block);
-            }
+            var first = slab.Take(World.HeaderBytes);
+            var second = slab.Take(World.HeaderBytes);
+            Assert.Equal(0, first);
+            Assert.Equal(1, second);
+
+            slab.Give(second);
+            Assert.Equal(1, slab.FreeCount);
+            Assert.Equal(1, slab.Take(World.HeaderBytes));
+            Assert.Equal(0, slab.FreeCount);
+
+            var survivor = (int*)slab.Unit(first);
+            survivor[0] = 0x12345678;
+            var grown = 40;
+            for (var i = 0; i < grown; i++) slab.Take(World.HeaderBytes);
+            Assert.Equal(0x12345678, ((int*)slab.Unit(first))[0]);
+            Assert.True(slab.Bytes >= (2 + grown) * (long)World.HeaderBytes);
         }
         finally
         {
-            map.Reset();
+            slab.Reset();
         }
     }
 
@@ -795,7 +800,7 @@ public sealed class EngineTests
         Assert.Equal(0, pending.LiveTiles);
         Assert.Equal(0, pending.DirtyTiles);
         Assert.Equal(64 * 40, pending.SourceBytes);
-        Assert.Equal(0, pending.MapBytes + pending.DifferenceBytes + pending.DenseBytes + pending.PageBytes);
+        Assert.Equal(0, pending.DirectoryBytes + pending.SlabBytes + pending.DifferenceBytes + pending.DenseBytes + pending.PageBytes);
         World.Process(w);
         var processed = Stats.Inspection.Read(w);
         Assert.Equal(1, processed.LiveTiles);
@@ -809,8 +814,11 @@ public sealed class EngineTests
         Assert.Equal(0, cleared.SourceSlots);
         Assert.Equal(64, cleared.SourceCapacity);
         Assert.Equal(0, cleared.LiveTiles);
-        Assert.Equal(0, cleared.MapBytes);
-        Assert.Equal(empty.WorldBytes + 64 * 40 + 20 + 64 + 16 * sizeof(DepositOp) + 64 * sizeof(int), cleared.WorldBytes);
+        Assert.Equal(1, cleared.Directories);
+        Assert.Equal(16, cleared.DirectoryBytes);
+        Assert.Equal(16 * World.BlockBytes + 64, cleared.SlabBytes);
+        Assert.Equal(empty.WorldBytes + 64 * 40 + 20 + 64 + 16 * sizeof(DepositOp) + 64 * sizeof(int) +
+            16 + 16 * World.BlockBytes + 64, cleared.WorldBytes);
     }
 
     [Fact]
@@ -1215,7 +1223,8 @@ public sealed class EngineTests
         World.Process(w);
         var after = Stats.Inspection.Read(w);
         Assert.Equal(0, after.LiveTiles);
-        Assert.Equal(0, after.MapBytes);
+        Assert.Equal(0, after.DirectoryBytes);
+        Assert.Equal(0, after.SlabBytes);
         Assert.Equal(0, after.DirtyTiles);
         Assert.Equal(0, World.Query(w, g, l, 0, 0, 256, 256));
         Assert.Equal((short)0, World.QueryMax(w, g, l, out _, out _));

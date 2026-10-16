@@ -64,7 +64,7 @@ public static unsafe partial class World
             PrepareSourceBatchRange(context, input, 0, context->BatchSources.Length);
 
             ReserveSourceBatchOperations(context, commands.Length);
-            context->BatchLayerDeltas.Resize(SourceBatchLayerStride);
+            context->BatchLayerDeltas.ResizeUninitialized(SourceBatchLayerStride);
             context->BatchLayerDeltas.Span.Clear();
             ApplySourceBatchRange(context, 0, context->BatchSources.Length, 0);
 
@@ -150,8 +150,8 @@ public static unsafe partial class World
     private static bool TryPlanSourceUpdates(WorldCtx* context, SourceCommand* commands, SourceResult* results, int count)
     {
         var source = &context->Sources;
-        context->BatchSources.Resize(Math.Min(count, source->Count));
-        context->BatchCommands.Resize(count);
+        context->BatchSources.ResizeUninitialized(Math.Min(count, source->Count));
+        context->BatchCommands.ResizeUninitialized(count);
         var entries = 0;
         var unique = true;
         for (var index = 0; index < count; index++)
@@ -202,11 +202,11 @@ public static unsafe partial class World
         ref int sourceCount, ref FreeRing ring)
     {
         var entryCapacity = Math.Min(count, context->Sources.Count + creationCount);
-        context->BatchSources.Resize(entryCapacity);
-        context->BatchCommands.Resize(count);
+        context->BatchSources.ResizeUninitialized(entryCapacity);
+        context->BatchCommands.ResizeUninitialized(count);
         var lookupSize = 16;
         while (lookupSize < entryCapacity * 2) lookupSize <<= 1;
-        context->BatchLookup.Resize(lookupSize);
+        context->BatchLookup.ResizeUninitialized(lookupSize);
         context->BatchLookup.Span.Clear();
         var entryCount = 0;
 
@@ -615,7 +615,7 @@ public static unsafe partial class World
             if (entry->FirstScheduleCommand == index) scheduleCount++;
         }
 
-        context->Ops.Resize(operationCount);
+        context->Ops.ResizeUninitialized(operationCount);
         if (context->Recording != 0) context->ScheduleJournal.Ensure(context->ScheduleJournal.Length + scheduleCount);
         context->Timers.Ensure(context->Timers.Length + scheduleCount);
     }

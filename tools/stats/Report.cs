@@ -73,8 +73,8 @@ internal static class Report
             writer.WriteNumber("possible_tiles"u8, snapshot.PossibleTiles);
             writer.WriteNumber("live_tiles"u8, snapshot.LiveTiles);
             writer.WriteNumber("dirty_tiles"u8, snapshot.DirtyTiles);
-            writer.WriteNumber("map_slots"u8, snapshot.MapSlots);
-            writer.WriteNumber("map_tombstones"u8, snapshot.Tombstones);
+            writer.WriteNumber("directories"u8, snapshot.Directories);
+            writer.WriteNumber("slab_free_units"u8, snapshot.SlabFreeUnits);
             writer.WriteNumber("catalog_stamps"u8, snapshot.Stamps);
             writer.WriteNumber("catalog_raster_stamps"u8, snapshot.RasterStamps);
             writer.WriteNumber("field_sum"u8, fieldSum);
@@ -92,7 +92,8 @@ internal static class Report
             writer.WriteNumber("scratch_bytes"u8, snapshot.ScratchBytes);
             writer.WriteNumber("dirty_flags_bytes"u8, snapshot.DirtyFlagBytes);
             writer.WriteNumber("dirty_queues_bytes"u8, snapshot.DirtyQueueBytes);
-            writer.WriteNumber("page_maps_bytes"u8, snapshot.MapBytes);
+            writer.WriteNumber("directories_bytes"u8, snapshot.DirectoryBytes);
+            writer.WriteNumber("slabs_bytes"u8, snapshot.SlabBytes);
             writer.WriteNumber("difference_arrays_bytes"u8, snapshot.DifferenceBytes);
             writer.WriteNumber("dense_buffers_bytes"u8, snapshot.DenseBytes);
             writer.WriteNumber("dense_pointer_bytes"u8, snapshot.DensePointerBytes);
@@ -146,10 +147,10 @@ internal static class Report
         if (snapshot.Valid)
         {
             Console.WriteLine($"grids: {snapshot.Grids}; layers: {snapshot.Layers}; sources: {snapshot.LiveSources}/{snapshot.SourceCapacity}; field sum: {fieldSum}");
-            Console.WriteLine($"tiles: {snapshot.LiveTiles}/{snapshot.PossibleTiles}; dirty: {snapshot.DirtyTiles}; map slots: {snapshot.MapSlots}; tombstones: {snapshot.Tombstones}");
+            Console.WriteLine($"tiles: {snapshot.LiveTiles}/{snapshot.PossibleTiles}; dirty: {snapshot.DirtyTiles}; directories: {snapshot.Directories}; slab free units: {snapshot.SlabFreeUnits}");
             Console.WriteLine($"native requested bytes: {snapshot.NativeBytes}; selected world: {snapshot.WorldBytes}; shared arenas + stamps: {snapshot.SharedBytes}");
             Console.WriteLine($"grids: {snapshot.GridBytes}; layers: {snapshot.LayerBytes}; sources: {snapshot.SourceBytes}; scratch: {snapshot.ScratchBytes}");
-            Console.WriteLine($"dirty flags: {snapshot.DirtyFlagBytes}; queues: {snapshot.DirtyQueueBytes}; maps: {snapshot.MapBytes}");
+            Console.WriteLine($"dirty flags: {snapshot.DirtyFlagBytes}; queues: {snapshot.DirtyQueueBytes}; directories: {snapshot.DirectoryBytes}; slabs: {snapshot.SlabBytes}");
             Console.WriteLine($"difference arrays: {snapshot.DifferenceBytes}; dense buffers: {snapshot.DenseBytes} ({snapshot.RasterTiles} raster tiles); query pages: {snapshot.PageBytes}; page sums: {snapshot.PageSumBytes}; max pyramids: {snapshot.PyramidBytes}");
             using var process = Process.GetCurrentProcess();
             Console.WriteLine($"managed heap: {GC.GetTotalMemory(false)}; working set: {process.WorkingSet64}; private process: {process.PrivateMemorySize64}");
