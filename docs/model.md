@@ -915,6 +915,20 @@ digits. Concurrency: single thread.
   the context; a context without a grid array is not a world, so `GetContext` returns null for it
   and every handle-taking call reads a freed handle as absent. No pointer escapes an owner: handles
   are bytes and source ids carry a generation.
+- **Source columns**: the hot columns (x, y, stamp, layer, gain, angle, scale, liveness,
+  generation) live in 16,384-slot chunks. *Lifetime*: each column owns an array of up to 1,024
+  chunk pointers, allocated zeroed when the first chunk is added and freed exactly once by
+  `World.Free` after every chunk; growth appends one zeroed chunk per column and never copies,
+  so a chunk pointer taken during a call stays valid for the world's lifetime. *Aliasing*: chunk
+  arrays and chunks are owned solely by the world's `SourceColumns`; borrowed caller columns
+  (`Sync`, `SyncTransforms`) are read-only inputs never overlapping them, and the batch planner
+  copies column state into its own entries before writing. *Alignment*: every chunk is a single
+  `AllocZeroed` block of one element type, so each element sits at its natural alignment
+  (float/int/uint 4 B, ushort 2 B, byte 1 B) and no chunk spans a boundary. *Bounds*: a slot is
+  addressed as `chunks[slot >> 14][slot & 16,383]`; the `slot < Count` test precedes every
+  access, `Count` never exceeds the 2^24-slot ceiling, and the chunk index is therefore always
+  below the allocated chunk count. *Concurrency*: growth, reads, and writes happen only on the
+  owning thread under the same exclusive-mutation rule as the rest of the world.
   The free ring is one native `int` buffer plus a head and a count, held by value in the world's
   `SourceColumns`: allocated when source columns first grow, released once by `World.Free`, and
   regrown only on the owning thread by allocating the larger buffer, copying the live entries to
