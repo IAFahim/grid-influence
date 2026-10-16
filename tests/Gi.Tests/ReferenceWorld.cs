@@ -559,13 +559,14 @@ internal sealed unsafe class ReferenceWorld
         var x1 = Math.Min(p.X1, g.Size);
         var y1 = Math.Min(p.Y1, g.Size);
         if (x1 <= x0 || y1 <= y0) return;
-        ld.Epochs ??= new int[g.TileCount];
         var tps = g.TilesPerSide;
         for (var ty = y0 >> 5; ty <= (y1 - 1) >> 5; ty++)
         for (var tx = x0 >> 5; tx <= (x1 - 1) >> 5; tx++)
         {
             var placement = p;
-            if (TileBake.Touches(&placement, tx << 5, ty << 5)) processed.Add(ty * tps + tx);
+            if (!TileBake.Touches(&placement, tx << 5, ty << 5)) continue;
+            ld.Epochs ??= new int[g.TileCount];
+            processed.Add(ty * tps + tx);
         }
     }
 
