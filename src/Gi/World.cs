@@ -35,7 +35,8 @@ internal unsafe struct SourceColumns
     public SourceColumn<byte> Alive;
     public SourceColumn<uint> Gen;
     public SourceColumn<int> Mark;
-    public NativeBuffer<int> JStamp;
+    public NativeBuffer<int> HotStamp;
+    public NativeBuffer<int> SchedStamp;
     public NativeBuffer<byte> Timed;
     public NativeBuffer<sbyte> FadeFrom;
     public NativeBuffer<sbyte> FadeTo;
@@ -96,7 +97,8 @@ internal unsafe struct SourceColumns
         ReleaseColumn(ref Gen);
         ReleaseColumn(ref Mark);
         Chunks = 0;
-        JStamp.Free();
+        HotStamp.Free();
+        SchedStamp.Free();
         Timed.Free();
         FadeFrom.Free();
         FadeTo.Free();
@@ -228,7 +230,7 @@ internal unsafe struct WorldCtx
     public NativeBuffer<int> TimedDue;
     public int Tick;
     public int MarkEpoch;
-    public int RewindEpoch;
+    public int RecordEpoch;
     public int RecordTick;
     public byte Recording;
     public KernelCache Kernels;
@@ -630,10 +632,20 @@ public static unsafe partial class World
     {
         var w = GetContext(world);
         if (w == null) return;
+        w->RecordEpoch++;
         w->Journal.Resize(0);
         w->ScheduleJournal.Resize(0);
         w->RecordTick = w->Tick;
         w->Recording = 1;
+        var s = &w->Sources;
+        var pending = w->Pending.Pointer;
+        for (var i = 0; i < w->Pending.Length; i++)
+        {
+            s->HotStamp.Pointer[pending[i].Slot] = w->RecordEpoch;
+            var n = w->Journal.Length;
+            w->Journal.Resize(n + 1);
+            w->Journal.Pointer[n] = pending[i];
+        }
     }
 
     public static void StopRecording(byte world)
@@ -651,28 +663,25 @@ public static unsafe partial class World
         if (w == null) return;
         Runtime.WorldRevisions[world]++;
         var s = &w->Sources;
+        var recording = w->Recording != 0;
+        w->Recording = 0;
 
         var pending = w->Pending.Pointer;
         for (var i = w->Pending.Length - 1; i >= 0; i--) RestoreColumns(s, pending + i);
         w->Pending.Resize(0);
-        w->RewindEpoch++;
 
         var journal = w->Journal.Pointer;
         for (var j = w->Journal.Length - 1; j >= 0; j--)
         {
             var entry = journal + j;
             var slot = entry->Slot;
-            if (s->JStamp.Pointer[slot] != w->RewindEpoch)
+            SnapshotPending(w, s, slot);
+            if (s->Mark[slot] != w->MarkEpoch)
             {
-                s->JStamp.Pointer[slot] = w->RewindEpoch;
-                SnapshotPending(w, s, slot);
-                if (s->Mark[slot] != w->MarkEpoch)
-                {
-                    s->Mark[slot] = w->MarkEpoch;
-                    var n = w->Changed.Length;
-                    w->Changed.Resize(n + 1);
-                    w->Changed.Pointer[n] = slot;
-                }
+                s->Mark[slot] = w->MarkEpoch;
+                var n = w->Changed.Length;
+                w->Changed.Resize(n + 1);
+                w->Changed.Pointer[n] = slot;
             }
 
             RestoreColumns(s, entry);
@@ -680,8 +689,7 @@ public static unsafe partial class World
 
         w->Journal.Resize(0);
         RestoreSchedules(w, s);
-        if (w->Recording != 0) ShiftSchedules(s, w->Tick - w->RecordTick);
-        w->Recording = 0;
+        if (recording) ShiftSchedules(s, w->Tick - w->RecordTick);
         RebuildTimed(w);
 
         s->Free.Clear();
@@ -827,17 +835,6 @@ public static unsafe partial class World
         var stamp = ProcessStages.Mark();
         SweepChanged(w);
         w->MarkEpoch++;
-        if (w->Recording != 0)
-        {
-            var pend = w->Pending.Pointer;
-            for (var i = 0; i < w->Pending.Length; i++)
-            {
-                var n = w->Journal.Length;
-                w->Journal.Resize(n + 1);
-                w->Journal.Pointer[n] = pend[i];
-            }
-        }
-
         w->Pending.Resize(0);
         ProcessStages.Measure(ref ProcessStages.PrepareTicks, stamp);
 
@@ -868,7 +865,8 @@ public static unsafe partial class World
         if (required <= initialized) return;
         var capacity = Math.Min(MaxSourceSlots, (required + SourceColumns.ChunkMask) & ~SourceColumns.ChunkMask);
         s->AddChunks((capacity - initialized) >> SourceColumns.ChunkBits);
-        s->JStamp.Resize(capacity);
+        s->HotStamp.Resize(capacity);
+        s->SchedStamp.Resize(capacity);
         s->Timed.Resize(capacity);
         s->FadeFrom.Resize(capacity);
         s->FadeTo.Resize(capacity);

@@ -25,6 +25,12 @@ public static unsafe partial class World
             Scale = s->Scale[slot],
             Gen = s->Gen[slot],
         };
+        if (w->Recording == 0 || s->HotStamp.Pointer[slot] == w->RecordEpoch) return;
+
+        s->HotStamp.Pointer[slot] = w->RecordEpoch;
+        var journaled = w->Journal.Length;
+        w->Journal.Resize(journaled + 1);
+        w->Journal.Pointer[journaled] = w->Pending.Pointer[n];
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

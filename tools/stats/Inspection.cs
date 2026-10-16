@@ -74,7 +74,7 @@ internal static unsafe class Inspection
             SourceBytes = (long)s->Chunks * SourceColumns.ChunkSlots *
                 (2 * sizeof(float) + 4 * sizeof(byte) + 2 * sizeof(ushort) + sizeof(uint) + sizeof(int)) +
                 (s->Chunks != 0 ? 10L * SourceColumns.MaxChunks * sizeof(void*) : 0) +
-                (long)s->JStamp.Capacity * sizeof(int) +
+                ((long)s->HotStamp.Capacity + s->SchedStamp.Capacity) * sizeof(int) +
                 s->Timed.Capacity + s->FadeFrom.Capacity + s->FadeTo.Capacity +
                 ((long)s->FadeStart.Capacity + s->FadeTicks.Capacity + s->ExpireAt.Capacity + s->TimedAt.Capacity) * sizeof(int) +
                 (long)s->Free.Capacity * sizeof(int),
