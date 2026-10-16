@@ -5,17 +5,15 @@ using System.Runtime.Intrinsics.X86;
 
 namespace Gi;
 
+#if NET
 public static unsafe partial class World
 {
     private const int PrefetchAhead = 8;
     private const int PrefetchRows = 12;
 
-    #if NET
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    #endif
     private static void PrefetchTarget(WorldCtx* w, SourceColumns* s, int slot)
     {
-        #if NET
         if (!Sse.IsSupported || s->Alive[slot] == 0) return;
 
         var v = StampCatalog.Get(s->Stamp[slot]);
@@ -44,7 +42,7 @@ public static unsafe partial class World
 
             var column = cellX & (TileBake.TileSize - 1);
             var row = cellY & (TileBake.TileSize - 1);
-            var rows = Math.Min(Math.Min((int)((v->Height * sampling + 255) >> 8) + 1, PrefetchRows), TileBake.TileSize - row);
+            var rows = Math.Min(Math.Min(((v->Height * sampling + 255) >> 8) + 1, PrefetchRows), TileBake.TileSize - row);
             var span = Math.Min((int)((v->Width * sampling + 255) >> 8), TileBake.TileSize - 1 - column);
             var cells = ld->Store.Cells(*set).I + row * TileBake.TileSize + column;
             for (var r = 0; r < rows; r++)
@@ -54,6 +52,6 @@ public static unsafe partial class World
                 cells += TileBake.TileSize;
             }
         }
-        #endif
     }
 }
+#endif

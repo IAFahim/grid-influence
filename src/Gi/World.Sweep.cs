@@ -73,7 +73,9 @@ public static unsafe partial class World
         var count = w->Changed.Length;
         for (var i = 0; i < count; i++)
         {
+#if NET
             if (i + PrefetchAhead < count) PrefetchTarget(w, s, slots[i + PrefetchAhead]);
+#endif
             var slot = slots[i];
             var layer = s->Layer[slot];
             var stamp = s->Stamp[slot];
