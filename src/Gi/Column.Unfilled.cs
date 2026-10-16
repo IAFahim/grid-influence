@@ -27,6 +27,15 @@ public static unsafe partial class World
         return false;
     }
 
+    private static bool UnfilledValueGradient(short* values, float* gradientXs, float* gradientYs, ulong* whole, int count)
+    {
+        ClearRows(values, count);
+        ClearRows(gradientXs, count);
+        ClearRows(gradientYs, count);
+        ClearBits(whole, count);
+        return false;
+    }
+
     private static bool UnfilledArea(long* totals, ulong* whole, int count)
     {
         ClearRows(totals, count);

@@ -232,7 +232,12 @@ before reading command payloads, writing
   source bit-exactly via `TrySense`), and `SenseGradientColumn`, `SenseAreaColumn`,
   `SenseMaxColumn`, and `SenseNearestColumn` provide the matching columnar forms for
   `TrySenseGradient`, `TrySenseArea`, `TrySenseMax`, and `TrySenseNearest` (writing `found`
-  bits where `value != short.MinValue`). `World.ChangedMask(world, layer, xs, ys,
+  bits where `value != short.MinValue`); an overload of `SenseGradientColumn` that also takes a
+  `short* values` column returns each agent's value and gradient in one pass, reading all four
+  neighbours from the agent's own page whenever its local cell is at least one cell from the
+  page edge, and equal to a `SenseColumn` plus a `SenseGradientColumn` call on every row, with
+  the `whole` mask the conjunction of the two. Every column read overwrites its mask words, so
+  bits never accumulate across calls. `World.ChangedMask(world, layer, xs, ys,
   reach, since, count, words)` writes one `ulong` per 64 agents — bit set when that agent's
   disk changed since the tick — zeros for quiet words, and returns the changed count.
   `World.Sync(world, sources, xs, ys, count)` is the fused column form of `Move`: it
