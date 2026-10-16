@@ -26,6 +26,7 @@ internal static unsafe class Receipts
             pending.DirtyFlagBytes == 0 && pending.DirtyQueueBytes == 0 &&
             pending.DifferenceBytes == 0 && pending.DenseBytes == 0 && pending.RasterTiles == 0 &&
             pending.DepositQueueBytes == 16 * sizeof(DepositOp) + 64 * sizeof(int) &&
+            pending.WorldRevisionBytes == World.MaxWorlds * sizeof(int) && pending.ZeroDenseBytes == World.DenseBytes &&
             pending.StampRasterBytes - empty.StampRasterBytes == 25 && pending.Stamps - empty.Stamps == 2;
 
         World.Process(world);

@@ -36,6 +36,8 @@ internal struct Snapshot
     public long DepositQueueBytes;
     public long RasterTiles;
     public long WorldArenaBytes;
+    public long WorldRevisionBytes;
+    public long ZeroDenseBytes;
     public long StampArenaBytes;
     public long StampRasterBytes;
 
@@ -43,7 +45,8 @@ internal struct Snapshot
         DirtyFlagBytes + DirtyQueueBytes + MapBytes + DifferenceBytes + DenseBytes + DensePointerBytes +
         TentBytes + BellBytes + PageBytes + PageSumBytes + PyramidBytes + DepositQueueBytes;
 
-    public readonly long SharedBytes => WorldArenaBytes + StampArenaBytes + StampRasterBytes;
+    public readonly long SharedBytes => WorldArenaBytes + WorldRevisionBytes + ZeroDenseBytes +
+        StampArenaBytes + StampRasterBytes;
 
     public readonly long NativeBytes => WorldBytes + SharedBytes;
 }
@@ -77,6 +80,8 @@ internal static unsafe class Inspection
                 ((long)s->FadeStart.Capacity + s->FadeTicks.Capacity + s->ExpireAt.Capacity + s->Due.Capacity) * sizeof(int) +
                 (long)s->Free.Capacity * sizeof(int) + s->Gen.Capacity,
             WorldArenaBytes = World.MaxWorlds * sizeof(WorldCtx),
+            WorldRevisionBytes = World.MaxWorlds * sizeof(int),
+            ZeroDenseBytes = World.DenseBytes,
             StampArenaBytes = StampCatalog.MaxStamps * sizeof(StampVariant),
 
             DepositQueueBytes = (long)w->Ops.Capacity * sizeof(DepositOp) + (long)w->Pending.Capacity * sizeof(int) +

@@ -1,6 +1,6 @@
 namespace Gi.Stats;
 
-internal readonly struct Scene(byte world, byte grid, int cells, int layers, int sources, int moves)
+internal readonly struct Scene(byte world, byte grid, int cells, int layers, int sources, int moves, int[] ids)
 {
     public readonly byte World = world;
     public readonly byte Grid = grid;
@@ -8,6 +8,7 @@ internal readonly struct Scene(byte world, byte grid, int cells, int layers, int
     public readonly int Layers = layers;
     public readonly int Sources = sources;
     public readonly int Moves = moves;
+    public readonly int[] Ids = ids;
 
     public static Scene Create(Options options)
     {
@@ -26,6 +27,7 @@ internal readonly struct Scene(byte world, byte grid, int cells, int layers, int
         }
         else stamp = Stamp.Box(size, size, 60);
 
+        var ids = new int[options.Sources];
         var state = 17u;
         for (var i = 0; i < options.Sources; i++)
         {
@@ -33,11 +35,11 @@ internal readonly struct Scene(byte world, byte grid, int cells, int layers, int
             var x = (state >> 8) % (uint)(cells * 4) * 0.25f;
             state = unchecked(state * 1664525u + 1013904223u);
             var y = (state >> 8) % (uint)(cells * 4) * 0.25f;
-            if ((Gi.World.Place(world, (byte)(i % options.Layers), x, y, stamp, 8) & Gi.World.SourceIndexMask) != i)
+            if (((ids[i] = Gi.World.Place(world, (byte)(i % options.Layers), x, y, stamp, 8)) & Gi.World.SourceIndexMask) != i)
                 throw new InvalidOperationException("Scene placement failed.");
         }
         Gi.World.Process(world);
-        return new Scene(world, grid, cells, options.Layers, options.Sources, Math.Min(options.Moves, options.Sources));
+        return new Scene(world, grid, cells, options.Layers, options.Sources, Math.Min(options.Moves, options.Sources), ids);
     }
 
     public long Sum()

@@ -64,7 +64,7 @@ internal static class Profiler
         var mask = (uint)(scene.Cells - 1);
         var offset = (uint)(frame & 1) * 3u;
         for (var i = 0; i < scene.Moves; i++)
-            World.Move(scene.World, i, ((unchecked((uint)i * 17u) + offset) & mask) + 0.25f,
+            World.Move(scene.World, scene.Ids[i], ((unchecked((uint)i * 17u) + offset) & mask) + 0.25f,
                 ((unchecked((uint)i * 31u) + offset) & mask) + 0.5f);
         World.Process(scene.World);
         return World.Query(scene.World, scene.Grid, 0, scene.Cells / 2, scene.Cells / 2);
