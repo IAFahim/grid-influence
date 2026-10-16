@@ -159,7 +159,7 @@ public static unsafe partial class World
 
         if (KernelFactory.TryGetTaps(w, gi, record.Stamp, record.Angle, precision, &p, out var taps))
         {
-            EmitKernelTaps(w, g, ld, in taps, p.Px, p.Py, gain);
+            EmitKernelTaps(g, ld, in taps, p.Px, p.Py, gain);
             return;
         }
 
@@ -257,7 +257,7 @@ public static unsafe partial class World
         }
     }
 
-    private static void EmitKernelTaps(WorldCtx* w, GridCtx* g, LayerData* ld, in KernelTaps taps, int px, int py, int gain)
+    private static void EmitKernelTaps(GridCtx* g, LayerData* ld, in KernelTaps taps, int px, int py, int gain)
     {
         var kx0 = px + taps.OriginX;
         var ky0 = py + taps.OriginY;
@@ -308,7 +308,7 @@ public static unsafe partial class World
                             var value = row[kx];
                             if (value == 0) continue;
 
-                            if (set == null)
+                            if (plane == null)
                             {
                                 set = EnsureSet(g, ld, tile);
                                 dirty = DirtyIndex(g, ld, tile);
@@ -328,7 +328,7 @@ public static unsafe partial class World
                             var value = row[kx];
                             if (value == 0) continue;
 
-                            if (set == null)
+                            if (ints32 == null)
                             {
                                 set = EnsureSet(g, ld, tile);
                                 dirty = DirtyIndex(g, ld, tile);

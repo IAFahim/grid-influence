@@ -1,11 +1,9 @@
 #if NET
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics.X86;
-#endif
 
 namespace Gi;
 
-#if NET
 public static unsafe partial class World
 {
     private const int PrefetchAhead = 8;
@@ -33,8 +31,8 @@ public static unsafe partial class World
             if (ld->Directory == null) continue;
 
             var sampling = (long)g->ScaleQ8 * scale >> 8;
-            var cellX = (int)((TileBake.AnchorQ8(x, g->OriginX, g->ScaleQ8, mask) + ((long)v->OriginQ8X * sampling >> 8)) >> 8);
-            var cellY = (int)((TileBake.AnchorQ8(y, g->OriginY, g->ScaleQ8, mask) + ((long)v->OriginQ8Y * sampling >> 8)) >> 8);
+            var cellX = (int)((TileBake.AnchorQ8(x, g->OriginX, g->ScaleQ8, mask) + (v->OriginQ8X * sampling >> 8)) >> 8);
+            var cellY = (int)((TileBake.AnchorQ8(y, g->OriginY, g->ScaleQ8, mask) + (v->OriginQ8Y * sampling >> 8)) >> 8);
             if ((uint)cellX >= (uint)g->Size || (uint)cellY >= (uint)g->Size) continue;
 
             var set = ld->SetOf((cellY >> TileBake.TileBits) * g->TilesPerSide + (cellX >> TileBake.TileBits));
