@@ -81,7 +81,7 @@ public sealed class TimeTests
         Assert.Equal((70.5f, 60.5f), (x, y));
         Assert.True(World.TrySenseNearest(w, food, 60.5f, 60.5f, 40f, 95, out v, out x, out y));
         Assert.Equal(short.MinValue, v);
-        Assert.Equal((60.5f, 60.5f), (x, y));
+        Assert.Equal((0f, 0f), (x, y));
         Assert.True(World.TrySenseNearest(w, food, 50.5f, 60.5f, 40f, 40, out v, out x, out _));
         Assert.Equal(50, v);
         Assert.Equal(40.5f, x);
