@@ -53,9 +53,11 @@ public static unsafe partial class World
         fixed (SourceResult* output = results)
         {
             var sourceCount = context->Sources.Count;
-            var freeHead = context->FreeHead;
+            context->Sources.Free.Reserve(Math.Min(MaxSourceSlots, sourceCount + creationCount));
+            var ring = context->Sources.Free;
             if (!onlyUpdates || !TryPlanSourceUpdates(context, input, output, commands.Length))
-                PlanSourceBatch(context, input, output, commands.Length, creationCount, ref sourceCount, ref freeHead);
+                PlanSourceBatch(context, input, output, commands.Length, creationCount, ref sourceCount, ref ring);
+            context->Sources.Free = ring;
             if (context->BatchSources.Length == 0) return BatchStatus.Applied;
             EnsureSourceCapacity(&context->Sources, context, sourceCount);
 
@@ -81,7 +83,6 @@ public static unsafe partial class World
             else ApplySourceBatchRange(context, 0, context->BatchSources.Length, 0);
 
             context->Sources.Count = sourceCount;
-            context->FreeHead = freeHead;
             FinishSourceBatch(context, commands.Length, partitions);
         }
 
@@ -187,7 +188,7 @@ public static unsafe partial class World
             {
                 Slot = slot, FirstCommand = index, LastCommand = index,
                 FirstDepositCommand = -1, FirstScheduleCommand = -1, OperationIndex = -1,
-                OriginalPending = pending, FreeNext = source->Free.Pointer[slot],
+                OriginalPending = pending,
                 PlannedGeneration = source->Gen.Pointer[slot], PlannedAlive = 1
             };
             link->Entry = entries;
@@ -208,7 +209,7 @@ public static unsafe partial class World
 
     private static void PlanSourceBatch(
         WorldCtx* context, SourceCommand* commands, SourceResult* results, int count, int creationCount,
-        ref int sourceCount, ref int freeHead)
+        ref int sourceCount, ref FreeRing ring)
     {
         var entryCapacity = Math.Min(count, context->Sources.Count + creationCount);
         context->BatchSources.Resize(entryCapacity);
@@ -247,11 +248,9 @@ public static unsafe partial class World
                     continue;
                 }
 
-                if (freeHead >= 0)
+                if (ring.TryPop(out slot))
                 {
-                    slot = freeHead;
                     entryIndex = GetSourceBatchEntry(context, slot, ref entryCount);
-                    freeHead = context->BatchSources.Pointer[entryIndex].FreeNext;
                 }
                 else
                 {
@@ -300,8 +299,7 @@ public static unsafe partial class World
                 {
                     var entry = context->BatchSources.Pointer + entryIndex;
                     entry->PlannedAlive = 0;
-                    entry->FreeNext = freeHead;
-                    freeHead = slot;
+                    ring.Push(slot);
                 }
 
                 results[index] = new SourceResult(sourceId, SourceResultStatus.Applied);
@@ -347,7 +345,6 @@ public static unsafe partial class World
             FirstScheduleCommand = -1,
             OperationIndex = -1,
             OriginalPending = slot < source->X.Length ? context->Pending.Pointer[slot] : 0,
-            FreeNext = slot < source->Count ? source->Free.Pointer[slot] : -1,
             PlannedGeneration = slot < source->X.Length ? source->Gen.Pointer[slot] : (byte)0,
             PlannedAlive = slot < source->Count ? source->Alive.Pointer[slot] : (byte)0
         };
@@ -630,7 +627,6 @@ public static unsafe partial class World
             source->FadeTicks.Pointer[slot] = state.FadeTicks;
             source->ExpireAt.Pointer[slot] = state.ExpireAt;
             source->Due.Pointer[slot] = state.Due;
-            source->Free.Pointer[slot] = entry->FreeNext;
             if (entry->FirstDepositCommand < 0) continue;
             context->Ops.Pointer[entry->OperationIndex] = entry->Operation;
             context->Pending.Pointer[slot] = entry->OperationIndex + 1;

@@ -169,7 +169,6 @@ internal struct SourceBatchEntry
     public int FirstCommand;
     public int LastCommand;
     public int OriginalPending;
-    public int FreeNext;
     public int FirstDepositCommand;
     public int FirstScheduleCommand;
     public int OperationIndex;

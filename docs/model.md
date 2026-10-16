@@ -114,11 +114,17 @@ before reading command payloads, writing
   coordinates; `World.TryGetSourceSpec(world, id, out spec)` reads a live source's current
   position, quantized heading in radians, quantized scale, gain, layer, and stamp). `gain` is an integer −16–16 (stored as one
   `sbyte`-ranged byte; deltas deposit exactly, so a negative gain subtracts). The id packs a
-  7-bit generation above a 24-bit slot index; `Remove` recycles the slot through a per-world free
-  list and the next fill of that slot bumps its generation, so a stale id (dead slot, recycled
-  slot, or out-of-range) is an inert no-op for `Move`/`SetGain`/`Remove`. Generations wrap after
-  128 fills of one slot, and `Place` returns `-1` once 2^24 slots are live. `Clear` empties every
-  slot and resets the free list but keeps the generation bytes, so pre-clear ids stay stale.
+  7-bit generation above a 24-bit slot index. A freed slot — by `Remove`, by an `Expire` that comes
+  due, or by a batch `Remove` — joins the tail of a per-world **free ring**, and `Place` (scalar or
+  batch) takes the head, so the slot freed longest ago is the next to be filled and a slot just freed
+  is the last: with `F` slots free, one slot is refilled at most once per `F` places. Filling a
+  slot bumps its generation, so a stale id (dead slot, recycled slot, or out-of-range) is an inert
+  no-op for `Move`/`SetGain`/`Remove`. Generations wrap after 128 fills of one slot: a stale id
+  addresses a live source again once its slot has been refilled 128 times, so while at least `F`
+  slots stay free an alias needs at least 127·`F` further places. That ABA hazard is the 1.x id
+  format's limit and is retired by 2.0's `World.SourceId` (32-bit generations, retired slots),
+  not worked around here. `Place` returns `-1` once 2^24 slots are live. `Clear` empties every slot and the
+  free ring but keeps the generation bytes, so pre-clear ids stay stale.
   Column growth zeroes the new generation bytes, so returned ids are deterministic across runs.
   Positions are
   float world units, converted to cell space per grid as `floor((x−ox)·scale·256)` in Q8 — the
@@ -276,7 +282,7 @@ before reading command payloads, writing
   methods change only their named fields. Ingestion does not tick or touch tiles; a later `Process`
   deposits the result. Small all-`Update` batches fuse validation and mutation on the caller.
   Large unique all-`Update` batches avoid hash grouping; other batches group commands by source
-  slot, preserving command order and virtual free-chain/generation transitions. Preparation and
+  slot, preserving command order and virtual free-ring/generation transitions. Preparation and
   disjoint source writes reuse the resolve pool above 8,192 source rows. Timer and journal commits
   stay on the caller. Footprint and sparse-map preparation still use the existing `Process` path.
 - **Process** applies the deferred op queue (fused or fragmented as above — the fragment
@@ -355,9 +361,9 @@ before reading command payloads, writing
   inverse deposit pair `{retract latest applied, apply recorded from}`; per-slot queue merging
   collapses multi-window journals to one net op per slot exactly like ordinary mutations.
   Unapplied queued mutations are discarded first — their slots restore to their queued
-  from-states — so no applied or pending state escapes the checkpoint. The free-slot chain
+  from-states — so no applied or pending state escapes the checkpoint. The free-slot ring
   cannot be replayed positionally (journal order is first-mutation order, not free-event
-  order), so `Rewind` rebuilds it canonically — dead slots chained in descending index order,
+  order), so `Rewind` rebuilds it canonically — every dead slot pushed in ascending index order,
   smallest slot at the head — a deterministic pure function of the restored columns. The next
   `Process` applies the inverse ops through the normal deferred path, so a rewind costs the
   same as the window it undoes — O(changes), never O(field). `StopRecording` discards the
@@ -714,7 +720,7 @@ pass behind them was `perf`-profile guided, receipts first.
   `Clear`, with the pending tail
   zeroed at column growth so fresh slots read "no op" and the whole column wiped by `Clear` —
   and `SourceColumns` buffers — positions, stamp,
-  layer, gain, angle, scale, schedule columns, liveness, the free-slot chain, and the generation
+  layer, gain, angle, scale, schedule columns, liveness, the free-slot ring, and the generation
   bytes — the timer heap and schedule journal (reset by `Clear`, capacity retained), and, per
   (grid, layer), the dirty flags and tile epochs (allocated together by the layer's first marked
   tile on that grid and kept until `World.Free`), and
@@ -751,6 +757,13 @@ pass behind them was `perf`-profile guided, receipts first.
   and every handle-taking call reads a freed handle as absent. No pointer escapes an owner: handles
   are bytes, source ids carry a generation, and the resolve pool holds a world pointer only inside
   one `Process` or column call.
+  The free ring is one native `int` buffer plus a head and a count, held by value in the world's
+  `SourceColumns`: allocated when source columns first grow, released once by `World.Free`, and
+  regrown only on the owning thread by allocating the larger buffer, copying the live entries to
+  its front in queue order, and freeing the old buffer, so no pointer into ring storage outlives
+  a call. Batch planning pops and pushes on a by-value copy that shares the committed storage;
+  the ring is reserved to its final size before the copy is taken and the copy is written back
+  before any column growth, so a copy never outlives a regrowth.
   Source-batch rows, command links, lookup slots, and partition-local layer counters are
   context-owned native buffers, retained for reuse and released by `World.Free`. `ApplyBatch`
   pins managed input/output spans for its entire call, including every internal worker join;
@@ -787,10 +800,16 @@ pass behind them was `perf`-profile guided, receipts first.
   rejected before any writes. One batch row owns each distinct source slot, including all
   remove/recreate operations on that slot. Preparation writes only its row's private state.
   The caller assigns distinct operation indexes before source writers start, so source columns,
-  pending indexes, free links, and operations have one writer each. Layer counters use one padded
+  pending indexes, and operations have one writer each. Layer counters use one padded
   row per worker/caller and are reduced after joining. Repeated targets fall back to grouping;
   the unique-update probe temporarily tags pending indexes and restores every tag before
   preparing workers or falling back. No external Gi call may observe that probe.
+  A slot is in the free ring at most once: it is pushed only by the alive-to-dead transition
+  (`Remove`, an expiry that comes due, a batch `Remove`, or the ascending rebuild of `Rewind`
+  over the slots already dead) and popped only by the dead-to-alive transition of a `Place`, so
+  the entries from head through head plus count (modulo the ring size) are distinct slots. The
+  batch planner's copy writes only the positions at or after its own tail and is committed
+  unconditionally before the call proceeds, and pool workers never read or write the ring.
 - **Alignment**: tile blocks, native buffers, page-map arrays, pool scratch, and prefix scratch
   use 64-byte aligned allocations. World/grid/layer/catalog metadata uses `AllocZeroed` with
   natural alignment; raster samples require only byte alignment. SIMD accesses use unaligned
@@ -831,7 +850,9 @@ pass behind them was `perf`-profile guided, receipts first.
   Borrowed `TransformRange` columns follow the same rule at their real widths — `int` ids,
   `float` positions/headings/scales, `ulong` mask words — with no per-row packing or decoding.
   Batch scratch uses the same aligned native buffers, and the layer-delta stride is 48 integers
-  (192 bytes), keeping adjacent worker rows on separate cache lines.
+  (192 bytes), keeping adjacent worker rows on separate cache lines. The free ring is an
+  `int` buffer from the same aligned allocator (natural alignment on netstandard2.1), read and
+  written only through scalar naturally aligned `int` accesses.
 - **Concurrency**: `ApplyBatch`/`Sync`/`SyncTransforms`/`Place`/`Move`/`SetGain`/`Remove`/`Process`/`Record`/`StopRecording`/
   `Rewind` are serial per world; different
   worlds may run on different threads. `ProcessAll` is that serial-per-world rule walked over
@@ -846,7 +867,7 @@ pass behind them was `perf`-profile guided, receipts first.
   Mutations only append to or merge within the owning
   world's op queue — a merge targets the one op its slot's pending index names, an index that
   only `ApplyDeposits` clears. `Rewind` runs entirely on the owning thread: it writes source
-  columns, merges into the same op queue, and rebuilds the free chain in place, and the
+  columns, merges into the same op queue, and rebuilds the free ring in place, and the
   inverse ops it enqueues reach workers only through a later `Process`. `Process`'s deferred
   build runs as two pool rounds plus an owning-thread stitch. The scatter round claims 64-op
   chunks through an atomic cursor; each participant appends only to its own slot's placement,
@@ -925,7 +946,7 @@ pass behind them was `perf`-profile guided, receipts first.
   source application is phase 7 and writes only preassigned source/operation ranges. Workers
   decrement the remaining count after their last access, and the caller joins all workers before
   clearing pointers, resizing buffers, committing schedules, returning borrowed spans, or releasing
-  pool ownership. No source worker changes a heap, journal length, free head, source count, or page
+  pool ownership. No source worker changes a heap, journal length, free ring, source count, or page
   map. The caller commits those values after joining. Hosts may record independent buffers while
   Gi readers run; they must join producer writes and Gi readers before `ApplyBatch` or `Process`.
   The crowded rebuild keeps one writer per arena: scatter workers and the caller each own a
@@ -948,6 +969,11 @@ pass behind them was `perf`-profile guided, receipts first.
   written before it is read — band and span arrays are filled up to the count their readers
   use, cell scratch is cleared or fully emitted first, and the resolve rows are cleared when
   their store is absent.
+  The free ring is read and written only by the world's owning thread — `Place`, `Remove`,
+  expiry inside `Process`, `Rewind`, `Clear`, and the batch planner and its commit — inside the
+  serial-per-world rule. Source-batch pool workers write only per-slot source columns and
+  operation ranges; the per-slot free link they once wrote is gone, so no pooled phase touches
+  the ring, and readers never do.
 - **Bounds**: source batches reject more than 2^24 commands before multiplying byte lengths.
   Creation references name earlier `Place` indexes, so results are initialized before those
   references are read. Generation and liveness validation precede source-column access. The
@@ -982,7 +1008,12 @@ pass behind them was `perf`-profile guided, receipts first.
   `0..31`, columns `0..31`. One-cell source evaluation writes one `int` on the stack:
   `EmitRaster` with `x1 = min(x1, cx+1)` clips its loops to that single cell. Sum stores
   accumulate in `int64` with wrap-around; only each cell's final sum must fit, which the
-  4,096-kernel stacking bound above guarantees.
+  4,096-kernel stacking bound above guarantees. The free ring's size is never below the source
+  column capacity: every column growth reserves the ring to the new capacity, and a batch reserves
+  it to `min(2^24, slots + creations)` before planning. A slot is in the ring at most once, so the
+  count never exceeds the number of slots and stays below the size at every push; the tail
+  `head + count` is below twice the size and one conditional subtraction maps it into
+  `[0, size)`, and a pop wraps `head + 1` to 0 at the size.
 
 ## Tool inspection
 

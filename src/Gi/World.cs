@@ -24,7 +24,7 @@ internal struct SourceColumns
     public NativeBuffer<int> ExpireAt;
     public NativeBuffer<int> Due;
     public NativeBuffer<byte> Alive;
-    public NativeBuffer<int> Free;
+    public FreeRing Free;
     public NativeBuffer<byte> Gen;
     public int Count;
 
@@ -45,7 +45,7 @@ internal struct SourceColumns
         ExpireAt.Free();
         Due.Free();
         Alive.Free();
-        Free.Free();
+        Free.Release();
         Gen.Free();
     }
 }
@@ -148,7 +148,6 @@ internal unsafe struct WorldCtx
     public int RecordTick;
     public byte Recording;
     public int* Prev;
-    public int FreeHead;
     public uint Crowded;
     public fixed int LayerLive[MaxLayers];
     public byte LiveStale;
@@ -224,7 +223,6 @@ public static unsafe partial class World
         w->Prev = (int*)NativeHeap.AlignedAlloc(TileBake.TileSize * sizeof(int));
         w->Rebuilds = (int*)NativeHeap.AllocZeroed(2 * MaxGrids * MaxLayers * sizeof(int));
         for (var i = 0; i < MaxGrids * MaxLayers; i++) w->Rebuilds[i] = -1;
-        w->FreeHead = -1;
         return id;
     }
 
@@ -430,13 +428,7 @@ public static unsafe partial class World
             !float.IsFinite(x) || !float.IsFinite(y)) return -1;
 
         var s = &w->Sources;
-        int i;
-        if (w->FreeHead >= 0)
-        {
-            i = w->FreeHead;
-            w->FreeHead = s->Free.Pointer[i];
-        }
-        else
+        if (!s->Free.TryPop(out var i))
         {
             if (s->Count >= MaxSourceSlots) return -1;
             if (s->Count == s->X.Length) GrowSources(s, w);
@@ -531,8 +523,7 @@ public static unsafe partial class World
         }
 
         s->Alive.Pointer[i] = 0;
-        s->Free.Pointer[i] = w->FreeHead;
-        w->FreeHead = i;
+        s->Free.Push(i);
     }
 
     private static void EnqueuePlace(WorldCtx* w, int slot, float x, float y, byte stamp, byte layer, sbyte gain)
@@ -1086,7 +1077,7 @@ public static unsafe partial class World
         var s = &w->Sources;
         new Span<byte>(s->Alive.Pointer, s->Count).Clear();
         s->Count = 0;
-        w->FreeHead = -1;
+        s->Free.Clear();
         w->Ops.Resize(0);
         w->Fragments.Resize(0);
         w->Placements.Resize(0);
@@ -1183,13 +1174,9 @@ public static unsafe partial class World
         w->Recording = 0;
         RebuildTimers(w);
 
-        w->FreeHead = -1;
-        for (var i = s->Count - 1; i >= 0; i--)
-            if (s->Alive.Pointer[i] == 0)
-            {
-                s->Free.Pointer[i] = w->FreeHead;
-                w->FreeHead = i;
-            }
+        s->Free.Clear();
+        for (var i = 0; i < s->Count; i++)
+            if (s->Alive.Pointer[i] == 0) s->Free.Push(i);
     }
 
     private static void RestoreSlot(SourceColumns* s, DepositOp* op)
@@ -1578,7 +1565,7 @@ public static unsafe partial class World
         s->ExpireAt.Resize(capacity);
         s->Due.Resize(capacity);
         s->Alive.Resize(capacity);
-        s->Free.Resize(capacity);
+        s->Free.Reserve(capacity);
         s->Gen.Resize(capacity);
         w->Pending.Resize(capacity);
         new Span<byte>(s->Gen.Pointer + initialized, capacity - initialized).Clear();
