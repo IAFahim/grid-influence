@@ -73,9 +73,15 @@ public static class GiValidation
     }
 
     public static bool TryGrid(int power, float size, out string? error)
+        => TryGrid(power, 0f, 0f, size, out error);
+
+    public static bool TryGrid(int power, float x, float y, float size, out string? error)
     {
-        if (!ValidationRules.IsPower(power) || !ValidationRules.IsGridSize(size))
-            return Reject("Grid power must be between 5 and 14 and size must be finite and positive.", out error);
+        if (!ValidationRules.IsPower(power) || !ValidationRules.IsGridOrigin(x) || !ValidationRules.IsGridOrigin(y) ||
+            !ValidationRules.IsGridSize(size) || !ValidationRules.TryGridScaleQ8(power, size, out _))
+            return Reject(
+                "Grid power must be between 5 and 14, origin and size must be finite, size must be positive, " +
+                "and 256 times cells per world unit must truncate to between 1 and 1048576.", out error);
         return Accept(out error);
     }
 

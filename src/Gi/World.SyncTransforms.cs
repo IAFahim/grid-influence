@@ -98,8 +98,10 @@ public static unsafe partial class World
             {
                 var id = sources[i];
                 var slot = id & SourceIndexMask;
+                var x = xs[i];
+                var y = ys[i];
                 if (id < 0 || slot >= source->Count || source->Alive.Pointer[slot] == 0 ||
-                    (uint)id >> 24 != source->Gen.Pointer[slot])
+                    (uint)id >> 24 != source->Gen.Pointer[slot] || !float.IsFinite(x) || !float.IsFinite(y))
                 {
                     if (invalid != null) invalid[i >> 6] |= 1ul << (i & 63);
                     continue;
@@ -111,8 +113,6 @@ public static unsafe partial class World
                 var scale = source->Scale.Pointer[slot];
                 if (scales != null && float.IsFinite(scales[i]))
                     scale = QuantizeSourceBatchScale(scales[i]);
-                var x = xs[i];
-                var y = ys[i];
                 if (*(int*)&x == *(int*)&source->X.Pointer[slot] && *(int*)&y == *(int*)&source->Y.Pointer[slot] &&
                     angle == source->Angle.Pointer[slot] && scale == source->Scale.Pointer[slot]) continue;
 
@@ -151,8 +151,10 @@ public static unsafe partial class World
                 var row = rowBase + i;
                 var id = sources[i];
                 var slot = id & SourceIndexMask;
+                var x = xs[i];
+                var y = ys[i];
                 if (id < 0 || slot >= source->Count || source->Alive.Pointer[slot] == 0 ||
-                    (uint)id >> 24 != source->Gen.Pointer[slot])
+                    (uint)id >> 24 != source->Gen.Pointer[slot] || !float.IsFinite(x) || !float.IsFinite(y))
                 {
                     if (invalid != null) invalid[i >> 6] |= 1ul << (i & 63);
                     continue;
@@ -173,8 +175,6 @@ public static unsafe partial class World
                 }
 
                 var fold = &entry->State;
-                var x = xs[i];
-                var y = ys[i];
                 var changed = *(int*)&x != *(int*)&fold->PositionX || *(int*)&y != *(int*)&fold->PositionY;
                 if (changed)
                 {

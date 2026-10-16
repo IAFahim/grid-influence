@@ -393,7 +393,10 @@ public static unsafe partial class World
     internal static byte AddGrid(byte world, int power, float x, float y, float size)
     {
         if (!ValidationRules.IsPower(power)) throw new ArgumentOutOfRangeException(nameof(power));
-        if (size <= 0f) throw new ArgumentOutOfRangeException(nameof(size));
+        if (!ValidationRules.IsGridSize(size)) throw new ArgumentOutOfRangeException(nameof(size));
+        if (!ValidationRules.IsGridOrigin(x)) throw new ArgumentOutOfRangeException(nameof(x));
+        if (!ValidationRules.IsGridOrigin(y)) throw new ArgumentOutOfRangeException(nameof(y));
+        if (!ValidationRules.TryGridScaleQ8(power, size, out var scaleQ8)) throw new ArgumentOutOfRangeException(nameof(size));
 
         var w = GetContext(world);
         if (w == null) throw new ArgumentOutOfRangeException(nameof(world));
@@ -406,7 +409,7 @@ public static unsafe partial class World
         g->OriginY = y;
         g->WorldSize = size;
         g->Scale = g->Size / size;
-        g->ScaleQ8 = (int)(g->Scale * 256f);
+        g->ScaleQ8 = scaleQ8;
         g->TilesPerSide = g->Size >> TileBake.TileBits;
         g->TileCount = g->TilesPerSide * g->TilesPerSide;
         g->Layers = (LayerData*)NativeHeap.AllocZeroed((nuint)(MaxLayers * sizeof(LayerData)));
@@ -1836,8 +1839,8 @@ public static unsafe partial class World
         if (w == null || grid >= w->GridCount || layer >= w->LayerCount) return 0;
 
         var g = w->Grids + grid;
-        var cx = (int)MathF.Floor((x - g->OriginX) * g->ScaleQ8) >> 8;
-        var cy = (int)MathF.Floor((y - g->OriginY) * g->ScaleQ8) >> 8;
+        var cx = (int)(CellQ8(x, g->OriginX, g->ScaleQ8) >> 8);
+        var cy = (int)(CellQ8(y, g->OriginY, g->ScaleQ8) >> 8);
         return Query(world, grid, layer, cx, cy);
     }
 
@@ -1880,8 +1883,8 @@ public static unsafe partial class World
         if (w == null || grid >= w->GridCount || layer >= w->LayerCount) return;
 
         var g = w->Grids + grid;
-        var cx = (int)MathF.Floor((x - g->OriginX) * g->ScaleQ8) >> 8;
-        var cy = (int)MathF.Floor((y - g->OriginY) * g->ScaleQ8) >> 8;
+        var cx = (int)(CellQ8(x, g->OriginX, g->ScaleQ8) >> 8);
+        var cy = (int)(CellQ8(y, g->OriginY, g->ScaleQ8) >> 8);
         gx = Query(world, grid, layer, cx + 1, cy) - Query(world, grid, layer, cx - 1, cy);
         gy = Query(world, grid, layer, cx, cy + 1) - Query(world, grid, layer, cx, cy - 1);
     }

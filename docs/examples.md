@@ -62,8 +62,9 @@ Grid.TryGetSpec(world, region,
 ```
 
 `power` is log2 of the cell count — 5 (32²) through 14 (16384²). `size` is the world-space
-extent; the origin `(x, y)` places the grid anywhere in world space. Up to 32 grids per
-world; every source deposits into each grid it overlaps at that grid's own scale. Grids are
+extent, finite and positive; the origin `(x, y)` places the grid anywhere in finite world
+space. `256 · 2^power / size` must truncate to between 1 and 1,048,576 (at most 4,096 cells per
+world unit). Up to 32 grids per world; every source deposits into each grid it overlaps at that grid's own scale. Grids are
 never freed singly, so their ids stay the dense range `0..Grid.Count(world)-1`;
 `Grid.CopyIds` copies at most the span's length but always returns the count, like
 `World.CopyWorldIds`. `Grid.TryGetSpec` returns the exact `power`, `x`, `y`, `size` a grid
@@ -179,11 +180,12 @@ if (World.SyncTransforms(token, ranges) == World.BatchStatus.Applied)
 ```
 
 Each row is `UpdateTransform` with `World.Sync`'s bit-exact position compare — `-0.0` and
-`+0.0` are different poses and NaN bits copy verbatim — while heading/scale ignore non-finite
-values and quantize exactly like `Turn`/`Scale`. Rows apply in range order then row order;
-duplicate ids fold into one merged pending op with the last row winning. Gain, fades, and
-expiry are never touched. Dead or stale-generation ids set their invalid mask bit — bit
-`row & 63` of word `row >> 6`, tail bits zero — instead of producing a result row, and the
+`+0.0` are different poses — while heading/scale ignore non-finite values and quantize exactly
+like `Turn`/`Scale`, and a row with a non-finite x or y is rejected whole. Rows apply in range
+order then row order; duplicate ids fold into one merged pending op with the last row winning.
+Gain, fades, and expiry are never touched. Dead or stale-generation ids and non-finite positions
+set their invalid mask bit — bit `row & 63` of word `row >> 6`, tail bits zero — instead of
+producing a result row, and the
 call still returns `Applied`. Malformed descriptors, short masks, mask/column aliasing, or a
 stale token reject the whole call before any write. Under 8,192 rows the loop runs inline with
 zero scratch; above it a planning scan and the pooled apply reuse the source-batch machinery,

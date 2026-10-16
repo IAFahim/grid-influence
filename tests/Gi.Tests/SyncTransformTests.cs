@@ -41,7 +41,7 @@ public sealed class SyncTransformTests : IDisposable
     }
 
     [Fact]
-    public unsafe void PositionOnly_MatchesWorldSyncIncludingSignedZeroNaNAndDuplicates()
+    public unsafe void PositionOnly_MatchesWorldSyncIncludingSignedZeroRejectedNaNAndDuplicates()
     {
         var twin = World.New();
         var twinGrid = Grid.New(twin, 6, 0f, 0f, 64f);
@@ -100,7 +100,7 @@ public sealed class SyncTransformTests : IDisposable
             var mask = new ulong[words + 1];
             var expected = new ulong[words];
             for (var index = 0; index < count; index++)
-                if (twinIds[index] == staleTwin)
+                if (twinIds[index] == staleTwin || !float.IsFinite(xs[index]) || !float.IsFinite(ys[index]))
                     expected[index >> 6] |= 1ul << (index & 63);
 
             fixed (int* idPointer = ids)
