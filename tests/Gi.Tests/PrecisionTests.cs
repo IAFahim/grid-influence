@@ -99,18 +99,18 @@ public sealed unsafe class PrecisionTests
             }
 
             World.Move(world, a, nextX, nextY);
-            Assert.Equal(0, ctx->Ops.Length);
+            Assert.Equal(0, ctx->Changed.Length);
             Assert.True(World.TryGetSourceSpec(world, a, out var specA));
             Assert.Equal((nextX, nextY), (specA.X, specA.Y));
 
             World.Turn(world, b, 0.5f + 0.002f);
-            Assert.Equal(0, ctx->Ops.Length);
+            Assert.Equal(0, ctx->Changed.Length);
 
             var syncId = a;
             var syncX = phaseBits == 8 ? nextX + 0.0002f : 20f + step * 0.5f;
             var syncY = phaseBits == 8 ? nextY + 0.0002f : 30f + step * 0.5f;
             World.Sync(world, &syncId, &syncX, &syncY, 1);
-            Assert.Equal(0, ctx->Ops.Length);
+            Assert.Equal(0, ctx->Changed.Length);
             Assert.True(World.TryGetSourceSpec(world, a, out specA));
             Assert.Equal((syncX, syncY), (specA.X, specA.Y));
 
@@ -132,7 +132,7 @@ public sealed unsafe class PrecisionTests
             Assert.Equal(
                 World.BatchStatus.Applied,
                 World.SyncTransforms(World.Capture(world), new ReadOnlySpan<World.TransformRange>(&range, 1)));
-            Assert.Equal(0, ctx->Ops.Length);
+            Assert.Equal(0, ctx->Changed.Length);
 
             var results = new World.SourceResult[2];
             World.SourceCommand[] commands =
@@ -141,7 +141,7 @@ public sealed unsafe class PrecisionTests
                 World.SourceCommand.Turn(b, 0.5f + 0.001f),
             ];
             Assert.Equal(World.BatchStatus.Applied, World.ApplyBatch(world, commands, results));
-            Assert.Equal(0, ctx->Ops.Length);
+            Assert.Equal(0, ctx->Changed.Length);
 
             World.Process(world);
             Assert.Equal(0, World.ChangedTiles(world, grid, layer, null));

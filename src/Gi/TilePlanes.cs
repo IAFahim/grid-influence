@@ -68,6 +68,26 @@ internal unsafe struct PlaneStore
         };
     }
 
+    public TilePlanes TakeDerived()
+    {
+        var pageIndex = Pages.Take(PageUnit);
+        var page = (short*)Pages.Unit(pageIndex);
+        new Span<short>(page, TileBake.TileSize * TileBake.TileSize).Clear();
+
+        var summaryIndex = Summaries.Take(TileSummary.Bytes);
+        var summary = (TileSummary*)Summaries.Unit(summaryIndex);
+        new Span<byte>(summary, TileSummary.Bytes).Clear();
+
+        return new TilePlanes
+        {
+            Page = pageIndex,
+            I = -1,
+            T = -1,
+            B = -1,
+            Summary = summaryIndex,
+        };
+    }
+
     public long* EnsureT(ref TilePlanes tile)
     {
         if (tile.T >= 0) return (long*)Int64s.Unit(tile.T);
@@ -85,7 +105,7 @@ internal unsafe struct PlaneStore
     public readonly PlaneCells Cells(in TilePlanes tile) => new()
     {
         Page = (short*)Pages.Unit(tile.Page),
-        I = (int*)Int32s.Unit(tile.I),
+        I = tile.I < 0 ? null : (int*)Int32s.Unit(tile.I),
         T = tile.T < 0 ? null : (long*)Int64s.Unit(tile.T),
         B = tile.B < 0 ? null : (long*)Int64s.Unit(tile.B),
         Summary = (TileSummary*)Summaries.Unit(tile.Summary),
@@ -95,7 +115,7 @@ internal unsafe struct PlaneStore
     {
         if (tile.T >= 0) Int64s.Give(tile.T);
         if (tile.B >= 0) Int64s.Give(tile.B);
-        Int32s.Give(tile.I);
+        if (tile.I >= 0) Int32s.Give(tile.I);
         Summaries.Give(tile.Summary);
         Pages.Give(tile.Page);
     }

@@ -165,18 +165,13 @@ internal struct SourceBatchState
 internal struct SourceBatchEntry
 {
     public SourceBatchState State;
-    public DepositOp Operation;
+    public SourceBatchState PendingState;
     public ScheduleRecord ScheduleBefore;
     public int Slot;
     public int FirstCommand;
     public int LastCommand;
-    public int OriginalPending;
     public int FirstDepositCommand;
     public int FirstScheduleCommand;
-    public int OperationIndex;
     public uint PlannedGeneration;
     public byte PlannedAlive;
-    public byte InitialLayer;
-    public byte InitialGain;
-    public byte InitialAlive;
 }

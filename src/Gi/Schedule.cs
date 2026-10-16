@@ -42,9 +42,9 @@ public static unsafe partial class World
             s->Timed.Pointer[i] &= unchecked((byte)~Fading);
             if (target != current)
             {
-                CountGain(w, s->Layer[i], (byte)current, (byte)target);
-                EnqueueMutation(w, s, i, s->X[i], s->Y[i], target, s->Angle[i], s->Scale[i], true);
+                BeforeWrite(w, s, i);
                 s->Gain[i] = (byte)target;
+                MarkChanged(w, s, i);
             }
         }
         else
@@ -207,10 +207,10 @@ public static unsafe partial class World
             var timed = s->Timed.Pointer[slot];
             if ((timed & Expiring) != 0 && s->ExpireAt.Pointer[slot] - now <= 0)
             {
-                CountGain(w, s->Layer[slot], s->Gain[slot], 0);
-                EnqueueMutation(w, s, slot, s->X[slot], s->Y[slot], 0, s->Angle[slot], s->Scale[slot], false);
+                BeforeWrite(w, s, slot);
                 s->Alive[slot] = 0;
                 if (s->Gen[slot] != uint.MaxValue) s->Free.Push(slot);
+                MarkChanged(w, s, slot);
                 continue;
             }
 
@@ -219,9 +219,9 @@ public static unsafe partial class World
                 var gain = FadeGain(s, slot, now);
                 if (gain != (sbyte)s->Gain[slot])
                 {
-                    CountGain(w, s->Layer[slot], s->Gain[slot], (byte)gain);
-                    EnqueueMutation(w, s, slot, s->X[slot], s->Y[slot], gain, s->Angle[slot], s->Scale[slot], true);
+                    BeforeWrite(w, s, slot);
                     s->Gain[slot] = (byte)gain;
+                    MarkChanged(w, s, slot);
                 }
             }
 

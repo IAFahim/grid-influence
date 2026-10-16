@@ -93,11 +93,34 @@ planes), `WarmFramesMakeNoNativeHeapCalls`, fifo-ring receipt (already `.Slot`-b
 
 - [x] Recon: write path, Process, Deposit, RunTimers, Applied, Rewind read and understood.
 - [x] This design committed.
-- [ ] Marking: `Mark` column + `w->Changed` on all write paths (scalar, batch, timers).
-- [ ] Deposited records: storage + key compare.
-- [ ] Delta sweep into `I`/`T`/`B` + dirty rects; `PlaneStore` attached to `LayerData`.
-- [ ] Publish wiring + summaries feed reads and `MaxPyramid`.
-- [ ] Exclusion + journal migration.
-- [ ] Deletions (crowd → rebuild → ops → diff/dense/`Resolve`).
-- [ ] Receipts/stats/docs; full validation ×2; pinned A/B on cpu0 vs pristine ad2b5be; RSS.
+- [x] Marking: `Mark` column + `w->Changed` on all write paths (scalar, batch, timers, sync, rewind).
+- [x] Deposited records: 16 B `DepositRecord` per (slot, grid) in `GridCtx.Records`; packed-key compare.
+- [x] Delta sweep into `I`/`T`/`B` + dirty rects (`World.Sweep.cs`); `PlaneStore` attached to `LayerData`.
+- [x] Publish wiring + summaries feed reads and `MaxPyramid`.
+- [x] Exclusion (`Applied` reads the record) + journal migration.
+- [x] Deletions (crowd → rebuild → ops → diff/dense/`Resolve`/`LayerLive`) — World.cs −1133/+~350 lines.
+- [x] Tests migrated (`LayerLiveTests` → `DepositRecordTests`, `ResolveTests`/`PublishTests`/stats tools).
+- [x] Validation green: build 0/0, tests 1064/1064, sample, receipts 144 PASS + 127 PASS/17 SKIP
+      (HW off), all warm paths 0 B with and without intrinsics; corpus regenerated.
+- [ ] Pinned A/B on cpu0 vs pristine ad2b5be (B1 ≤ 80 ns / B1 Cell ≤ 10 ns / B2 / RSS ≤ 180 MB).
+- [ ] docs/model.md proof updates for the new unsafe surface.
 - [ ] PR + report.
+
+## Semantics discovered while validating (now pinned by the suite)
+
+- `MarkEpoch` must advance **after** `SweepChanged`: a timer-expiry inside Process can mark a slot
+  that a later mutation in the same outer epoch reuses — if the epoch advanced before the sweep,
+  `MarkChanged` saw the stale mark as current and silently dropped the new deposit.
+- Journal = epoch-start snapshots taken from `w->Pending` during `Process` while recording —
+  including mutations made before `Record` (matches the reference's `pendingFrom` journaling).
+  `Rewind` restores pending first, then journal entries in reverse, re-queuing each journaled slot
+  once (`JStamp`/`RewindEpoch` dedup) with a deposited-state pending baseline (`_pendingFrom =
+  _deposited` equivalent), and never clears `w->Changed` (queued entries must stay queued).
+- `ChangedTiles`/`Changed` read `ld->Epochs`, which must be allocated lazily: the reference only
+  materializes the epochs array when a deposit's coverage passes `TileBake.Touches` on ≥1 tile
+  (`MarkDeposited`). `Epochs` now allocates inside `DirtyIndex` plus a `Touches`-gated coverage
+  scan in `EmitDelta`; epoch-0 tiles count at `since=-1` in both engines, so allocation timing is
+  observable.
+- Merged `I` plane (box+dense in one int32) wraps before publish at ~2.2e9/cell where the old
+  split planes did not; `Publish` clamps the wrapped value. The 550k-source overflow test was
+  re-baselined to `-32768` (exclusion parity — its actual assertion — is unaffected).

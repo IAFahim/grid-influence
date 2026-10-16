@@ -712,80 +712,27 @@ public sealed class EngineTests
         var slab = new FixedSlab();
         try
         {
-            var first = slab.Take(World.HeaderBytes);
-            var second = slab.Take(World.HeaderBytes);
+            var first = slab.Take(PlaneStore.PageUnit);
+            var second = slab.Take(PlaneStore.PageUnit);
             Assert.Equal(0, first);
             Assert.Equal(1, second);
 
             slab.Give(second);
             Assert.Equal(1, slab.FreeCount);
-            Assert.Equal(1, slab.Take(World.HeaderBytes));
+            Assert.Equal(1, slab.Take(PlaneStore.PageUnit));
             Assert.Equal(0, slab.FreeCount);
 
             var survivor = (int*)slab.Unit(first);
             survivor[0] = 0x12345678;
             var grown = 40;
-            for (var i = 0; i < grown; i++) slab.Take(World.HeaderBytes);
+            for (var i = 0; i < grown; i++) slab.Take(PlaneStore.PageUnit);
             Assert.Equal(0x12345678, ((int*)slab.Unit(first))[0]);
-            Assert.True(slab.Bytes >= (2 + grown) * (long)World.HeaderBytes);
+            Assert.True(slab.Bytes >= (2 + grown) * (long)PlaneStore.PageUnit);
         }
         finally
         {
             slab.Reset();
         }
-    }
-
-    [Fact]
-    public unsafe void Resolve_MatchesScalarPrefixAcrossVectorLanes()
-    {
-        var difference = stackalloc int[TileBake.DiffRows * TileBake.DiffPitch];
-        var dense = stackalloc int[32 * 32];
-        var previous = stackalloc int[32];
-        var expectedPrevious = stackalloc int[32];
-        var output = stackalloc short[32 * 32];
-        var pageSum = 0L;
-        var pageMax = short.MinValue;
-        new Span<int>(difference, TileBake.DiffRows * TileBake.DiffPitch).Clear();
-        new Span<int>(previous, 32).Clear();
-        new Span<int>(expectedPrevious, 32).Clear();
-        for (var y = 0; y < 32; y++)
-        for (var x = 0; x < 32; x++)
-        {
-            difference[y * TileBake.DiffPitch + x] = ((y * 37 + x * 13) % 41 - 20) * 4096;
-            dense[y * 32 + x] = ((y * 19 + x * 31) % 17 - 8) * 70000;
-        }
-
-        var filled = TileBake.Resolve(difference, dense, previous, null, null, output, &pageSum, &pageMax);
-        Assert.Equal(ResolveOutcome.None, filled & ResolveOutcome.Empty);
-        Assert.Equal(ResolveOutcome.Changed, filled & ResolveOutcome.Changed);
-        var expectedSum = 0L;
-        var expectedMax = short.MinValue;
-        for (var y = 0; y < 32; y++)
-        {
-            var carry = 0;
-            for (var x = 0; x < 32; x++)
-            {
-                carry += difference[y * TileBake.DiffPitch + x];
-                expectedPrevious[x] += carry;
-                var expected = (short)Math.Clamp(expectedPrevious[x] + dense[y * 32 + x], short.MinValue, short.MaxValue);
-                Assert.Equal(expected, output[y * 32 + x]);
-                expectedSum += expected;
-                if (expected > expectedMax) expectedMax = expected;
-            }
-        }
-
-        Assert.Equal(expectedSum, pageSum);
-        Assert.Equal(expectedMax, pageMax);
-
-        new Span<int>(difference, TileBake.DiffRows * TileBake.DiffPitch).Clear();
-        new Span<int>(dense, 32 * 32).Clear();
-        new Span<int>(previous, 32).Clear();
-        var emptied = TileBake.Resolve(difference, dense, previous, null, null, output, &pageSum, &pageMax);
-        Assert.Equal(ResolveOutcome.Empty, emptied & ResolveOutcome.Empty);
-        Assert.Equal(ResolveOutcome.Changed, emptied & ResolveOutcome.Changed);
-        for (var i = 0; i < 32 * 32; i++) Assert.Equal(0, output[i]);
-        Assert.Equal(0L, pageSum);
-        Assert.Equal((short)0, pageMax);
     }
 
     [Fact]
@@ -800,15 +747,16 @@ public sealed class EngineTests
         Assert.Equal(1, pending.LiveSources);
         Assert.Equal(0, pending.LiveTiles);
         Assert.Equal(0, pending.DirtyTiles);
-        Assert.Equal(778_240, pending.SourceBytes);
-        Assert.Equal(0, pending.DirectoryBytes + pending.SlabBytes + pending.DifferenceBytes + pending.DenseBytes + pending.PageBytes);
+        Assert.Equal(983_040, pending.SourceBytes);
+        Assert.Equal(0, pending.DirectoryBytes + pending.SlabBytes + pending.Int32Bytes + pending.PageBytes);
         World.Process(w);
         var processed = Stats.Inspection.Read(w);
         Assert.Equal(1, processed.LiveTiles);
         Assert.Equal(0, processed.DirtyTiles);
-        Assert.Equal(World.BlockBytes, 6528);
-        Assert.Equal(World.BlockBytes, processed.DifferenceBytes + processed.DenseBytes + processed.DensePointerBytes + processed.PageBytes + processed.PageSumBytes);
-        Assert.Equal(20, processed.DirtyFlagBytes);
+        var unitBytes = PlaneStore.PageUnit + PlaneStore.Int32Unit + TileSummary.Bytes + sizeof(TilePlanes);
+        Assert.Equal(unitBytes, processed.PageBytes + processed.Int32Bytes + processed.SummaryBytes + processed.SetBytes);
+        Assert.Equal(16 * unitBytes, processed.SlabBytes);
+        Assert.Equal(32, processed.DirtyFlagBytes);
         Assert.Equal(1920, World.Query(w, g, l, 0, 0, 64, 64));
         World.Clear(w);
         var cleared = Stats.Inspection.Read(w);
@@ -817,43 +765,40 @@ public sealed class EngineTests
         Assert.Equal(0, cleared.LiveTiles);
         Assert.Equal(1, cleared.Directories);
         Assert.Equal(16, cleared.DirectoryBytes);
-        Assert.Equal(16 * World.BlockBytes + 64, cleared.SlabBytes);
-        Assert.Equal(empty.WorldBytes + 778_240 + 20 + 64 + 16 * sizeof(DepositOp) + 16_384 * sizeof(int) +
-            16 + 16 * World.BlockBytes + 64, cleared.WorldBytes);
+        Assert.Equal(16 * unitBytes + 4 * 64, cleared.SlabBytes);
+        Assert.Equal(empty.WorldBytes + 983_040 + 32 + 16 * sizeof(int) + 16 * sizeof(TileRect) +
+            16 * sizeof(int) + 16 * sizeof(JournalEntry) + 16_384L * sizeof(DepositRecord) +
+            16 + 16 * unitBytes + 4 * 64 + processed.KernelBytes, cleared.WorldBytes);
     }
 
     [Fact]
-    public void Inspection_DenseAllocatesLazilyPerRasterTile()
+    public void Inspection_Int64AllocatesLazilyPerSmoothTile()
     {
         var w = World.New();
         var g = Grid.New(w, 6, 0f, 0f, 64f);
         var l = Layer.New(w);
-        var samples = new sbyte[6 * 6];
-        for (var i = 0; i < samples.Length; i++) samples[i] = (sbyte)(i % 7);
         World.Place(w, l, 16f, 16f, Stamp.Box(4, 4, 60), 2);
-        World.Place(w, l, 40f, 40f, Stamp.New(samples, 6, 6), 2);
+        World.Place(w, l, 40f, 40f, Stamp.Tent(4, 4, 60), 2);
 
         var pending = Stats.Inspection.Read(w);
         Assert.Equal(0, pending.LiveTiles);
-        Assert.Equal(0, pending.RasterTiles);
-        Assert.Equal(0, pending.DenseBytes);
-        Assert.Equal(0, pending.DensePointerBytes);
+        Assert.Equal(0, pending.TentTiles);
+        Assert.Equal(0, pending.TentBytes);
+        Assert.Equal(0, pending.Int32Bytes);
 
         World.Process(w);
         var processed = Stats.Inspection.Read(w);
         Assert.Equal(2, processed.LiveTiles);
-        Assert.Equal(1, processed.RasterTiles);
-        Assert.Equal(World.DenseBytes, processed.DenseBytes);
-        Assert.Equal(2 * (World.HeaderBytes - World.DensePtrOffset), processed.DensePointerBytes);
-        var expected = 0;
-        for (var y = 0; y < 6; y++)
-        for (var x = 0; x < 6; x++) expected += samples[y * 6 + x];
-        Assert.Equal(2 * expected, World.Query(w, g, l, 32, 32, 32, 32));
+        Assert.Equal(1, processed.TentTiles);
+        Assert.Equal(PlaneStore.Int64Unit, processed.TentBytes);
+        Assert.Equal(2 * PlaneStore.Int32Unit, processed.Int32Bytes);
+        Assert.True(World.Query(w, g, l, 40, 40) > 0);
 
         World.Clear(w);
         var cleared = Stats.Inspection.Read(w);
-        Assert.Equal(0, cleared.RasterTiles);
-        Assert.Equal(0, cleared.DenseBytes);
+        Assert.Equal(0, cleared.TentTiles);
+        Assert.Equal(0, cleared.TentBytes);
+        Assert.Equal(0, cleared.Int32Bytes);
     }
 
     [Fact]

@@ -39,19 +39,18 @@ internal static unsafe partial class TileBake
         if (t.T == null) new Span<int>(tentOut, TileSize).Clear();
         if (t.B == null) new Span<int>(bellOut, TileSize).Clear();
 
-        var any = false;
         var changed = false;
         for (var y = y0; y < y1; y++)
         {
             if (t.T != null) SmoothRow(t.T, y, tentOut);
             if (t.B != null) SmoothRow(t.B, y, bellOut);
             var row = y * TileSize;
-            changed |= RowScalar(t.I + row, tentOut, bellOut, t.Page + row, x0, x1, ref any);
+            changed |= RowScalar(t.I + row, tentOut, bellOut, t.Page + row, x0, x1);
         }
 
         UpdateSummaries(t, x0, y0, x1, y1);
         if (changed) t.Summary->Epoch = tick;
-        return Outcome(any, changed);
+        return Outcome(PageAny(t.Page), changed);
     }
 
 #if NET
@@ -71,11 +70,9 @@ internal static unsafe partial class TileBake
         if (t.T == null) new Span<int>(tentOut, TileSize).Clear();
         if (t.B == null) new Span<int>(bellOut, TileSize).Clear();
 
-        var acc = Vector128<int>.Zero;
         var differs = Vector128<short>.Zero;
         var bound = Vector128.Create(ExactBound);
         var guard = Vector128.Create(ExactMask);
-        var anyScalar = false;
         var changed = false;
         for (var y = y0; y < y1; y++)
         {
@@ -90,7 +87,7 @@ internal static unsafe partial class TileBake
             for (var x = x0; x < vectorEnd; x += 4) wide |= Load128(iRow + x) + bound;
             if (!Vector128.EqualsAll(wide & guard, Vector128<int>.Zero))
             {
-                changed |= RowScalar(iRow, tentOut, bellOut, pageRow, x0, x1, ref anyScalar);
+                changed |= RowScalar(iRow, tentOut, bellOut, pageRow, x0, x1);
                 continue;
             }
 
@@ -98,21 +95,19 @@ internal static unsafe partial class TileBake
             {
                 var totalA = Load128(iRow + x) + Load128(tentOut + x) + Load128(bellOut + x);
                 var totalB = Load128(iRow + x + 4) + Load128(tentOut + x + 4) + Load128(bellOut + x + 4);
-                acc |= totalA | totalB;
                 var cells = PackCells(totalA, totalB);
                 var published = LoadShorts(pageRow + x);
                 differs |= ~Vector128.Equals(published, cells);
                 StoreShorts(pageRow + x, cells);
             }
 
-            changed |= RowScalar(iRow, tentOut, bellOut, pageRow, vectorEnd, x1, ref anyScalar);
+            changed |= RowScalar(iRow, tentOut, bellOut, pageRow, vectorEnd, x1);
         }
 
         UpdateSummaries(t, x0, y0, x1, y1);
-        var any = anyScalar || !Vector128.EqualsAll(acc, Vector128<int>.Zero);
         changed |= !Vector128.EqualsAll(differs, Vector128<short>.Zero);
         if (changed) t.Summary->Epoch = tick;
-        return Outcome(any, changed);
+        return Outcome(PageAny(t.Page), changed);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
@@ -131,11 +126,9 @@ internal static unsafe partial class TileBake
         if (t.T == null) new Span<int>(tentOut, TileSize).Clear();
         if (t.B == null) new Span<int>(bellOut, TileSize).Clear();
 
-        var acc = Vector256<int>.Zero;
         var differs = Vector128<short>.Zero;
         var bound = Vector256.Create(ExactBound);
         var guard = Vector256.Create(ExactMask);
-        var anyScalar = false;
         var changed = false;
         for (var y = y0; y < y1; y++)
         {
@@ -150,14 +143,13 @@ internal static unsafe partial class TileBake
             for (var x = x0; x < vectorEnd; x += 8) wide |= Avx.LoadVector256(iRow + x) + bound;
             if (!Vector256.EqualsAll(wide & guard, Vector256<int>.Zero))
             {
-                changed |= RowScalar(iRow, tentOut, bellOut, pageRow, x0, x1, ref anyScalar);
+                changed |= RowScalar(iRow, tentOut, bellOut, pageRow, x0, x1);
                 continue;
             }
 
             for (var x = x0; x < vectorEnd; x += 8)
             {
                 var total = Avx.LoadVector256(iRow + x) + Avx.LoadVector256(tentOut + x) + Avx.LoadVector256(bellOut + x);
-                acc |= total;
                 var packed = Avx2.PackSignedSaturate(total, total);
                 var cells = Avx2.Permute4x64(packed.AsInt64(), 0xd8).GetLower().AsInt16();
                 var published = Sse2.LoadVector128(pageRow + x);
@@ -165,14 +157,13 @@ internal static unsafe partial class TileBake
                 Sse2.Store(pageRow + x, cells);
             }
 
-            changed |= RowScalar(iRow, tentOut, bellOut, pageRow, vectorEnd, x1, ref anyScalar);
+            changed |= RowScalar(iRow, tentOut, bellOut, pageRow, vectorEnd, x1);
         }
 
         UpdateSummaries(t, x0, y0, x1, y1);
-        var any = anyScalar || !Vector256.EqualsAll(acc, Vector256<int>.Zero);
         changed |= !Vector128.EqualsAll(differs, Vector128<short>.Zero);
         if (changed) t.Summary->Epoch = tick;
-        return Outcome(any, changed);
+        return Outcome(PageAny(t.Page), changed);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -184,19 +175,43 @@ internal static unsafe partial class TileBake
     }
 #endif
 
-    private static bool RowScalar(int* i, int* tentOut, int* bellOut, short* page, int x0, int x1, ref bool any)
+    private static bool RowScalar(int* i, int* tentOut, int* bellOut, short* page, int x0, int x1)
     {
         var changed = false;
         for (var x = x0; x < x1; x++)
         {
             var total = (long)i[x] + tentOut[x] + bellOut[x];
-            if (total != 0) any = true;
             var cell = (short)Math.Clamp(total, short.MinValue, short.MaxValue);
             if (cell != page[x]) changed = true;
             page[x] = cell;
         }
 
         return changed;
+    }
+
+    #if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    #endif
+    internal static bool PageAny(short* page)
+    {
+#if NET
+        if (Avx2.IsSupported)
+        {
+            var wide = Vector256<short>.Zero;
+            for (var i = 0; i < TileSize * TileSize; i += 16) wide |= Avx.LoadVector256(page + i);
+            return !Vector256.EqualsAll(wide, Vector256<short>.Zero);
+        }
+
+        if (Vector)
+        {
+            var wide = Vector128<short>.Zero;
+            for (var i = 0; i < TileSize * TileSize; i += 8) wide |= LoadShorts(page + i);
+            return !Vector128.EqualsAll(wide, Vector128<short>.Zero);
+        }
+#endif
+        var any = false;
+        for (var i = 0; i < TileSize * TileSize; i++) any |= page[i] != 0;
+        return any;
     }
 
     private static void UpdateSummaries(PlaneCells t, int x0, int y0, int x1, int y1)

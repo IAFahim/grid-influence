@@ -540,24 +540,20 @@ public sealed class SourceBatchTests : IDisposable
     {
         var actual = World.GetContext(_batchWorld);
         var expected = World.GetContext(_serialWorld);
-        Assert.Equal(expected->Ops.Length, actual->Ops.Length);
-        for (var index = 0; index < actual->Ops.Length; index++)
+        Assert.Equal(expected->Changed.Length, actual->Changed.Length);
+        for (var index = 0; index < actual->Changed.Length; index++)
+            Assert.Equal(expected->Changed.Pointer[index], actual->Changed.Pointer[index]);
+
+        Assert.Equal(expected->Pending.Length, actual->Pending.Length);
+        for (var index = 0; index < actual->Pending.Length; index++)
         {
-            var actualOperation = actual->Ops.Pointer[index];
-            var expectedOperation = expected->Ops.Pointer[index];
-            Assert.Equal(expectedOperation.Slot, actualOperation.Slot);
-            var expectedFrom = (expectedOperation.FromGain, expectedOperation.FromX, expectedOperation.FromY,
-                expectedOperation.FromStamp, expectedOperation.FromLayer, expectedOperation.FromAngle, expectedOperation.FromScale);
-            var actualFrom = (actualOperation.FromGain, actualOperation.FromX, actualOperation.FromY,
-                actualOperation.FromStamp, actualOperation.FromLayer, actualOperation.FromAngle, actualOperation.FromScale);
-            var expectedTo = (expectedOperation.ToGain, expectedOperation.ToX, expectedOperation.ToY,
-                expectedOperation.ToStamp, expectedOperation.ToLayer, expectedOperation.ToAngle, expectedOperation.ToScale);
-            var actualTo = (actualOperation.ToGain, actualOperation.ToX, actualOperation.ToY,
-                actualOperation.ToStamp, actualOperation.ToLayer, actualOperation.ToAngle, actualOperation.ToScale);
-            if (expectedOperation.FromGain != 0 || actualOperation.FromGain != 0)
-                Assert.True(expectedFrom == actualFrom, $"from slot {actualOperation.Slot}: expected {expectedFrom}, actual {actualFrom}");
-            if (expectedOperation.ToGain != 0 || actualOperation.ToGain != 0)
-                Assert.True(expectedTo == actualTo, $"to slot {actualOperation.Slot}: expected {expectedTo}, actual {actualTo}");
+            var a = actual->Pending.Pointer[index];
+            var e = expected->Pending.Pointer[index];
+            Assert.True(
+                a.Slot == e.Slot && a.X == e.X && a.Y == e.Y && a.Stamp == e.Stamp &&
+                a.Layer == e.Layer && a.Gain == e.Gain && a.Alive == e.Alive &&
+                a.Angle == e.Angle && a.Scale == e.Scale && a.Gen == e.Gen,
+                $"pending {index}: slot {a.Slot}");
         }
     }
 
