@@ -1,3 +1,4 @@
+if (args.Length > 0 && args[0] == "--frames") return FrameHarness.Run(args);
 var mode = args.Length > 0 ? args[0] : "";
 if (mode == "--place") { Verification.PlaceProfile(); return 0; }
 if (mode == "--daily") { Verification.Daily(); return 0; }

@@ -729,6 +729,62 @@ pass behind them was `perf`-profile guided, receipts first.
   mid-block to the block tail); that delta sat inside the A/B noise band, so it was accepted for
   the −38.6% box-tile block size. Judge such trades on interleaved minima, never on single runs.
 
+### Frame harness
+
+`dotnet run --project benchmarks -c Release --no-build -- --frames <B1|B2|B4|C|W|all|verify>
+[--precision exact|cell] [--measure N] [--warmup N] [--entities N] [--seed N] [--jit-ms N]` measures
+the reference frames of ROADMAP.md §1 on one thread (`ResolvePool.SerialOnly`). `--precision cell`
+is rejected until `Layer.Precision` exists. `verify` runs only the harness receipts.
+
+Frames, as built on `main` (one engine, no transient layers):
+
+- `B1` — the `--budget` canonical frame of `snapshot-bucket-index`: 1M boxes 8×8 on a 4096² grid, gains
+  ±1, every source shifts 0.5 × 0.25 cells per frame; `Sync`, `Process`, `SenseColumn`,
+  `SenseGradientColumn`, `ChangedMask`. Stages: sync, process, point, gradient, changed.
+- `B2` — the same 1M sources, no reads; 1 mover and 200 movers (distinct sources, 0.5 × 0.25 shift,
+  `Move` then `Process`). `B4` — the same sources, `Process` only.
+- `C` — emulated with 1M persistent 4×4 boxes on a 1024² grid, synced in Morton order every frame
+  (0.1 cell per frame), `Process`, value and gradient for every agent, 1,000 `TrySenseArea` at r = 16.
+  The arrays are re-sorted by Morton key every 128 frames; the re-sort is timed apart and amortized
+  (`resort.p50_ms_with_resort`).
+- `W` — 1M persistent sources on a 2048² grid placed in Morton slot order: 250k agents (4×4 boxes, 0.1 cell
+  per frame), 740k static (4×4 boxes on layer 0, 6×6 tents on layer 1) and 10k timed (fade and expire over
+  100 frames, 100 replaced per frame); layers boxes, tents and their `Sum`. Per frame: `Sync` of the agents,
+  1,000 spawns and 1,000 despawns (100 of them timed), `Process`, point and gradient senses for the agents on
+  the derived layer, 1,000 `TrySenseArea` at r = 8, 16, 24, 32.
+
+Agents are kept inside the grid with a margin so every disk sense is complete. Warmup is 30 frames and
+measurement 300 frames; p50 and p99 are nearest-rank. Before the timed run the harness runs the code on a
+20k-source world for `--jit-ms` so no hot method is still in tier-0.
+
+Output is JSON lines with stable key order and invariant culture: one header line (CPU model, runtime,
+intrinsics, receipts) and one line per frame (`p50_ms`, `p99_ms`, `p50_ns_per_entity`, `stages`,
+`resort`, `bytes_per_frame`, `crossing_cell`, `crossing_q8`, `checksum`, `ok`). `crossing_cell` is the share
+of movers whose cell changed per frame, `crossing_q8` the share whose 1/256-cell anchor changed. The
+exit code is non-zero when a read was incomplete or a measured frame allocated.
+
+Pinning: list the cores with `lscpu -e=CPU,CORE,MAXMHZ`. On the Ryzen 5 8500G the Zen 4 cores have the
+higher MAXMHZ and the Zen 4c cores the lower; on a hybrid Intel part the P-cores do. Run
+`taskset -c <cpu> dotnet run --project benchmarks -c Release --no-build -- --frames all`, keep the
+hyper-thread sibling of that CPU idle, and compare `cpu_start` and `cpu_end` in the output. Repeat each
+run in fresh processes; do not build while a timing run is in progress.
+
+Receipts, run before any timing: percentile rank, culture-invariant JSON, Morton sort order and
+permutation, and for every frame at 20k sources — two identical runs give identical checksums, warm frames
+allocate 0 B, every read is complete, the driver's positions equal `TryGetSourceSpec` for every source, `W`
+ends with exactly its entity count of live sources, and the field of every layer equals a fresh world built from the final
+sources.
+
+Unsafe proof for the harness buffers. Lifetime: `FrameArena` owns every native block; blocks are allocated
+in `Setup` and freed by the scenario's `Dispose`, and no pointer outlives its scenario. Gi receives the
+pointers only for the duration of one call and keeps none. Aliasing: each array is its own allocation;
+the re-sort writes into `*Next` buffers and swaps the pointers between frames, never during a Gi call,
+and the radix passes ping-pong between `pairs` and `scratch`. Alignment: `NativeMemory.AlignedAlloc` at
+64 B, elements at most 8 B wide. Bounds: allocations are rounded up to a multiple of 16 elements and
+zeroed, so the 8-byte hash loop over `Padded(count) * sizeof(T)` bytes stays inside the block and reads
+zero padding; mask arrays hold `(count + 63) >> 6` words; the radix histogram has 2,048 entries for 11-bit
+digits. Concurrency: single thread, and `ResolvePool.SerialOnly` keeps Gi from starting workers.
+
 ## Unsafe proof
 
 - **Lifetime**: the world arena (255 `WorldCtx`) and stamp catalog (256 `StampVariant`) are
