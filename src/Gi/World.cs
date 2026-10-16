@@ -1005,8 +1005,6 @@ public static unsafe partial class World
         var tileX0 = (tile % tps) << TileBake.TileBits;
         var tileY0 = (tile / tps) << TileBake.TileBits;
         var block = TileBlock(ld, tile, false);
-        var oldPage = stackalloc short[Cells];
-        Buffer.MemoryCopy(block + PageOffset, oldPage, PageBytes, PageBytes);
         new Span<int>(DiffOf(block), DiffBytes / sizeof(int)).Clear();
         var dense = *(byte**)(block + DensePtrOffset);
         if (dense != null) new Span<int>(dense, Cells).Clear();
@@ -1043,21 +1041,10 @@ public static unsafe partial class World
         tent = TentOf(block);
         bell = BellOf(block);
         new Span<int>(prev, TileBake.TileSize).Clear();
-        if (!TileBake.Resolve(difference, DenseOf(block), prev, tent, bell,
-            (short*)(block + PageOffset), (long*)(block + SumOffset), (short*)(block + MaxOffset)))
-        {
-            *changed = PageAny(oldPage) ? (byte)1 : (byte)0;
-            return null;
-        }
-
-        var page = (short*)(block + PageOffset);
-        *changed = 0;
-        for (var i = 0; i < Cells; i++)
-            if (oldPage[i] != page[i])
-            {
-                *changed = 1;
-                break;
-            }
+        var outcome = TileBake.Resolve(difference, DenseOf(block), prev, tent, bell,
+            (short*)(block + PageOffset), (long*)(block + SumOffset), (short*)(block + MaxOffset));
+        *changed = (outcome & ResolveOutcome.Changed) != 0 ? (byte)1 : (byte)0;
+        if ((outcome & ResolveOutcome.Empty) != 0) return null;
 
         return block;
     }
@@ -1496,12 +1483,12 @@ public static unsafe partial class World
                             }
 
                             ld->InDirty[tile] = 0;
-                            dirty[kept++] = tile;
                             if (!pages->TryGet(tile, out var block)) continue;
 
                             new Span<int>(w->Prev, TileBake.TileSize).Clear();
-                            if (!TileBake.Resolve(DiffOf(block), DenseOf(block), w->Prev, TentOf(block), BellOf(block),
-                                (short*)(block + PageOffset), (long*)(block + SumOffset), (short*)(block + MaxOffset)))
+                            var outcome = TileBake.Resolve(DiffOf(block), DenseOf(block), w->Prev, TentOf(block), BellOf(block),
+                                (short*)(block + PageOffset), (long*)(block + SumOffset), (short*)(block + MaxOffset));
+                            if ((outcome & ResolveOutcome.Empty) != 0)
                             {
                                 pages->Remove(tile);
                                 FreeBlock(block);
@@ -1511,6 +1498,8 @@ public static unsafe partial class World
                             {
                                 ld->Max.Update(g->TilesPerSide, tile, *(short*)(block + MaxOffset));
                             }
+
+                            if ((outcome & ResolveOutcome.Changed) != 0) dirty[kept++] = tile;
                         }
 
                         ld->Dirty.Resize(kept);

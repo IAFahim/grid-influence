@@ -749,7 +749,9 @@ public sealed class EngineTests
             dense[y * 32 + x] = ((y * 19 + x * 31) % 17 - 8) * 70000;
         }
 
-        Assert.True(TileBake.Resolve(difference, dense, previous, null, null, output, &pageSum, &pageMax));
+        var filled = TileBake.Resolve(difference, dense, previous, null, null, output, &pageSum, &pageMax);
+        Assert.Equal(ResolveOutcome.None, filled & ResolveOutcome.Empty);
+        Assert.Equal(ResolveOutcome.Changed, filled & ResolveOutcome.Changed);
         var expectedSum = 0L;
         var expectedMax = short.MinValue;
         for (var y = 0; y < 32; y++)
@@ -772,7 +774,9 @@ public sealed class EngineTests
         new Span<int>(difference, TileBake.DiffRows * TileBake.DiffPitch).Clear();
         new Span<int>(dense, 32 * 32).Clear();
         new Span<int>(previous, 32).Clear();
-        Assert.False(TileBake.Resolve(difference, dense, previous, null, null, output, &pageSum, &pageMax));
+        var emptied = TileBake.Resolve(difference, dense, previous, null, null, output, &pageSum, &pageMax);
+        Assert.Equal(ResolveOutcome.Empty, emptied & ResolveOutcome.Empty);
+        Assert.Equal(ResolveOutcome.Changed, emptied & ResolveOutcome.Changed);
         for (var i = 0; i < 32 * 32; i++) Assert.Equal(0, output[i]);
         Assert.Equal(0L, pageSum);
         Assert.Equal((short)0, pageMax);

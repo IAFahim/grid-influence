@@ -48,7 +48,7 @@ public sealed unsafe class ResolveTests
         _ => true,
     };
 
-    private static bool Invoke(ResolvePath path, int* difference, int* dense, int* previousRow,
+    private static ResolveOutcome Invoke(ResolvePath path, int* difference, int* dense, int* previousRow,
         long* tent, long* bell, short* output, long* pageSum, short* pageMax) => path switch
     {
         ResolvePath.Vector128 => TileBake.Resolve128(difference, dense, previousRow, tent, bell, output, pageSum, pageMax),
@@ -64,6 +64,7 @@ public sealed unsafe class ResolveTests
         public int[] PreviousRow = new int[Size];
         public long[]? Tent;
         public long[]? Bell;
+        public short[]? Published;
     }
 
     private sealed class Expected
@@ -73,11 +74,20 @@ public sealed unsafe class ResolveTests
         public long PageSum;
         public short PageMax = short.MinValue;
         public bool Any;
+        public bool Changed;
+    }
+
+    private static short[] SeedPage(int salt)
+    {
+        var page = new short[Cells];
+        for (var i = 0; i < Cells; i++) page[i] = (short)((i * 40503 + salt * 977) % 65536 - 32768);
+        return page;
     }
 
     private static Expected Expect(Tile tile)
     {
         var expected = new Expected();
+        var published = tile.Published ?? new short[Cells];
         tile.PreviousRow.CopyTo(expected.PreviousRow, 0);
         unchecked
         {
@@ -95,6 +105,7 @@ public sealed unsafe class ResolveTests
                     if (total != 0) expected.Any = true;
                     var cell = (short)Math.Clamp(total, short.MinValue, short.MaxValue);
                     expected.Output[y * Size + x] = cell;
+                    if (cell != published[y * Size + x]) expected.Changed = true;
                     if (cell > expected.PageMax) expected.PageMax = cell;
                     expected.PageSum += cell;
                 }
@@ -106,34 +117,36 @@ public sealed unsafe class ResolveTests
 
     private static short[] Check(ResolvePath path, Tile tile, out bool any)
     {
+        if (!Supported(path))
+        {
+            any = false;
+            return new short[Cells];
+        }
+
         var expected = Expect(tile);
         var output = new short[Cells];
+        if (tile.Published != null) tile.Published.CopyTo(output, 0);
         var previousRow = (int[])tile.PreviousRow.Clone();
         long pageSum = long.MinValue;
         short pageMax = 0;
-        if (Supported(path))
+        ResolveOutcome outcome = ResolveOutcome.None;
+        fixed (int* difference = tile.Difference)
+        fixed (int* dense = tile.Dense)
+        fixed (int* prev = previousRow)
+        fixed (long* tent = tile.Tent)
+        fixed (long* bell = tile.Bell)
+        fixed (short* page = output)
         {
-            fixed (int* difference = tile.Difference)
-            fixed (int* dense = tile.Dense)
-            fixed (int* prev = previousRow)
-            fixed (long* tent = tile.Tent)
-            fixed (long* bell = tile.Bell)
-            fixed (short* page = output)
-            {
-                any = Invoke(path, difference, dense, prev, tent, bell, page, &pageSum, &pageMax);
-            }
-
-            Assert.Equal(expected.Output, output);
-            Assert.Equal(expected.PreviousRow, previousRow);
-            Assert.Equal(expected.PageSum, pageSum);
-            Assert.Equal(expected.PageMax, pageMax);
-            Assert.Equal(expected.Any, any);
-        }
-        else
-        {
-            any = false;
+            outcome = Invoke(path, difference, dense, prev, tent, bell, page, &pageSum, &pageMax);
         }
 
+        Assert.Equal(expected.Output, output);
+        Assert.Equal(expected.PreviousRow, previousRow);
+        Assert.Equal(expected.PageSum, pageSum);
+        Assert.Equal(expected.PageMax, pageMax);
+        Assert.Equal(expected.Any, (outcome & ResolveOutcome.Empty) == 0);
+        Assert.Equal(expected.Changed, (outcome & ResolveOutcome.Changed) != 0);
+        any = (outcome & ResolveOutcome.Empty) == 0;
         return output;
     }
 
@@ -179,7 +192,7 @@ public sealed unsafe class ResolveTests
     [MemberData(nameof(Paths))]
     public void EdgeValueGrid_MatchesLongReference(ResolvePath path)
     {
-        var tile = new Tile { Tent = new long[Cells], Bell = new long[Cells] };
+        var tile = new Tile { Tent = new long[Cells], Bell = new long[Cells], Published = SeedPage(1) };
         for (var i = 0; i < tile.Difference.Length; i++)
             tile.Difference[i] = EdgeInts[i % EdgeInts.Length];
         for (var i = 0; i < Cells; i++)
@@ -223,6 +236,7 @@ public sealed unsafe class ResolveTests
         {
             Tent = withTent ? new long[Cells] : null,
             Bell = withBell ? new long[Cells] : null,
+            Published = SeedPage(seed),
         };
         unchecked
         {
@@ -240,6 +254,41 @@ public sealed unsafe class ResolveTests
         }
 
         Check(path, tile, out _);
+    }
+
+    [Theory]
+    [MemberData(nameof(Paths))]
+    public void ResolveTwice_SecondPassIsNotEmptyButUnchanged(ResolvePath path)
+    {
+        if (!Supported(path)) return;
+        var tile = new Tile { Tent = new long[Cells] };
+        tile.Difference[5 * Pitch + 3] = 40_000;
+        tile.Tent[10 * Size + 11] = 3L << 40;
+        var first = Check(path, tile, out var anyFirst);
+        Assert.True(anyFirst);
+        tile.Published = first;
+        var second = Check(path, tile, out var anySecond);
+        Assert.True(anySecond);
+        Assert.Equal(first, second);
+    }
+
+    [Theory]
+    [MemberData(nameof(Paths))]
+    public void CancelledDeposit_LeavesEmptyPageUnchanged(ResolvePath path)
+    {
+        if (!Supported(path)) return;
+        var tile = new Tile();
+        var variant = StampCatalog.Get(Stamp.Box(8, 8, 60));
+        fixed (int* difference = tile.Difference)
+        {
+            if (!TileBake.Place(16.5f, 16.5f, 0f, 0f, 256, 256, variant, 0, 256, out var p)) Assert.Fail();
+            TileBake.EmitBox(difference, 0, 0, p.Px, p.Py, p.Fx, p.Fy, p.ExtentX, p.ExtentY, variant, 5);
+            TileBake.EmitBox(difference, 0, 0, p.Px, p.Py, p.Fx, p.Fy, p.ExtentX, p.ExtentY, variant, -5);
+        }
+
+        var output = Check(path, tile, out var any);
+        Assert.False(any);
+        Assert.Equal(new short[Cells], output);
     }
 
     private static int NextInt(Random random, Regime regime) => regime switch

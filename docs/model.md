@@ -241,10 +241,11 @@ before reading command payloads, writing
   stamp, gain), any other plane stores one `Placement` per source per slot and the item carries
   its index — then collects the touched set (chain heads ∪ existing page keys, so dissipated
   tiles clear), pre-allocates pages and dense buffers serially, and resolves each touched tile
-  by re-emitting its own chain into a cleared difference array. Before re-emitting, the tile
-  saves its old page; after resolving it compares, and only tiles whose pages differ stay in
-  the dirty list — so epochs, `Changed`, and sleeping AI behave exactly as under incremental
-  processing (asserted: crowded output equals stepped incremental output cell for cell).
+  by re-emitting its own chain into a cleared difference array. The resolve compares each
+  published `int16` cell against the freshly resolved one in place, and only tiles whose bytes
+  differ stay in the dirty list — so epochs, `Changed`, and sleeping AI behave exactly as under
+  incremental processing (asserted: crowded output equals stepped incremental output cell for
+  cell).
   Crowdedness is a per-layer, per-frame decision, derived layers never crowd (they recombine),
   and idle frames — an empty op queue — short-circuit before any counting.
   Slot reuse can merge removal on one layer with placement on another before processing.
@@ -313,17 +314,25 @@ before reading command payloads, writing
   buffers — the four-plane total `boxes + dense + tent + bell` is formed in `int64` and
   saturates to `short` exactly once, **after** summation, so cancellation is preserved and two
   planes that each fit `int32` but whose sum does not saturate with the correct sign instead of
-  wrapping — and writes the page's
-  cell total into its `int64` sum slot and the page's maximum cell into its `int16` max slot
-  (both bit-identical across resolve paths). The scalar resolve is that exact definition; the
+  wrapping — and compares each published `int16` cell against the resolved one before storing
+  it, reporting a changed bit beside the page's
+  cell total in its `int64` sum slot and the page's maximum cell in its `int16` max slot
+  (all three bit-identical across resolve paths). The scalar resolve is that exact definition; the
   AVX2 and Vector128 resolves keep `int32` sums behind a per-tile exactness guard: while every
   cell's `|boxes|` and `|dense|` stay below `2^29` the `int32` total cannot wrap, because the
   tent and bell terms are `RoundQ40` results and so lie in `[−2^23, 2^23]` for any `int64`
   sums, so `|boxes + dense + tent + bell| < 2^31`; the guard accumulates `(v + 2^29)` over both
   operands, and the first tile where any lane holds bit 30 or 31 restores its `previousRow`
   carry from a private entry copy and resolves the whole tile through the scalar path, so every
-  resolve path publishes identical bytes. A tile that resolves to all-zero frees its block
-  and leaves the map — a missing page reads as 0. A world holding at least 32 dirty tiles across
+  resolve path publishes identical bytes and identical changed bits — the fast paths stage the
+  new page in a stack buffer and merge-compare it into the published page only after the guard
+  passes, while the fallback leaves the published page untouched and compares it in place. A
+  tile is changed exactly when its published bytes differ; a tile that resolves to all-zero
+  frees its block and leaves the map — a missing page reads as 0, and it stays changed only
+  when its old page held a non-zero cell, which the same comparison decides (the zeros it
+  publishes differ from that old page). Deposits that cancel inside one window — a source
+  moved out and back before `Process`, or removed while an identical source takes its place —
+  leave the published bytes equal, so nothing is reported. A world holding at least 32 dirty tiles across
   all its (grid, layer) pairs fans the whole drain over a fixed worker pool — one flattened
   queue, chunks of eight tiles crossing layer boundaries freely; smaller totals and contended
   pools resolve sequentially. After the drain (and, for pooled phases, strictly after the join),
@@ -332,9 +341,12 @@ before reading command payloads, writing
   maxes, stopping at a single root. A tile write updates the cached node max in its parent slot
   and propagates only when it must: a value above the cached max replaces it without a scan, an
   unchanged slot stops the walk, and only a falling former maximum rescans its 64-slot node
-  (vectorized for full nodes) before continuing upward. Each `Process` then rotates every
+  (vectorized for full nodes) before continuing upward. Tiles whose published bytes did not
+  differ leave the dirty list there and then — serially inside the drain, or in the pooled
+  epilogue that compacts every task's dirty list from the per-tile outcome bytes — so the
+  changed feed costs nothing for quiet tiles. Each `Process` then rotates every
   (grid, layer) dirty list into its **changed list** — a zero-copy buffer swap, so the tiles the
-  call resolved stay readable until the next `Process` overwrites them.
+  call changed stay readable until the next `Process` overwrites them.
 - **Derived layers**: `Layer.Sum(world, a, weightA, b, weightB, shift)` reads
   `clamp(round(weightA·A + weightB·B) / 2^shift)` — rounding half away from zero, weights within
   ±32,767 and `shift` 0–15, so the `int32` total `|weightA·A + weightB·B| < 2^31` is exact —
@@ -352,11 +364,15 @@ before reading command payloads, writing
   world context, so a wider budget widens those masks on the place and process paths; layer ids
   stay bytes. `Process`, after the drain (and the pool's
   join), visits derived layers in id order: each marks the union of its inputs' dirty lists —
-  this window's resolved tiles, derived inputs included — and recombines exactly those tiles in
+  this window's byte-changed tiles, derived inputs included, which is every tile whose
+  recombination can move a byte, because a derived page always equals the recipe applied to its
+  inputs' current bytes — and recombines exactly those tiles in
   one pass over the 1,024 cells of each input page (an absent page reads the shared zero page),
-  writing the derived page, its sum, and its max (16 or 8 cells per vector step, bit-identical
-  to the scalar loop). All-zero results free the tile; pyramids and changed lists update as for
-  any layer, so every query works on derived layers. `Place` on a derived layer returns `-1`.
+  comparing each published cell against the combined one before storing it, and writing the
+  derived page, its sum, and its max (16 or 8 cells per vector step, bit-identical
+  to the scalar loop). All-zero results free the tile — a fresh derived block starts zeroed, so
+  it compares against the zeros an absent page reads as; pyramids and changed lists update as
+  for any layer, so every query works on derived layers. `Place` on a derived layer returns `-1`.
   Recipes belong to the world's layer table and survive `Clear`; pages follow their inputs
   through `Rewind` and `Clear`. A derived layer created while its inputs already hold pages
   marks every live input tile, so the next `Process` fills it completely; resolve skips derived
@@ -436,16 +452,21 @@ before reading command payloads, writing
   gradients at the border measure the drop toward empty space, and a non-finite position
   returns `(0, 0)`. ~5 ns per point;
   `ChangedTiles(world, grid, layer, int* dst)` returns how many tiles the most recent
-  `Process` resolved on that (grid, layer) and copies the tile ids to `dst` when it is not
+  `Process` changed on that (grid, layer) — changed meaning the tile's published `int16`
+  bytes differ from what they were before that `Process`, on every deposit path — and copies
+  the tile ids to `dst` when it is not
   null — repainting, incremental network sync, and dirty-rect presentation read one call
-  instead of diffing pages. The list includes tiles that resolved to zero and left the map;
+  instead of diffing pages. The list includes a tile that resolved to zero and left the map
+  exactly when its old page held a non-zero cell; a deposit that cancels inside one window
+  reports nothing;
   it is empty before the first `Process`, after a `Process` with nothing dirty on that pair,
   and after `Clear`. The caller's buffer must hold the grid's tile count; passing null fetches
   only the count. Buffers swap, so the feed allocates nothing warm.
   `ChangedTiles(world, grid, layer, since, int* dst)` serves consumers that read at their own
   cadence: every (grid, layer) keeps an `int32` **epoch** per tile — the tick of the last
-  `Process` that resolved it, written for every dirty tile (base and derived, including tiles
-  that resolved to zero) after the drain — and the overload returns, ascending, every tile whose
+  `Process` that changed its bytes, written for every byte-changed tile (base and derived,
+  including tiles that resolved to zero with published content) after the drain — and the
+  overload returns, ascending, every tile whose
   epoch is after `since`. `Clear` stamps every tile it frees with the next tick, so a consumer
   polling with the current tick sees the cleared tiles;
   `QueryRegion(world, grid, layer, x, y, w, h, short* dst)` fills `w×h` cells row-major with
@@ -635,7 +656,10 @@ world rect at its own cell density; a source deposits into every grid it overlap
 - `changed-tiles-match-drain` — on a 64² grid, the changed-tile set after each `Process`
   equals the tile footprints of that window's place/move/remove operations exactly (count,
   membership, no duplicates), stays layer-isolated, empties on idle `Process` and `Clear`, and
-  includes tiles that resolved to zero and left the map.
+  includes tiles that resolved to zero and left the map with published content. The
+  byte rule itself — cancelled deposits report nothing, emptied tiles report exactly when
+  their old page held content, and crowd, delta and derived paths agree — is held by
+  `ChangedBytesTests`.
 - `deferred-window-matches-stepped-processing` — three worlds of 90 mixed mutations applied
   with one `Process` at the end produce bit-identical pages to the same sequences stepped
   through a `Process` per mutation; and a place-200 + remove-200 window collapses to an empty
@@ -676,7 +700,8 @@ world rect at its own cell density; a source deposits into every grid it overlap
   of derived inputs) over four grids through five churn rounds of mixed box, raster, tent, and
   bell sources: every cell equals the formula applied to the inputs' cells, the full and random
   rect sums equal scans, `QueryMax` (full and rect) equals the scan maximum at a cell holding
-  it, and each derived layer's changed tiles equal the union of its inputs'.
+  it, and every layer's changed tiles — base and derived — equal the tiles whose oracle-computed
+  bytes differ from the previous round's.
 - `derived-exclude-matches-removal` — 60 trials over five derived layers (including a chain and
   saturating piles): excluded point, area, and gradient reads equal the reads after
   `Remove` + `Process`, and `Rewind` restores the originals.
@@ -1181,21 +1206,29 @@ digits. Concurrency: single thread, and `ResolvePool.SerialOnly` keeps Gi from s
   preceded by a float range test — `CellQ8` on reads and `TileBake.Span` on deposits, both at
   ±2^30 — or converts a value already reduced to a bounded range (`Turn` and `Scale` reduce in
   double first), so no result depends on a platform's out-of-range conversion.
-- **Resolve entry copy and guard fallback**: the Vector128 and AVX2 resolves stack-allocate one
-  128 B `entry` row of 32 `int32` per call. Lifetime: it is private to the resolve call, on its
-  own stack frame, and no pointer to it escapes; it is fully written — vector stores covering
-  exactly cells 0–31 — from `previousRow` before the tile's first row is resolved, and read
-  only by the same call's restore loop after the guard trips, so under `SkipLocalsInit` no lane
-  is read before it is written. Aliasing: `entry` is fresh stack storage distinct from
-  `previousRow`, the tile's planes, and the page; the restore writes `previousRow[0..31]` only,
-  returning the carry to its entry values, so the scalar fallback resolves from the same
-  starting state the fast path used and its writes (output, `previousRow`, sum, max, `any`)
-  are the same tile-local set the fast path would have made. Alignment: the copy uses the
-  resolve's unaligned-safe vector loads and stores, correct for any `Prev` scratch slice
-  alignment. Concurrency: a tile is resolved by exactly one participant — the serial drain, one
-  pooled claim per tile, or the owning rebuild worker — and the guard check, restore, and
-  fallback all run inside that one resolve call, so no other writer can observe the
-  intermediate `previousRow` values.
+- **Resolve entry copy, staged page, and guard fallback**: the Vector128 and AVX2 resolves
+  stack-allocate one 128 B `entry` row of 32 `int32` and one 2 KB `fresh` page of 1,024
+  `int16` per call. Lifetime: both are private to the resolve call, on its
+  own stack frame, and no pointer to either escapes; `entry` is fully written — vector stores
+  covering exactly cells 0–31 — from `previousRow` before the tile's first row is resolved, and
+  read only by the same call's restore loop after the guard trips, while `fresh` is fully
+  written — one packed store per 4 or 8 cells over all 32 rows — before the merge loop reads
+  it, so under `SkipLocalsInit` no lane of either buffer
+  is read before it is written. Aliasing: `entry` and `fresh` are fresh stack storage distinct
+  from `previousRow`, the tile's planes, and the published page; the fast loop writes the
+  resolved cells to `fresh` alone, leaving the published page untouched, so the scalar
+  fallback compares and stores in place against the true prior bytes; the merge loop reads
+  each published group before overwriting it with the `fresh` group, one group at a time, so
+  no cell is compared against an already-updated value. The restore writes `previousRow[0..31]`
+  only, returning the carry to its entry values, so the scalar fallback resolves from the same
+  starting state the fast path used and its writes (output, `previousRow`, sum, max, `any`,
+  changed) are the same tile-local set the fast path would have made. Alignment: both copies
+  use the resolve's unaligned-safe vector loads and stores, correct for any `Prev` scratch
+  slice or page alignment. Concurrency: a tile is resolved by exactly one participant — the
+  serial drain, one pooled claim per tile, or the owning rebuild worker — and the guard check,
+  restore, merge, and fallback all run inside that one resolve call, so no other writer can
+  observe the intermediate `previousRow` values, the staged page, or the half-merged published
+  page.
 
 ### Floor probes
 
