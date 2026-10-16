@@ -22,7 +22,8 @@ internal static unsafe partial class ResolvePool
     private const int Chunk = 8;
     private const int Buckets = 64;
     internal const int ColumnThreshold = 8192;
-    private const int ColumnChunk = 1024;
+    private const int ColumnWordsPerChunk = 16;
+    private const int ColumnChunk = ColumnWordsPerChunk * 64;
     private const int ScatterChunk = 2048;
 
     private static int _busy;
@@ -492,7 +493,7 @@ internal static unsafe partial class ResolvePool
     private static void RunColumns(int mode)
     {
         WaitParked();
-        _columnCursor = _columnCount;
+        _columnCursor = 0;
         _remaining = _workers;
         Volatile.Write(ref _phase, mode);
         for (var k = 0; k < _workers; k++) _wake[k].Set();
@@ -503,13 +504,13 @@ internal static unsafe partial class ResolvePool
 
     private static void ColumnShare()
     {
+        var count = _columnCount;
         while (true)
         {
-            var claimed = Interlocked.Add(ref _columnCursor, -ColumnChunk);
-            var hi = claimed + ColumnChunk;
-            if (hi <= 0) return;
-            if (hi > _columnCount) hi = _columnCount;
-            var lo = claimed < 0 ? 0 : claimed;
+            var first = (long)(Interlocked.Increment(ref _columnCursor) - 1) * ColumnChunk;
+            if (first >= count) return;
+            var lo = (int)first;
+            var hi = (int)Math.Min(first + ColumnChunk, count);
             var gaps = _columnMode == 2
                 ? World.SenseRange(_columnWorld, _columnLayer, _columnXs, _columnYs, _columnValues, _columnWhole, lo, hi)
                 : World.ChangedRange(_columnWorld, _columnLayer, _columnXs, _columnYs, _columnReach, _columnSince, _columnWords, lo, hi);

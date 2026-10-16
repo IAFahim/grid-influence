@@ -919,6 +919,25 @@ pass behind them was `perf`-profile guided, receipts first.
   the worker consumes exactly one signal per round, an `AutoResetEvent`'s coalescing can never
   absorb a round: each round's signal reaches a thread that is at or past its park point, so
   every worker executes every round exactly once and each round's barrier arithmetic balances.
+  Column rounds (`SenseColumn` and `ChangedMask`, phases 2 and 3) publish the world, layer, caller
+  column pointers, mode, count, and a chunk cursor reset to zero before any wake event is signalled.
+  A participant claims chunk `k = Interlocked.Increment(cursor) - 1`, so chunks are handed out in
+  ascending order and each index exactly once, and ends its share when `1024 * k >= count` (the
+  product is formed in 64 bits). Chunk `k` owns rows `[1024k, min(1024k + 1024, count))`. A chunk
+  boundary is always a multiple of 1024, hence of 64, so chunk `k` owns mask words
+  `[16k, 16k + 16)` and no other chunk reads or writes them: value writes and mask-word
+  read-modify-writes are disjoint across participants, and the only shared write is the gap count,
+  through `Interlocked.Add`. Claiming downward from `count` would put boundaries at
+  `count - 1024k`, split words between two chunks, and lose bits to concurrent `|=`; claiming
+  upward is the fix, and `ColumnShareTests` compares pooled against serial masks and values at
+  counts that are not multiples of 64. Lifetime: the caller clears the `(count + 63) >> 6` mask
+  words before the round, workers touch caller columns only between wake and their volatile
+  decrement of the remaining count, and the initiator reads results only after its volatile read
+  of zero, so the caller's pointers outlive every dereference; workers park holding no pointer
+  they will use again before the next round rewrites them. Aliasing: inputs are read-only, the
+  value and mask outputs are written at disjoint indices, and the world is read-only during the
+  round under the serial-per-world rule. Alignment is that of the serial loop: natural alignment
+  for `float`, `short`, and `ulong` elements, each accessed whole.
   Source-batch rounds claim disjoint 128-row chunks. Pool acquisition protects their world and
   command pointers, cursor, count, and phase; a contending world uses its own inline ranges and
   does not read or modify these pool statics. Preparation is phase 6 and writes only batch rows;
