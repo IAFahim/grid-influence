@@ -26,7 +26,7 @@ internal static unsafe partial class Verification
             $"payload: 12 B/row position-only, 20 B/row full pose, {sizeof(World.TransformRange)} B descriptor; " +
             "0 full input copies; 1 planning scan; 1 bit/row invalid mask");
         Console.WriteLine(
-            $"scratch: 0 B under {ResolvePool.ColumnThreshold} rows; large path " +
+            $"scratch: 0 B under 8192 rows; large path " +
             $"{sizeof(SourceBatchEntry)} B per unique source + 4 B/entry lookup + ops reuse; " +
             "no command links, no per-row results");
         foreach (var count in new[] { 64, 4096, 65536, 100000 })

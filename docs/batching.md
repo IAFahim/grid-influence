@@ -6,7 +6,7 @@ Design and implementation tracker: [source batches #34](https://github.com/IAFah
 [transform-only updates #38](https://github.com/IAFahim/grid-influence/issues/38),
 [borrowed transform ranges #39](https://github.com/IAFahim/grid-influence/issues/39).
 `World.ApplyBatch`, source commands, creation targets, per-command results, the `World.Revision`
-token, and parallel tile footprint preparation are implemented in `1.2.0-alpha.2`; checked
+token, and tile footprint preparation are implemented in `1.2.0-alpha.2`; checked
 consumption with `World.Token`, `UpdateTransform`, and `World.SyncTransforms` land in
 `1.2.0-alpha.3`. Direct mutations and batch calls remain
 exclusive per world. Concurrent submissions belong in host-owned buffers, not concurrent `Place` calls.
@@ -29,7 +29,7 @@ new inputs. One coordinator owns each Gi world across all host systems and ECS w
 | Existing surface | Real caller | Batch treatment and required semantics |
 | --- | --- | --- |
 | `World.New`, `Free`, `CopyWorldIds` | Bootstrap, streamed level lifetime, coordinator | Exclusive lifetime boundary. Join in-flight input, processing, readers, and result users before freeing/reusing a world handle. |
-| `Grid.New`, `Layer.New`, `Layer.Sum`, `Min`, `Max`, `Mask` | Bootstrap or controlled graph changes | Exclusive structural phase. Freeze grid/layer records while source and tile workers use them. Preserve derived-layer dependencies. |
+| `Grid.New`, `Layer.New`, `Layer.Sum`, `Min`, `Max`, `Mask` | Bootstrap or controlled graph changes | Exclusive structural phase. Freeze grid/layer records while sources are written and tiles are prepared. Preserve derived-layer dependencies. |
 | Grid/layer `Count`, `CopyIds`, `TryGetSpec` | Tools, buffer sizing, coordinator | Read during a stable metadata phase; do not race world/grid/layer creation or destruction. |
 | `Stamp.New`, `Box`, `Tent`, `Bell`, `Disk`, `Cone`, `Dome`, `Free` | Runtime catalog owner | Register at runtime before producer jobs use byte handles. Catalog mutation is exclusive across worlds; a deferred request also retains its stamp until consumed/cancelled. |
 | `World.Place` | Spawn bursts, persistent emitters, transient effects | Existing direct API keeps its immediate integer result. Deferred recording returns a scoped ticket; creation produces a real source ID or explicit failure. Same-batch commands may target the ticket. |
@@ -42,7 +42,7 @@ new inputs. One coordinator owns each Gi world across all host systems and ECS w
 | `Process`, `ProcessAll` | Explicit simulation phase | Consume only sealed, accepted work; tick once per chosen processing step. No producer may mutate the batch being consumed. |
 | `Query`, `QueryAt`, `QueryRegion`, `QueryMax`, `QueryGradient` | Parallel gameplay readers | Read the last completed field; join before ingestion/processing and wait for publication before reading the new field. |
 | `TrySense*`, including source exclusion | AI sensing, self-exclusion | Same read fence; source columns and pending operations are part of the read set. Exclusion uses the last applied placement, not an unprocessed desired position. |
-| `SenseColumn`, `ChangedMask` | Large AI query batches | Reuse the current column APIs and their worker thresholds. Concurrent calls need disjoint output columns/masks; ingestion and processing still wait for these readers. |
+| `SenseColumn`, `ChangedMask` | Large AI query batches | Reuse the current column APIs. Concurrent calls need disjoint output columns/masks; ingestion and processing still wait for these readers. |
 | `Covers`, `Tick`, `Changed`, `ChangedTiles` | Routing, incremental consumers | Stable read phase. Publish changed lists, epochs, and derived results together after processing finishes. |
 | `Clear`, `Record`, `StopRecording`, `Rewind` | Reset, replay, rollback | Ordered exclusive controls at a batch boundary. Define pending-input cancellation/retention explicitly; preserve timer and source generations. Reject obsolete queued epochs after clear/rewind. |
 
@@ -64,30 +64,29 @@ encoded as ordinary source IDs. A host owner can disappear before creation compl
 the request identity, cancel before ingestion when possible, or remove the resulting source
 afterward. Do not lose the result just because the original entity no longer has its component.
 
-## Data and worker stages
+## Data and processing stages
 
 1. Record typed creation, mutation, removal, and scheduling inputs into producer-owned storage.
    Complete-state inputs use a direct array fast path when counts and ownership are known.
 2. Seal, count, validate ordering/identity, and normalize conflicting inputs by source. Reuse
    retained scratch and prefix offsets; avoid sorting the already-unique full-state path.
-3. Reserve source slots, source-column capacity, and operation ranges before exposing worker
-   pointers. Validate result capacity before application. Source-slot exhaustion is a per-command
+3. Reserve source slots, source-column capacity, and operation ranges before writing rows.
+   Validate result capacity before application. Source-slot exhaustion is a per-command
    failure; native memory growth follows Gi's existing allocation contract.
-4. Apply disjoint source assignments in parallel. Preserve the earliest applied state and final
-   desired state in one pending operation per slot. Reduce partition-local counters afterward;
-   do not increment shared lengths/free lists from workers.
-5. Commit ordered timer/journal work without concurrent heap/list mutation. Keep the existing
+4. Apply source assignments in order. Preserve the earliest applied state and final
+   desired state in one pending operation per slot, and fold layer counters afterward.
+5. Commit ordered timer/journal work. Keep the existing
    timer-before-deposit processing semantics and rewind parity.
-6. Calculate footprints into partition-owned ranges. Gather tile requirements by key, prepare
+6. Calculate footprints into retained ranges. Gather tile requirements by key, prepare
    sparse maps and buffers, then publish stable pointers. No pointer survives an arena resize.
-7. Reuse Gi's current adaptive deposit, crowded-rebuild, and tile resolution machinery. One
-   worker owns a `(grid, layer, tile)` while different tiles execute concurrently. Shared map
-   removal/freeing and index publication happen after worker joins; derived layers follow inputs.
+7. Reuse Gi's current adaptive deposit, crowded-rebuild, and tile resolution machinery. Each
+   `(grid, layer, tile)` has one writer; shared map
+   removal/freeing and index publication stay on the calling thread; derived layers follow inputs.
 8. Publish result IDs and field availability. Reclaim input memory only after every relevant
    producer, consumer, result publisher, and reader is finished.
 
-The core stays dependency-free. Synchronous batch methods borrow native ranges only until all
-internal workers join; they do not retain caller spans/pointers. A future asynchronous API would
+The core stays dependency-free. Synchronous batch methods borrow native ranges only until the
+call returns; they do not retain caller spans/pointers. A future asynchronous API would
 need a separate explicit lifetime contract. Ordinary .NET callers own explicit recording lanes;
 Unity's worker-index streams are not a general managed-thread primitive.
 
@@ -142,20 +141,19 @@ No host API is added to Gi. Exclusive direct calls remain available between batc
 Small full-state batches validate and apply in one inline pass. Large unique full-state batches
 avoid hashing; repeated sources fall back to ordered grouping. General batches reserve slots
 against a virtual free ring, validate generation-tagged IDs, and retain one row per affected slot.
-Two worker phases prepare final states and write disjoint columns/operation ranges using the
-existing `ResolvePool`. The caller commits timer heaps and schedule journals after joining.
+Two sequential phases prepare final states and write columns/operation ranges on the calling
+thread. Timer heaps and schedule journals are committed between them.
 Fresh placement undo records preserve the direct `Place` layer and identity semantics, including
 reused slots. Cross-layer slot reuse also fixes an existing crowded-processing defect: retraction
 and application now count/skip against their respective layers rather than treating the whole
 operation as belonging to its target layer ([#36](https://github.com/IAFahim/grid-influence/issues/36)).
 No public mutation replay loop or new scheduler is used.
 
-Tile footprint preparation is parallel too (#35): when a deferred batch acquires the pool,
-workers claim 64-op chunks and write per-worker placements, 16 B key-carrying fragments, and
-(grid, layer, tile) prep keys; the owning thread stitches them by prefix offsets and a
-counting sort; a second round gives each (grid, layer) task one writer, which sorts its tiles,
-allocates and grows blocks, and marks dirty in ascending order before apply workers see
-anything. Fragments never hold block pointers, so no pointer survives an arena resize.
+Tile footprint preparation is deferred too (#35): a heavy or large batch resolves one
+placement per (deposit, grid), appends a 16 B key-carrying fragment per touched tile,
+allocates and grows blocks, and marks dirty in ascending order — all on the calling thread —
+before the fragment apply runs. Fragments never hold block pointers, so no pointer survives
+an arena resize.
 `dotnet run --project benchmarks -c Release --no-build -- --stages` reports preparation,
 application, and resolution costs per `Process` against the forced-serial build.
 
@@ -246,9 +244,9 @@ Paths and scratch: under 8,192 total rows one inline pass on the caller enqueues
 coalescing ops `Move`/`Turn`/`Scale` would, with zero scratch. Above that, a sequential
 caller-thread scan folds rows into one entry per unique source — seeded from the current
 columns, or from the slot's pending op so an unprocessed earlier edit merges rather than
-chains, preserving that op's original `From*` for rewind — and the existing pooled batch-apply
-phase writes source columns and ops in parallel before the workers join. Invalid bits are all
-written during the caller-thread scan, so no mask word has two writers. The retained O(N)
+chains, preserving that op's original `From*` for rewind — and the batch-apply
+phase then writes source columns and ops in one sequential pass. Invalid bits are all
+written during the planning scan. The retained O(N)
 scratch of the large path is one 136-byte batch entry plus 4 bytes of hash lookup per unique
 source — no per-row command links, no result rows, no flattened copy. The columns are borrowed
 only for the synchronous call and no caller pointer survives the return; the host retains the
@@ -258,18 +256,18 @@ storage through the consumer handle and a producer must never write a consumed r
 
 `BatchSemanticsTests` establishes observable serial behavior for deferred visibility,
 coalescing, generation reuse, fade cancellation, self-exclusion, idle ticking, and rewind.
-Use those behaviors as an oracle for batch tests, then vary producer order, partition count,
-worker completion order, shape overlap, grid scale, and storage growth. Cover rejected input,
+Use those behaviors as an oracle for batch tests, then vary producer order, batch size,
+shape overlap, grid scale, and storage growth. Cover rejected input,
 owner destruction, pending ticket cancellation, shutdown, and batches spanning multiple frames.
 
 Verify warm allocation bounds, the complete unsafe proof, tests, samples, and both intrinsic
 modes before reporting stage timings. Report recording, normalization/reservation, source
 ingestion, structural tile preparation, and tile processing separately. Reuse the existing
-small-work inline path instead of paying parallel setup cost for every batch.
+small-work inline path instead of paying large-batch setup cost for every batch.
 
 `SourceBatchTests` compares batches with ordered direct calls across every stamp shape, multiple
 grids, derived layers, pending operations, stale/reused IDs, timer cancellation, expiry, rewind,
-rejection, large parallel batches, duplicate fallback, and concurrent independent worlds.
+rejection, large batches, duplicate fallback, and concurrent independent worlds.
 `dotnet run --project benchmarks -c Release -- --batch` checks parity and warm allocation before
 printing serial-versus-batch ingestion timing. It excludes host recording and tile processing
 from the timed interval; transport and end-to-end Unity timing require the host consumer.

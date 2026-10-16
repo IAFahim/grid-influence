@@ -60,10 +60,11 @@ the ones this page never quotes, has a runnable example in
 [`docs/examples.md`](docs/examples.md).
 
 `World.ApplyBatch(world, commands, results)` ingests sealed source commands with ordered partial
-updates, creation results, fades, and expiry. Large batches prepare and write disjoint source
-slots using Gi's worker pool; deferred deposit batches also build their tile footprints,
-page allocations, and dirty marks in parallel — one writer per (grid, layer) — with fragments
-carrying tile keys, never block pointers; `Process` remains the explicit deposit/tick boundary.
+updates, creation results, fades, and expiry. Large batches prepare and write source
+slots in one sequential pass; deferred deposit batches also build their tile footprints,
+page allocations, and dirty marks on the calling thread — one writer per (grid, layer) — with
+fragments carrying tile keys, never block pointers; `Process` remains the explicit deposit/tick
+boundary.
 Hosts can record concurrently into their own buffers, then join producers and Gi readers
 before ingestion; `World.Capture(world)` seals a checked token, and the token overloads of
 `ApplyBatch`, `Sync`, and `Process` reject work recorded against a cleared, rewound, freed, or
@@ -401,7 +402,7 @@ World.SyncTransforms(token, ranges);
 `SenseColumn` reads agent coordinates as `float*` and writes `short*` values (plus optional
 whole-tile flags); `ChangedMask` writes one `ulong` per 64 agents, zeros for the quiet ones;
 `Sync` is the fused form of `Move` for a whole column — gen-validated, coalescing, zero managed
-allocation. At 8,192+ rows they fan out over the same worker pool as resolve. `SyncTransforms`
+allocation. At 8,192+ rows they take the large-batch path. `SyncTransforms`
 consumes the same host-native columns for full poses — 12 B per position-only row, 20 B with
 heading and scale, no flattening into commands, no per-row results — and reports stale rows as
 one mask bit instead.
@@ -422,8 +423,8 @@ unless noted; `process` rows include the mutations.
 | `TrySenseNearest` r=32 | 0.86 µs | closest cell at a threshold |
 | `Changed` r=16 | 58 ns | tile epochs since a tick |
 | `exclude: self` point / area r=24 bell | 0.03–0.04 / 2.7 µs | exact aura removal, no rebuild |
-| place/move 200 boxes + `Process` | ~80–95 µs | deferred ops, pooled resolve |
-| 4,000 bells 16×16 + 200 moves, `Process` stages | 280 µs total | prep 74 / apply 50 / resolve 156 — parallel build; serial build totals 818 µs (`--stages`) |
+| place/move 200 boxes + `Process` | ~80–95 µs | deferred ops, serial resolve |
+| 4,000 bells 16×16 + 200 moves, `Process` stages | 818 µs total | prep/apply/resolve split via `--stages`; the 280 µs figure predates removing the worker pool |
 | 65,536 transform updates via `ApplyBatch` | 2,061 µs | 31.8M rows/s — `UpdateTransform` snapshots preserve fades, 0 B warm (`--batch`) |
 | 65,536 borrowed transform rows via `SyncTransforms` | 2,183 µs | 30.0M rows/s — host-native columns, 20 B/row pose, 1 bit/row mask, 0 B warm (`--sync`) |
 | 100,000 borrowed transform rows | 3,389 µs | 29.5M rows/s — serial loop 1,854 µs, `ApplyBatch` 2,971 µs at this size (`--sync`) |
@@ -439,9 +440,9 @@ unless noted; `process` rows include the mutations.
 | same via 1M `Query` calls | 6,100 µs | ~12,000× slower |
 | best cell of `food − 2·threat`, derived | 0.18 µs | vs 860 µs `QueryRegion` ×2 + scan |
 | 2,000 fading sources, per tick | 31 µs mean, 0 µs idle | vs ~330 µs dense decay pass |
-| move 400 across 16 layers + `Process` | 74 µs | one flattened worker queue |
+| move 400 across 16 layers + `Process` | 74 µs | serial dirty-tile drain |
 | `QueryRegion` fill 256² | 6.8 µs | straight into your pixel buffer |
-| `SenseColumn` per agent | 9.7 ns | 100k agents, pooled |
+| `SenseColumn` per agent | 9.7 ns | 100k agents |
 | `ChangedMask` per agent | 15 ns | reach 24, 100k agents |
 | `Sync` per position | 13.8 ns | 100k, excludes `Process` |
 
@@ -476,7 +477,7 @@ tile), so an empty world of any size costs zero.
 ## Reference frames (1M entities, one core)
 
 Deployments are measured against reference frames (`--frames all --precision exact|cell`) on
-one pinned core (`ResolvePool.SerialOnly = true`, 0 B allocated per frame). Each base layer
+one pinned core (0 B allocated per frame). Each base layer
 chooses its snapping precision (`Layer.New(world, Layer.Precision.Cell)` for cell-snapped
 deposits, `Layer.Precision.Exact` for 1/256-cell sub-cell motion); a source only enqueues work
 when its snapped key changes.
@@ -600,8 +601,8 @@ a full 512² region scan, and the 600-tick loop allocates 0 B.
   retract-and-apply pair per op. Integer adds commute, so any mutation sequence collapses
   exactly, and a source placed and removed inside one window never touches a tile. Light
   box batches emit fused on the calling thread; heavy or large deferred batches build
-  footprints, page allocations, and dirty marks in parallel — per-worker scratch, an
-  owning-thread stitch, then one writer per (grid, layer) — with fragments carrying tile
+  footprints, page allocations, and dirty marks in order on the calling thread —
+  one writer per (grid, layer) — with fragments carrying tile
   keys instead of block pointers, and dirty lists still deterministic and ascending.
 - **Each stamp kind deposits at its own sparsity.** A box is 4 corner writes per tile band. A
   raster samples bilinearly into the tile's dense buffer. Tents and bells add their exact
@@ -622,15 +623,10 @@ a full 512² region scan, and the 600-tick loop allocates 0 B.
   descends a per-(grid,layer) max pyramid; nearest prunes tiles by their max; `Changed` reads
   per-tile epochs.
 - **Crowded layers rebuild.** Deposits counted from the op queue vs an incrementally maintained
-  live count decide per layer, per frame. The rebuild scatters sources into per-(tile, worker)
-  chunk chains — one writer per arena, indices stable across growth — then re-emits and resolves
+  live count decide per layer, per frame. The rebuild scatters sources into per-tile
+  chunk chains — one arena, indices stable across growth — then re-emits and resolves
   each touched tile from its own chain, saving the old page first so `Changed` still means
   "values differ". Dissipated tiles free their blocks; derived layers see the same dirty set.
-- **Big frames fan out.** ≥32 dirty tiles total splits resolve over a fixed worker pool; large
-  mutation batches fragment by tile so no two workers share a tile. Rounds handshake through a
-  parked gate — workers flag themselves parked before waiting, initiators wait for all-parked
-  before publishing round state — so wake-ups stay one-per-round regardless of timing. Pooled
-  and serial output are bit-identical.
 - **Handles, not objects.** Everything public returns `byte` ids into unmanaged arenas; source
   ids pack a generation over the slot index, so stale handles are inert no-ops and slots
   recycle. No managed allocation on the data path.
@@ -660,14 +656,14 @@ intrinsics:
 | `sense-*`, `derived-exclude-matches-removal`, `turned-exclude-matches-removal` | grid picking, disk scans, nearest, and exclusion == removal bit for bit |
 | `fade-steps-match-schedule`, `expire-removes-on-schedule`, `rewind-resumes-schedules` | 140 fades follow the spec every tick; expiry edge cases; a rewound world tracks its twin |
 | `source-slots-reuse-and-stale-handles-inert`, `rewind-restores-recorded-state`, `signed-gain-exact` | handle lifecycle, rewind, signed gains |
-| `saturated-sum-clamps`, `cross-grid-sums-conserve-world-integral`, `multi-layer-pooled-matches-scans` | saturation, scale conservation, pooled determinism |
+| `saturated-sum-clamps`, `cross-grid-sums-conserve-world-integral`, `multi-layer-churn-matches-scans` | saturation, scale conservation, churn determinism |
 | `crowded-rebuild-matches-stepped-incremental`, `crowded-small-boxes-match-stepped-incremental`, `crowded-unchanged-frames-report-no-changed-tiles` | the rebuild equals stepped incremental on every cell; no-change frames report no changed tiles |
 | `sense-column-matches-try-sense`, `changed-mask-matches-changed`, `sync-matches-move` | column batches equal the per-agent API bit for bit |
 | `warm-crowded-process-allocates-0-bytes`, `warm-column-batches-allocate-0-bytes` | 0 B for crowded `Process` and column batches, warm |
 | `source-batches-match-serial-and-allocate-0-bytes`, `source-batches-retract-across-layers` | sealed batch ingestion equals serial calls cell for cell and rewinds across layers, 0 B warm |
 | `transform-updates-match-ordered-calls` | `UpdateTransform` batches equal ordered `Move`+`Turn`+`Scale` on every cell while fades keep running, 0 B warm |
 | `sync-transforms-match-ordered-calls` | borrowed `SyncTransforms` ranges equal ordered calls and `ApplyBatch` on every cell through stale rows, fades, and pending merges, 0 B warm |
-| `parallel-deposit-prep-matches-serial` | pooled tile preparation equals the serial build on every cell across shapes, grids, layers, saturation, churn, and changed tiles, 0 B warm |
+| `mixed-stamp-process-allocates-zero-bytes` | moving mixed-shape workloads across shapes, grids, layers, removals, and churn process with 0 B warm |
 
 ## Cookbook
 

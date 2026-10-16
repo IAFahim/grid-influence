@@ -35,16 +35,7 @@ internal sealed unsafe class CorpusRunner
 
     public static void Run(StreamSetup setup, string mode, TextWriter output)
     {
-        var previous = ResolvePool.SerialOnly;
-        ResolvePool.SerialOnly = true;
-        try
-        {
-            new CorpusRunner(setup, output).Execute(mode);
-        }
-        finally
-        {
-            ResolvePool.SerialOnly = previous;
-        }
+        new CorpusRunner(setup, output).Execute(mode);
     }
 
     private void Execute(string mode)

@@ -100,11 +100,10 @@ public sealed unsafe class ColumnBudgetTests : IDisposable
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void WarmPointGradientAndChangedColumnsAllocateZeroBytes(bool pooled)
+    [InlineData(65)]
+    [InlineData(16387)]
+    public void WarmPointGradientAndChangedColumnsAllocateZeroBytes(int count)
     {
-        var count = pooled ? 16387 : 65;
         var source = World.Place(_world, _layer, 32.5f, 31.5f, _stamp, 2);
         World.Process(_world);
         var xs = new float[count];
@@ -121,43 +120,34 @@ public sealed unsafe class ColumnBudgetTests : IDisposable
             excludes[i] = i % 2 == 0 ? source : -1;
         }
 
-        var previousSerial = ResolvePool.SerialOnly;
-        ResolvePool.SerialOnly = !pooled;
-        try
+        fixed (float* xp = xs, yp = ys, gxp = gx, gyp = gy)
+        fixed (int* ep = excludes)
+        fixed (short* vp = values)
+        fixed (ulong* wp = words)
         {
-            fixed (float* xp = xs, yp = ys, gxp = gx, gyp = gy)
-            fixed (int* ep = excludes)
-            fixed (short* vp = values)
-            fixed (ulong* wp = words)
+            for (var repeat = 0; repeat < 16; repeat++)
             {
-                for (var repeat = 0; repeat < 16; repeat++)
-                {
-                    World.SenseColumn(_world, _layer, xp, yp, count, vp, wp);
-                    World.SenseColumn(_world, _layer, xp, yp, ep, count, vp, wp);
-                    World.SenseGradientColumn(_world, _layer, xp, yp, ep, count, gxp, gyp, wp);
-                    World.ChangedMask(_world, _layer, xp, yp, 0f, 0, count, wp);
-                }
-
-                var complete = true;
-                var hits = 0;
-                var before = GC.GetAllocatedBytesForCurrentThread();
-                for (var repeat = 0; repeat < 16; repeat++)
-                {
-                    complete &= World.SenseColumn(_world, _layer, xp, yp, count, vp, wp);
-                    complete &= World.SenseColumn(_world, _layer, xp, yp, ep, count, vp, wp);
-                    complete &= World.SenseGradientColumn(_world, _layer, xp, yp, ep, count, gxp, gyp, wp);
-                    hits += World.ChangedMask(_world, _layer, xp, yp, 0f, 0, count, wp);
-                }
-
-                var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-                Assert.True(complete);
-                Assert.True(hits > 0);
-                Assert.Equal(0L, allocated);
+                World.SenseColumn(_world, _layer, xp, yp, count, vp, wp);
+                World.SenseColumn(_world, _layer, xp, yp, ep, count, vp, wp);
+                World.SenseGradientColumn(_world, _layer, xp, yp, ep, count, gxp, gyp, wp);
+                World.ChangedMask(_world, _layer, xp, yp, 0f, 0, count, wp);
             }
-        }
-        finally
-        {
-            ResolvePool.SerialOnly = previousSerial;
+
+            var complete = true;
+            var hits = 0;
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            for (var repeat = 0; repeat < 16; repeat++)
+            {
+                complete &= World.SenseColumn(_world, _layer, xp, yp, count, vp, wp);
+                complete &= World.SenseColumn(_world, _layer, xp, yp, ep, count, vp, wp);
+                complete &= World.SenseGradientColumn(_world, _layer, xp, yp, ep, count, gxp, gyp, wp);
+                hits += World.ChangedMask(_world, _layer, xp, yp, 0f, 0, count, wp);
+            }
+
+            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.True(complete);
+            Assert.True(hits > 0);
+            Assert.Equal(0L, allocated);
         }
     }
 }

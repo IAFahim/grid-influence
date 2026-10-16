@@ -15,13 +15,6 @@ public static unsafe partial class World
 
         ClearBits(whole, count);
 
-        if (count >= ResolvePool.ColumnThreshold && ResolvePool.TryAcquire())
-        {
-            var gaps = ResolvePool.SenseColumns(w, layer, xs, ys, values, whole, count);
-            ResolvePool.Release();
-            return gaps == 0;
-        }
-
         return SenseRange(w, layer, xs, ys, values, whole, 0, count) == 0;
     }
 
@@ -37,13 +30,6 @@ public static unsafe partial class World
         if (count <= 0) return 0;
 
         ClearBits(words, count);
-
-        if (count >= ResolvePool.ColumnThreshold && ResolvePool.TryAcquire())
-        {
-            var hits = ResolvePool.ChangedColumns(w, layer, xs, ys, reach, since, words, count);
-            ResolvePool.Release();
-            return hits;
-        }
 
         return ChangedRange(w, layer, xs, ys, reach, since, words, 0, count);
     }

@@ -159,14 +159,9 @@ public sealed unsafe class ChangedBytesTests
         World.Free(w);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void CrowdAndDeltaPaths_ReportTheSameChangedTiles(bool serialOnly)
+    [Fact]
+    public void CrowdAndDeltaPaths_ReportTheSameChangedTiles()
     {
-        var previous = ResolvePool.SerialOnly;
-        ResolvePool.SerialOnly = serialOnly;
-        try
         {
             const int movers = 70;
             const int statics = 90;
@@ -222,10 +217,6 @@ public sealed unsafe class ChangedBytesTests
 
             World.Free(crowdWorld);
             World.Free(deltaWorld);
-        }
-        finally
-        {
-            ResolvePool.SerialOnly = previous;
         }
     }
 

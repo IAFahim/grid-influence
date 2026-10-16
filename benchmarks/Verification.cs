@@ -31,7 +31,7 @@ internal static partial class Verification
         Check("fifo-free-ring-delays-slot-reuse", FifoFreeRingDelaysSlotReuse());
         Check("rewind-restores-recorded-state", RewindRestoresRecordedState());
         Check("signed-gain-exact", SignedGainExact());
-        Check("multi-layer-pooled-matches-scans", MultiLayerPooledMatchesScans());
+        Check("multi-layer-churn-matches-scans", MultiLayerChurnMatchesScans());
         Check("saturated-sum-clamps", SaturatedSumClamps());
         Check("cross-grid-sums-conserve-world-integral", CrossGridSumsConserve());
         Check("kernels-share-box-units-and-centre", KernelsShareBoxUnitsAndCentre());
@@ -76,7 +76,7 @@ internal static partial class Verification
         Check("source-batches-retract-across-layers", SourceBatchesRetractAcrossLayers());
         Check("transform-updates-match-ordered-calls", TransformUpdatesMatchOrderedCallsAndAllocateNothing());
         Check("sync-transforms-match-ordered-calls", SyncTransformsMatchOrderedCallsAndAllocateNothing());
-        Check("parallel-deposit-prep-matches-serial", ParallelDepositPrepMatchesSerial());
+        Check("mixed-stamp-process-allocates-zero-bytes", MixedStampProcessAllocatesZeroBytes());
         Check("precision-cell-skips-subcell-moves-and-matches-exclusion", PrecisionCellSkipsSubcellMovesAndMatchesExclusion());
 
         Console.WriteLine(failures == 0 ? "verification: all receipts green" : $"verification: {failures} failures");
@@ -1246,7 +1246,7 @@ internal static partial class Verification
         return Gi.World.Query(w, g, l, 0, 0, 64, 64) == 0;
     }
 
-    private static bool MultiLayerPooledMatchesScans()
+    private static bool MultiLayerChurnMatchesScans()
     {
         var w = Gi.World.New();
         var g = Gi.Grid.New(w, 8, 0f, 0f, 256f);

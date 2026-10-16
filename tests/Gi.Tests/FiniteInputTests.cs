@@ -147,7 +147,7 @@ public sealed unsafe class FiniteInputTests : IDisposable
     [Fact]
     public void LargeColumnReads_MatchScalarReadsWithNonFiniteRowsOnPooledAndSerialPaths()
     {
-        const int count = ResolvePool.ColumnThreshold + 64;
+        const int count = 8192 + 64;
         var xs = new float[count];
         var ys = new float[count];
         var random = new Random(4242);
@@ -173,33 +173,24 @@ public sealed unsafe class FiniteInputTests : IDisposable
             expectedHits++;
         }
 
-        foreach (var serial in new[] { false, true })
         {
-            ResolvePool.SerialOnly = serial;
-            try
+            var values = new short[count];
+            var whole = new ulong[expectedWhole.Length];
+            var changed = new ulong[expectedChanged.Length];
+            fixed (float* xPointer = xs)
+            fixed (float* yPointer = ys)
+            fixed (short* valuePointer = values)
+            fixed (ulong* wholePointer = whole)
+            fixed (ulong* changedPointer = changed)
             {
-                var values = new short[count];
-                var whole = new ulong[expectedWhole.Length];
-                var changed = new ulong[expectedChanged.Length];
-                fixed (float* xPointer = xs)
-                fixed (float* yPointer = ys)
-                fixed (short* valuePointer = values)
-                fixed (ulong* wholePointer = whole)
-                fixed (ulong* changedPointer = changed)
-                {
-                    World.SenseColumn(_world, _layer, xPointer, yPointer, count, valuePointer, wholePointer);
-                    Assert.Equal(expectedHits, World.ChangedMask(
-                        _world, _layer, xPointer, yPointer, 3f, 0, count, changedPointer));
-                }
+                World.SenseColumn(_world, _layer, xPointer, yPointer, count, valuePointer, wholePointer);
+                Assert.Equal(expectedHits, World.ChangedMask(
+                    _world, _layer, xPointer, yPointer, 3f, 0, count, changedPointer));
+            }
 
-                Assert.True(expectedValues.AsSpan().SequenceEqual(values));
-                Assert.True(expectedWhole.AsSpan().SequenceEqual(whole));
-                Assert.True(expectedChanged.AsSpan().SequenceEqual(changed));
-            }
-            finally
-            {
-                ResolvePool.SerialOnly = false;
-            }
+            Assert.True(expectedValues.AsSpan().SequenceEqual(values));
+            Assert.True(expectedWhole.AsSpan().SequenceEqual(whole));
+            Assert.True(expectedChanged.AsSpan().SequenceEqual(changed));
         }
     }
 
@@ -254,7 +245,7 @@ public sealed unsafe class FiniteInputTests : IDisposable
 
     [Theory]
     [InlineData(300)]
-    [InlineData(ResolvePool.ColumnThreshold + 600)]
+    [InlineData(8192 + 600)]
     public void SyncTransforms_RejectsWholeRowsWithNonFinitePositionsOnSmallAndLargePaths(int count)
     {
         var world = World.New();
@@ -435,7 +426,7 @@ public sealed unsafe class FiniteInputTests : IDisposable
     [Fact]
     public void RejectedRowsAndOutsideReads_AllocateNothingWhenWarm()
     {
-        const int count = ResolvePool.ColumnThreshold + 128;
+        const int count = 8192 + 128;
         var ids = new int[count];
         var xs = new float[count];
         var ys = new float[count];

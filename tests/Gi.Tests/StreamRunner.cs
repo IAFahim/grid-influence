@@ -5,7 +5,6 @@ internal sealed unsafe class StreamRunner
     private const ulong AuxSalt = StreamOperands.AuxSalt;
     private const int MaxTiles = 64;
     private const int MaxColumn = 8;
-    private static readonly bool PooledMode = Environment.GetEnvironmentVariable("GI_DIFFERENTIAL_POOLED") == "1";
 
     private readonly StreamSetup _setup;
     private readonly List<StreamCommand> _commands;
@@ -53,22 +52,7 @@ internal sealed unsafe class StreamRunner
         BugInjection? bug = null,
         Action<int, byte, byte, short[]>? onPage = null)
     {
-        if (PooledMode)
-        {
-            new StreamRunner(setup, commands, bug, onPage).Execute();
-            return;
-        }
-
-        var previous = ResolvePool.SerialOnly;
-        ResolvePool.SerialOnly = true;
-        try
-        {
-            new StreamRunner(setup, commands, bug, onPage).Execute();
-        }
-        finally
-        {
-            ResolvePool.SerialOnly = previous;
-        }
+        new StreamRunner(setup, commands, bug, onPage).Execute();
     }
 
     public static StreamMismatch? TryRun(

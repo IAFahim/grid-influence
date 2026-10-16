@@ -43,7 +43,7 @@ public static unsafe partial class World
         }
 
         if (commands.Length == 0) return BatchStatus.Applied;
-        if (onlyUpdates && commands.Length < ResolvePool.ColumnThreshold)
+        if (onlyUpdates && commands.Length < LargeBatchThreshold)
         {
             ApplySmallSourceUpdates(context, commands, results);
             return BatchStatus.Applied;
@@ -61,29 +61,15 @@ public static unsafe partial class World
             if (context->BatchSources.Length == 0) return BatchStatus.Applied;
             EnsureSourceCapacity(&context->Sources, context, sourceCount);
 
-            var pooled = context->BatchSources.Length >= ResolvePool.ColumnThreshold && ResolvePool.TryAcquire();
-            if (pooled)
-            {
-                ResolvePool.PrepareSourceBatch(context, input);
-                ResolvePool.Release();
-            }
-            else PrepareSourceBatchRange(context, input, 0, context->BatchSources.Length);
+            PrepareSourceBatchRange(context, input, 0, context->BatchSources.Length);
 
             ReserveSourceBatchOperations(context, commands.Length);
-            context->BatchLayerDeltas.Resize(ResolvePool.MaximumSlots * SourceBatchLayerStride);
+            context->BatchLayerDeltas.Resize(SourceBatchLayerStride);
             context->BatchLayerDeltas.Span.Clear();
-            pooled = context->BatchSources.Length >= ResolvePool.ColumnThreshold && ResolvePool.TryAcquire();
-            var partitions = pooled ? ResolvePool.Slots : 1;
-
-            if (pooled)
-            {
-                ResolvePool.ApplySourceBatch(context);
-                ResolvePool.Release();
-            }
-            else ApplySourceBatchRange(context, 0, context->BatchSources.Length, 0);
+            ApplySourceBatchRange(context, 0, context->BatchSources.Length, 0);
 
             context->Sources.Count = sourceCount;
-            FinishSourceBatch(context, commands.Length, partitions);
+            FinishSourceBatch(context, commands.Length, 1);
         }
 
         return BatchStatus.Applied;

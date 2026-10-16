@@ -64,13 +64,13 @@ public static unsafe partial class World
         }
 
         if (totalRows == 0) return BatchStatus.Applied;
-        if (totalRows < ResolvePool.ColumnThreshold)
+        if (totalRows < LargeBatchThreshold)
         {
             ApplySmallTransformRanges(context, ranges);
             return BatchStatus.Applied;
         }
 
-        ApplyPooledTransformRanges(context, ranges, (int)totalRows);
+        ApplyLargeTransformRanges(context, ranges, (int)totalRows);
         return BatchStatus.Applied;
     }
 
@@ -136,7 +136,7 @@ public static unsafe partial class World
         }
     }
 
-    private static void ApplyPooledTransformRanges(WorldCtx* context, ReadOnlySpan<TransformRange> ranges, int totalRows)
+    private static void ApplyLargeTransformRanges(WorldCtx* context, ReadOnlySpan<TransformRange> ranges, int totalRows)
     {
         var source = &context->Sources;
         var capacity = Math.Min(totalRows, source->Count);
@@ -232,14 +232,9 @@ public static unsafe partial class World
         }
 
         context->Ops.Resize(assigned);
-        context->BatchLayerDeltas.Resize(ResolvePool.MaximumSlots * SourceBatchLayerStride);
+        context->BatchLayerDeltas.Resize(SourceBatchLayerStride);
         context->BatchLayerDeltas.Span.Clear();
-        if (entries >= ResolvePool.ColumnThreshold && ResolvePool.TryAcquire())
-        {
-            ResolvePool.ApplySourceBatch(context);
-            ResolvePool.Release();
-        }
-        else ApplySourceBatchRange(context, 0, entries, 0);
+        ApplySourceBatchRange(context, 0, entries, 0);
     }
 
     private static void BeginTransformDeposit(SourceBatchEntry* entry, int row)

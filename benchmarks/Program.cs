@@ -10,16 +10,7 @@ var result = Verification.Run();
 if (mode is "" or "--verify")
 {
     result |= FloorProbes.Receipts();
-    var previousSerial = Gi.ResolvePool.SerialOnly;
-    Gi.ResolvePool.SerialOnly = true;
-    try
-    {
-        result |= FrameReceipts.Run(Console.Out) == 0 ? 0 : 1;
-    }
-    finally
-    {
-        Gi.ResolvePool.SerialOnly = previousSerial;
-    }
+    result |= FrameReceipts.Run(Console.Out) == 0 ? 0 : 1;
 }
 if (mode == "--timing") Verification.Timing();
 if (mode == "--compare") Verification.Compare();

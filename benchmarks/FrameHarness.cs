@@ -39,7 +39,6 @@ internal static class FrameHarness
             return 2;
         }
 
-        Gi.ResolvePool.SerialOnly = true;
         if (options.Selection == "VERIFY") return FrameReceipts.Run(Console.Out) == 0 ? 0 : 1;
 
         var plans = Catalog.Where(p => options.Selection == "ALL" || options.Selection == p.Name).ToArray();

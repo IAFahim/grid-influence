@@ -188,8 +188,8 @@ set their invalid mask bit — bit `row & 63` of word `row >> 6`, tail bits zero
 producing a result row, and the
 call still returns `Applied`. Malformed descriptors, short masks, mask/column aliasing, or a
 stale token reject the whole call before any write. Under 8,192 rows the loop runs inline with
-zero scratch; above it a planning scan and the pooled apply reuse the source-batch machinery,
-with workers joined before the call returns.
+zero scratch; above it a planning scan and the batch apply reuse the source-batch machinery
+before the call returns.
 
 ## Time
 
@@ -297,7 +297,7 @@ World.Sync(world, sourceIds, newXs, newYs, count);
 ```
 
 `xs`, `ys`, `values`, `words`, `sourceIds` are raw pointers (`float*`, `short*`, `ulong*`,
-`int*`). Above 8,192 rows they fan out over the same worker pool as resolve; all three are
+`int*`). All three are
 zero managed allocation and bit-identical to the per-agent API.
 
 ## Limits

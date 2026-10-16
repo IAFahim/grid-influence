@@ -649,7 +649,7 @@ public static unsafe partial class World
         w->Pending.Pointer[slot] = n + 1;
     }
 
-    private static int ApplyDeposits(WorldCtx* w, ref bool pooled)
+    private static int ApplyDeposits(WorldCtx* w)
     {
         var count = w->Ops.Length;
         if (count == 0) return 0;
@@ -667,12 +667,6 @@ public static unsafe partial class World
 
         w->Fragments.Resize(0);
         w->Placements.Resize(0);
-        if (deferred && ResolvePool.TryAcquire())
-        {
-            pooled = true;
-            return BuildDepositsPooled(w, ops, count);
-        }
-
         for (var i = 0; i < count; i++)
         {
             var op = ops + i;
@@ -703,6 +697,7 @@ public static unsafe partial class World
 
     private const int DeferredOps = 512;
     private const int CrowdDeposits = 64;
+    internal const int LargeBatchThreshold = 8192;
     internal const uint BoxItem = 1u << 31;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1402,8 +1397,7 @@ public static unsafe partial class World
         if (w->Timers.Length != 0) RunTimers(w);
         w->Crowded = ScanCrowding(w);
         var stamp = ProcessStages.Mark();
-        var pooled = false;
-        var fragmentCount = ApplyDeposits(w, ref pooled);
+        var fragmentCount = ApplyDeposits(w);
 
         w->RebuildChains.Resize(0);
         w->RebuildDense.Resize(0);
@@ -1412,144 +1406,92 @@ public static unsafe partial class World
         w->RebuildArena.Resize(0);
         new Span<int>(w->Rebuilds, 2 * w->GridCount * MaxLayers).Fill(0);
 
-        if (w->Crowded != 0 && !pooled) pooled = ResolvePool.TryAcquire();
-        if (w->Crowded != 0 && pooled)
+        for (var gi = 0; gi < w->GridCount; gi++)
         {
-            var stride = 0;
-            for (var gi = 0; gi < w->GridCount; gi++)
-                for (var l = 0; l < w->LayerCount; l++)
-                    if ((w->Crowded & (1u << l)) != 0) stride = Math.Max(stride, (w->Grids + gi)->TileCount);
-
-            ResolvePool.BeginCrowdFrame(stride);
-            for (var gi = 0; gi < w->GridCount; gi++)
+            var g = w->Grids + gi;
+            for (var l = 0; l < w->LayerCount; l++)
             {
-                var g = w->Grids + gi;
-                for (var l = 0; l < w->LayerCount; l++)
-                {
-                    if ((w->Crowded & (1u << l)) == 0) continue;
-
-                    var ld = EnsureDirty(g, (byte)l);
-                    var (chainsRegion, denseRegion) = PrepareMerge(w, g->TileCount, ResolvePool.Slots);
-                    ResolvePool.ScatterLayer(w, g, (byte)l, chainsRegion, denseRegion);
-                    MergeLayer(w, g, ld, g->TileCount, chainsRegion, denseRegion, ResolvePool.Slots,
-                        w->Rebuilds + 2 * (gi * MaxLayers + l));
-                }
-            }
-        }
-        else
-        {
-            for (var gi = 0; gi < w->GridCount; gi++)
-            {
-                var g = w->Grids + gi;
-                for (var l = 0; l < w->LayerCount; l++)
-                {
-                    if ((w->Crowded & (1u << l)) != 0) RebuildLayer(w, g, (byte)l, gi * MaxLayers + l);
-                }
+                if ((w->Crowded & (1u << l)) != 0) RebuildLayer(w, g, (byte)l, gi * MaxLayers + l);
             }
         }
 
         ProcessStages.Measure(ref ProcessStages.PrepareTicks, stamp);
 
-        var total = 0;
+        stamp = ProcessStages.Mark();
+        ApplyFragments(w, fragmentCount);
+        w->Fragments.Resize(0);
+        ProcessStages.Measure(ref ProcessStages.ApplyTicks, stamp);
+        stamp = ProcessStages.Mark();
+
+        Placement** serialPlacements = stackalloc Placement*[1];
+        RebuildChunk** serialArena = stackalloc RebuildChunk*[1];
+        serialPlacements[0] = w->RebuildPlacements.Pointer;
+        serialArena[0] = w->RebuildArena.Pointer;
         for (var gi = 0; gi < w->GridCount; gi++)
         {
             var g = w->Grids + gi;
             for (var l = 0; l < w->LayerCount; l++)
-                if (!IsDerived(w, l)) total += g->Layers[l].Dirty.Length;
-        }
-
-        if (!pooled && total >= ResolvePool.Threshold) pooled = ResolvePool.TryAcquire();
-        if (pooled && fragmentCount >= ResolvePool.ApplyThreshold)
-        {
-            ResolvePool.ApplyAndResolveWorld(w, fragmentCount, total);
-            ResolvePool.Release();
-        }
-        else
-        {
-            stamp = ProcessStages.Mark();
-            ApplyFragments(w, fragmentCount);
-            w->Fragments.Resize(0);
-            ProcessStages.Measure(ref ProcessStages.ApplyTicks, stamp);
-            stamp = ProcessStages.Mark();
-
-            if (pooled)
             {
-                ResolvePool.ResolveWorld(w, total);
-                ResolvePool.Release();
-            }
-            else
-            {
-                Placement** serialPlacements = stackalloc Placement*[1];
-                RebuildChunk** serialArena = stackalloc RebuildChunk*[1];
-                serialPlacements[0] = w->RebuildPlacements.Pointer;
-                serialArena[0] = w->RebuildArena.Pointer;
-                for (var gi = 0; gi < w->GridCount; gi++)
+                if (IsDerived(w, l)) continue;
+
+                var ld = g->Layers + l;
+                var rebuildSlot = 2 * (gi * MaxLayers + l);
+                var slots = w->Rebuilds[rebuildSlot + 1];
+                var chainsRegion = w->Rebuilds[rebuildSlot];
+                var pages = &ld->Pages;
+                var dirty = ld->Dirty.Pointer;
+                var kept = 0;
+                for (var i = 0; i < ld->Dirty.Length; i++)
                 {
-                    var g = w->Grids + gi;
-                    for (var l = 0; l < w->LayerCount; l++)
+                    var tile = dirty[i];
+                    if (slots != 0)
                     {
-                        if (IsDerived(w, l)) continue;
-
-                        var ld = g->Layers + l;
-                        var rebuildSlot = 2 * (gi * MaxLayers + l);
-                        var slots = w->Rebuilds[rebuildSlot + 1];
-                        var chainsRegion = w->Rebuilds[rebuildSlot];
-                        var pages = &ld->Pages;
-                        var dirty = ld->Dirty.Pointer;
-                        var kept = 0;
-                        for (var i = 0; i < ld->Dirty.Length; i++)
+                        byte changed;
+                        var rebuilt = RebuildTile(w, g, ld, tile, chainsRegion, slots, serialArena, serialPlacements, w->Prev, &changed);
+                        if (rebuilt == null)
                         {
-                            var tile = dirty[i];
-                            if (slots != 0)
-                            {
-                                byte changed;
-                                var rebuilt = RebuildTile(w, g, ld, tile, chainsRegion, slots, serialArena, serialPlacements, w->Prev, &changed);
-                                if (rebuilt == null)
-                                {
-                                    if (pages->TryGet(tile, out var dead))
-                                    {
-                                        pages->Remove(tile);
-                                        FreeBlock(dead);
-                                    }
-
-                                    ld->Max.Update(g->TilesPerSide, tile, 0);
-                                }
-                                else
-                                {
-                                    ld->Max.Update(g->TilesPerSide, tile, *(short*)(rebuilt + MaxOffset));
-                                }
-
-                                if (changed != 0) dirty[kept++] = tile;
-                                continue;
-                            }
-
-                            ld->InDirty[tile] = 0;
-                            if (!pages->TryGet(tile, out var block)) continue;
-
-                            new Span<int>(w->Prev, TileBake.TileSize).Clear();
-                            var outcome = TileBake.Resolve(DiffOf(block), DenseOf(block), w->Prev, TentOf(block), BellOf(block),
-                                (short*)(block + PageOffset), (long*)(block + SumOffset), (short*)(block + MaxOffset));
-                            if ((outcome & ResolveOutcome.Empty) != 0)
+                            if (pages->TryGet(tile, out var dead))
                             {
                                 pages->Remove(tile);
-                                FreeBlock(block);
-                                ld->Max.Update(g->TilesPerSide, tile, 0);
-                            }
-                            else
-                            {
-                                ld->Max.Update(g->TilesPerSide, tile, *(short*)(block + MaxOffset));
+                                FreeBlock(dead);
                             }
 
-                            if ((outcome & ResolveOutcome.Changed) != 0) dirty[kept++] = tile;
+                            ld->Max.Update(g->TilesPerSide, tile, 0);
+                        }
+                        else
+                        {
+                            ld->Max.Update(g->TilesPerSide, tile, *(short*)(rebuilt + MaxOffset));
                         }
 
-                        ld->Dirty.Resize(kept);
+                        if (changed != 0) dirty[kept++] = tile;
+                        continue;
                     }
-                }
-            }
 
-            ProcessStages.Measure(ref ProcessStages.ResolveTicks, stamp);
+                    ld->InDirty[tile] = 0;
+                    if (!pages->TryGet(tile, out var block)) continue;
+
+                    new Span<int>(w->Prev, TileBake.TileSize).Clear();
+                    var outcome = TileBake.Resolve(DiffOf(block), DenseOf(block), w->Prev, TentOf(block), BellOf(block),
+                        (short*)(block + PageOffset), (long*)(block + SumOffset), (short*)(block + MaxOffset));
+                    if ((outcome & ResolveOutcome.Empty) != 0)
+                    {
+                        pages->Remove(tile);
+                        FreeBlock(block);
+                        ld->Max.Update(g->TilesPerSide, tile, 0);
+                    }
+                    else
+                    {
+                        ld->Max.Update(g->TilesPerSide, tile, *(short*)(block + MaxOffset));
+                    }
+
+                    if ((outcome & ResolveOutcome.Changed) != 0) dirty[kept++] = tile;
+                }
+
+                ld->Dirty.Resize(kept);
+            }
         }
+
+        ProcessStages.Measure(ref ProcessStages.ResolveTicks, stamp);
 
         if (w->DerivedCount != 0) Derive(w);
         for (var gi = 0; gi < w->GridCount; gi++)

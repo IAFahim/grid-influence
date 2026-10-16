@@ -158,7 +158,7 @@ public sealed unsafe class LayerLiveTests : IDisposable
     [Fact]
     public void BatchAboveTheColumnThreshold_KeepsTheCountExact()
     {
-        const int count = ResolvePool.ColumnThreshold + 1500;
+        const int count = 8192 + 1500;
         var create = new SourceCommand[count];
         for (var i = 0; i < count; i++)
         {
