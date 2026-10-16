@@ -177,7 +177,7 @@ Three claims from the earlier plans that these predictions reject:
 | P0-12 | Salvage + close `snapshot-bucket-index` | A | P0-1 | S | done | phase0 | profiler stale-handle fix + inspection accounting re-applied; 32 tests ported (958 total); branch closed at a53411d with the D14 note on #40; 3 findings carried to P0-14/P1-1 |
 | P0-13 | #40 + README interim | A | P0-11 | S | done | phase0 | README interim reference-frame section + 8500G numbers; PLAN.md superseded header; ROADMAP board completed |
 | P0-14 | Clean-up: CI inspect, doc/version echoes, carry-forward findings | A | — | S | done | phase0 | `jb inspectcode` 0 warnings; rejection outputs zeroed while preserving covered not-found `TrySenseNearest` position; exclusion fold widened to `int64` with non-uniform raster+box overflow test; non-finite `reach` rejected; ring + frame receipts in `--verify`; validation & stats READMEs updated; GC counter note in `docs/model.md` |
-| P1-1 | Reference interpreter | C | P0-10 (early) | L | todo | | |
+| P1-1 | Reference interpreter | C | P0-10 (early) | L | done | phase0 | `ReferenceWorld` tileless interpreter in `Gi.Tests`, BigInteger planes, exact saturation/rounding, full query/sense/exclusion/schedule parity; 989 tests pass lockstep differential validation across all stamp kinds and precisions |
 | P1-2 | Stream generator + differential + minimizer | C | P1-1 | M | todo | | |
 | P1-3 | Golden corpus | C | P1-2 | M | todo | | |
 | P1-4 | Laws | C | P1-2 | S | todo | | |
