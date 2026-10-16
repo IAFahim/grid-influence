@@ -105,6 +105,7 @@ internal static class FrameHarness
             .Integer("warmup_frames", options.Warmup)
             .Integer("measure_frames", options.Measure)
             .Text("percentile", "nearest-rank")
+            .Number("timestamp_overhead_ns", FrameStats.TimestampOverheadNs(), 2)
             .Text("receipts", "green")
             .Integer("receipt_lines", receiptCount)
             .EndObject()

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
 using System.Runtime.CompilerServices;
@@ -139,6 +140,24 @@ internal static class FrameStats
     {
         var rank = (ascending.Length * percent + 99) / 100;
         return ascending[Math.Clamp(rank, 1, ascending.Length) - 1];
+    }
+
+    public static double TimestampOverheadNs()
+    {
+        const int rounds = 16;
+        const int reads = 1 << 14;
+        var toNs = 1e9 / Stopwatch.Frequency;
+        var min = double.MaxValue;
+        for (var r = 0; r < rounds; r++)
+        {
+            long last = 0;
+            var start = Stopwatch.GetTimestamp();
+            for (var i = 0; i < reads; i++) last = Stopwatch.GetTimestamp();
+            var perRead = (double)(last - start) / reads * toNs;
+            if (perRead < min) min = perRead;
+        }
+
+        return min;
     }
 }
 

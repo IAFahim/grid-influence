@@ -56,6 +56,9 @@ internal sealed class FrameResult
             .Number("min_ms", MinNs / 1e6, 6)
             .Number("max_ms", MaxNs / 1e6, 6)
             .Number("mean_ms", MeanNs / 1e6, 6)
+            .Number("p50_ns", P50Ns, 1)
+            .Number("p99_ns", P99Ns, 1)
+            .Number("mean_ns", MeanNs, 1)
             .Number("p50_ns_per_entity", P50Ns / entities, 3)
             .Number("p99_ns_per_entity", P99Ns / entities, 3)
             .Number("mean_ns_per_entity", MeanNs / entities, 3);
@@ -65,6 +68,8 @@ internal sealed class FrameResult
         for (var s = 0; s < StageNames.Length; s++)
             json.BeginObject()
                 .Text("name", StageNames[s])
+                .Number("p50_ns", StageP50Ns[s], 1)
+                .Number("mean_ns", StageMeanNs[s], 1)
                 .Number("p50_ns_per_entity", StageP50Ns[s] / entities, 3)
                 .Number("mean_ns_per_entity", StageMeanNs[s] / entities, 3)
                 .Number("mean_share", MeanNs > 0 ? StageMeanNs[s] / MeanNs : 0, 4)
