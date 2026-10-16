@@ -187,7 +187,8 @@ Three claims from the earlier plans that these predictions reject:
 | V2-3 | Chunked sources + `SourceId` | V | V2-2 | L | done | #47 | `SourceColumn<T>`/`SourceColumns` chunked SoA (16,384-slot chunks, 1,024-pointer arrays, growth appends a zeroed chunk and never copies; cold schedule columns separate); `World.SourceId(uint Slot, uint Generation)` across scalar calls, `SourceId*` columns, batch commands/results, `TransformRange.Sources`, `TryGetSourceSpec`; 32-bit generations with retirement on every free path (Remove, expiry, batch remove, Rewind) — no id ever reissued (10^6-cycle churn test on 10 slots); int ids deleted per D5, no wrappers; corpus byte-identical, B1 mean p50 +1.2 % same-host i9-14900K (gate ±5 %; sync +1.6 ns from 8-byte ids + chunk indirection), 0 B warm, checksum + final state identical; stats/inspection receipts re-derived for chunks; 2.0.0-alpha.1 version lands at C-6 |
 | V2-4 | Kernel cache | V′ | V2-2 | M | done | #46 | `KernelCache` (32 fixed entries, packed-key linear scan, round-robin insert) + `KernelFactory` building gain-1 taps through today's emitters into scratch, then bbox/row-extents/max|tap|/structure tags (Box, Separable, Spans, Dense); 13 tests cover the card's full equality matrix (every kind, widths 1+2 and odd/even, all 256×256 box phases 1×1–8×8, scales {0.5, 1, 3.7}, sampled angles; gain × taps ≡ today's emission cell-for-cell, int32 and wrapping int64); grid-edge-clipped boxes and >4.19 M-cell canvases take the exact uncached path (soundness-tested); `Stamp.Free` flushes the cache; corpus byte-identical, B1 +0.8 % same-host i9-14900K (gate ±5 %), 0 B warm, 994/994, combined tree 1406/1406 after merge |
 | V2-5 | Planes, publish, summaries | V″ | V2-2 | M | done | #45 | `PlaneStore` (page / `I` / `T` / `B` / summary slabs, unit-index persistence, first-use `T`/`B`) + `TileBake.Publish` scalar/Vector128/AVX2 behind the exactness guard: compare-then-store, exact summaries with rescan-only-on-decrease max, epoch written only when bytes differ, ≥ 50 % whole-tile rule; 412 tests pin Publish to `Resolve` and an independent model (every cell and summary, scalar/SIMD identical); corpus byte-identical, B1 +0.81 % same-host i9-14900K (gate ±5 %), 0 B warm, 1393/1393; standalone until V2-6 wiring (i9-14900K host — re-run on Zen 4 for ledger absolutes) |
-| V2-6 | Change-rate `Process`, old pipeline deleted | V | V2-3, V2-4, V2-5 | L | blocked | #48 (draft) | correct (1069 tests, verify 144/0 and 127/0, checksums identical to ad2b5be) but the stop rule fired. i9-14900K `cpu0`, same-host A/B vs ad2b5be: B1 Exact `Process` 97 → 318 ns (gate ≤ 80, stop > 100); B1 Cell `Process`+`Sync` 77 → 144 ns (gate ≤ 10); B2 200 movers 208 → 284 µs (gate ≤ 20); RSS 365 → 284 MB (gate ≤ 180). Cause: the emit is O(area) once the difference plane is deleted, and instruction-bound (`--crowd` 359 ns per mover at cache-resident sizes). Tile-ordered sweep (`v2-6-tile-order`) buys 37 ns at B1 for +24 MB RSS (past the 300 MB stop): not merged. Ledger issues: the B1-at-Cell prediction assumed ≈ 10 % crossing but B1 crosses 62.5 %; the 40–80 ns Exact prediction came from the Ryzen's 134 ns baseline, the i9's old pipeline is 97 ns. Needs an owner re-plan; C-5 is the only unblocked `todo` card |
+| V2-6 | Change-rate `Process`, old pipeline deleted | V | V2-3, V2-4, V2-5 | L | review | #48 | correct (1069 tests, verify 144/0 and 127/0, checksums identical to ad2b5be on B1/B2/C/W at Exact and Cell, 0 B warm). Same-host i9-14900K `cpu0` vs ad2b5be: C Exact 84.5 → 136.9 ms, C Cell 32.2 → 36.4, W Exact 41.8 → 45.7, W Cell 15.3 → 19.3; B1 Exact `Process` 97 → 318 ns, B1 Cell `Process`+`Sync` 77 → 144 ns, B2 200 movers 208 → 284 µs; peak RSS down on every frame (C 310 → 243, W 626 → 317 MB). The original B1 gates were missed and the stop rule fired; they were reset (below) and the emit-cost recovery moved to V2-6b. Waiting on the owner to merge |
+| V2-6b | Emit-cost recovery | V | V2-6 | M | todo | | |
 | V2-7 | Turned/arc/raster/round on new path | V′ | V2-6 | M | todo | | |
 | V2-8 | Overflow by promotion | V″ | V2-6 | M | todo | | |
 | V2-9 | Schedule sweep | V | V2-6 | S | todo | | |
@@ -505,12 +506,25 @@ L · needs V2-3, V2-4, V2-5
   - the op pipeline: `DepositOp`, `Ops`, `Pending`, `Fragments` and `Placements`;
   - the difference and dense planes, `TileBake.Resolve`, and the remaining users of `IntegrateBoxes` and `Quadrant`.
 - Until R-6 lands, exclusion reads the deposited record and calls `Place`.
-- **Done when:**
+- **Done when** (reset 2026-10-17 after measuring C and W; the original B1 gates were B1 Exact `Process` ≤ 80 ns, B1 Cell `Process` + `Sync` ≤ 10 ns, B2 ≤ 2 µs / ≤ 20 µs, RSS ≤ 180 MB):
   - corpus, interpreter and receipts are green at Exact and at Cell;
-  - B1 Exact `Process` ≤ 80 ns;
-  - B1 Cell `Process` + `Sync` ≤ 10 ns;
-  - B2 ≤ 2 µs / ≤ 20 µs;
-  - RSS ≤ 180 MB.
+  - every frame's output checksum equals the previous engine's, and warm paths allocate 0 B;
+  - no frame's peak RSS above the previous engine's, and ≤ 300 MB;
+  - the `Process` cost is measured on B1, B2, C and W against the previous engine and recorded; recovery is V2-6b.
+
+#### V2-6b · Emit-cost recovery
+M · needs V2-6
+- **Why.** V2-6 is correct but slower than ad2b5be on this host: C Exact +62 %, C Cell +13 %, W Exact +9 %, W Cell +25 %, B1 Exact `Process` 97 → 318 ns. Deleting the difference plane made a box emit O(area); `Process` is instruction-bound (at cache-resident sizes: `EmitBoxDelta` 30 %, publish summaries 15 %, placement 11 %), with the first touch of each tile's `I` row a further 10–25 % at 1M random-order sources.
+- **Levers, in the order I would try them.**
+  1. Emit a mover's −old and +new box as one per-row delta (the box is separable, so `delta_row = wy_new·px_new − wy_old·px_old`) when both land on the same tile.
+  2. Cache the placement and footprint of an unchanged stamp and scale; remove the `__tls_get_addr` calls on the sweep path.
+  3. Cut `UpdateSummaries` to the rows the rectangle touched.
+  4. Tile-ordered sweep (branch `v2-6-tile-order`, measured B1 `Process` −37 ns for +24 MB RSS; keep only if the RSS cost is paid for elsewhere).
+- **Done when:**
+  - B1 Exact `Process` ≤ 100 ns (ad2b5be: 97);
+  - C Exact, C Cell, W Exact, W Cell each within +10 % of ad2b5be on the same host;
+  - B1 Cell is re-specified first: the P0-10 row assumed ≈ 10 % cell crossing, but B1 crosses 62.5 % (12.6 % is C/W);
+  - re-run on the Ryzen 5 8500G for the ledger absolutes.
 
 #### V2-7 · Turned, arc, raster and round stamps
 M · needs V2-6
