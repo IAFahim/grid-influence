@@ -25,6 +25,9 @@ internal static unsafe class FrameReceipts
         Check("frames-b4-idle-deterministic-and-matches-rebuild", Scenario(() => new FrameIdle(Entities, Power, 7), 12, log));
         Check("frames-c-crowd-deterministic-and-matches-rebuild", Scenario(() => new FrameCrowd(Entities, Power, 7), 140, log));
         Check("frames-w-world-deterministic-and-matches-rebuild", Scenario(() => new FrameWorld(Entities, Power, 7), 130, log));
+        Check("frames-b1-cell-deterministic-and-matches-rebuild", Scenario(() => new FrameLegacy(Entities, Power, 7, true), 12, log));
+        Check("frames-c-cell-deterministic-and-matches-rebuild", Scenario(() => new FrameCrowd(Entities, Power, 7, true), 140, log));
+        Check("frames-w-cell-deterministic-and-matches-rebuild", Scenario(() => new FrameWorld(Entities, Power, 7, true), 130, log));
         return failures;
     }
 
@@ -152,13 +155,22 @@ internal static unsafe class FrameReceipts
             foreach (var layer in scenario.LayerIds)
             {
                 if (!Gi.Layer.TryGetRecipe(scenario.World, layer, out var recipe)) return false;
-                var made = recipe.Op switch
+                byte made;
+                if (recipe.Op == Gi.Layer.Derivation.Base)
                 {
-                    Gi.Layer.Derivation.Base => Gi.Layer.New(fresh),
-                    Gi.Layer.Derivation.Sum => Gi.Layer.Sum(fresh, recipe.FirstLayer, recipe.FirstWeight, recipe.SecondLayer,
-                        recipe.SecondWeight, recipe.Shift),
-                    _ => byte.MaxValue,
-                };
+                    if (!Gi.Layer.TryGetPrecision(scenario.World, layer, out var precision)) return false;
+                    made = Gi.Layer.New(fresh, precision);
+                }
+                else if (recipe.Op == Gi.Layer.Derivation.Sum)
+                {
+                    made = Gi.Layer.Sum(fresh, recipe.FirstLayer, recipe.FirstWeight, recipe.SecondLayer,
+                        recipe.SecondWeight, recipe.Shift);
+                }
+                else
+                {
+                    made = byte.MaxValue;
+                }
+
                 if (made != layer) return false;
             }
 

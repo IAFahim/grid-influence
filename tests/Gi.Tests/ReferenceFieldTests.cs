@@ -4,14 +4,14 @@ namespace Gi.Tests;
 
 public sealed unsafe class ReferenceFieldTests
 {
-    private enum Kernel : byte { Box, Raster, Tent, Bell, Disk, Cone, Dome }
+    private enum Kernel : byte { Box, Raster, Tent, Bell, Disk, Cone }
 
     private sealed record Pixels(int Width, int Height, sbyte[] Values)
     {
         public int At(int x, int y) => (uint)x < (uint)Width && (uint)y < (uint)Height ? Values[y * Width + x] : 0;
     }
 
-    private sealed record ReferenceStamp(Kernel Kind, byte Handle, int Width, int Height, sbyte Value, int Arc, Pixels[] Levels);
+    private sealed record ReferenceStamp(Kernel Kind, int Width, int Height, sbyte Value, int Arc, Pixels[] Levels);
 
     private sealed class Source
     {
@@ -249,7 +249,7 @@ public sealed unsafe class ReferenceFieldTests
             Layer.Min(world, 0, 2);
             Layer.Max(world, 0, 1);
             Layer.Mask(world, 2, 4, -12, 80);
-            var stamp = new ReferenceStamp(Kernel.Bell, handle, 128, 128, 51, 360, Mips(128, 128, BellPixels(128, 128, 51)));
+            var stamp = new ReferenceStamp(Kernel.Bell, 128, 128, 51, 360, Mips(128, 128, BellPixels(128, 128, 51)));
             var source = new Source { Stamp = stamp, X = 8.25f, Y = 7.875f, Radians = radians, Gain = -3 };
             source.Handle = World.Place(world, 0, source.X, source.Y, handle, (sbyte)source.Gain);
             World.Turn(world, source.Handle, radians);

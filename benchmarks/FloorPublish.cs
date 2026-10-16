@@ -172,7 +172,7 @@ internal static unsafe class FloorPublishKernel
             for (var i = 0; i < TileCells; i++)
             {
                 var n = tile * TileCells + i;
-                var total = (long)p.Exact[n] + Rounded(p.Tent[n]) + Rounded(p.Bell[n]);
+                var total = p.Exact[n] + Rounded(p.Tent[n]) + Rounded(p.Bell[n]);
                 values[i] = (short)(total > short.MaxValue ? short.MaxValue : total < short.MinValue ? short.MinValue : total);
                 p.New[n] = values[i];
             }
@@ -209,89 +209,89 @@ internal sealed unsafe class FloorPublishSuite : FloorSuite
     private const int BlockTiles = 32;
     private const int Blocks = Tiles / BlockTiles;
 
-    private readonly FloorPublishPlanes planes;
-    private readonly FloorPublishPlanes expected;
-    private readonly FloorCase[] cases;
+    private readonly FloorPublishPlanes _planes;
+    private readonly FloorPublishPlanes _expected;
+    private readonly FloorCase[] _cases;
 
     public FloorPublishSuite()
     {
-        planes = Allocate();
-        expected = Allocate();
-        expected.Exact = planes.Exact;
-        expected.Tent = planes.Tent;
-        expected.Bell = planes.Bell;
-        expected.Old = planes.Old;
+        _planes = Allocate();
+        _expected = Allocate();
+        _expected.Exact = _planes.Exact;
+        _expected.Tent = _planes.Tent;
+        _expected.Bell = _planes.Bell;
+        _expected.Old = _planes.Old;
         Fill();
-        FloorPublishKernel.Reference(expected, Tiles);
+        FloorPublishKernel.Reference(_expected, Tiles);
         var perturb = new FloorRandom(0x57);
         for (var tile = 0; tile < Tiles; tile++)
         {
             for (var i = 0; i < FloorShape.TileCells; i++)
-                planes.Old[tile * FloorShape.TileCells + i] = expected.New[tile * FloorShape.TileCells + i];
-            if ((tile & 1) == 1) planes.Old[tile * FloorShape.TileCells + perturb.Below(FloorShape.TileCells)]++;
+                _planes.Old[tile * FloorShape.TileCells + i] = _expected.New[tile * FloorShape.TileCells + i];
+            if ((tile & 1) == 1) _planes.Old[tile * FloorShape.TileCells + perturb.Below(FloorShape.TileCells)]++;
         }
 
-        new Span<short>(expected.New, Cells).Clear();
-        FloorPublishKernel.Reference(expected, Tiles);
-        cases =
+        new Span<short>(_expected.New, Cells).Clear();
+        FloorPublishKernel.Reference(_expected, Tiles);
+        _cases =
         [
             new FloorCase("P5", "publish-1024-tiles", Cells,
-                () => FloorPublishKernel.Run(planes, Tiles),
+                () => FloorPublishKernel.Run(_planes, Tiles),
                 () =>
                 {
-                    FloorPublishKernel.Run(planes, Tiles);
-                    return Hash(planes);
+                    FloorPublishKernel.Run(_planes, Tiles);
+                    return Hash(_planes);
                 }),
             new FloorCase("P5", "publish-32-tiles-x32-L2-resident", Cells,
                 () =>
                 {
-                    for (var b = 0; b < Blocks; b++) FloorPublishKernel.Run(planes, BlockTiles);
+                    for (var b = 0; b < Blocks; b++) FloorPublishKernel.Run(_planes, BlockTiles);
                 },
                 () =>
                 {
-                    Clear(planes);
-                    FloorPublishKernel.Run(planes, BlockTiles);
-                    return Hash(planes);
+                    Clear(_planes);
+                    FloorPublishKernel.Run(_planes, BlockTiles);
+                    return Hash(_planes);
                 }),
         ];
     }
 
     public override string Id => "P5";
 
-    public override IReadOnlyList<FloorCase> Cases => cases;
+    public override IReadOnlyList<FloorCase> Cases => _cases;
 
     public override void Receipt(FloorReceipts receipts)
     {
         var changedTiles = 0;
-        for (var tile = 0; tile < Tiles; tile++) changedTiles += expected.Changed[tile];
+        for (var tile = 0; tile < Tiles; tile++) changedTiles += _expected.Changed[tile];
         receipts.Check("floor-p5-reference-has-changed-and-unchanged-tiles", changedTiles == Tiles / 2);
         var saturated = 0;
-        for (var i = 0; i < Cells; i++) if (expected.New[i] == short.MaxValue || expected.New[i] == short.MinValue) saturated++;
+        for (var i = 0; i < Cells; i++) if (_expected.New[i] == short.MaxValue || _expected.New[i] == short.MinValue) saturated++;
         receipts.Check("floor-p5-reference-saturates-both-signs", saturated > 0);
 
-        Clear(planes);
-        FloorPublishKernel.Scalar(planes, Tiles);
-        receipts.Check("floor-p5-scalar-matches-reference", Same(planes, expected));
+        Clear(_planes);
+        FloorPublishKernel.Scalar(_planes, Tiles);
+        receipts.Check("floor-p5-scalar-matches-reference", Same(_planes, _expected));
         if (Avx2.IsSupported && Sse41.IsSupported)
         {
-            Clear(planes);
-            FloorPublishKernel.Vector(planes, Tiles);
-            receipts.Check("floor-p5-vector-matches-reference", Same(planes, expected));
+            Clear(_planes);
+            FloorPublishKernel.Vector(_planes, Tiles);
+            receipts.Check("floor-p5-vector-matches-reference", Same(_planes, _expected));
         }
         else receipts.Skip("floor-p5-vector-matches-reference", "avx2 unavailable");
 
-        Clear(planes);
-        FloorPublishKernel.Run(planes, BlockTiles);
+        Clear(_planes);
+        FloorPublishKernel.Run(_planes, BlockTiles);
         var cellsInBlock = BlockTiles * FloorShape.TileCells;
         var rowsInBlock = BlockTiles * FloorShape.TileSize;
         receipts.Check("floor-p5-block-matches-leading-tiles",
-            new ReadOnlySpan<short>(planes.New, cellsInBlock).SequenceEqual(new ReadOnlySpan<short>(expected.New, cellsInBlock))
-            && new ReadOnlySpan<long>(planes.Sum, BlockTiles).SequenceEqual(new ReadOnlySpan<long>(expected.Sum, BlockTiles))
-            && new ReadOnlySpan<short>(planes.Max, BlockTiles).SequenceEqual(new ReadOnlySpan<short>(expected.Max, BlockTiles))
-            && new ReadOnlySpan<int>(planes.Argmax, BlockTiles).SequenceEqual(new ReadOnlySpan<int>(expected.Argmax, BlockTiles))
-            && new ReadOnlySpan<int>(planes.RowSum, rowsInBlock).SequenceEqual(new ReadOnlySpan<int>(expected.RowSum, rowsInBlock))
-            && new ReadOnlySpan<short>(planes.RowMax, rowsInBlock).SequenceEqual(new ReadOnlySpan<short>(expected.RowMax, rowsInBlock))
-            && new ReadOnlySpan<byte>(planes.Changed, BlockTiles).SequenceEqual(new ReadOnlySpan<byte>(expected.Changed, BlockTiles)));
+            new ReadOnlySpan<short>(_planes.New, cellsInBlock).SequenceEqual(new ReadOnlySpan<short>(_expected.New, cellsInBlock))
+            && new ReadOnlySpan<long>(_planes.Sum, BlockTiles).SequenceEqual(new ReadOnlySpan<long>(_expected.Sum, BlockTiles))
+            && new ReadOnlySpan<short>(_planes.Max, BlockTiles).SequenceEqual(new ReadOnlySpan<short>(_expected.Max, BlockTiles))
+            && new ReadOnlySpan<int>(_planes.Argmax, BlockTiles).SequenceEqual(new ReadOnlySpan<int>(_expected.Argmax, BlockTiles))
+            && new ReadOnlySpan<int>(_planes.RowSum, rowsInBlock).SequenceEqual(new ReadOnlySpan<int>(_expected.RowSum, rowsInBlock))
+            && new ReadOnlySpan<short>(_planes.RowMax, rowsInBlock).SequenceEqual(new ReadOnlySpan<short>(_expected.RowMax, rowsInBlock))
+            && new ReadOnlySpan<byte>(_planes.Changed, BlockTiles).SequenceEqual(new ReadOnlySpan<byte>(_expected.Changed, BlockTiles)));
     }
 
     private FloorPublishPlanes Allocate() => new()
@@ -323,13 +323,13 @@ internal sealed unsafe class FloorPublishSuite : FloorSuite
                     continue;
                 if (plateau)
                 {
-                    planes.Exact[n] = 5000;
+                    _planes.Exact[n] = 5000;
                     continue;
                 }
 
-                planes.Exact[n] = Exact(ref rng);
-                planes.Tent[n] = Smooth(ref rng);
-                planes.Bell[n] = Smooth(ref rng);
+                _planes.Exact[n] = Exact(ref rng);
+                _planes.Tent[n] = Smooth(ref rng);
+                _planes.Bell[n] = Smooth(ref rng);
             }
         }
     }
@@ -350,15 +350,15 @@ internal sealed unsafe class FloorPublishSuite : FloorSuite
     private static long Smooth(ref FloorRandom rng)
     {
         var kind = (int)(rng.Next() & 255);
-        const long Limit = 1L << 62;
+        const long limit = 1L << 62;
         return kind switch
         {
-            0 => Limit - rng.Below(1000),
-            1 => -Limit + rng.Below(1000),
+            0 => limit - rng.Below(1000),
+            1 => -limit + rng.Below(1000),
             2 => ((long)(rng.Below(4000) - 2000) << 40) + (1L << 39),
             3 => -((long)rng.Below(2000) << 40) - (1L << 39),
-            4 => Limit,
-            5 => -Limit,
+            4 => limit,
+            5 => -limit,
             _ => ((long)(rng.Below(4000) - 2000) << 40) + (long)(rng.Next() & ((1UL << 40) - 1)) - (1L << 39),
         };
     }

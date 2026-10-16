@@ -305,7 +305,7 @@ public sealed unsafe class ChangedBytesTests
         var b = Layer.New(w);
         var box = Stamp.Box(6, 6, 50);
         var sa = World.Place(w, a, 20f, 20f, box, 5);
-        var sb = World.Place(w, b, 20f, 20f, box, 5);
+        World.Place(w, b, 20f, 20f, box, 5);
         World.Process(w);
         var sum = Layer.Sum(w, a, 1, b, -1);
         World.Process(w);

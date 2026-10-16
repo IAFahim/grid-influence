@@ -59,7 +59,7 @@ internal static unsafe class FloorConvolveKernel
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public static void SeparableVector(int* origin, long* output, long* ring, int* weights, int taps, int rows)
     {
-        NativeMemory.Clear(ring, (nuint)(RingRows * Side * sizeof(long)));
+        NativeMemory.Clear(ring, RingRows * Side * sizeof(long));
         var w0 = BroadcastWeight(weights, 0, taps);
         var w1 = BroadcastWeight(weights, 1, taps);
         var w2 = BroadcastWeight(weights, 2, taps);
@@ -115,7 +115,7 @@ internal static unsafe class FloorConvolveKernel
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public static void SeparableScalar(int* origin, long* output, long* ring, int* weights, int taps, int rows)
     {
-        NativeMemory.Clear(ring, (nuint)(RingRows * Side * sizeof(long)));
+        NativeMemory.Clear(ring, RingRows * Side * sizeof(long));
         for (var y = 0; y < rows; y++)
         {
             var h = origin + y * Pitch;
@@ -162,14 +162,14 @@ internal sealed unsafe class FloorConvolveSuite : FloorSuite
     private static readonly int[] TentWeights = [87381, 174763, 262144, 262144, 174763, 87381];
     private static readonly int[] BellWeights = [16384, 81920, 180224, 245760, 245760, 180224, 81920, 16384];
 
-    private readonly int* origin;
-    private readonly int* zeroRow;
-    private readonly int* boxOutput;
-    private readonly long* smoothOutput;
-    private readonly long* ring;
-    private readonly int* tent;
-    private readonly int* bell;
-    private readonly FloorCase[] cases;
+    private readonly int* _origin;
+    private readonly int* _zeroRow;
+    private readonly int* _boxOutput;
+    private readonly long* _smoothOutput;
+    private readonly long* _ring;
+    private readonly int* _tent;
+    private readonly int* _bell;
+    private readonly FloorCase[] _cases;
 
     public FloorConvolveSuite()
     {
@@ -177,46 +177,46 @@ internal sealed unsafe class FloorConvolveSuite : FloorSuite
         var pitch = FloorConvolveKernel.Pitch;
         var rows = FloorConvolveKernel.TopRows + side;
         var block = Arena.Alloc<int>((long)rows * pitch);
-        origin = block + FloorConvolveKernel.TopRows * pitch + FloorConvolveKernel.Margin;
-        zeroRow = Arena.Alloc<int>(side);
-        boxOutput = Arena.Alloc<int>(FloorShape.Cells);
-        smoothOutput = Arena.Alloc<long>(FloorShape.Cells);
-        ring = Arena.Alloc<long>(FloorConvolveKernel.RingRows * side);
-        tent = Arena.Alloc<int>(FloorConvolveKernel.MaxTaps);
-        bell = Arena.Alloc<int>(FloorConvolveKernel.MaxTaps);
-        for (var i = 0; i < TentWeights.Length; i++) tent[i] = TentWeights[i];
-        for (var i = 0; i < BellWeights.Length; i++) bell[i] = BellWeights[i];
+        _origin = block + FloorConvolveKernel.TopRows * pitch + FloorConvolveKernel.Margin;
+        _zeroRow = Arena.Alloc<int>(side);
+        _boxOutput = Arena.Alloc<int>(FloorShape.Cells);
+        _smoothOutput = Arena.Alloc<long>(FloorShape.Cells);
+        _ring = Arena.Alloc<long>(FloorConvolveKernel.RingRows * side);
+        _tent = Arena.Alloc<int>(FloorConvolveKernel.MaxTaps);
+        _bell = Arena.Alloc<int>(FloorConvolveKernel.MaxTaps);
+        for (var i = 0; i < TentWeights.Length; i++) _tent[i] = TentWeights[i];
+        for (var i = 0; i < BellWeights.Length; i++) _bell[i] = BellWeights[i];
         var rng = new FloorRandom(0x54);
-        for (var i = 0; i < FloorShape.Splats; i++) origin[rng.Below(side) * pitch + rng.Below(side)]++;
-        cases =
+        for (var i = 0; i < FloorShape.Splats; i++) _origin[rng.Below(side) * pitch + rng.Below(side)]++;
+        _cases =
         [
             new FloorCase("P4", "box4x4-int32", FloorShape.Cells,
-                () => FloorConvolveKernel.Box(origin, boxOutput, zeroRow, FloorConvolveKernel.Side),
+                () => FloorConvolveKernel.Box(_origin, _boxOutput, _zeroRow, FloorConvolveKernel.Side),
                 () =>
                 {
-                    FloorConvolveKernel.Box(origin, boxOutput, zeroRow, FloorConvolveKernel.Side);
-                    return FloorHash.Of(boxOutput, FloorShape.Cells);
+                    FloorConvolveKernel.Box(_origin, _boxOutput, _zeroRow, FloorConvolveKernel.Side);
+                    return FloorHash.Of(_boxOutput, FloorShape.Cells);
                 }),
-            Smooth("tent6-int64", tent, TentWeights.Length),
-            Smooth("bell8-int64", bell, BellWeights.Length),
+            Smooth("tent6-int64", _tent, TentWeights.Length),
+            Smooth("bell8-int64", _bell, BellWeights.Length),
             new FloorCase("P4", "box4x4-int32-L2-resident", BlockRows * Blocks * FloorConvolveKernel.Side,
                 () =>
                 {
-                    for (var b = 0; b < Blocks; b++) FloorConvolveKernel.Box(origin, boxOutput, zeroRow, BlockRows);
+                    for (var b = 0; b < Blocks; b++) FloorConvolveKernel.Box(_origin, _boxOutput, _zeroRow, BlockRows);
                 },
                 () =>
                 {
-                    FloorConvolveKernel.Box(origin, boxOutput, zeroRow, BlockRows);
-                    return FloorHash.Of(boxOutput, BlockRows * FloorConvolveKernel.Side);
+                    FloorConvolveKernel.Box(_origin, _boxOutput, _zeroRow, BlockRows);
+                    return FloorHash.Of(_boxOutput, BlockRows * FloorConvolveKernel.Side);
                 }),
-            SmoothBlocks("tent6-int64-L2-resident", tent, TentWeights.Length),
-            SmoothBlocks("bell8-int64-L2-resident", bell, BellWeights.Length),
+            SmoothBlocks("tent6-int64-L2-resident", _tent, TentWeights.Length),
+            SmoothBlocks("bell8-int64-L2-resident", _bell, BellWeights.Length),
         ];
     }
 
     public override string Id => "P4";
 
-    public override IReadOnlyList<FloorCase> Cases => cases;
+    public override IReadOnlyList<FloorCase> Cases => _cases;
 
     public override void Receipt(FloorReceipts receipts)
     {
@@ -227,8 +227,8 @@ internal sealed unsafe class FloorConvolveSuite : FloorSuite
         for (var y = 0; y < side; y++)
         for (var x = 0; x < side; x++)
         {
-            maxCount = Math.Max(maxCount, origin[y * pitch + x]);
-            total += origin[y * pitch + x];
+            maxCount = Math.Max(maxCount, _origin[y * pitch + x]);
+            total += _origin[y * pitch + x];
         }
 
         receipts.Check("floor-p4-histogram-holds-every-splat", total == FloorShape.Splats);
@@ -238,39 +238,39 @@ internal sealed unsafe class FloorConvolveSuite : FloorSuite
         for (var y = 0; y < side; y++)
         for (var x = 0; x < side; x++)
         {
-            var count = origin[y * pitch + x];
+            var count = _origin[y * pitch + x];
             if (count == 0) continue;
             for (var j = 0; j < FloorConvolveKernel.BoxSide && y + j < side; j++)
             for (var i = 0; i < FloorConvolveKernel.BoxSide && x + i < side; i++)
                 boxExpected[(y + j) * side + x + i] += count;
         }
 
-        new Span<int>(boxOutput, FloorShape.Cells).Clear();
-        FloorConvolveKernel.BoxScalar(origin, boxOutput, side);
-        receipts.Check("floor-p4-box-scalar-matches-direct-emission", Equal(boxOutput, boxExpected));
+        new Span<int>(_boxOutput, FloorShape.Cells).Clear();
+        FloorConvolveKernel.BoxScalar(_origin, _boxOutput, side);
+        receipts.Check("floor-p4-box-scalar-matches-direct-emission", Equal(_boxOutput, boxExpected));
         if (Avx2.IsSupported)
         {
-            new Span<int>(boxOutput, FloorShape.Cells).Clear();
-            FloorConvolveKernel.BoxVector(origin, boxOutput, zeroRow, side);
-            receipts.Check("floor-p4-box-vector-matches-direct-emission", Equal(boxOutput, boxExpected));
-            new Span<int>(boxOutput, FloorShape.Cells).Clear();
-            FloorConvolveKernel.Box(origin, boxOutput, zeroRow, BlockRows);
+            new Span<int>(_boxOutput, FloorShape.Cells).Clear();
+            FloorConvolveKernel.BoxVector(_origin, _boxOutput, _zeroRow, side);
+            receipts.Check("floor-p4-box-vector-matches-direct-emission", Equal(_boxOutput, boxExpected));
+            new Span<int>(_boxOutput, FloorShape.Cells).Clear();
+            FloorConvolveKernel.Box(_origin, _boxOutput, _zeroRow, BlockRows);
             receipts.Check("floor-p4-box-block-matches-leading-rows",
-                new ReadOnlySpan<int>(boxOutput, BlockRows * side).SequenceEqual(boxExpected.AsSpan(0, BlockRows * side)));
+                new ReadOnlySpan<int>(_boxOutput, BlockRows * side).SequenceEqual(boxExpected.AsSpan(0, BlockRows * side)));
         }
         else receipts.Skip("floor-p4-box-vector-matches-direct-emission", "avx2 unavailable");
 
-        SmoothReceipt(receipts, "tent6", TentWeights, tent);
-        SmoothReceipt(receipts, "bell8", BellWeights, bell);
+        SmoothReceipt(receipts, "tent6", TentWeights, _tent);
+        SmoothReceipt(receipts, "bell8", BellWeights, _bell);
     }
 
     private FloorCase Smooth(string variant, int* weights, int taps)
         => new("P4", variant, FloorShape.Cells,
-            () => FloorConvolveKernel.Separable(origin, smoothOutput, ring, weights, taps, FloorConvolveKernel.Side),
+            () => FloorConvolveKernel.Separable(_origin, _smoothOutput, _ring, weights, taps, FloorConvolveKernel.Side),
             () =>
             {
-                FloorConvolveKernel.Separable(origin, smoothOutput, ring, weights, taps, FloorConvolveKernel.Side);
-                return FloorHash.Of(smoothOutput, FloorShape.Cells);
+                FloorConvolveKernel.Separable(_origin, _smoothOutput, _ring, weights, taps, FloorConvolveKernel.Side);
+                return FloorHash.Of(_smoothOutput, FloorShape.Cells);
             });
 
     private FloorCase SmoothBlocks(string variant, int* weights, int taps)
@@ -278,12 +278,12 @@ internal sealed unsafe class FloorConvolveSuite : FloorSuite
             () =>
             {
                 for (var b = 0; b < Blocks; b++)
-                    FloorConvolveKernel.Separable(origin, smoothOutput, ring, weights, taps, BlockRows);
+                    FloorConvolveKernel.Separable(_origin, _smoothOutput, _ring, weights, taps, BlockRows);
             },
             () =>
             {
-                FloorConvolveKernel.Separable(origin, smoothOutput, ring, weights, taps, BlockRows);
-                return FloorHash.Of(smoothOutput, BlockRows * FloorConvolveKernel.Side);
+                FloorConvolveKernel.Separable(_origin, _smoothOutput, _ring, weights, taps, BlockRows);
+                return FloorHash.Of(_smoothOutput, BlockRows * FloorConvolveKernel.Side);
             });
 
     private void SmoothReceipt(FloorReceipts receipts, string name, int[] weights, int* native)
@@ -294,25 +294,25 @@ internal sealed unsafe class FloorConvolveSuite : FloorSuite
         for (var y = 0; y < side; y++)
         for (var x = 0; x < side; x++)
         {
-            var count = origin[y * pitch + x];
+            var count = _origin[y * pitch + x];
             if (count == 0) continue;
             for (var j = 0; j < weights.Length && y + j < side; j++)
             for (var i = 0; i < weights.Length && x + i < side; i++)
                 expected[(y + j) * side + x + i] += (long)count * weights[i] * weights[j];
         }
 
-        new Span<long>(smoothOutput, FloorShape.Cells).Clear();
-        FloorConvolveKernel.SeparableScalar(origin, smoothOutput, ring, native, weights.Length, side);
-        receipts.Check($"floor-p4-{name}-scalar-matches-direct-emission", Equal(smoothOutput, expected));
+        new Span<long>(_smoothOutput, FloorShape.Cells).Clear();
+        FloorConvolveKernel.SeparableScalar(_origin, _smoothOutput, _ring, native, weights.Length, side);
+        receipts.Check($"floor-p4-{name}-scalar-matches-direct-emission", Equal(_smoothOutput, expected));
         if (Avx2.IsSupported)
         {
-            new Span<long>(smoothOutput, FloorShape.Cells).Clear();
-            FloorConvolveKernel.SeparableVector(origin, smoothOutput, ring, native, weights.Length, side);
-            receipts.Check($"floor-p4-{name}-vector-matches-direct-emission", Equal(smoothOutput, expected));
-            new Span<long>(smoothOutput, FloorShape.Cells).Clear();
-            FloorConvolveKernel.SeparableVector(origin, smoothOutput, ring, native, weights.Length, BlockRows);
+            new Span<long>(_smoothOutput, FloorShape.Cells).Clear();
+            FloorConvolveKernel.SeparableVector(_origin, _smoothOutput, _ring, native, weights.Length, side);
+            receipts.Check($"floor-p4-{name}-vector-matches-direct-emission", Equal(_smoothOutput, expected));
+            new Span<long>(_smoothOutput, FloorShape.Cells).Clear();
+            FloorConvolveKernel.SeparableVector(_origin, _smoothOutput, _ring, native, weights.Length, BlockRows);
             receipts.Check($"floor-p4-{name}-block-matches-leading-rows",
-                new ReadOnlySpan<long>(smoothOutput, BlockRows * side).SequenceEqual(expected.AsSpan(0, BlockRows * side)));
+                new ReadOnlySpan<long>(_smoothOutput, BlockRows * side).SequenceEqual(expected.AsSpan(0, BlockRows * side)));
         }
         else receipts.Skip($"floor-p4-{name}-vector-matches-direct-emission", "avx2 unavailable");
     }

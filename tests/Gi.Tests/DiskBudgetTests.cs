@@ -78,26 +78,28 @@ public sealed class DiskBudgetTests
             var cells = Snapshot(world, grid, layer, size);
             int[] radii = [0, 1, 31, 127, 128, 181, 255, 256, 257, 1023, 4096, 7936, 65536];
             for (var phase = 0; phase < 256; phase++)
-            foreach (var radius in radii)
             {
-                var cellX = (phase % 4) switch { 0 => 0, 1 => 31, 2 => 32, _ => 63 };
-                var cellY = (phase % 3) switch { 0 => 0, 1 => 32, _ => 63 };
-                var qx = (cellX << 8) + phase;
-                var qy = (cellY << 8) + ((phase * 73) & 255);
-                var x = qx / 256f;
-                var y = qy / 256f;
-                var threshold = (short)((phase % 5) switch { 0 => -200, 1 => 0, 2 => 100, 3 => 1000, _ => short.MaxValue });
-                var expected = Scan(cells, size, qx, qy, radius, threshold);
+                foreach (var radius in radii)
+                {
+                    var cellX = (phase % 4) switch { 0 => 0, 1 => 31, 2 => 32, _ => 63 };
+                    var cellY = (phase % 3) switch { 0 => 0, 1 => 32, _ => 63 };
+                    var qx = (cellX << 8) + phase;
+                    var qy = (cellY << 8) + ((phase * 73) & 255);
+                    var x = qx / 256f;
+                    var y = qy / 256f;
+                    var threshold = (short)((phase % 5) switch { 0 => -200, 1 => 0, 2 => 100, 3 => 1000, _ => short.MaxValue });
+                    var expected = Scan(cells, size, qx, qy, radius, threshold);
 
-                Assert.Equal(expected.Complete, World.TrySenseArea(world, layer, x, y, radius / 256f, out var sum));
-                Assert.Equal(expected.Sum, sum);
-                Assert.Equal(expected.Complete, World.TrySenseMax(world, layer, x, y, radius / 256f, out var max, out var maxX, out var maxY));
-                Assert.Equal((expected.Max, expected.MaxX + 0.5f, expected.MaxY + 0.5f), (max, maxX, maxY));
-                Assert.Equal(expected.Complete, World.TrySenseNearest(world, layer, x, y, radius / 256f, threshold,
-                    out var nearest, out var nearestX, out var nearestY));
-                Assert.Equal(expected.Nearest, nearest);
-                Assert.Equal(expected.NearestX < 0 ? x : expected.NearestX + 0.5f, nearestX);
-                Assert.Equal(expected.NearestY < 0 ? y : expected.NearestY + 0.5f, nearestY);
+                    Assert.Equal(expected.Complete, World.TrySenseArea(world, layer, x, y, radius / 256f, out var sum));
+                    Assert.Equal(expected.Sum, sum);
+                    Assert.Equal(expected.Complete, World.TrySenseMax(world, layer, x, y, radius / 256f, out var max, out var maxX, out var maxY));
+                    Assert.Equal((expected.Max, expected.MaxX + 0.5f, expected.MaxY + 0.5f), (max, maxX, maxY));
+                    Assert.Equal(expected.Complete, World.TrySenseNearest(world, layer, x, y, radius / 256f, threshold,
+                        out var nearest, out var nearestX, out var nearestY));
+                    Assert.Equal(expected.Nearest, nearest);
+                    Assert.Equal(expected.NearestX < 0 ? x : expected.NearestX + 0.5f, nearestX);
+                    Assert.Equal(expected.NearestY < 0 ? y : expected.NearestY + 0.5f, nearestY);
+                }
             }
         }
         finally { World.Free(world); }
@@ -161,6 +163,60 @@ public sealed class DiskBudgetTests
             Assert.False(World.Changed(world, layer, 31.99f, 31.99f, 0.5f, since));
             Assert.True(World.Changed(world, layer, 31.99f, 31.99f, 0.75f, since));
             Assert.True(World.Changed(world, layer, 32f, 32f, 0, since));
+        }
+        finally { World.Free(world); }
+    }
+
+    [Fact]
+    public unsafe void Sensing_RejectsNonFiniteCoordinatesAndReach()
+    {
+        var world = World.New();
+        try
+        {
+            Grid.New(world, 6, 0, 0, 64);
+            var layer = Layer.New(world);
+            World.Place(world, layer, 0.5f, 0.5f, Stamp.Box(1, 1, 63), 1);
+            World.Process(world);
+            foreach (var invalid in new[] { float.NaN, float.NegativeInfinity, float.PositiveInfinity })
+            {
+                Assert.False(World.Covers(world, invalid, 0));
+                Assert.False(World.Covers(world, 0, invalid));
+                Assert.False(World.TrySense(world, layer, invalid, 0, out var point));
+                Assert.Equal(0, point);
+                Assert.False(World.TrySenseGradient(world, layer, 0, invalid, out var gx, out var gy));
+                Assert.Equal((0f, 0f), (gx, gy));
+                Assert.False(World.TrySenseArea(world, layer, invalid, 0, 1, out var area));
+                Assert.Equal(0, area);
+                Assert.False(World.TrySenseArea(world, layer, 0.5f, 0.5f, invalid, out area));
+                Assert.Equal(0, area);
+                Assert.False(World.TrySenseMax(world, layer, 0, invalid, 1, out var max, out var maxX, out var maxY));
+                Assert.Equal((0, 0f, 0f), (max, maxX, maxY));
+                Assert.False(World.TrySenseMax(world, layer, 0.5f, 0.5f, invalid, out max, out maxX, out maxY));
+                Assert.Equal((0, 0f, 0f), (max, maxX, maxY));
+                Assert.False(World.TrySenseNearest(world, layer, invalid, 0, 1, 0, out var nearest, out var nx, out var ny));
+                Assert.Equal((short.MinValue, 0f, 0f), (nearest, nx, ny));
+                Assert.False(World.TrySenseNearest(world, layer, 0.5f, 0.5f, invalid, 0, out nearest, out nx, out ny));
+                Assert.Equal((short.MinValue, 0f, 0f), (nearest, nx, ny));
+                Assert.False(World.Changed(world, layer, 0.5f, 0.5f, invalid, 0));
+
+                float x = 0.5f, y = 0.5f, r = invalid, bx = 9f, by = 9f;
+                short v = 99, threshold = 0;
+                long total = 99;
+                var mask = ulong.MaxValue;
+                Assert.False(World.SenseAreaColumn(world, layer, &x, &y, &r, null, 1, &total, &mask));
+                Assert.Equal((0L, 0ul), (total, mask));
+                mask = ulong.MaxValue;
+                Assert.False(World.SenseMaxColumn(world, layer, &x, &y, &r, 1, &v, &bx, &by, &mask));
+                Assert.Equal(((short)0, 0f, 0f, 0ul), (v, bx, by, mask));
+                bx = 9f;
+                by = 9f;
+                mask = ulong.MaxValue;
+                Assert.False(World.SenseNearestColumn(world, layer, &x, &y, &r, &threshold, 1, &v, &bx, &by, &mask));
+                Assert.Equal((short.MinValue, 0f, 0f, 0ul), (v, bx, by, mask));
+                mask = ulong.MaxValue;
+                Assert.Equal(0, World.ChangedMask(world, layer, &x, &y, invalid, 0, 1, &mask));
+                Assert.Equal(0ul, mask);
+            }
         }
         finally { World.Free(world); }
     }

@@ -77,96 +77,96 @@ internal sealed unsafe class FloorHistogramSuite : FloorSuite
     private const int Count = FloorShape.Splats;
     private const int Cells = FloorShape.Cells;
 
-    private readonly int* uniformRandom;
-    private readonly int* uniformMorton;
-    private readonly int* clumpRandom;
-    private readonly int* clumpMorton;
-    private readonly int* histogram;
-    private readonly int* odd;
-    private readonly int* merged;
-    private readonly FloorCase[] cases;
+    private readonly int* _uniformRandom;
+    private readonly int* _uniformMorton;
+    private readonly int* _clumpRandom;
+    private readonly int* _clumpMorton;
+    private readonly int* _histogram;
+    private readonly int* _odd;
+    private readonly int* _merged;
+    private readonly FloorCase[] _cases;
 
     public FloorHistogramSuite()
     {
         var rng = new FloorRandom(0x52);
-        Generate(0, FloorShape.Size, ref rng, out uniformRandom, out uniformMorton);
-        Generate(448, 128, ref rng, out clumpRandom, out clumpMorton);
-        histogram = Arena.Alloc<int>(Cells);
-        odd = Arena.Alloc<int>(Cells);
-        merged = Arena.Alloc<int>(Cells);
-        cases =
+        Generate(0, FloorShape.Size, ref rng, out _uniformRandom, out _uniformMorton);
+        Generate(448, 128, ref rng, out _clumpRandom, out _clumpMorton);
+        _histogram = Arena.Alloc<int>(Cells);
+        _odd = Arena.Alloc<int>(Cells);
+        _merged = Arena.Alloc<int>(Cells);
+        _cases =
         [
-            Accumulating("P2", "random-uniform", uniformRandom, true),
-            Accumulating("P2", "morton-uniform", uniformMorton, false),
-            Accumulating("P2", "morton-uniform-prefetch", uniformMorton, true),
+            Accumulating("P2", "random-uniform", _uniformRandom, true),
+            Accumulating("P2", "morton-uniform", _uniformMorton, false),
+            Accumulating("P2", "morton-uniform-prefetch", _uniformMorton, true),
             new FloorCase("P2", "clear-4MB", Cells,
-                () => FloorHistogramKernel.Clear(histogram, Cells),
+                () => FloorHistogramKernel.Clear(_histogram, Cells),
                 () =>
                 {
-                    FloorHistogramKernel.Clear(histogram, Cells);
-                    return FloorHash.Of(histogram, Cells);
+                    FloorHistogramKernel.Clear(_histogram, Cells);
+                    return FloorHash.Of(_histogram, Cells);
                 }),
-            Accumulating("P3", "baseline-morton-clump", clumpMorton, false),
-            Interleaved("P3", "interleaved2-morton-uniform", uniformMorton, false),
-            Interleaved("P3", "interleaved2-morton-uniform-prefetch", uniformMorton, true),
-            Interleaved("P3", "interleaved2-morton-clump", clumpMorton, false),
-            Coalesced("P3", "coalesce-morton-uniform", uniformMorton, false),
-            Coalesced("P3", "coalesce-morton-clump", clumpMorton, false),
+            Accumulating("P3", "baseline-morton-clump", _clumpMorton, false),
+            Interleaved("P3", "interleaved2-morton-uniform", _uniformMorton, false),
+            Interleaved("P3", "interleaved2-morton-uniform-prefetch", _uniformMorton, true),
+            Interleaved("P3", "interleaved2-morton-clump", _clumpMorton, false),
+            Coalesced("P3", "coalesce-morton-uniform", _uniformMorton, false),
+            Coalesced("P3", "coalesce-morton-clump", _clumpMorton, false),
             new FloorCase("P3", "merge-2x4MB", Cells,
-                () => FloorHistogramKernel.Merge(histogram, odd, Cells),
+                () => FloorHistogramKernel.Merge(_histogram, _odd, Cells),
                 () =>
                 {
-                    FloorHistogramKernel.Clear(histogram, Cells);
-                    FloorHistogramKernel.Clear(odd, Cells);
-                    odd[7] = 3;
-                    FloorHistogramKernel.Merge(histogram, odd, Cells);
-                    return FloorHash.Of(histogram, Cells);
+                    FloorHistogramKernel.Clear(_histogram, Cells);
+                    FloorHistogramKernel.Clear(_odd, Cells);
+                    _odd[7] = 3;
+                    FloorHistogramKernel.Merge(_histogram, _odd, Cells);
+                    return FloorHash.Of(_histogram, Cells);
                 }),
         ];
     }
 
     public override string Id => "P2";
 
-    public override IReadOnlyList<FloorCase> Cases => cases;
+    public override IReadOnlyList<FloorCase> Cases => _cases;
 
     public override void Receipt(FloorReceipts receipts)
     {
         var sets = new (string Name, nint Data)[]
         {
-            ("random-uniform", (nint)uniformRandom), ("morton-uniform", (nint)uniformMorton),
-            ("random-clump", (nint)clumpRandom), ("morton-clump", (nint)clumpMorton),
+            ("random-uniform", (nint)_uniformRandom), ("morton-uniform", (nint)_uniformMorton),
+            ("random-clump", (nint)_clumpRandom), ("morton-clump", (nint)_clumpMorton),
         };
         foreach (var (name, address) in sets)
         {
             var data = (int*)address;
             var expected = Reference(data);
             var prefetching = name.StartsWith("random", StringComparison.Ordinal);
-            FloorHistogramKernel.Clear(histogram, Cells);
-            FloorHistogramKernel.Accumulate(data, Count, histogram, prefetching);
-            receipts.Check($"floor-p2-histogram-{name}-matches-reference", Equal(histogram, expected));
+            FloorHistogramKernel.Clear(_histogram, Cells);
+            FloorHistogramKernel.Accumulate(data, Count, _histogram, prefetching);
+            receipts.Check($"floor-p2-histogram-{name}-matches-reference", Equal(_histogram, expected));
 
-            FloorHistogramKernel.Clear(histogram, Cells);
-            FloorHistogramKernel.Accumulate(data, Count, histogram, !prefetching);
-            receipts.Check($"floor-p2-histogram-{name}-other-prefetch-matches-reference", Equal(histogram, expected));
+            FloorHistogramKernel.Clear(_histogram, Cells);
+            FloorHistogramKernel.Accumulate(data, Count, _histogram, !prefetching);
+            receipts.Check($"floor-p2-histogram-{name}-other-prefetch-matches-reference", Equal(_histogram, expected));
 
-            FloorHistogramKernel.Clear(histogram, Cells);
-            FloorHistogramKernel.Clear(odd, Cells);
-            FloorHistogramKernel.AccumulateInterleaved(data, Count, histogram, odd, prefetching);
-            FloorHistogramKernel.Merge(histogram, odd, Cells);
-            receipts.Check($"floor-p3-interleaved-{name}-matches-reference", Equal(histogram, expected));
+            FloorHistogramKernel.Clear(_histogram, Cells);
+            FloorHistogramKernel.Clear(_odd, Cells);
+            FloorHistogramKernel.AccumulateInterleaved(data, Count, _histogram, _odd, prefetching);
+            FloorHistogramKernel.Merge(_histogram, _odd, Cells);
+            receipts.Check($"floor-p3-interleaved-{name}-matches-reference", Equal(_histogram, expected));
 
-            FloorHistogramKernel.Clear(histogram, Cells);
-            FloorHistogramKernel.Clear(odd, Cells);
-            FloorHistogramKernel.AccumulateInterleaved(data, Count, histogram, odd, !prefetching);
-            FloorHistogramKernel.Merge(histogram, odd, Cells);
-            receipts.Check($"floor-p3-interleaved-{name}-other-prefetch-matches-reference", Equal(histogram, expected));
+            FloorHistogramKernel.Clear(_histogram, Cells);
+            FloorHistogramKernel.Clear(_odd, Cells);
+            FloorHistogramKernel.AccumulateInterleaved(data, Count, _histogram, _odd, !prefetching);
+            FloorHistogramKernel.Merge(_histogram, _odd, Cells);
+            receipts.Check($"floor-p3-interleaved-{name}-other-prefetch-matches-reference", Equal(_histogram, expected));
 
-            FloorHistogramKernel.Clear(histogram, Cells);
-            FloorHistogramKernel.AccumulateCoalesced(data, Count, histogram, prefetching);
-            receipts.Check($"floor-p3-coalesced-{name}-matches-reference", Equal(histogram, expected));
+            FloorHistogramKernel.Clear(_histogram, Cells);
+            FloorHistogramKernel.AccumulateCoalesced(data, Count, _histogram, prefetching);
+            receipts.Check($"floor-p3-coalesced-{name}-matches-reference", Equal(_histogram, expected));
         }
 
-        var shortRun = new int[] { 5, 5, 5, 9, 9, 5, 5, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+        var shortRun = new[] { 5, 5, 5, 9, 9, 5, 5, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
         var runExpected = new int[16];
         for (var i = 0; i < 8; i++) runExpected[shortRun[i]]++;
         var tail = new int[16];
@@ -191,41 +191,41 @@ internal sealed unsafe class FloorHistogramSuite : FloorSuite
         var sevenExpected = new int[16];
         for (var i = 0; i < 7; i++) sevenExpected[shortRun[i]]++;
         receipts.Check("floor-p3-interleaved-odd-count-exact", combined.AsSpan().SequenceEqual(sevenExpected));
-        FloorHistogramKernel.Clear(histogram, Cells);
-        FloorHistogramKernel.Clear(odd, Cells);
+        FloorHistogramKernel.Clear(_histogram, Cells);
+        FloorHistogramKernel.Clear(_odd, Cells);
     }
 
     private FloorCase Accumulating(string probe, string variant, int* data, bool prefetch)
         => new(probe, variant, Count,
-            () => FloorHistogramKernel.Accumulate(data, Count, histogram, prefetch),
+            () => FloorHistogramKernel.Accumulate(data, Count, _histogram, prefetch),
             () =>
             {
-                FloorHistogramKernel.Clear(histogram, Cells);
-                FloorHistogramKernel.Accumulate(data, Count, histogram, prefetch);
-                return FloorHash.Of(histogram, Cells);
+                FloorHistogramKernel.Clear(_histogram, Cells);
+                FloorHistogramKernel.Accumulate(data, Count, _histogram, prefetch);
+                return FloorHash.Of(_histogram, Cells);
             });
 
     private FloorCase Interleaved(string probe, string variant, int* data, bool prefetch)
         => new(probe, variant, Count,
-            () => FloorHistogramKernel.AccumulateInterleaved(data, Count, histogram, odd, prefetch),
+            () => FloorHistogramKernel.AccumulateInterleaved(data, Count, _histogram, _odd, prefetch),
             () =>
             {
-                FloorHistogramKernel.Clear(histogram, Cells);
-                FloorHistogramKernel.Clear(odd, Cells);
-                FloorHistogramKernel.AccumulateInterleaved(data, Count, histogram, odd, prefetch);
-                new Span<int>(histogram, Cells).CopyTo(new Span<int>(merged, Cells));
-                FloorHistogramKernel.Merge(merged, odd, Cells);
-                return FloorHash.Of(merged, Cells);
+                FloorHistogramKernel.Clear(_histogram, Cells);
+                FloorHistogramKernel.Clear(_odd, Cells);
+                FloorHistogramKernel.AccumulateInterleaved(data, Count, _histogram, _odd, prefetch);
+                new Span<int>(_histogram, Cells).CopyTo(new Span<int>(_merged, Cells));
+                FloorHistogramKernel.Merge(_merged, _odd, Cells);
+                return FloorHash.Of(_merged, Cells);
             });
 
     private FloorCase Coalesced(string probe, string variant, int* data, bool prefetch)
         => new(probe, variant, Count,
-            () => FloorHistogramKernel.AccumulateCoalesced(data, Count, histogram, prefetch),
+            () => FloorHistogramKernel.AccumulateCoalesced(data, Count, _histogram, prefetch),
             () =>
             {
-                FloorHistogramKernel.Clear(histogram, Cells);
-                FloorHistogramKernel.AccumulateCoalesced(data, Count, histogram, prefetch);
-                return FloorHash.Of(histogram, Cells);
+                FloorHistogramKernel.Clear(_histogram, Cells);
+                FloorHistogramKernel.AccumulateCoalesced(data, Count, _histogram, prefetch);
+                return FloorHash.Of(_histogram, Cells);
             });
 
     private static int[] Reference(int* data)

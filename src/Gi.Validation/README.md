@@ -19,4 +19,4 @@ Use the netstandard2.1 Gi.Validation.dll in Unity with its Plugin Inspector rest
 
 Gi and Gi.Validation compile the same internal src/Gi/ValidationRules.cs source. The helper does not link to Gi.dll or require a new API on that runtime assembly, so it can validate inputs for an existing compatible Gi.Influence installation. Runtime exceptions and gain clamping remain unchanged. `TryGrid(power, x, y, size, out error)` applies the runtime's `Grid.New` rules from the same source: power 5–14, finite origin, finite positive size, and a truncated `ScaleQ8` of 1 through 1,048,576. `TryGrid(power, size, out error)` checks the same rules at origin (0, 0).
 
-Gi.Validation has an independent version, currently 0.1.0-alpha.3. Build and package it with dotnet pack src/Gi.Validation -c Release. Keep the helper version aligned with the runtime constraints it describes; do not replace published versions or tags.
+Gi.Validation has an independent version, currently 0.1.0-alpha.4. Build and package it with dotnet pack src/Gi.Validation -c Release. Keep the helper version aligned with the runtime constraints it describes; do not replace published versions or tags.

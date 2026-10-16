@@ -5,14 +5,16 @@ internal abstract unsafe class FrameScenario : IDisposable
 {
     protected readonly FrameArena Arena = new();
     protected readonly ulong Seed;
+    protected readonly Gi.Layer.Precision LayerPrecision;
     protected byte WorldId;
     protected byte GridId;
 
-    protected FrameScenario(int entities, int power, ulong seed)
+    protected FrameScenario(int entities, int power, ulong seed, bool cell = false)
     {
         Entities = entities;
         Power = power;
         Seed = seed;
+        LayerPrecision = cell ? Gi.Layer.Precision.Cell : Gi.Layer.Precision.Exact;
     }
 
     public int Entities { get; }
@@ -84,7 +86,7 @@ internal abstract unsafe class FrameScenario : IDisposable
         Arena.Dispose();
     }
 
-    protected byte NewLayer() => Gi.Layer.New(WorldId);
+    protected byte NewLayer() => Gi.Layer.New(WorldId, LayerPrecision);
 
     protected int Place(byte layer, float x, float y, byte stamp, sbyte gain)
     {
@@ -112,7 +114,7 @@ internal abstract unsafe class FrameCanonical : FrameScenario
     private long _cellFlips;
     private long _q8Flips;
 
-    protected FrameCanonical(int entities, int power, ulong seed) : base(entities, power, seed)
+    protected FrameCanonical(int entities, int power, ulong seed, bool cell = false) : base(entities, power, seed, cell)
     {
     }
 
@@ -160,7 +162,7 @@ internal abstract unsafe class FrameCanonical : FrameScenario
     }
 }
 
-internal sealed unsafe class FrameLegacy(int entities, int power, ulong seed) : FrameCanonical(entities, power, seed)
+internal sealed unsafe class FrameLegacy(int entities, int power, ulong seed, bool cell = false) : FrameCanonical(entities, power, seed, cell)
 {
     private static readonly string[] StageNames = ["sync", "process", "point", "gradient", "changed"];
     private float* _gradientX;
@@ -234,7 +236,7 @@ internal sealed unsafe class FrameLegacy(int entities, int power, ulong seed) : 
     }
 }
 
-internal sealed unsafe class FrameSparse(int entities, int power, ulong seed, int movers) : FrameCanonical(entities, power, seed)
+internal sealed unsafe class FrameSparse(int entities, int power, ulong seed, int movers, bool cell = false) : FrameCanonical(entities, power, seed, cell)
 {
     private static readonly string[] StageNames = ["move", "process"];
     private readonly int _movers = movers;
@@ -312,7 +314,7 @@ internal sealed unsafe class FrameSparse(int entities, int power, ulong seed, in
     }
 }
 
-internal sealed unsafe class FrameIdle(int entities, int power, ulong seed) : FrameCanonical(entities, power, seed)
+internal sealed unsafe class FrameIdle(int entities, int power, ulong seed, bool cell = false) : FrameCanonical(entities, power, seed, cell)
 {
     private static readonly string[] StageNames = ["process"];
 
@@ -353,7 +355,7 @@ internal sealed unsafe class FrameIdle(int entities, int power, ulong seed) : Fr
     }
 }
 
-internal sealed unsafe class FrameCrowd(int entities, int power, ulong seed) : FrameScenario(entities, power, seed)
+internal sealed unsafe class FrameCrowd(int entities, int power, ulong seed, bool cell = false) : FrameScenario(entities, power, seed, cell)
 {
     private const int Width = 4;
     private const int Interval = 128;
@@ -571,7 +573,7 @@ internal sealed unsafe class FrameCrowd(int entities, int power, ulong seed) : F
     }
 }
 
-internal sealed unsafe class FrameWorld(int entities, int power, ulong seed) : FrameScenario(entities, power, seed)
+internal sealed unsafe class FrameWorld(int entities, int power, ulong seed, bool cell = false) : FrameScenario(entities, power, seed, cell)
 {
     private const int Lifetime = 100;
     private const float Speed = 0.1f;

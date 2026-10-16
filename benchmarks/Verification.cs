@@ -28,6 +28,7 @@ internal static partial class Verification
         Check("tent-matches-impulse-oracle", TentMatchesImpulseOracle());
         Check("bell-matches-paraboloid-oracle", BellMatchesParaboloidOracle());
         Check("source-slots-reuse-and-stale-handles-inert", SourceSlotsReuseAndStaleInert());
+        Check("fifo-free-ring-delays-slot-reuse", FifoFreeRingDelaysSlotReuse());
         Check("rewind-restores-recorded-state", RewindRestoresRecordedState());
         Check("signed-gain-exact", SignedGainExact());
         Check("multi-layer-pooled-matches-scans", MultiLayerPooledMatchesScans());
@@ -76,6 +77,7 @@ internal static partial class Verification
         Check("transform-updates-match-ordered-calls", TransformUpdatesMatchOrderedCallsAndAllocateNothing());
         Check("sync-transforms-match-ordered-calls", SyncTransformsMatchOrderedCallsAndAllocateNothing());
         Check("parallel-deposit-prep-matches-serial", ParallelDepositPrepMatchesSerial());
+        Check("precision-cell-skips-subcell-moves-and-matches-exclusion", PrecisionCellSkipsSubcellMovesAndMatchesExclusion());
 
         Console.WriteLine(failures == 0 ? "verification: all receipts green" : $"verification: {failures} failures");
         return failures == 0 ? 0 : 1;
@@ -1040,6 +1042,132 @@ internal static partial class Verification
         Gi.World.Process(w);
         if (Gi.World.Query(w, g, l, 20, 20) != 5 * 40) return false;
         return Gi.World.Query(w, g, l, 12, 12) == 0;
+    }
+
+    private static bool FifoFreeRingDelaysSlotReuse()
+    {
+        const int freeSlots = 64;
+        const int liveSlots = 16;
+        const int cycles = 127 * freeSlots;
+        var w = Gi.World.New();
+        try
+        {
+            var g = Gi.Grid.New(w, 6, 0f, 0f, 64f);
+            var l = Gi.Layer.New(w);
+            var stamp = Gi.Stamp.Box(1, 1, 10);
+            var initial = new int[freeSlots + liveSlots];
+            for (var i = 0; i < initial.Length; i++)
+                initial[i] = Gi.World.Place(w, l, 8.5f, 8.5f, stamp, 1);
+            for (var i = 0; i < freeSlots; i++)
+                Gi.World.Remove(w, initial[i]);
+            var stale = initial[0];
+            var active = new Queue<int>(initial.Skip(freeSlots));
+            for (var step = 0; step < cycles; step++)
+            {
+                var victim = active.Dequeue();
+                Gi.World.Remove(w, victim);
+                var placed = Gi.World.Place(w, l, 16.5f, 16.5f, stamp, 2);
+                if ((placed & Gi.World.SourceIndexMask) != (step % (freeSlots + liveSlots))) return false;
+                if (placed == stale || Gi.World.TryGetSourceSpec(w, stale, out _)) return false;
+                active.Enqueue(placed);
+            }
+
+            Gi.World.Move(w, stale, 32.5f, 32.5f);
+            Gi.World.SetGain(w, stale, 16);
+            Gi.World.Process(w);
+            return Gi.World.Query(w, g, l, 32, 32) == 0 && Gi.World.Query(w, g, l, 16, 16) == liveSlots * 20;
+        }
+        finally
+        {
+            Gi.World.Free(w);
+        }
+    }
+
+    private static unsafe bool PrecisionCellSkipsSubcellMovesAndMatchesExclusion()
+    {
+        var w = Gi.World.New();
+        var snapped = Gi.World.New();
+        try
+        {
+            var g = Gi.Grid.New(w, 7, 0f, 0f, 128f);
+            var gs = Gi.Grid.New(snapped, 7, 0f, 0f, 128f);
+            var cellLayer = Gi.Layer.New(w, Gi.Layer.Precision.Cell);
+            var exactLayer = Gi.Layer.New(snapped);
+            var derived = Gi.Layer.Sum(w, cellLayer, 2);
+            var stamps = new[]
+            {
+                Gi.Stamp.Box(6, 4, 70),
+                Gi.Stamp.Tent(9, 7, 90),
+                Gi.Stamp.Bell(11, 11, 100),
+                Gi.Stamp.Cone(5, 80, 180),
+            };
+            var rng = new Random(1010);
+            var ids = new int[40];
+            var xs = new float[ids.Length];
+            var ys = new float[ids.Length];
+            for (var i = 0; i < ids.Length; i++)
+            {
+                xs[i] = 16f + rng.Next(96) + 0.125f + (float)(rng.NextDouble() * 0.5);
+                ys[i] = 16f + rng.Next(96) + 0.125f + (float)(rng.NextDouble() * 0.5);
+                var stamp = stamps[i % stamps.Length];
+                var gain = (sbyte)(i % 2 == 0 ? 7 : -5);
+                ids[i] = Gi.World.Place(w, cellLayer, xs[i], ys[i], stamp, gain);
+                var sId = Gi.World.Place(snapped, exactLayer, MathF.Floor(xs[i]), MathF.Floor(ys[i]), stamp, gain);
+                var angle = (float)(i * 0.31);
+                Gi.World.Turn(w, ids[i], angle);
+                Gi.World.Turn(snapped, sId, angle);
+            }
+
+            Gi.World.Process(w);
+            Gi.World.Process(snapped);
+            if (!Read(w, g, cellLayer, 128).AsSpan().SequenceEqual(Read(snapped, gs, exactLayer, 128))) return false;
+
+            var tick = Gi.World.Tick(w);
+            for (var i = 0; i < ids.Length; i++)
+            {
+                xs[i] = MathF.Floor(xs[i]) + 0.875f;
+                ys[i] = MathF.Floor(ys[i]) + 0.75f;
+                Gi.World.Move(w, ids[i], xs[i], ys[i]);
+            }
+
+            fixed (int* idPtr = ids)
+            fixed (float* xPtr = xs, yPtr = ys)
+                Gi.World.Sync(w, idPtr, xPtr, yPtr, ids.Length);
+
+            Gi.World.Process(w);
+            if (Gi.World.ChangedTiles(w, g, cellLayer, null) != 0) return false;
+            if (Gi.World.ChangedTiles(w, g, cellLayer, tick, null) != 0) return false;
+            if (!Read(w, g, cellLayer, 128).AsSpan().SequenceEqual(Read(snapped, gs, exactLayer, 128))) return false;
+
+            for (var i = 0; i < 12; i++)
+            {
+                var id = ids[i];
+                var px = xs[i];
+                var py = ys[i];
+                if (!Gi.World.TrySense(w, cellLayer, px, py, id, out var exVal)) return false;
+                if (!Gi.World.TrySenseArea(w, cellLayer, px, py, 10f, id, out var exArea)) return false;
+                if (!Gi.World.TrySenseGradient(w, cellLayer, px, py, id, out var exGx, out var exGy)) return false;
+                if (!Gi.World.TrySense(w, derived, px, py, id, out var exDer)) return false;
+
+                Gi.World.Record(w);
+                Gi.World.Remove(w, id);
+                Gi.World.Process(w);
+                Gi.World.TrySense(w, cellLayer, px, py, out var remVal);
+                Gi.World.TrySenseArea(w, cellLayer, px, py, 10f, out var remArea);
+                Gi.World.TrySenseGradient(w, cellLayer, px, py, out var remGx, out var remGy);
+                Gi.World.TrySense(w, derived, px, py, out var remDer);
+                Gi.World.Rewind(w);
+                Gi.World.Process(w);
+                if (exVal != remVal || exArea != remArea || exGx != remGx || exGy != remGy || exDer != remDer) return false;
+            }
+
+            return true;
+        }
+        finally
+        {
+            Gi.World.Free(w);
+            Gi.World.Free(snapped);
+        }
     }
 
     private static bool RewindRestoresRecordedState()

@@ -73,10 +73,10 @@ internal static unsafe class FloorReadKernel
             Vector256.Store(Vector256.ConvertToSingle(down - up) * half, gradientY + i);
             var packed = Avx2.Permute4x64(Avx2.PackSignedSaturate(centre, centre).AsInt64(), 0xD8).AsInt16();
             packed.GetLower().Store(values + i);
-            var border = (uint)Vector256.AndNot(present, interior).ExtractMostSignificantBits();
+            var border = Vector256.AndNot(present, interior).ExtractMostSignificantBits();
             while (border != 0)
             {
-                var lane = System.Numerics.BitOperations.TrailingZeroCount(border);
+                var lane = BitOperations.TrailingZeroCount(border);
                 Edge(field, cells[i + lane], i + lane, values, gradientX, gradientY);
                 border &= border - 1;
             }
@@ -160,87 +160,87 @@ internal sealed unsafe class FloorReadsSuite : FloorSuite
     private const int BlockQueries = 16384;
     private const int BlockRepeats = 61;
 
-    private readonly Layout large;
-    private readonly Layout small;
-    private readonly short* values;
-    private readonly float* gradientX;
-    private readonly float* gradientY;
-    private readonly FloorCase[] cases;
+    private readonly Layout _large;
+    private readonly Layout _small;
+    private readonly short* _values;
+    private readonly float* _gradientX;
+    private readonly float* _gradientY;
+    private readonly FloorCase[] _cases;
 
     public FloorReadsSuite()
     {
-        values = Arena.Alloc<short>(Count);
-        gradientX = Arena.Alloc<float>(Count);
-        gradientY = Arena.Alloc<float>(Count);
+        _values = Arena.Alloc<short>(Count);
+        _gradientX = Arena.Alloc<float>(Count);
+        _gradientY = Arena.Alloc<float>(Count);
         var rng = new FloorRandom(0x56);
-        large = Build(4096, ref rng);
-        small = Build(1024, ref rng);
-        cases =
+        _large = Build(4096, ref rng);
+        _small = Build(1024, ref rng);
+        _cases =
         [
-            Reading("random-32MB", large.Field, large.Random),
-            Reading("coherent-32MB", large.Field, large.Coherent),
-            Reading("random-2MB", small.Field, small.Random),
-            Reading("coherent-2MB", small.Field, small.Coherent),
+            Reading("random-32MB", _large.Field, _large.Random),
+            Reading("coherent-32MB", _large.Field, _large.Coherent),
+            Reading("random-2MB", _small.Field, _small.Random),
+            Reading("coherent-2MB", _small.Field, _small.Coherent),
             new FloorCase("P6", "coherent-2MB-L2-resident", BlockQueries * BlockRepeats,
                 () =>
                 {
                     for (var r = 0; r < BlockRepeats; r++)
-                        FloorReadKernel.Read(small.Field, small.Coherent, BlockQueries, values, gradientX, gradientY);
+                        FloorReadKernel.Read(_small.Field, _small.Coherent, BlockQueries, _values, _gradientX, _gradientY);
                 },
                 () =>
                 {
-                    FloorReadKernel.Read(small.Field, small.Coherent, BlockQueries, values, gradientX, gradientY);
-                    var h = FloorHash.Of(values, BlockQueries);
-                    h = FloorHash.Add(h, FloorHash.Of(gradientX, BlockQueries));
-                    return FloorHash.Add(h, FloorHash.Of(gradientY, BlockQueries));
+                    FloorReadKernel.Read(_small.Field, _small.Coherent, BlockQueries, _values, _gradientX, _gradientY);
+                    var h = FloorHash.Of(_values, BlockQueries);
+                    h = FloorHash.Add(h, FloorHash.Of(_gradientX, BlockQueries));
+                    return FloorHash.Add(h, FloorHash.Of(_gradientY, BlockQueries));
                 }),
         ];
     }
 
     public override string Id => "P6";
 
-    public override IReadOnlyList<FloorCase> Cases => cases;
+    public override IReadOnlyList<FloorCase> Cases => _cases;
 
     public override void Receipt(FloorReceipts receipts)
     {
-        foreach (var (name, layout) in new[] { ("32MB", large), ("2MB", small) })
+        foreach (var (name, layout) in new[] { ("32MB", _large), ("2MB", _small) })
         {
             var flat = Flatten(layout.Field);
             foreach (var (order, cells) in new[] { ("random", (nint)layout.Random), ("coherent", (nint)layout.Coherent) })
             {
                 var queries = (int*)cells;
                 Verify(receipts, $"floor-p6-{order}-{name}-scalar-matches-flat-field", layout, queries, Count, flat,
-                    () => FloorReadKernel.ReadScalar(layout.Field, queries, 0, Count, values, gradientX, gradientY));
+                    () => FloorReadKernel.ReadScalar(layout.Field, queries, 0, Count, _values, _gradientX, _gradientY));
                 if (Avx2.IsSupported)
                     Verify(receipts, $"floor-p6-{order}-{name}-vector-matches-flat-field", layout, queries, Count, flat,
-                        () => FloorReadKernel.Read(layout.Field, queries, Count, values, gradientX, gradientY));
+                        () => FloorReadKernel.Read(layout.Field, queries, Count, _values, _gradientX, _gradientY));
                 else receipts.Skip($"floor-p6-{order}-{name}-vector-matches-flat-field", "avx2 unavailable");
             }
 
             if (name != "2MB") continue;
             Verify(receipts, "floor-p6-block-matches-leading-queries", layout, layout.Coherent, BlockQueries, flat,
-                () => FloorReadKernel.Read(layout.Field, layout.Coherent, BlockQueries, values, gradientX, gradientY));
+                () => FloorReadKernel.Read(layout.Field, layout.Coherent, BlockQueries, _values, _gradientX, _gradientY));
             Verify(receipts, "floor-p6-unaligned-count-matches-flat-field", layout, layout.Random, 1003, flat,
-                () => FloorReadKernel.Read(layout.Field, layout.Random, 1003, values, gradientX, gradientY));
+                () => FloorReadKernel.Read(layout.Field, layout.Random, 1003, _values, _gradientX, _gradientY));
         }
     }
 
     private FloorCase Reading(string variant, FloorField field, int* cells)
         => new("P6", variant, Count,
-            () => FloorReadKernel.Read(field, cells, Count, values, gradientX, gradientY),
+            () => FloorReadKernel.Read(field, cells, Count, _values, _gradientX, _gradientY),
             () =>
             {
-                FloorReadKernel.Read(field, cells, Count, values, gradientX, gradientY);
-                var h = FloorHash.Of(values, Count);
-                h = FloorHash.Add(h, FloorHash.Of(gradientX, Count));
-                return FloorHash.Add(h, FloorHash.Of(gradientY, Count));
+                FloorReadKernel.Read(field, cells, Count, _values, _gradientX, _gradientY);
+                var h = FloorHash.Of(_values, Count);
+                h = FloorHash.Add(h, FloorHash.Of(_gradientX, Count));
+                return FloorHash.Add(h, FloorHash.Of(_gradientY, Count));
             });
 
     private void Verify(FloorReceipts receipts, string name, Layout layout, int* cells, int count, short[] flat, Action run)
     {
-        new Span<short>(values, Count).Clear();
-        new Span<float>(gradientX, Count).Clear();
-        new Span<float>(gradientY, Count).Clear();
+        new Span<short>(_values, Count).Clear();
+        new Span<float>(_gradientX, Count).Clear();
+        new Span<float>(_gradientY, Count).Clear();
         run();
         var side = layout.Field.Side;
         var tiles = layout.Field.TilesPerSide;
@@ -263,9 +263,9 @@ internal sealed unsafe class FloorReadsSuite : FloorSuite
             else outside++;
 
             short At(int px, int py) => inside && px >= 0 && py >= 0 && px < side && py < side ? flat[py * side + px] : (short)0;
-            ok = values[i] == At(x, y)
-                 && gradientX[i] == (At(x + 1, y) - At(x - 1, y)) * 0.5f
-                 && gradientY[i] == (At(x, y + 1) - At(x, y - 1)) * 0.5f;
+            ok = _values[i] == At(x, y)
+                 && _gradientX[i] == (At(x + 1, y) - At(x - 1, y)) * 0.5f
+                 && _gradientY[i] == (At(x, y + 1) - At(x, y - 1)) * 0.5f;
         }
 
         receipts.Check(name, ok && (count < 100_000 || outside > 0 && absentTile > 0));

@@ -161,7 +161,10 @@ public sealed unsafe class LayerLiveTests : IDisposable
         const int count = ResolvePool.ColumnThreshold + 1500;
         var create = new SourceCommand[count];
         for (var i = 0; i < count; i++)
-            create[i] = SourceCommand.Place((byte)(i % Layers), 1f + i % 250, 1f + i / 250 % 250, _stamp, (sbyte)(i % 5 - 2));
+        {
+            var row = i / 250;
+            create[i] = SourceCommand.Place((byte)(i % Layers), 1f + i % 250, 1f + row % 250, _stamp, (sbyte)(i % 5 - 2));
+        }
         var created = new SourceResult[count];
         Assert.Equal(BatchStatus.Applied, World.ApplyBatch(_world, create, created));
         AssertExact("create");
@@ -170,12 +173,13 @@ public sealed unsafe class LayerLiveTests : IDisposable
         for (var i = 0; i < count; i++)
         {
             var target = created[i].SourceId;
+            var row = i / 200;
             update[i] = (i % 4) switch
             {
                 0 => SourceCommand.SetGain(target, (sbyte)(i % 3)),
                 1 => SourceCommand.Remove(target),
                 2 => SourceCommand.Fade(target, (sbyte)(i % 7 - 3), 0),
-                _ => SourceCommand.Update(target, 2f + i % 200, 2f + i / 200 % 200, 0f, 1f, (sbyte)(i % 4 - 1)),
+                _ => SourceCommand.Update(target, 2f + i % 200, 2f + row % 200, 0f, 1f, (sbyte)(i % 4 - 1)),
             };
         }
 

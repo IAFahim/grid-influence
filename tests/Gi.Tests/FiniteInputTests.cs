@@ -270,8 +270,9 @@ public sealed unsafe class FiniteInputTests : IDisposable
             var theirs = new int[count];
             for (var i = 0; i < count; i++)
             {
+                var row = i / 61;
                 var x = 1f + i % 61;
-                var y = 1f + i / 61 % 60;
+                var y = 1f + row % 60;
                 mine[i] = World.Place(world, layer, x, y, stamp, 1);
                 theirs[i] = World.Place(twin, twinLayer, x, y, stamp, 1);
             }
@@ -286,8 +287,9 @@ public sealed unsafe class FiniteInputTests : IDisposable
             var expected = new ulong[(count + 63) >> 6];
             for (var i = 0; i < count; i++)
             {
+                var row = i / 61;
                 xs[i] = Math.Min(1f + i % 61 + 0.5f, 61.5f);
-                ys[i] = Math.Min(1f + i / 61 % 60 + 0.5f, 60.5f);
+                ys[i] = Math.Min(1f + row % 60 + 0.5f, 60.5f);
                 headings[i] = 0.25f * (i % 4);
                 scales[i] = 1f + i % 5 * 0.25f;
                 var rejected = false;
@@ -404,10 +406,11 @@ public sealed unsafe class FiniteInputTests : IDisposable
 
             index = 0;
             foreach (var stamp in stamps)
-            foreach (var unreachable in Unreachable)
+            foreach (var _ in Unreachable)
             {
+                var row = index / 9;
                 var x = 12f + index % 9 * 5f;
-                var y = 12f + index / 9 % 6 * 6f;
+                var y = 12f + row % 6 * 6f;
                 World.Move(parked, ids[index], x, y);
                 var id = World.Place(direct, directLayer, x, y, stamp, (sbyte)(1 + index % 3));
                 World.Turn(direct, id, 0.7f + index);
@@ -441,9 +444,11 @@ public sealed unsafe class FiniteInputTests : IDisposable
         var mask = new ulong[(count + 63) >> 6];
         for (var i = 0; i < count; i++)
         {
-            ids[i] = Place(1f + i % 61, 1f + i / 61 % 60);
+            var row = i / 61;
+            var queryRow = i / 60;
+            ids[i] = Place(1f + i % 61, 1f + row % 60);
             xs[i] = i % 5 == 0 ? NonFinite[i / 5 % NonFinite.Length] : 2f + i % 60;
-            ys[i] = i % 7 == 0 ? Unreachable[i / 7 % Unreachable.Length] : 2f + i / 60 % 60;
+            ys[i] = i % 7 == 0 ? Unreachable[i / 7 % Unreachable.Length] : 2f + queryRow % 60;
         }
 
         World.Process(_world);

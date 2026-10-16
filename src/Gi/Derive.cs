@@ -20,6 +20,10 @@ internal struct LayerRecipe
     public byte A;
     public byte B;
     public byte Shift;
+    public byte PhaseBits;
+    public byte TurnBits;
+    public ushort TurnMask;
+    public int AnchorMask;
     public int WeightA;
     public int WeightB;
     public short Low;
@@ -42,7 +46,7 @@ public static unsafe partial class World
         if (low > high) throw new ArgumentOutOfRangeException(nameof(low));
 
         var reads = w->Recipes[a].Reads | w->Recipes[b].Reads;
-        var id = AddLayer(world);
+        var id = AddLayer(world, Layer.Precision.Exact);
         for (var gi = 0; gi < w->GridCount; gi++)
         {
             var g = w->Grids + gi;

@@ -105,30 +105,36 @@ public static unsafe partial class World
                 continue;
             }
 
-            var angle = source->Angle.Pointer[slot];
+            var oldX = source->X.Pointer[slot];
+            var oldY = source->Y.Pointer[slot];
+            var oldAngle = source->Angle.Pointer[slot];
+            var oldScale = source->Scale.Pointer[slot];
+            var angle = oldAngle;
             if (float.IsFinite(command.HeadingRadians)) angle = QuantizeSourceBatchAngle(command.HeadingRadians);
-            var scale = source->Scale.Pointer[slot];
+            var scale = oldScale;
             if (float.IsFinite(command.ScaleValue)) scale = QuantizeSourceBatchScale(command.ScaleValue);
             var finitePosition = float.IsFinite(command.PositionX) && float.IsFinite(command.PositionY);
-            var positionX = finitePosition ? command.PositionX : source->X.Pointer[slot];
-            var positionY = finitePosition ? command.PositionY : source->Y.Pointer[slot];
+            var positionX = finitePosition ? command.PositionX : oldX;
+            var positionY = finitePosition ? command.PositionY : oldY;
+            var layer = source->Layer.Pointer[slot];
+            var posChanged = (positionX != oldX || positionY != oldY) && PositionChanged(context, layer, oldX, oldY, positionX, positionY);
+            var angChanged = angle != oldAngle && AngleChanged(context, layer, oldAngle, angle);
+            var scaleChanged = scale != oldScale;
             if (command.Kind == SourceCommandKind.UpdateTransform)
             {
-                if (positionX != source->X.Pointer[slot] || positionY != source->Y.Pointer[slot] ||
-                    angle != source->Angle.Pointer[slot] || scale != source->Scale.Pointer[slot])
-                {
-                    EnqueueMutation(context, source, slot, positionX, positionY,
-                        (sbyte)source->Gain.Pointer[slot], angle, scale, true);
-                    source->X.Pointer[slot] = positionX;
-                    source->Y.Pointer[slot] = positionY;
-                    source->Angle.Pointer[slot] = angle;
-                    source->Scale.Pointer[slot] = scale;
-                }
-
+                var currentGain = (sbyte)source->Gain.Pointer[slot];
+                if (posChanged) EnqueueMutation(context, source, slot, positionX, positionY, currentGain, oldAngle, oldScale, true);
+                source->X.Pointer[slot] = positionX;
+                source->Y.Pointer[slot] = positionY;
+                if (angChanged) EnqueueMutation(context, source, slot, positionX, positionY, currentGain, angle, oldScale, true);
+                source->Angle.Pointer[slot] = angle;
+                if (scaleChanged) EnqueueMutation(context, source, slot, positionX, positionY, currentGain, angle, scale, true);
+                source->Scale.Pointer[slot] = scale;
                 results[index] = new SourceResult(identifier, SourceResultStatus.Applied);
                 continue;
             }
 
+            var oldGain = source->Gain.Pointer[slot];
             var gain = (byte)Math.Clamp((int)command.Gain, -MaxGain, MaxGain);
             if ((source->Timed.Pointer[slot] & Fading) != 0)
             {
@@ -136,15 +142,18 @@ public static unsafe partial class World
                 source->Timed.Pointer[slot] &= unchecked((byte)~Fading);
             }
 
-            if (positionX != source->X.Pointer[slot] || positionY != source->Y.Pointer[slot] ||
-                angle != source->Angle.Pointer[slot] || scale != source->Scale.Pointer[slot] || gain != source->Gain.Pointer[slot])
+            var signedOldGain = (sbyte)oldGain;
+            if (posChanged) EnqueueMutation(context, source, slot, positionX, positionY, signedOldGain, oldAngle, oldScale, true);
+            source->X.Pointer[slot] = positionX;
+            source->Y.Pointer[slot] = positionY;
+            if (angChanged) EnqueueMutation(context, source, slot, positionX, positionY, signedOldGain, angle, oldScale, true);
+            source->Angle.Pointer[slot] = angle;
+            if (scaleChanged) EnqueueMutation(context, source, slot, positionX, positionY, signedOldGain, angle, scale, true);
+            source->Scale.Pointer[slot] = scale;
+            if (gain != oldGain)
             {
+                CountGain(context, layer, oldGain, gain);
                 EnqueueMutation(context, source, slot, positionX, positionY, (sbyte)gain, angle, scale, true);
-                CountGain(context, source->Layer.Pointer[slot], source->Gain.Pointer[slot], gain);
-                source->X.Pointer[slot] = positionX;
-                source->Y.Pointer[slot] = positionY;
-                source->Angle.Pointer[slot] = angle;
-                source->Scale.Pointer[slot] = scale;
                 source->Gain.Pointer[slot] = gain;
             }
 
@@ -375,34 +384,17 @@ public static unsafe partial class World
                     FromStamp = state.Stamp, FromLayer = state.Layer,
                     FromGain = state.Alive != 0 ? (sbyte)state.Gain : (sbyte)0,
                     FromAngle = state.Angle, FromScale = state.Scale,
-                    AliveFrom = state.Alive, FromGen = state.Generation
+                    ToX = state.PositionX, ToY = state.PositionY,
+                    ToStamp = state.Stamp, ToLayer = state.Layer,
+                    ToGain = state.Alive != 0 ? (sbyte)state.Gain : (sbyte)0,
+                    ToAngle = state.Angle, ToScale = state.Scale,
+                    AliveFrom = state.Alive, AliveTo = state.Alive, FromGen = state.Generation
                 };
 
             for (var commandIndex = entry->FirstCommand; commandIndex >= 0;
                  commandIndex = context->BatchCommands.Pointer[commandIndex].Next)
-                FoldSourceCommand(context, entry, ref state, in commands[commandIndex], commandIndex);
+                FoldSourceCommand(context, entry, ref state, ref operation, in commands[commandIndex], commandIndex);
 
-            if (entry->OriginalPending == 0 && entry->FirstDepositCommand >= 0 &&
-                commands[entry->FirstDepositCommand].Kind == SourceCommandKind.Place)
-            {
-                ref readonly var placement = ref commands[entry->FirstDepositCommand];
-                operation.FromX = placement.PositionX;
-                operation.FromY = placement.PositionY;
-                operation.FromStamp = placement.Stamp;
-                operation.FromLayer = placement.Layer;
-                operation.FromAngle = 0;
-                operation.FromScale = UnitScale;
-                operation.FromGen = (byte)((operation.FromGen + 1) & 127);
-            }
-
-            operation.ToX = state.PositionX;
-            operation.ToY = state.PositionY;
-            operation.ToStamp = state.Stamp;
-            operation.ToLayer = state.Layer;
-            operation.ToGain = state.Alive != 0 ? (sbyte)state.Gain : (sbyte)0;
-            operation.ToAngle = state.Angle;
-            operation.ToScale = state.Scale;
-            operation.AliveTo = state.Alive;
             entry->State = state;
             entry->Operation = operation;
         }
@@ -421,7 +413,7 @@ public static unsafe partial class World
     };
 
     private static void FoldSourceCommand(
-        WorldCtx* context, SourceBatchEntry* entry, ref SourceBatchState state,
+        WorldCtx* context, SourceBatchEntry* entry, ref SourceBatchState state, ref DepositOp operation,
         in SourceCommand command, int index)
     {
         switch (command.Kind)
@@ -438,38 +430,51 @@ public static unsafe partial class World
                 state.Alive = 1;
                 state.Generation = (byte)((state.Generation + 1) & 127);
                 MarkSourceBatchSchedule(entry, index);
-                MarkSourceBatchDeposit(entry, index);
-                FoldSourceTurn(entry, ref state, command.HeadingRadians, index);
-                FoldSourceScale(entry, ref state, command.ScaleValue, index);
+                if (entry->OriginalPending == 0 && entry->FirstDepositCommand < 0)
+                {
+                    operation.FromX = command.PositionX;
+                    operation.FromY = command.PositionY;
+                    operation.FromStamp = command.Stamp;
+                    operation.FromLayer = command.Layer;
+                    operation.FromAngle = 0;
+                    operation.FromScale = UnitScale;
+                    operation.FromGen = state.Generation;
+                }
+
+                if (entry->FirstDepositCommand < 0) entry->FirstDepositCommand = index;
+                CommitSourceBatchDeposit(ref operation, in state);
+                FoldSourceTurn(context, entry, ref state, ref operation, command.HeadingRadians, index);
+                FoldSourceScale(entry, ref state, ref operation, command.ScaleValue, index);
                 break;
             case SourceCommandKind.Update:
-                FoldSourceMove(entry, ref state, command.PositionX, command.PositionY, index);
-                FoldSourceTurn(entry, ref state, command.HeadingRadians, index);
-                FoldSourceScale(entry, ref state, command.ScaleValue, index);
-                FoldSourceGain(entry, ref state, command.Gain, index);
+                FoldSourceMove(context, entry, ref state, ref operation, command.PositionX, command.PositionY, index);
+                FoldSourceTurn(context, entry, ref state, ref operation, command.HeadingRadians, index);
+                FoldSourceScale(entry, ref state, ref operation, command.ScaleValue, index);
+                FoldSourceGain(entry, ref state, ref operation, command.Gain, index);
                 break;
             case SourceCommandKind.UpdateTransform:
-                FoldSourceMove(entry, ref state, command.PositionX, command.PositionY, index);
-                FoldSourceTurn(entry, ref state, command.HeadingRadians, index);
-                FoldSourceScale(entry, ref state, command.ScaleValue, index);
+                FoldSourceMove(context, entry, ref state, ref operation, command.PositionX, command.PositionY, index);
+                FoldSourceTurn(context, entry, ref state, ref operation, command.HeadingRadians, index);
+                FoldSourceScale(entry, ref state, ref operation, command.ScaleValue, index);
                 break;
             case SourceCommandKind.Move:
-                FoldSourceMove(entry, ref state, command.PositionX, command.PositionY, index);
+                FoldSourceMove(context, entry, ref state, ref operation, command.PositionX, command.PositionY, index);
                 break;
             case SourceCommandKind.Turn:
-                FoldSourceTurn(entry, ref state, command.HeadingRadians, index);
+                FoldSourceTurn(context, entry, ref state, ref operation, command.HeadingRadians, index);
                 break;
             case SourceCommandKind.Scale:
-                FoldSourceScale(entry, ref state, command.ScaleValue, index);
+                FoldSourceScale(entry, ref state, ref operation, command.ScaleValue, index);
                 break;
             case SourceCommandKind.SetGain:
-                FoldSourceGain(entry, ref state, command.Gain, index);
+                FoldSourceGain(entry, ref state, ref operation, command.Gain, index);
                 break;
             case SourceCommandKind.Remove:
                 if (state.Timed != 0) MarkSourceBatchSchedule(entry, index);
+                BeginSourceBatchDeposit(entry, ref operation, in state, index);
                 state.Timed = 0;
                 state.Alive = 0;
-                MarkSourceBatchDeposit(entry, index);
+                CommitSourceBatchDeposit(ref operation, in state);
                 break;
             case SourceCommandKind.Fade:
                 MarkSourceBatchSchedule(entry, index);
@@ -479,8 +484,9 @@ public static unsafe partial class World
                     state.Timed &= unchecked((byte)~Fading);
                     if (target != state.Gain)
                     {
+                        BeginSourceBatchDeposit(entry, ref operation, in state, index);
                         state.Gain = target;
-                        MarkSourceBatchDeposit(entry, index);
+                        CommitSourceBatchDeposit(ref operation, in state);
                     }
                 }
                 else
@@ -506,9 +512,36 @@ public static unsafe partial class World
         }
     }
 
-    private static void MarkSourceBatchDeposit(SourceBatchEntry* entry, int index)
+    private static void BeginSourceBatchDeposit(
+        SourceBatchEntry* entry, ref DepositOp operation, in SourceBatchState state, int index)
     {
-        if (entry->FirstDepositCommand < 0) entry->FirstDepositCommand = index;
+        if (entry->FirstDepositCommand >= 0) return;
+        if (entry->OriginalPending == 0)
+        {
+            operation.FromX = state.PositionX;
+            operation.FromY = state.PositionY;
+            operation.FromStamp = state.Stamp;
+            operation.FromLayer = state.Layer;
+            operation.FromGain = state.Alive != 0 ? (sbyte)state.Gain : (sbyte)0;
+            operation.FromAngle = state.Angle;
+            operation.FromScale = state.Scale;
+            operation.AliveFrom = state.Alive;
+            operation.FromGen = state.Generation;
+        }
+
+        entry->FirstDepositCommand = index;
+    }
+
+    private static void CommitSourceBatchDeposit(ref DepositOp operation, in SourceBatchState state)
+    {
+        operation.ToX = state.PositionX;
+        operation.ToY = state.PositionY;
+        operation.ToStamp = state.Stamp;
+        operation.ToLayer = state.Layer;
+        operation.ToGain = state.Alive != 0 ? (sbyte)state.Gain : (sbyte)0;
+        operation.ToAngle = state.Angle;
+        operation.ToScale = state.Scale;
+        operation.AliveTo = state.Alive;
     }
 
     private static void MarkSourceBatchSchedule(SourceBatchEntry* entry, int index)
@@ -516,31 +549,41 @@ public static unsafe partial class World
         if (entry->FirstScheduleCommand < 0) entry->FirstScheduleCommand = index;
     }
 
-    private static void FoldSourceMove(SourceBatchEntry* entry, ref SourceBatchState state, float positionX, float positionY, int index)
+    private static void FoldSourceMove(
+        WorldCtx* context, SourceBatchEntry* entry, ref SourceBatchState state, ref DepositOp operation,
+        float positionX, float positionY, int index)
     {
         if (!float.IsFinite(positionX) || !float.IsFinite(positionY)) return;
         if (state.PositionX == positionX && state.PositionY == positionY) return;
+        var changed = PositionChanged(context, state.Layer, state.PositionX, state.PositionY, positionX, positionY);
+        if (changed) BeginSourceBatchDeposit(entry, ref operation, in state, index);
         state.PositionX = positionX;
         state.PositionY = positionY;
-        MarkSourceBatchDeposit(entry, index);
+        if (changed) CommitSourceBatchDeposit(ref operation, in state);
     }
 
-    private static void FoldSourceTurn(SourceBatchEntry* entry, ref SourceBatchState state, float headingRadians, int index)
+    private static void FoldSourceTurn(
+        WorldCtx* context, SourceBatchEntry* entry, ref SourceBatchState state, ref DepositOp operation,
+        float headingRadians, int index)
     {
         if (!float.IsFinite(headingRadians)) return;
         var angle = QuantizeSourceBatchAngle(headingRadians);
         if (angle == state.Angle) return;
+        var changed = AngleChanged(context, state.Layer, state.Angle, angle);
+        if (changed) BeginSourceBatchDeposit(entry, ref operation, in state, index);
         state.Angle = angle;
-        MarkSourceBatchDeposit(entry, index);
+        if (changed) CommitSourceBatchDeposit(ref operation, in state);
     }
 
-    private static void FoldSourceScale(SourceBatchEntry* entry, ref SourceBatchState state, float scale, int index)
+    private static void FoldSourceScale(
+        SourceBatchEntry* entry, ref SourceBatchState state, ref DepositOp operation, float scale, int index)
     {
         if (!float.IsFinite(scale)) return;
         var next = QuantizeSourceBatchScale(scale);
         if (next == state.Scale) return;
+        BeginSourceBatchDeposit(entry, ref operation, in state, index);
         state.Scale = next;
-        MarkSourceBatchDeposit(entry, index);
+        CommitSourceBatchDeposit(ref operation, in state);
     }
 
     private static ushort QuantizeSourceBatchAngle(float headingRadians)
@@ -556,7 +599,8 @@ public static unsafe partial class World
         return (ushort)(quantized < 1 ? 1 : quantized > ushort.MaxValue ? ushort.MaxValue : quantized);
     }
 
-    private static void FoldSourceGain(SourceBatchEntry* entry, ref SourceBatchState state, sbyte gain, int index)
+    private static void FoldSourceGain(
+        SourceBatchEntry* entry, ref SourceBatchState state, ref DepositOp operation, sbyte gain, int index)
     {
         if ((state.Timed & Fading) != 0)
         {
@@ -566,8 +610,9 @@ public static unsafe partial class World
 
         var next = (byte)Math.Clamp((int)gain, -MaxGain, MaxGain);
         if (next == state.Gain) return;
+        BeginSourceBatchDeposit(entry, ref operation, in state, index);
         state.Gain = next;
-        MarkSourceBatchDeposit(entry, index);
+        CommitSourceBatchDeposit(ref operation, in state);
     }
 
     private static void ReserveSourceBatchOperations(WorldCtx* context, int commandCount)

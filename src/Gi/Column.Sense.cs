@@ -1,4 +1,6 @@
+#if NET
 using System.Runtime.CompilerServices;
+#endif
 
 namespace Gi;
 
@@ -97,10 +99,10 @@ public static unsafe partial class World
         short* values, float* bestXs, float* bestYs, ulong* whole)
     {
         var w = GetContext(world);
-        if (w == null || layer >= w->LayerCount) return UnfilledMax(xs, ys, values, bestXs, bestYs, whole, count);
+        if (w == null || layer >= w->LayerCount) return UnfilledMax(values, bestXs, bestYs, whole, count);
         if (count <= 0) return true;
         if (xs == null || ys == null || reaches == null || values == null || bestXs == null || bestYs == null)
-            return UnfilledMax(xs, ys, values, bestXs, bestYs, whole, count);
+            return UnfilledMax(values, bestXs, bestYs, whole, count);
 
         ClearBits(whole, count);
 
@@ -123,11 +125,11 @@ public static unsafe partial class World
         short* values, float* nearestXs, float* nearestYs, ulong* found)
     {
         var w = GetContext(world);
-        if (w == null || layer >= w->LayerCount) return UnfilledNearest(xs, ys, values, nearestXs, nearestYs, found, count);
+        if (w == null || layer >= w->LayerCount) return UnfilledNearest(values, nearestXs, nearestYs, found, count);
         if (count <= 0) return true;
         if (xs == null || ys == null || reaches == null || thresholds == null ||
             values == null || nearestXs == null || nearestYs == null)
-            return UnfilledNearest(xs, ys, values, nearestXs, nearestYs, found, count);
+            return UnfilledNearest(values, nearestXs, nearestYs, found, count);
 
         ClearBits(found, count);
 

@@ -19,6 +19,8 @@ internal static class ValidationRules
     internal const int MaxShift = 15;
     internal const int MinScaleQ8 = 1;
     internal const int MaxScaleQ8 = 1 << 20;
+    internal const int MaxPhaseBits = 8;
+    internal const int MaxTurnBits = 16;
 
     internal static bool IsAxis(int axis) => axis >= 1 && axis <= MaxAxis;
     internal static bool IsRadius(int radius) => radius >= 1 && radius <= MaxRadius;
@@ -30,6 +32,8 @@ internal static class ValidationRules
     internal static bool IsPower(int power) => power >= MinPower && power <= MaxPower;
     internal static bool IsWeight(int weight) => weight >= -MaxWeight && weight <= MaxWeight;
     internal static bool IsShift(int shift) => shift >= 0 && shift <= MaxShift;
+    internal static bool IsPhaseBits(int phaseBits) => phaseBits >= 0 && phaseBits <= MaxPhaseBits;
+    internal static bool IsTurnBits(int turnBits) => turnBits >= 0 && turnBits <= MaxTurnBits;
     internal static bool IsGridSize(float size) => float.IsFinite(size) && size > 0f;
     internal static bool IsGridOrigin(float origin) => float.IsFinite(origin);
 

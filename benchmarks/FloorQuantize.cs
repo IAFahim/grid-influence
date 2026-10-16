@@ -71,74 +71,74 @@ internal sealed unsafe class FloorQuantizeSuite : FloorSuite
         1023.5f, 0.5f, 511.99997f, 512f, 31.5f, 1000f, -16f, 1039.99f,
     ];
 
-    private readonly float* xs;
-    private readonly float* ys;
-    private readonly int* output;
-    private readonly int* expected;
-    private readonly FloorCase[] cases;
+    private readonly float* _xs;
+    private readonly float* _ys;
+    private readonly int* _output;
+    private readonly int* _expected;
+    private readonly FloorCase[] _cases;
 
     public FloorQuantizeSuite()
     {
         const int count = FloorShape.Splats;
-        xs = Arena.Alloc<float>(count);
-        ys = Arena.Alloc<float>(count);
-        output = Arena.Alloc<int>(count);
-        expected = Arena.Alloc<int>(count);
+        _xs = Arena.Alloc<float>(count);
+        _ys = Arena.Alloc<float>(count);
+        _output = Arena.Alloc<int>(count);
+        _expected = Arena.Alloc<int>(count);
         var rng = new FloorRandom(0x51);
         for (var i = 0; i < count; i++)
         {
-            xs[i] = -16f + 1056f * rng.Unit();
-            ys[i] = -16f + 1056f * rng.Unit();
+            _xs[i] = -16f + 1056f * rng.Unit();
+            _ys[i] = -16f + 1056f * rng.Unit();
         }
 
         for (var i = 0; i < EdgeValues.Length; i++)
         {
-            xs[i] = EdgeValues[i];
-            ys[i] = EdgeValues[(i + 5) % EdgeValues.Length];
+            _xs[i] = EdgeValues[i];
+            _ys[i] = EdgeValues[(i + 5) % EdgeValues.Length];
         }
 
-        for (var i = 0; i < count; i++) expected[i] = FloorQuantizeKernel.Reference(xs[i], ys[i], OriginX, OriginY);
-        cases =
+        for (var i = 0; i < count; i++) _expected[i] = FloorQuantizeKernel.Reference(_xs[i], _ys[i], OriginX, OriginY);
+        _cases =
         [
             new FloorCase("P1", "quantize-1M", count,
-                () => FloorQuantizeKernel.Run(xs, ys, output, count, OriginX, OriginY),
+                () => FloorQuantizeKernel.Run(_xs, _ys, _output, count, OriginX, OriginY),
                 () =>
                 {
-                    FloorQuantizeKernel.Run(xs, ys, output, count, OriginX, OriginY);
-                    return FloorHash.Of(output, count);
+                    FloorQuantizeKernel.Run(_xs, _ys, _output, count, OriginX, OriginY);
+                    return FloorHash.Of(_output, count);
                 }),
             new FloorCase("P1", "quantize-L2-resident", Block * Repeats,
                 () =>
                 {
-                    for (var r = 0; r < Repeats; r++) FloorQuantizeKernel.Run(xs, ys, output, Block, OriginX, OriginY);
+                    for (var r = 0; r < Repeats; r++) FloorQuantizeKernel.Run(_xs, _ys, _output, Block, OriginX, OriginY);
                 },
                 () =>
                 {
-                    FloorQuantizeKernel.Run(xs, ys, output, Block, OriginX, OriginY);
-                    return FloorHash.Of(output, Block);
+                    FloorQuantizeKernel.Run(_xs, _ys, _output, Block, OriginX, OriginY);
+                    return FloorHash.Of(_output, Block);
                 }),
         ];
     }
 
     public override string Id => "P1";
 
-    public override IReadOnlyList<FloorCase> Cases => cases;
+    public override IReadOnlyList<FloorCase> Cases => _cases;
 
     public override void Receipt(FloorReceipts receipts)
     {
         const int count = FloorShape.Splats;
         var outside = 0;
-        for (var i = 0; i < count; i++) if (expected[i] < 0) outside++;
+        for (var i = 0; i < count; i++) if (_expected[i] < 0) outside++;
         receipts.Check("floor-p1-reference-has-inside-and-outside-cells", outside > count / 100 && outside < count / 10);
 
-        new Span<int>(output, count).Clear();
-        FloorQuantizeKernel.RunScalar(xs, ys, output, 0, count, OriginX, OriginY);
-        receipts.Check("floor-p1-scalar-matches-reference", new ReadOnlySpan<int>(output, count).SequenceEqual(new ReadOnlySpan<int>(expected, count)));
+        new Span<int>(_output, count).Clear();
+        FloorQuantizeKernel.RunScalar(_xs, _ys, _output, 0, count, OriginX, OriginY);
+        receipts.Check("floor-p1-scalar-matches-reference", new ReadOnlySpan<int>(_output, count).SequenceEqual(new ReadOnlySpan<int>(_expected, count)));
 
-        new Span<int>(output, count).Clear();
-        FloorQuantizeKernel.Run(xs, ys, output, Block, OriginX, OriginY);
+        new Span<int>(_output, count).Clear();
+        FloorQuantizeKernel.Run(_xs, _ys, _output, Block, OriginX, OriginY);
         receipts.Check("floor-p1-block-matches-leading-cells",
-            new ReadOnlySpan<int>(output, Block).SequenceEqual(new ReadOnlySpan<int>(expected, Block)));
+            new ReadOnlySpan<int>(_output, Block).SequenceEqual(new ReadOnlySpan<int>(_expected, Block)));
 
         if (!Avx2.IsSupported)
         {
@@ -146,9 +146,9 @@ internal sealed unsafe class FloorQuantizeSuite : FloorSuite
             return;
         }
 
-        new Span<int>(output, count).Clear();
-        var done = FloorQuantizeKernel.RunVector(xs, ys, output, count, OriginX, OriginY);
+        new Span<int>(_output, count).Clear();
+        var done = FloorQuantizeKernel.RunVector(_xs, _ys, _output, count, OriginX, OriginY);
         receipts.Check("floor-p1-vector-matches-reference",
-            done == count && new ReadOnlySpan<int>(output, count).SequenceEqual(new ReadOnlySpan<int>(expected, count)));
+            done == count && new ReadOnlySpan<int>(_output, count).SequenceEqual(new ReadOnlySpan<int>(_expected, count)));
     }
 }

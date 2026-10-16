@@ -39,26 +39,36 @@ internal static unsafe partial class TileBake
     private const long MaxTentExtent = (1L << 23) - 2;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static int AnchorQ8(float value, float origin, int scaleQ8, int anchorMask)
+    {
+        var position = (value - origin) * scaleQ8;
+        var bounded = MathF.Abs(position) <= MaxPositionQ8
+            ? position
+            : position > 0f ? MaxPositionQ8 : -MaxPositionQ8;
+        return (int)MathF.Floor(bounded) & anchorMask;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Footprint(
         float wx, float wy, float originX, float originY, int scaleQ8, int sampling, int size,
-        StampVariant* v, bool clip,
+        int anchorMask, StampVariant* v, bool clip,
         out int px, out int py, out int fx, out int fy,
         out int extentX, out int extentY,
         out int x0, out int y0, out int x1, out int y1)
     {
         var cap = v->Kind == StampKind.Tent ? MaxTentExtent : MaxExtent;
-        Span((wx - originX) * scaleQ8, v->OriginQ8X, v->Width, sampling, size, clip, cap, out px, out fx, out extentX, out x0, out x1);
-        Span((wy - originY) * scaleQ8, v->OriginQ8Y, v->Height, sampling, size, clip, cap, out py, out fy, out extentY, out y0, out y1);
+        Span((wx - originX) * scaleQ8, anchorMask, v->OriginQ8X, v->Width, sampling, size, clip, cap, out px, out fx, out extentX, out x0, out x1);
+        Span((wy - originY) * scaleQ8, anchorMask, v->OriginQ8Y, v->Height, sampling, size, clip, cap, out py, out fy, out extentY, out y0, out y1);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void Span(float position, int originQ8, int length, int sampling, int size, bool clip, long cap,
+    private static void Span(float position, int anchorMask, int originQ8, int length, int sampling, int size, bool clip, long cap,
         out int cell, out int phase, out int extent, out int first, out int end)
     {
         var bounded = MathF.Abs(position) <= MaxPositionQ8
             ? position
             : position > 0f ? MaxPositionQ8 : -MaxPositionQ8;
-        var lead = (int)MathF.Floor(bounded) + ((long)originQ8 * sampling >> 8);
+        var lead = ((int)MathF.Floor(bounded) & anchorMask) + ((long)originQ8 * sampling >> 8);
         var full = Math.Min((long)length * sampling, cap);
         if (clip)
         {
@@ -306,8 +316,10 @@ internal static unsafe partial class TileBake
         for (var x = 0; x < TileSize; x++) output[x] = RoundQ40(row[x]);
     }
 
+#if NET
     private const int ExactBound = 1 << 29;
     private const int ExactMask = int.MinValue | (1 << 30);
+#endif
 
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]

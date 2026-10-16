@@ -61,7 +61,7 @@ Measurement conditions for every number in this file:
 - **Runtime:** .NET 10 Release, hardware intrinsics on.
 - **Run:** single thread, 0 B allocated per frame. Warm up first, then report p50 and p99 over 300 frames. Seeds are fixed, and the output checksum is consumed so no work can be optimized away.
 - **Scalar build** (`DOTNET_EnableHWIntrinsic=0`): it must be correct and allocate 0 B. Its numbers are published, not gated.
-- **Host note (2026-10-16).** The P0-1 baselines and P0-2 floors measured so far come from an Intel i9-14900K P-core (5.7–6.0 GHz, AVX2, no AVX-512), pinned with `taskset`; its E-cores stand in for Zen 4c until re-measured. The Zen 4 / Zen 4c tables of §1 must be re-run on the Ryzen 5 8500G before any gate depends on them. B1 on this host is ≈ 0.76× the 8500G figure (239 vs 315 ns/entity).
+- **Host note (2026-10-16).** All Phase 0 baselines, floor probes (Zen 4 `cpu0`, Zen 4c `cpu2`, and scalar), and P0-11 lever numbers have now been measured on the Ryzen 5 8500G (`taskset -c 0` for Zen 4, `taskset -c 2` for Zen 4c). Earlier i9-14900K numbers are kept in git history for reference.
 
 | Frame | Definition | Target |
 |---|---|---|
@@ -120,11 +120,23 @@ Each row below is what I expect a card to report. The last column is the stop li
 | T-3 | C, with `FieldView` reads | ≈ 0.9–1.8 ms | > 3 ms |
 | C-4 | C and W | ≤ target | > 15 % above target → re-plan |
 
-**Measured so far (i9-14900K P-core, pinned, single thread, p50; replaces the 8500G predictions until re-run):**
+**Measured on Ryzen 5 8500G (pinned Zen 4 `cpu0`, single thread, p50; Zen 4c `cpu2` and scalar also recorded):**
 
-- P0-1 baselines: B1 239 ns/entity (sync 5.8, process ≈ 100, reads ≈ 100); B2 1 mover 1.1–1.2 µs, 200 movers ≈ 200 µs; B4 27 ns; C ≈ 88–92 ms; W ≈ 44–47 ms; RSS ≈ 300 MB (W peak ≈ 555 MB). Cell-crossing rate: B1 62.5 %, C/W agents 12.6 %.
-- P0-2 floors (AVX2): quantize 0.24 ms; histogram coherent/random 0.39/0.91 ms; box convolve 0.14 ms, tent 0.65 ms; publish 0.38 ms; 1M reads coherent/random 2.87/5.47 ms; disks 88 ns (r=16), 192 ns (r=32); anchor sweep 0.22 ms. Frame C's coherent-order floor sum ≈ 4 ms before the ×1.15 fallback applies (reads dominate).
-- P0-8 effect: 1M-source frames with 10k timers ≈ 0.8 ms faster per frame; plain B2 unchanged.
+- **P0-1 baselines (`Exact`):** B1 320.1 ns/entity (`sync` 10.7, `process` 133.2, `point` 37.5, `gradient` 106.5, `changed` 30.5; reproducing the 315 ns ±10% target); B2 1 mover 1.84 µs, 200 movers 280 µs; B4 50 ns; C 120.5 ms (`sync` 10.8, `process` 72.3, reads 37.0); W 63.1 ms (`sync` 2.7, `process` 48.0, reads 11.6); 0 B/frame across all frames. Cell-crossing rate: B1 62.53 % (0.5×0.25 step), C/W agents 12.6 %.
+- **P0-2 floors (Zen 4 `cpu0` AVX2 / Zen 4c `cpu2` AVX2 / Zen 4 scalar):**
+  - P1 quantize 1M: 0.20 ms / 0.28 ms / 4.03 ms
+  - P2/P3 histogram 1M coherent (`interleaved2`): 0.47 ms / 0.60 ms / 0.41 ms; plain Morton: 0.56 ms / 0.81 ms / 0.60 ms; random: 0.69 ms / 0.99 ms / 0.60 ms
+  - P4 convolve 1024² box: 0.14 ms / 0.20 ms / 0.84 ms; tent int64: 0.72 ms / 0.95 ms / 8.54 ms; bell int64: 0.94 ms / 1.26 ms / 11.75 ms
+  - P5 publish 1,024 tiles: 0.44 ms / 0.54 ms / 3.01 ms
+  - P6 1M value+gradient reads, 32 MB coherent / random: 4.62 / 23.13 ms (Zen 4), 6.07 / 25.43 ms (Zen 4c), 6.43 / 23.20 ms (scalar); 2 MB coherent / random: 2.94 / 4.25 ms (Zen 4)
+  - P7 disk sums r=16 / r=32 / r=64: 107 / 222 / 535 ns (Zen 4), 148 / 322 / 758 ns (Zen 4c), 528 / 1,238 / 3,131 ns (scalar)
+  - P8 anchor sweep 1M (10% moved): 0.18 ms / 0.32 ms / 0.87 ms
+- **P0-8 effect:** 1M-source frames with 10k timers ≈ 0.8 ms faster per frame; plain B2 unchanged.
+- **P0-10 + P0-11 (`Cell` vs `Exact` on Zen 4 `cpu0`):**
+  - **C (1M movers @ 0.1 cell/frame, 12.61% crossing):** `Process` **72.32 → 13.47 ns/entity** (5.4× faster, beating the 15–30 ns prediction), `Sync` **10.83 → 7.37 ns/entity** (within 6–10 ns), total **120.5 → 52.7 ms** (reads now 60% of frame).
+  - **W (250k movers @ 0.1 cell/frame, 12.60% crossing):** total **63.1 → 25.2 ms** (`Process` 48.0 → 12.6 ms, `Sync` 2.7 → 2.0 ms, reads 10.3 ms; beating the 30–60 ms prediction).
+  - **B1 (0.5×0.25 step = 62.53% crossing):** 320.1 → 282.7 ns/entity (`Process` 133.2 → 95.0 ns, `Sync` 10.7 → 13.9 ns; at 62.53% crossing `2 × 625k ≥ 1M` still enters `RebuildLayer`).
+  - **B2 (`Cell`):** 1 mover 1.84 → 1.41 µs, 200 movers 280 → 158 µs; **B4 (`Cell`):** 40 ns. All 0 B/frame.
 
 Three claims from the earlier plans that these predictions reject:
 
@@ -151,8 +163,8 @@ Three claims from the earlier plans that these predictions reject:
 
 | ID | Card | Lane | Needs | Size | Status | PR | Result |
 |---|---|---|---|---|---|---|---|
-| P0-1 | Frame harness (B1, B2, B4, C, W) | A | — | M | done | phase0 | i9-14900K P-core baselines: B1 239 ns/entity, C ≈ 90 ms, W ≈ 45 ms, B2 1.2 µs / ≈ 200 µs, B4 27 ns; 0 B/frame; 9 frame receipts; Zen 4 rerun pending on the 8500G |
-| P0-2 | Floor probes P1–P8 | A | — | S | done | phase0 | floors measured on the i9-14900K P-core (+ E-core stand-in, scalar): coherent reads dominate (2.87 ms), quantize 0.24, publish 0.38, disks 88/192 ns; receipts wired into `--verify`; Zen 4 pending |
+| P0-1 | Frame harness (B1, B2, B4, C, W) | A | — | M | done | phase0 | Ryzen 5 8500G Zen 4 (`cpu0`): B1 320.1 ns/entity, C 120.5 ms, W 63.1 ms, B2 1.84 µs / 280 µs, B4 50 ns; 0 B/frame; 12 frame receipts in `--verify` |
+| P0-2 | Floor probes P1–P8 | A | — | S | done | phase0 | Ryzen 5 8500G Zen 4 (`cpu0`), Zen 4c (`cpu2`) and scalar measured: quantize 0.20 ms, P3 hist 0.47 ms, box conv 0.14 ms, tent 0.72 ms, publish 0.44 ms, 2 MB/32 MB coherent reads 2.94/4.62 ms, disks 107/222 ns, sweep 0.18 ms |
 | P0-3 | R1 column-mask race | B1 | — | S | done | #41 → phase0 | chunks claimed upward on 1,024-row multiples; every mask word has one writer; race test red on old code, 30/30 green on new |
 | P0-5 | R3 int64 total + limits doc | B1 | P0-3 | S | done | phase0 | int64 sum, 2^29 guard + whole-tile scalar fallback; Process +0.97 % (gate 3 %), checksums identical, 926 tests on phase0; limits pinned: box/dense 1,048,576/cell, tent/bell 4,096/peak (card's ~2,000 corrected) |
 | P0-7 | R6 `Changed` = bytes differ | B1 | P0-5 | M | done | phase0 | per-cell published-byte compare inside all four Resolve/Combine paths (staged page so the guard fallback stays exact); epochs, masks, ChangedTiles and derived layers inherit the rule; 975 tests on phase0; B1 process unchanged (≈97 ns/entity); one receipt changed as the card allows |
@@ -160,11 +172,11 @@ Three claims from the earlier plans that these predictions reject:
 | P0-8 | R7 `LayerLive` without recounts | B2 | P0-4 | S | done | phase0 | `LayerLive` exact on every change, `LiveStale` deleted; 1M-source frames with 10k timers ≈ 0.8 ms faster; 514 tests |
 | P0-6 | R4/R5 finite + range validation | B3 | — | M | done | #43 → phase0 | non-finite writes rejected, reads treat NaN/∞ as outside, casts range-checked at ±2^30, `TryGrid` shares the rules; ≈ 1 ns/row cost |
 | P0-9 | R8/R10 one-core pool, cleared outputs | B3 | P0-6, P0-3 | S | done | phase0 | pool refused on one processor; every column read writes outputs before early returns; 454 tests, receipts unchanged |
-| P0-10 | Precision on main (oracle switch + skip) | B | P0-7, P0-8, P0-9 | M | todo | | |
-| P0-11 | Measure the lever | A | P0-1, P0-10 | S | todo | | |
+| P0-10 | Precision on main (oracle switch + skip) | B | P0-7, P0-8, P0-9 | M | done | phase0 | `Layer.Precision` (`PhaseBits` 0–8, `TurnBits` 0–16), `Layer.New(world, precision)`, `Layer.TryGetPrecision`, anchor/angle masks on all 5 `TileBake.Place` paths, snapped-key skip across all 6 write paths; 986 tests, all receipts green, packed as `1.3.0-alpha.1` |
+| P0-11 | Measure the lever | A | P0-1, P0-10 | S | done | phase0 | Zen 4 (`cpu0`): at ~12.6% crossing (`C`), `Process` 72.3 → 13.5 ns/entity, `Sync` 10.8 → 7.4 ns/entity (total 120.5 → 52.7 ms); `W` 63.1 → 25.2 ms; `B1` (62.5% crossing) 320.1 → 282.7 ns/entity; `B2` 1.41 µs / 158 µs; `B4` 40 ns |
 | P0-12 | Salvage + close `snapshot-bucket-index` | A | P0-1 | S | done | phase0 | profiler stale-handle fix + inspection accounting re-applied; 32 tests ported (958 total); branch closed at a53411d with the D14 note on #40; 3 findings carried to P0-14/P1-1 |
-| P0-13 | #40 + README interim | A | P0-11 | S | todo | | |
-| P0-14 | Clean-up: CI inspect, doc/version echoes, carry-forward findings | A | — | S | doing | p0-14-cleanup | items 2+5 done on the branch (927 tests): rejection outputs zeroed, exclusion fold widened to int64, receipts updated; item 6 root-caused as a measurement artifact (P0-5 harness used the process-wide GC max, Gi's thread allocates 0 B) — pending: item 1 (.editorconfig suppressions per a3d9e77 precedent), item 3 (validation README), item 4 (ring + frame receipts into `--verify`), discriminating counts for the exclusion test, the artifact note in docs/model.md, non-finite reach rejection, stats README figure |
+| P0-13 | #40 + README interim | A | P0-11 | S | done | phase0 | README interim reference-frame section + 8500G numbers; PLAN.md superseded header; ROADMAP board completed |
+| P0-14 | Clean-up: CI inspect, doc/version echoes, carry-forward findings | A | — | S | done | phase0 | `jb inspectcode` 0 warnings; rejection outputs zeroed while preserving covered not-found `TrySenseNearest` position; exclusion fold widened to `int64` with non-uniform raster+box overflow test; non-finite `reach` rejected; ring + frame receipts in `--verify`; validation & stats READMEs updated; GC counter note in `docs/model.md` |
 | P1-1 | Reference interpreter | C | P0-10 (early) | L | todo | | |
 | P1-2 | Stream generator + differential + minimizer | C | P1-1 | M | todo | | |
 | P1-3 | Golden corpus | C | P1-2 | M | todo | | |

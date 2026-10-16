@@ -31,14 +31,14 @@ internal static class FloorShape
 
 internal struct FloorRandom
 {
-    private ulong state;
+    private ulong _state;
 
-    public FloorRandom(ulong seed) => state = seed;
+    public FloorRandom(ulong seed) => _state = seed;
 
     public ulong Next()
     {
-        state += 0x9E3779B97F4A7C15UL;
-        var z = state;
+        _state += 0x9E3779B97F4A7C15UL;
+        var z = _state;
         z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9UL;
         z = (z ^ (z >> 27)) * 0x94D049BB133111EBUL;
         return z ^ (z >> 31);
@@ -76,21 +76,21 @@ internal static unsafe class FloorHash
 
 internal sealed unsafe class FloorArena : IDisposable
 {
-    private readonly List<nint> blocks = [];
+    private readonly List<nint> _blocks = [];
 
     public T* Alloc<T>(long count) where T : unmanaged
     {
         var bytes = (nuint)((count * sizeof(T) + 127) & ~63L);
         var block = NativeMemory.AlignedAlloc(bytes, 64);
         NativeMemory.Clear(block, bytes);
-        blocks.Add((nint)block);
+        _blocks.Add((nint)block);
         return (T*)block;
     }
 
     public void Dispose()
     {
-        foreach (var block in blocks) NativeMemory.AlignedFree((void*)block);
-        blocks.Clear();
+        foreach (var block in _blocks) NativeMemory.AlignedFree((void*)block);
+        _blocks.Clear();
     }
 }
 
@@ -105,17 +105,17 @@ internal sealed class FloorCase(string probe, string variant, long ops, Action p
 
 internal sealed class FloorReceipts
 {
-    private readonly List<(string Name, bool Ok, string Note)> items = [];
+    private readonly List<(string Name, bool Ok, string Note)> _items = [];
 
-    public bool AllPassed => items.All(i => i.Ok);
+    public bool AllPassed => _items.All(i => i.Ok);
 
-    public int Failures => items.Count(i => !i.Ok);
+    public int Failures => _items.Count(i => !i.Ok);
 
-    public IReadOnlyList<(string Name, bool Ok, string Note)> Items => items;
+    public IReadOnlyList<(string Name, bool Ok, string Note)> Items => _items;
 
-    public void Check(string name, bool ok) => items.Add((name, ok, ""));
+    public void Check(string name, bool ok) => _items.Add((name, ok, ""));
 
-    public void Skip(string name, string reason) => items.Add((name, true, reason));
+    public void Skip(string name, string reason) => _items.Add((name, true, reason));
 }
 
 internal abstract class FloorSuite : IDisposable

@@ -84,14 +84,19 @@ internal static unsafe partial class TileBake
 
     internal static bool Place(float x, float y, float originX, float originY, int scaleQ8, int size,
         StampVariant* v, int angle, int scale, out Placement p)
+        => Place(x, y, originX, originY, scaleQ8, size, v, angle, scale, Layer.Precision.Exact, out p);
+
+    internal static bool Place(float x, float y, float originX, float originY, int scaleQ8, int size,
+        StampVariant* v, int angle, int scale, Layer.Precision precision, out Placement p)
     {
         p = default;
         var sampling = (int)Math.Min((long)scaleQ8 * scale >> 8, int.MaxValue);
         if (sampling == 0) return false;
 
+        angle &= precision.TurnMask;
         var round = v->Kind >= StampKind.Disk;
         var turned = round || angle != 0;
-        Footprint(x, y, originX, originY, scaleQ8, sampling, size, v, v->Kind == StampKind.ConstantRectangle && !turned,
+        Footprint(x, y, originX, originY, scaleQ8, sampling, size, precision.AnchorMask, v, v->Kind == StampKind.ConstantRectangle && !turned,
             out p.Px, out p.Py, out p.Fx, out p.Fy, out p.ExtentX, out p.ExtentY,
             out p.X0, out p.Y0, out p.X1, out p.Y1);
         p.V = v;

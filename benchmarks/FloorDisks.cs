@@ -156,11 +156,11 @@ internal sealed unsafe class FloorDisksSuite : FloorSuite
     private const int Disks = 1000;
     private static readonly int[] Radii = [16, 32, 64];
 
-    private readonly FloorDiskField field;
-    private readonly int*[] centersX = new int*[Radii.Length];
-    private readonly int*[] centersY = new int*[Radii.Length];
-    private readonly long* sums;
-    private readonly FloorCase[] cases;
+    private readonly FloorDiskField _field;
+    private readonly int*[] _centersX = new int*[Radii.Length];
+    private readonly int*[] _centersY = new int*[Radii.Length];
+    private readonly long* _sums;
+    private readonly FloorCase[] _cases;
 
     public FloorDisksSuite()
     {
@@ -197,33 +197,33 @@ internal sealed unsafe class FloorDisksSuite : FloorSuite
             rowSums[page * FloorShape.TileSize + row] = sum;
         }
 
-        field = new FloorDiskField
+        _field = new FloorDiskField
         {
             Pages = pages, Directory = directory, RowSums = rowSums, GreaterEqual = greaterEqual,
             LessEqual = lessEqual, TilesPerSide = tilesPerSide, Side = side,
         };
-        sums = Arena.Alloc<long>(Disks);
+        _sums = Arena.Alloc<long>(Disks);
         var list = new List<FloorCase>();
         for (var k = 0; k < Radii.Length; k++)
         {
             var radius = Radii[k];
-            centersX[k] = Arena.Alloc<int>(Disks);
-            centersY[k] = Arena.Alloc<int>(Disks);
+            _centersX[k] = Arena.Alloc<int>(Disks);
+            _centersY[k] = Arena.Alloc<int>(Disks);
             for (var i = 0; i < Disks; i++)
             {
-                centersX[k][i] = radius + rng.Below(side - 2 * radius);
-                centersY[k][i] = radius + rng.Below(side - 2 * radius);
+                _centersX[k][i] = radius + rng.Below(side - 2 * radius);
+                _centersY[k][i] = radius + rng.Below(side - 2 * radius);
             }
 
             list.Add(Summing(k));
         }
 
-        cases = [.. list];
+        _cases = [.. list];
     }
 
     public override string Id => "P7";
 
-    public override IReadOnlyList<FloorCase> Cases => cases;
+    public override IReadOnlyList<FloorCase> Cases => _cases;
 
     public override void Receipt(FloorReceipts receipts)
     {
@@ -249,21 +249,23 @@ internal sealed unsafe class FloorDisksSuite : FloorSuite
         var scalarOk = true;
         var vectorOk = true;
         foreach (var radius in new[] { 0, 1, 2, 5, 16, 32, 64 })
-        for (var i = 0; i < 300; i++)
         {
-            var cx = radius + rng.Below(side - 2 * radius);
-            var cy = radius + rng.Below(side - 2 * radius);
-            var expected = Naive(flat, cx, cy, radius);
-            scalarOk &= FloorDiskKernel.SumScalar(field, cx, cy, radius) == expected;
-            if (Avx2.IsSupported) vectorOk &= FloorDiskKernel.SumVector(field, cx, cy, radius) == expected;
+            for (var i = 0; i < 300; i++)
+            {
+                var cx = radius + rng.Below(side - 2 * radius);
+                var cy = radius + rng.Below(side - 2 * radius);
+                var expected = Naive(flat, cx, cy, radius);
+                scalarOk &= FloorDiskKernel.SumScalar(_field, cx, cy, radius) == expected;
+                if (Avx2.IsSupported) vectorOk &= FloorDiskKernel.SumVector(_field, cx, cy, radius) == expected;
+            }
         }
 
         for (var k = 0; k < Radii.Length; k++)
         for (var i = 0; i < Disks; i++)
         {
-            var expected = Naive(flat, centersX[k][i], centersY[k][i], Radii[k]);
-            scalarOk &= FloorDiskKernel.SumScalar(field, centersX[k][i], centersY[k][i], Radii[k]) == expected;
-            if (Avx2.IsSupported) vectorOk &= FloorDiskKernel.SumVector(field, centersX[k][i], centersY[k][i], Radii[k]) == expected;
+            var expected = Naive(flat, _centersX[k][i], _centersY[k][i], Radii[k]);
+            scalarOk &= FloorDiskKernel.SumScalar(_field, _centersX[k][i], _centersY[k][i], Radii[k]) == expected;
+            if (Avx2.IsSupported) vectorOk &= FloorDiskKernel.SumVector(_field, _centersX[k][i], _centersY[k][i], Radii[k]) == expected;
         }
 
         receipts.Check("floor-p7-scalar-disk-sums-match-cell-scan", scalarOk);
@@ -277,29 +279,29 @@ internal sealed unsafe class FloorDisksSuite : FloorSuite
             () =>
             {
                 Run(k);
-                return FloorHash.Of(sums, Disks);
+                return FloorHash.Of(_sums, Disks);
             });
 
     private void Run(int k)
     {
         var radius = Radii[k];
-        var xs = centersX[k];
-        var ys = centersY[k];
-        for (var i = 0; i < Disks; i++) sums[i] = FloorDiskKernel.Sum(field, xs[i], ys[i], radius);
+        var xs = _centersX[k];
+        var ys = _centersY[k];
+        for (var i = 0; i < Disks; i++) _sums[i] = FloorDiskKernel.Sum(_field, xs[i], ys[i], radius);
     }
 
     private short[] Flatten()
     {
         var flat = new short[FloorShape.Cells];
-        for (var ty = 0; ty < field.TilesPerSide; ty++)
-        for (var tx = 0; tx < field.TilesPerSide; tx++)
+        for (var ty = 0; ty < _field.TilesPerSide; ty++)
+        for (var tx = 0; tx < _field.TilesPerSide; tx++)
         {
-            var page = field.Directory[ty * field.TilesPerSide + tx];
+            var page = _field.Directory[ty * _field.TilesPerSide + tx];
             if (page < 0) continue;
             for (var y = 0; y < FloorShape.TileSize; y++)
             for (var x = 0; x < FloorShape.TileSize; x++)
-                flat[(ty * FloorShape.TileSize + y) * field.Side + tx * FloorShape.TileSize + x] =
-                    field.Pages[page * FloorShape.TileCells + y * FloorShape.TileSize + x];
+                flat[(ty * FloorShape.TileSize + y) * _field.Side + tx * FloorShape.TileSize + x] =
+                    _field.Pages[page * FloorShape.TileCells + y * FloorShape.TileSize + x];
         }
 
         return flat;
@@ -311,7 +313,7 @@ internal sealed unsafe class FloorDisksSuite : FloorSuite
         for (var y = cy - radius; y <= cy + radius; y++)
         for (var x = cx - radius; x <= cx + radius; x++)
             if ((x - cx) * (x - cx) + (y - cy) * (y - cy) <= radius * radius)
-                total += flat[y * field.Side + x];
+                total += flat[y * _field.Side + x];
         return total;
     }
 }

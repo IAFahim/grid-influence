@@ -41,7 +41,21 @@ before reading command payloads, writing
   one dense id space, and `Layer.TryGetRecipe(world, layer, out recipe)` inspects any live
   layer's `Layer.Recipe` (`Layer.Derivation` operator plus input layers, weights, shift, and
   mask bounds). A layer
-  (`Layer.New(world)`) is an independent field channel present on every grid. A layer either
+  (`Layer.New(world)` or `Layer.New(world, precision)`) is an independent field channel present
+  on every grid. Each base layer carries a `Layer.Precision` (`PhaseBits` 0–8, `TurnBits` 0–16;
+  presets `Exact` = (8, 16), `Half` = (1, 16), `Quarter` = (2, 16), `Cell` = (0, 16);
+  `Layer.Precision.TryCreate(phaseBits, turnBits, out precision)` validates ranges; plain
+  `Layer.New(world)` uses `Exact`; `Layer.TryGetPrecision(world, layer, out precision)` reads a
+  base layer's precision and returns `false` on derived or invalid layers). `PhaseBits` masks
+  each Q8 anchor coordinate (`floor((p − origin)·ScaleQ8) & ~((1 << (8 − PhaseBits)) − 1)`)
+  before adding the stamp origin, and `TurnBits` masks the 16-bit binary angle
+  (`angle & (0xFFFF & ~((1 << (16 − TurnBits)) − 1))`) on every placement and exclusion path
+  (`Deposit`, `BuildDeposits`, `ScatterDeposit`, `ScatterSource`, `ShapeOf`). Write paths
+  (`Move`, `Turn`, `Sync`, `SyncColumns`, `SyncTransforms`, `ApplyBatch`) compare the snapped
+  key (per-grid anchor X/Y and masked angle) of the old and new state: when no grid's key
+  changed and stamp, gain, scale, layer, and liveness are unchanged, the new floats/angle are
+  stored in the source columns without enqueuing a deposit mutation. Precision lives in the
+  world's `LayerRecipe` table and survives `Clear`. A layer either
   receives deposits (`Layer.New`) or is **derived** (`Layer.Sum`/`Min`/`Max`/
   `Mask`): its cells are a pure function of other layers' cells, maintained by `Process` (below).
   Deposited and derived layers share one table: a world holds at most `World.MaxLayers` (32)
@@ -485,8 +499,11 @@ add one `int64` page sum per live page, so large sparse grids do not visit every
   configuration: among grids whose cell space contains the point (the deposits' own truncated
   `ScaleQ8` mapping), prefer a grid that contains the whole footprint, then the larger
   `ScaleQ8` (finer), then the lower grid id. No grid contains the point → `false` with every
-  out value zeroed (`Covers(world, x, y)` tells "not covered" from "covered but clipped"), so an
-  uncovered point never reads as an empty field; a non-finite position is contained by no grid,
+  out value zeroed — `TrySenseNearest` keeps its `short.MinValue` not-found sentinel so
+  `value ≥ threshold` and the column `found` bits stay truthful, and the reported positions of
+  `TrySenseMax` and `TrySenseNearest` are zeroed on rejection rather than echoing the query point
+  (`Covers(world, x, y)` tells "not covered" from "covered but clipped"), so an
+  uncovered point never reads as an empty field; a non-finite position or reach is contained by no grid,
   so `Covers` is `false` and every `TrySense*`, column read, `Changed`, and `ChangedMask` row
   treats it as uncovered. A footprint no grid holds whole is answered on
   the finest grid containing the point, clipped, and reports `false`; answers are never
@@ -520,7 +537,9 @@ add one `int64` page sum per live page, so large sparse grids do not visit every
   one-cell clip); tent and bell sources replace the rounded sum of their kernel with the
   rounded sum minus their exact product `value·gain·C·Wx·Wy`, which needs the cell's unrounded
   kernel sum — one load from the tile's tent or bell store. Saturated page cells rebuild every
-  component (box prefix, dense, tent, bell) before subtracting. Areas apply the same rule per
+  component (box prefix, dense, tent, bell) before subtracting, and the rebuilt fold forms the
+  box-plus-dense total in `int64` and saturates once, exactly as resolve does, so exclusion
+  matches the page on tiles whose planes each fit `int32` but whose sum does not. Areas apply the same rule per
   cell of the source's footprint inside the disk, reading the stores directly and integrating
   the difference array only for tiles that hold a saturated cell.
   `World.Changed(world, layer, x, y, reach, since)` answers whether any tile holding a cell of
@@ -677,6 +696,8 @@ world rect at its own cell density; a source deposits into every grid it overlap
 - `source-slots-reuse-and-stale-handles-inert` — 2000 place/remove pairs keep slots bounded,
   the recycled id differs from the stale one, and stale `Move`/`SetGain`/`Remove` leave the
   field bit-identical.
+- `fifo-free-ring-delays-slot-reuse` — with 64 free slots and 16 live slots, 127×64 remove/place
+  churn cycles pop slots in strict FIFO order and never alias a stale id.
 - `rewind-restores-recorded-state` — after a two-window journal mixing a remove, a slot
   reoccupation, moves, gain changes, and a new place across box and tent stamps, `Rewind` +
   `Process` restores the recorded field's whole-layer sum bit-exactly; rolled-back ids stay
@@ -785,13 +806,16 @@ pass behind them was `perf`-profile guided, receipts first.
   timing-neutral on box scenes and ~3% slower on an all-raster 2048² churn (dense moved from
   mid-block to the block tail); that delta sat inside the A/B noise band, so it was accepted for
   the −38.6% box-tile block size. Judge such trades on interleaved minima, never on single runs.
+- `GC.GetTotalAllocatedBytes` is process-wide and includes runtime background threads (an 8,200 B
+  step appeared in a P0-5 scratch harness from that counter while Gi's own thread allocated 0 B).
+  Always measure warm-path allocations with `GC.GetAllocatedBytesForCurrentThread()`.
 
 ### Frame harness
 
-`dotnet run --project benchmarks -c Release --no-build -- --frames <B1|B2|B4|C|W|all|verify>
+- `dotnet run --project benchmarks -c Release --no-build -- --frames <B1|B2|B4|C|W|all|verify>
 [--precision exact|cell] [--measure N] [--warmup N] [--entities N] [--seed N] [--jit-ms N]` measures
-the reference frames of ROADMAP.md §1 on one thread (`ResolvePool.SerialOnly`). `--precision cell`
-is rejected until `Layer.Precision` exists. `verify` runs only the harness receipts.
+the reference frames of ROADMAP.md §1 on one thread (`ResolvePool.SerialOnly`). `verify` runs only
+the harness receipts (also wired into `--verify`).
 
 Frames, as built on `main` (one engine, no transient layers):
 
@@ -1102,13 +1126,11 @@ digits. Concurrency: single thread, and `ResolvePool.SerialOnly` keeps Gi from s
   `SenseNearestColumn`, `ChangedMask`) write their outputs before returning on a world that is not
   live, a layer out of range, or a null required column. Every non-null output column and mask gets
   the rows an unfillable row would hold in the per-row `TrySense*` form: zero values, gradients,
-  totals, and mask words; `short.MinValue` for nearest values; the query point for best and nearest
-  positions (zero when the query column is null). The return value is unchanged, and nothing is
+  totals, best/nearest positions, and mask words; `short.MinValue` for nearest values. The return value is unchanged, and nothing is
   written when `count <= 0`. Lifetime and aliasing: the writes run on the calling thread alone,
   before and without acquiring the pool, over exactly `count` rows and `(count + 63) >> 6` mask
   words (the word count is formed in unsigned arithmetic, so it cannot overflow), the same extents
-  the accepted path writes; a position echo uses overlap-safe `Span.CopyTo`, so a caller that
-  aliases an output column with its query column stays correct. Alignment is natural alignment of
+  the accepted path writes. Alignment is natural alignment of
   `float`, `short`, `long`, and `ulong`, each accessed whole. There is no concurrency: no pool
   worker holds these pointers on a rejected call.
   Source-batch rounds claim disjoint 128-row chunks. Pool acquisition protects their world and

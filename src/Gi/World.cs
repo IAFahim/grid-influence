@@ -285,7 +285,7 @@ public static unsafe partial class World
     public static bool TryGetSourceSpec(byte world, int source, out SourceSpec spec)
     {
         spec = default;
-        if (!TrySource(world, source, out var w, out var s, out var i)) return false;
+        if (!TrySource(world, source, out _, out var s, out var i)) return false;
 
         spec = new SourceSpec(
             s->X.Pointer[i],
@@ -413,15 +413,51 @@ public static unsafe partial class World
         return id;
     }
 
-    internal static byte AddLayer(byte world)
+    internal static byte AddLayer(byte world, Layer.Precision precision)
     {
+        if (!ValidationRules.IsPhaseBits(precision.PhaseBits) || !ValidationRules.IsTurnBits(precision.TurnBits))
+            throw new ArgumentOutOfRangeException(nameof(precision));
         var w = GetContext(world);
         if (w == null) throw new ArgumentOutOfRangeException(nameof(world));
         if (w->LayerCount >= MaxLayers) throw new InvalidOperationException("Layer limit reached.");
         var id = w->LayerCount++;
-        w->Recipes[id] = new LayerRecipe { Reads = 1u << id };
+        w->Recipes[id] = new LayerRecipe
+        {
+            PhaseBits = precision.PhaseBits,
+            TurnBits = precision.TurnBits,
+            TurnMask = precision.TurnMask,
+            AnchorMask = precision.AnchorMask,
+            Reads = 1u << id,
+        };
         return (byte)id;
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static Layer.Precision LayerPrecision(WorldCtx* w, byte layer)
+    {
+        var r = w->Recipes + layer;
+        return new Layer.Precision(r->PhaseBits, r->TurnBits);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static bool PositionChanged(WorldCtx* w, byte layer, float oldX, float oldY, float newX, float newY)
+    {
+        var mask = w->Recipes[layer].AnchorMask;
+        for (var gi = 0; gi < w->GridCount; gi++)
+        {
+            var g = w->Grids + gi;
+            if (g->ScaleQ8 == 0) continue;
+            var dx = TileBake.AnchorQ8(oldX, g->OriginX, g->ScaleQ8, mask) ^ TileBake.AnchorQ8(newX, g->OriginX, g->ScaleQ8, mask);
+            var dy = TileBake.AnchorQ8(oldY, g->OriginY, g->ScaleQ8, mask) ^ TileBake.AnchorQ8(newY, g->OriginY, g->ScaleQ8, mask);
+            if ((dx | dy) != 0) return true;
+        }
+
+        return false;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static bool AngleChanged(WorldCtx* w, byte layer, ushort oldAngle, ushort newAngle)
+        => w->GridCount > 0 && ((oldAngle ^ newAngle) & w->Recipes[layer].TurnMask) != 0;
 
     public static int Place(byte world, byte layer, float x, float y, byte stamp, sbyte gain)
     {
@@ -463,7 +499,8 @@ public static unsafe partial class World
         var oldX = s->X.Pointer[i];
         var oldY = s->Y.Pointer[i];
         if (oldX == x && oldY == y) return;
-        EnqueueMutation(w, s, i, x, y, (sbyte)s->Gain.Pointer[i], s->Angle.Pointer[i], s->Scale.Pointer[i], true);
+        if (PositionChanged(w, s->Layer.Pointer[i], oldX, oldY, x, y))
+            EnqueueMutation(w, s, i, x, y, (sbyte)s->Gain.Pointer[i], s->Angle.Pointer[i], s->Scale.Pointer[i], true);
         s->X.Pointer[i] = x;
         s->Y.Pointer[i] = y;
     }
@@ -493,9 +530,11 @@ public static unsafe partial class World
         var turns = angle * (1.0 / (2 * Math.PI));
         turns -= Math.Floor(turns);
         var next = (ushort)((int)(turns * 65536.0) & 0xFFFF);
-        if (next == s->Angle.Pointer[i]) return;
+        var old = s->Angle.Pointer[i];
+        if (next == old) return;
 
-        EnqueueMutation(w, s, i, s->X.Pointer[i], s->Y.Pointer[i], (sbyte)s->Gain.Pointer[i], next, s->Scale.Pointer[i], true);
+        if (AngleChanged(w, s->Layer.Pointer[i], old, next))
+            EnqueueMutation(w, s, i, s->X.Pointer[i], s->Y.Pointer[i], (sbyte)s->Gain.Pointer[i], next, s->Scale.Pointer[i], true);
         s->Angle.Pointer[i] = next;
     }
 
@@ -712,10 +751,11 @@ public static unsafe partial class World
         if (gain == 0) return;
 
         var v = StampCatalog.Get(stampId);
+        var precision = LayerPrecision(w, layer);
         for (var gi = 0; gi < w->GridCount; gi++)
         {
             var g = w->Grids + gi;
-            if (g->ScaleQ8 == 0 || !TileBake.Place(x, y, g->OriginX, g->OriginY, g->ScaleQ8, g->Size, v, angle, scale, out var p))
+            if (g->ScaleQ8 == 0 || !TileBake.Place(x, y, g->OriginX, g->OriginY, g->ScaleQ8, g->Size, v, angle, scale, precision, out var p))
                 continue;
 
             var cx0 = Math.Max(p.X0, 0);
@@ -748,10 +788,11 @@ public static unsafe partial class World
         if (gain == 0) return;
 
         var v = StampCatalog.Get(stampId);
+        var precision = LayerPrecision(w, layer);
         for (var gi = 0; gi < w->GridCount; gi++)
         {
             var g = w->Grids + gi;
-            if (g->ScaleQ8 == 0 || !TileBake.Place(x, y, g->OriginX, g->OriginY, g->ScaleQ8, g->Size, v, angle, scale, out var p))
+            if (g->ScaleQ8 == 0 || !TileBake.Place(x, y, g->OriginX, g->OriginY, g->ScaleQ8, g->Size, v, angle, scale, precision, out var p))
                 continue;
 
             var cx0 = Math.Max(p.X0, 0);
@@ -849,7 +890,7 @@ public static unsafe partial class World
         if (gain == 0) return;
         var stamp = s->Stamp.Pointer[sourceIndex];
         if (!TileBake.Place(s->X.Pointer[sourceIndex], s->Y.Pointer[sourceIndex], g->OriginX, g->OriginY, g->ScaleQ8, g->Size,
-            StampCatalog.Get(stamp), s->Angle.Pointer[sourceIndex], s->Scale.Pointer[sourceIndex], out var p)) return;
+            StampCatalog.Get(stamp), s->Angle.Pointer[sourceIndex], s->Scale.Pointer[sourceIndex], LayerPrecision(w, layer), out var p)) return;
 
         uint stampSlot = stamp | ((uint)slotIndex << 8);
         var local = 0;

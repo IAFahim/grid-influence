@@ -107,19 +107,30 @@ public static unsafe partial class World
                     continue;
                 }
 
-                var angle = source->Angle.Pointer[slot];
+                var oldX = source->X.Pointer[slot];
+                var oldY = source->Y.Pointer[slot];
+                var oldAngle = source->Angle.Pointer[slot];
+                var oldScale = source->Scale.Pointer[slot];
+                var angle = oldAngle;
                 if (headings != null && float.IsFinite(headings[i]))
                     angle = QuantizeSourceBatchAngle(headings[i]);
-                var scale = source->Scale.Pointer[slot];
+                var scale = oldScale;
                 if (scales != null && float.IsFinite(scales[i]))
                     scale = QuantizeSourceBatchScale(scales[i]);
-                if (*(int*)&x == *(int*)&source->X.Pointer[slot] && *(int*)&y == *(int*)&source->Y.Pointer[slot] &&
-                    angle == source->Angle.Pointer[slot] && scale == source->Scale.Pointer[slot]) continue;
+                var rawPosChanged = *(int*)&x != *(int*)&oldX || *(int*)&y != *(int*)&oldY;
+                if (!rawPosChanged && angle == oldAngle && scale == oldScale) continue;
 
-                EnqueueMutation(context, source, slot, x, y, (sbyte)source->Gain.Pointer[slot], angle, scale, true);
+                var layer = source->Layer.Pointer[slot];
+                var posChanged = rawPosChanged && PositionChanged(context, layer, oldX, oldY, x, y);
+                var angChanged = angle != oldAngle && AngleChanged(context, layer, oldAngle, angle);
+                var scaleChanged = scale != oldScale;
+                var gain = (sbyte)source->Gain.Pointer[slot];
+                if (posChanged) EnqueueMutation(context, source, slot, x, y, gain, oldAngle, oldScale, true);
                 source->X.Pointer[slot] = x;
                 source->Y.Pointer[slot] = y;
+                if (angChanged) EnqueueMutation(context, source, slot, x, y, gain, angle, oldScale, true);
                 source->Angle.Pointer[slot] = angle;
+                if (scaleChanged) EnqueueMutation(context, source, slot, x, y, gain, angle, scale, true);
                 source->Scale.Pointer[slot] = scale;
             }
         }
@@ -175,11 +186,13 @@ public static unsafe partial class World
                 }
 
                 var fold = &entry->State;
-                var changed = *(int*)&x != *(int*)&fold->PositionX || *(int*)&y != *(int*)&fold->PositionY;
-                if (changed)
+                if (*(int*)&x != *(int*)&fold->PositionX || *(int*)&y != *(int*)&fold->PositionY)
                 {
+                    var posChanged = PositionChanged(context, fold->Layer, fold->PositionX, fold->PositionY, x, y);
+                    if (posChanged) BeginTransformDeposit(entry, row);
                     fold->PositionX = x;
                     fold->PositionY = y;
+                    if (posChanged) CommitTransformDeposit(entry);
                 }
 
                 if (headings != null && float.IsFinite(headings[i]))
@@ -187,8 +200,10 @@ public static unsafe partial class World
                     var angle = QuantizeSourceBatchAngle(headings[i]);
                     if (angle != fold->Angle)
                     {
+                        var angChanged = AngleChanged(context, fold->Layer, fold->Angle, angle);
+                        if (angChanged) BeginTransformDeposit(entry, row);
                         fold->Angle = angle;
-                        changed = true;
+                        if (angChanged) CommitTransformDeposit(entry);
                     }
                 }
 
@@ -197,12 +212,11 @@ public static unsafe partial class World
                     var next = QuantizeSourceBatchScale(scales[i]);
                     if (next != fold->Scale)
                     {
+                        BeginTransformDeposit(entry, row);
                         fold->Scale = next;
-                        changed = true;
+                        CommitTransformDeposit(entry);
                     }
                 }
-
-                if (changed && entry->FirstDepositCommand < 0) entry->FirstDepositCommand = row;
             }
 
             rowBase += range.Count;
@@ -215,12 +229,6 @@ public static unsafe partial class World
             var entry = context->BatchSources.Pointer + index;
             if (entry->FirstDepositCommand < 0) continue;
             entry->OperationIndex = entry->OriginalPending != 0 ? entry->OriginalPending - 1 : assigned++;
-            entry->Operation.ToX = entry->State.PositionX;
-            entry->Operation.ToY = entry->State.PositionY;
-            entry->Operation.ToGain = entry->State.Alive != 0 ? (sbyte)entry->State.Gain : (sbyte)0;
-            entry->Operation.ToAngle = entry->State.Angle;
-            entry->Operation.ToScale = entry->State.Scale;
-            entry->Operation.AliveTo = entry->State.Alive;
         }
 
         context->Ops.Resize(assigned);
@@ -232,6 +240,30 @@ public static unsafe partial class World
             ResolvePool.Release();
         }
         else ApplySourceBatchRange(context, 0, entries, 0);
+    }
+
+    private static void BeginTransformDeposit(SourceBatchEntry* entry, int row)
+    {
+        if (entry->FirstDepositCommand >= 0) return;
+        if (entry->OriginalPending == 0)
+        {
+            entry->Operation.FromX = entry->State.PositionX;
+            entry->Operation.FromY = entry->State.PositionY;
+            entry->Operation.FromAngle = entry->State.Angle;
+            entry->Operation.FromScale = entry->State.Scale;
+        }
+
+        entry->FirstDepositCommand = row;
+    }
+
+    private static void CommitTransformDeposit(SourceBatchEntry* entry)
+    {
+        entry->Operation.ToX = entry->State.PositionX;
+        entry->Operation.ToY = entry->State.PositionY;
+        entry->Operation.ToGain = entry->State.Alive != 0 ? (sbyte)entry->State.Gain : (sbyte)0;
+        entry->Operation.ToAngle = entry->State.Angle;
+        entry->Operation.ToScale = entry->State.Scale;
+        entry->Operation.AliveTo = entry->State.Alive;
     }
 
     private static DepositOp SeedTransformOperation(int slot, in SourceBatchState state) => new()

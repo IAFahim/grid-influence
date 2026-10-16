@@ -14,7 +14,7 @@ internal sealed class FrameOptions
     public int JitMilliseconds = 1500;
 }
 
-internal sealed record FramePlan(string Name, Func<FrameOptions, FrameScenario> Create, Func<FrameScenario> CreateSmall);
+internal sealed record FramePlan(string Name, Func<FrameOptions, FrameScenario> Create, Func<bool, FrameScenario> CreateSmall);
 
 internal static class FrameHarness
 {
@@ -23,12 +23,12 @@ internal static class FrameHarness
 
     private static readonly FramePlan[] Catalog =
     [
-        new("B1", o => new FrameLegacy(o.Entities, 12, o.Seed), () => new FrameLegacy(SmallEntities, SmallPower, 1)),
-        new("B2", o => new FrameSparse(o.Entities, 12, o.Seed, 1), () => new FrameSparse(SmallEntities, SmallPower, 1, 1)),
-        new("B2", o => new FrameSparse(o.Entities, 12, o.Seed, 200), () => new FrameSparse(SmallEntities, SmallPower, 1, 200)),
-        new("B4", o => new FrameIdle(o.Entities, 12, o.Seed), () => new FrameIdle(SmallEntities, SmallPower, 1)),
-        new("C", o => new FrameCrowd(o.Entities, 10, o.Seed), () => new FrameCrowd(SmallEntities, SmallPower, 1)),
-        new("W", o => new FrameWorld(o.Entities, 11, o.Seed), () => new FrameWorld(SmallEntities, SmallPower, 1)),
+        new("B1", o => new FrameLegacy(o.Entities, 12, o.Seed, o.Cell), cell => new FrameLegacy(SmallEntities, SmallPower, 1, cell)),
+        new("B2", o => new FrameSparse(o.Entities, 12, o.Seed, 1, o.Cell), cell => new FrameSparse(SmallEntities, SmallPower, 1, 1, cell)),
+        new("B2", o => new FrameSparse(o.Entities, 12, o.Seed, 200, o.Cell), cell => new FrameSparse(SmallEntities, SmallPower, 1, 200, cell)),
+        new("B4", o => new FrameIdle(o.Entities, 12, o.Seed, o.Cell), cell => new FrameIdle(SmallEntities, SmallPower, 1, cell)),
+        new("C", o => new FrameCrowd(o.Entities, 10, o.Seed, o.Cell), cell => new FrameCrowd(SmallEntities, SmallPower, 1, cell)),
+        new("W", o => new FrameWorld(o.Entities, 11, o.Seed, o.Cell), cell => new FrameWorld(SmallEntities, SmallPower, 1, cell)),
     ];
 
     public static int Run(string[] args)
@@ -41,12 +41,6 @@ internal static class FrameHarness
 
         Gi.ResolvePool.SerialOnly = true;
         if (options.Selection == "VERIFY") return FrameReceipts.Run(Console.Out) == 0 ? 0 : 1;
-
-        if (options.Cell)
-        {
-            Console.Error.WriteLine("--precision cell needs Layer.Precision, which lands with card P0-10; main has exact deposits only.");
-            return 2;
-        }
 
         var plans = Catalog.Where(p => options.Selection == "ALL" || options.Selection == p.Name).ToArray();
         if (plans.Length == 0)
@@ -64,7 +58,8 @@ internal static class FrameHarness
             return 1;
         }
 
-        Console.Out.Write(Header(options, receipts.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries).Length));
+        var precision = options.Cell ? "cell" : "exact";
+        Console.Out.Write(Header(options, precision, receipts.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries).Length));
         Console.Out.Write('\n');
         Console.Out.Flush();
 
@@ -72,12 +67,12 @@ internal static class FrameHarness
         foreach (var plan in plans)
         {
             Console.Error.WriteLine("frames: warming code paths for " + plan.Name);
-            FrameDriver.WarmCode(plan.CreateSmall, options.JitMilliseconds);
+            FrameDriver.WarmCode(() => plan.CreateSmall(options.Cell), options.JitMilliseconds);
             GC.Collect();
             using var scenario = plan.Create(options);
             Console.Error.WriteLine("frames: measuring " + plan.Name + " " + scenario.Variant);
             var result = FrameDriver.Measure(scenario, options);
-            Console.Out.Write(result.ToJson("exact"));
+            Console.Out.Write(result.ToJson(precision));
             Console.Out.Write('\n');
             Console.Out.Flush();
             ok &= result.Ok;
@@ -86,7 +81,7 @@ internal static class FrameHarness
         return ok ? 0 : 1;
     }
 
-    private static string Header(FrameOptions options, int receiptCount)
+    private static string Header(FrameOptions options, string precision, int receiptCount)
         => new FrameJson().BeginObject()
             .BeginObject("header")
             .Text("tool", "gi-frames")
@@ -100,7 +95,7 @@ internal static class FrameHarness
             .Flag("hw_intrinsics", Vector128.IsHardwareAccelerated)
             .Flag("avx2", Avx2.IsSupported)
             .Flag("serial_only", true)
-            .Text("precision", "exact")
+            .Text("precision", precision)
             .Integer("seed", (long)options.Seed)
             .Integer("warmup_frames", options.Warmup)
             .Integer("measure_frames", options.Measure)
