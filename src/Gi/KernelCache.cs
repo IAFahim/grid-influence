@@ -18,14 +18,13 @@ internal readonly unsafe struct KernelTaps
     public readonly int Height;
     public readonly int MaxTap;
     public readonly long MaxTapQ40;
-    public readonly int* RowFirst;
-    public readonly int* RowEnd;
+    public readonly int* RowExtents;
     public readonly int* Cells;
     public readonly long* Q40;
 
     internal KernelTaps(
         Plane plane, KernelShape shape, int originX, int originY, int width, int height,
-        int maxTap, long maxTapQ40, int* rowFirst, int* rowEnd, int* cells, long* q40)
+        int maxTap, long maxTapQ40, int* rowExtents, int* cells, long* q40)
     {
         Plane = plane;
         Shape = shape;
@@ -35,8 +34,7 @@ internal readonly unsafe struct KernelTaps
         Height = height;
         MaxTap = maxTap;
         MaxTapQ40 = maxTapQ40;
-        RowFirst = rowFirst;
-        RowEnd = rowEnd;
+        RowExtents = rowExtents;
         Cells = cells;
         Q40 = q40;
     }
@@ -101,7 +99,7 @@ internal unsafe struct KernelCache
         var rows = _rows.Pointer + (long)entry->Slot * (2 * MaxSide);
         return new KernelTaps(
             entry->Plane, entry->Shape, entry->OriginX, entry->OriginY, entry->Width, entry->Height,
-            entry->MaxTap, entry->MaxTapQ40, rows, rows + MaxSide,
+            entry->MaxTap, entry->MaxTapQ40, rows,
             entry->Plane == Plane.Difference || entry->Plane == Plane.Dense ? (int*)taps : null,
             entry->Plane == Plane.Tent || entry->Plane == Plane.Bell ? taps : null);
     }
@@ -125,7 +123,7 @@ internal unsafe struct KernelCache
     internal KernelEntry* Insert(
         ulong key, ulong turn, Plane plane, KernelShape shape,
         int originX, int originY, int width, int height, int maxTap, long maxTapQ40,
-        int* rowFirst, int* rowEnd, int* cells, long* q40)
+        int* rowExtents, int* cells, long* q40)
     {
         EnsureStorage();
         var slot = _cursor;
@@ -149,8 +147,7 @@ internal unsafe struct KernelCache
         else Buffer.MemoryCopy(cells, taps, MaxCells * sizeof(long), width * height * sizeof(int));
 
         var rows = _rows.Pointer + (long)slot * (2 * MaxSide);
-        Buffer.MemoryCopy(rowFirst, rows, MaxSide * sizeof(int), height * sizeof(int));
-        Buffer.MemoryCopy(rowEnd, rows + MaxSide, MaxSide * sizeof(int), height * sizeof(int));
+        Buffer.MemoryCopy(rowExtents, rows, 2 * MaxSide * sizeof(int), 2 * height * sizeof(int));
         return entry;
     }
 
@@ -206,7 +203,7 @@ internal static unsafe class KernelFactory
         var height = ry1 - ry0;
         if (width <= 0 || height <= 0)
         {
-            taps = new KernelTaps(p->Plane, ShapeOf(p), 0, 0, 0, 0, 0, 0, null, null, null, null);
+            taps = new KernelTaps(p->Plane, ShapeOf(p), 0, 0, 0, 0, 0, 0, null, null, null);
             return true;
         }
 
@@ -243,19 +240,20 @@ internal static unsafe class KernelFactory
         var originY = ry0 + minY;
         var kernelWidth = maxX - minX + 1;
         var kernelHeight = maxY - minY + 1;
+        if (maxX >= 0) Compact(ints, longs, width, minX, minY, kernelWidth, kernelHeight);
         if (!clipped && width <= KernelCache.MaxSide && height <= KernelCache.MaxSide)
         {
             var entry = cache->Insert(
                 key.Main, key.Turn, p->Plane, ShapeOf(p),
                 originX, originY, kernelWidth, kernelHeight, maxTapInt, maxTap,
-                extents, extents + height, ints, longs);
+                extents, ints, longs);
             taps = cache->View(entry);
             return true;
         }
 
         taps = new KernelTaps(
             p->Plane, ShapeOf(p), originX, originY, kernelWidth, kernelHeight,
-            maxTapInt, maxTap, extents, extents + height, ints, longs);
+            maxTapInt, maxTap, extents, ints, longs);
         return true;
     }
 
@@ -452,14 +450,31 @@ internal static unsafe class KernelFactory
         {
             minX = 0;
             minY = 0;
+            extents[0] = 0;
+            extents[1] = 0;
             return;
         }
 
+        var write = 0;
         for (var y = minY; y <= maxY; y++)
         {
-            if (extents[2 * y + 1] == 0) continue;
-            extents[2 * y] -= minX;
-            extents[2 * y + 1] -= minX;
+            var end = extents[2 * y + 1];
+            extents[2 * write] = end == 0 ? 0 : extents[2 * y] - minX;
+            extents[2 * write + 1] = end == 0 ? 0 : end - minX;
+            write++;
+        }
+    }
+
+    private static void Compact(int* ints, long* longs, int width, int minX, int minY, int kernelWidth, int kernelHeight)
+    {
+        if (minX == 0 && minY == 0 && kernelWidth == width) return;
+
+        for (var j = 0; j < kernelHeight; j++)
+        {
+            var source = (long)(minY + j) * width + minX;
+            var target = (long)j * kernelWidth;
+            if (ints != null) Buffer.MemoryCopy(ints + source, ints + target, kernelWidth * sizeof(int), kernelWidth * sizeof(int));
+            else Buffer.MemoryCopy(longs + source, longs + target, kernelWidth * sizeof(long), kernelWidth * sizeof(long));
         }
     }
 }

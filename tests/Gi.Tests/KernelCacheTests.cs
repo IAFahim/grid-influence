@@ -24,7 +24,7 @@ public sealed unsafe class KernelCacheTests
     private static float PositionFor(StampVariant* v, bool xAxis, int cell, int phase, int scaleQ8)
     {
         var origin = xAxis ? v->OriginQ8X : v->OriginQ8Y;
-        var lead = (long)cell << 8 | phase;
+        var lead = ((long)cell << 8) + phase;
         return (lead - ((long)origin * scaleQ8 >> 8) + 0.5f) / 256f;
     }
 
@@ -111,7 +111,7 @@ public sealed unsafe class KernelCacheTests
         bool metadata, bool clamped, string context)
     {
         var w = World.GetContext(world);
-        Assert.NotNull(w);
+        Assert.True(w != null);
         var v = StampCatalog.Get(stamp);
         var x = PositionFor(v, true, cellX, phaseX, scaleQ8);
         var y = PositionFor(v, false, cellY, phaseY, scaleQ8);
@@ -128,7 +128,12 @@ public sealed unsafe class KernelCacheTests
         var oy0 = Math.Max(p.Y0, 0);
         var ox1 = Math.Min(p.X1, Size);
         var oy1 = Math.Min(p.Y1, Size);
-        Assert.True(ox1 > ox0 && oy1 > oy0, context);
+        if (ox1 <= ox0 || oy1 <= oy0)
+        {
+            Assert.True(KernelFactory.TryGetTaps(w, 0, stamp, angle, Layer.Precision.Exact, &p, out var empty), context);
+            Assert.True(empty.Width == 0 && empty.Height == 0, $"{context}: expected an empty kernel");
+            return;
+        }
 
         var width = ox1 - ox0;
         var height = oy1 - oy0;
@@ -152,10 +157,13 @@ public sealed unsafe class KernelCacheTests
                 var actual = intKernel
                     ? cells[(cy - oy0) * width + cx - ox0]
                     : q40[(cy - oy0) * width + cx - ox0];
-                if (expected != actual) Assert.True(false, $"{context}: cell ({cx},{cy}) expected {expected} got {actual}");
+                if (expected != actual) Assert.Fail($"{context}: cell ({cx},{cy}) expected {expected} got {actual}");
             }
 
-            if (!(metadata && Math.Abs((long)gain) <= 16)) return;
+            var boundsX0 = p.Px + taps.OriginX;
+            var boundsY0 = p.Py + taps.OriginY;
+            var insideGrid = boundsX0 >= ox0 && boundsY0 >= oy0 && boundsX0 + taps.Width <= ox1 && boundsY0 + taps.Height <= oy1;
+            if (!(metadata && Math.Abs((long)gain) <= 16 && insideGrid)) return;
 
             var minX = int.MaxValue;
             var minY = int.MaxValue;
@@ -202,15 +210,16 @@ public sealed unsafe class KernelCacheTests
             Assert.True(expectedMax == maxTap, $"{context}: maxTap {expectedMax} vs {maxTap}");
             for (var j = 0; j < height; j++)
             {
-                var tapRow = j + minY;
+                var tapRow = j - minY;
+                if (tapRow < 0 || tapRow >= taps.Height) continue;
                 if (rowFirst[j] == 0 && rowEnd[j] == 0)
                 {
-                    Assert.True(taps.RowFirst[tapRow] == 0 && taps.RowEnd[tapRow] == 0, $"{context}: empty row {tapRow}");
+                    Assert.True(taps.RowExtents[2 * tapRow] == 0 && taps.RowExtents[2 * tapRow + 1] == 0, $"{context}: empty row {tapRow}");
                     continue;
                 }
 
-                Assert.True(rowFirst[j] - minX == taps.RowFirst[tapRow], $"{context}: rowFirst {tapRow}");
-                Assert.True(rowEnd[j] - minX == taps.RowEnd[tapRow], $"{context}: rowEnd {tapRow}");
+                Assert.True(rowFirst[j] - minX == taps.RowExtents[2 * tapRow], $"{context}: rowFirst {tapRow}");
+                Assert.True(rowEnd[j] - minX == taps.RowExtents[2 * tapRow + 1], $"{context}: rowEnd {tapRow}");
             }
         }
     }
@@ -424,7 +433,7 @@ public sealed unsafe class KernelCacheTests
                         var j = 32 + row - p.Py - taps.OriginY;
                         var expected = i >= 0 && i < taps.Width && j >= 0 && j < taps.Height ? taps.Cells[j * taps.Width + i] * 3 : 0;
                         if (expected != cells[row * 16 + column])
-                            Assert.True(false,
+                            Assert.Fail(
                                 $"box {width}x{height} phase {phaseX},{phaseY}: cell ({column},{row}) expected {expected} got {cells[row * 16 + column]}");
                     }
                 }
@@ -546,7 +555,7 @@ public sealed unsafe class KernelCacheTests
             Assert.True(TileBake.Place(x, y, 0f, 0f, 256, Size, variant, 0, 256, Layer.Precision.Exact, out var mid));
             Assert.True(KernelFactory.TryGetTaps(w, 0, stamp, 0, Layer.Precision.Exact, &mid, out _));
             var key = new KernelKey(stamp, mid.Sampling, 0, mid.Fx, mid.Fy, 0);
-            Assert.NotNull(w->Kernels.Find(key.Main, key.Turn));
+            Assert.True(w->Kernels.Find(key.Main, key.Turn) != null);
 
             CheckTaps(world, stamp, 256, 0, 7, Size - 3, 40, 128, 128, true, false, "right edge reuses phase 128");
             CheckTaps(world, stamp, 256, 0, 7, 40, Size - 3, 128, 128, true, false, "bottom edge reuses phase 128");
@@ -578,11 +587,11 @@ public sealed unsafe class KernelCacheTests
 
             var first = PlaceAt(1);
             var key = new KernelKey(stamp, first.Sampling, 0, first.Fx, first.Fy, 0);
-            Assert.Null(w->Kernels.Find(key.Main, key.Turn));
+            Assert.True(w->Kernels.Find(key.Main, key.Turn) == null);
             Assert.True(KernelFactory.TryGetTaps(w, 0, stamp, 0, Layer.Precision.Exact, &first, out var taps));
             Assert.Equal(KernelShape.Box, taps.Shape);
             Assert.Equal(Plane.Difference, taps.Plane);
-            Assert.NotNull(w->Kernels.Find(key.Main, key.Turn));
+            Assert.True(w->Kernels.Find(key.Main, key.Turn) != null);
 
             var again = PlaceAt(1);
             Assert.True(KernelFactory.TryGetTaps(w, 0, stamp, 0, Layer.Precision.Exact, &again, out var second));
@@ -594,17 +603,17 @@ public sealed unsafe class KernelCacheTests
                 Assert.True(KernelFactory.TryGetTaps(w, 0, stamp, 0, Layer.Precision.Exact, &placement, out _));
             }
 
-            Assert.Null(w->Kernels.Find(key.Main, key.Turn));
+            Assert.True(w->Kernels.Find(key.Main, key.Turn) == null);
             var last = PlaceAt(KernelCache.EntryCount + 1);
             var lastKey = new KernelKey(stamp, last.Sampling, 0, last.Fx, last.Fy, 0);
-            Assert.NotNull(w->Kernels.Find(lastKey.Main, lastKey.Turn));
+            Assert.True(w->Kernels.Find(lastKey.Main, lastKey.Turn) != null);
 
             var big = Stamp.Box(100, 100, 60);
             Assert.True(TileBake.Place(300.5f, 300.5f, 0f, 0f, 256, Size, StampCatalog.Get(big), 0, 256, Layer.Precision.Exact, out var oversized));
             Assert.True(KernelFactory.TryGetTaps(w, 0, big, 0, Layer.Precision.Exact, &oversized, out var bigTaps));
             Assert.True(bigTaps.Width > KernelCache.MaxSide || bigTaps.Height > KernelCache.MaxSide);
             var bigKey = new KernelKey(big, oversized.Sampling, 0, oversized.Fx, oversized.Fy, 0);
-            Assert.Null(w->Kernels.Find(bigKey.Main, bigKey.Turn));
+            Assert.True(w->Kernels.Find(bigKey.Main, bigKey.Turn) == null);
 
             Assert.True(Stamp.Free(big));
             Assert.True(Stamp.Free(stamp));
@@ -631,9 +640,9 @@ public sealed unsafe class KernelCacheTests
                 Assert.True(TileBake.Place(35.5f, 41.5f, 0f, 0f, 256, Size, StampCatalog.Get(stampId), angle, scale,
                     Layer.Precision.Exact, out var p));
                 var key = new KernelKey(stampId, p.Sampling, grid, p.Fx, p.Fy, angle);
-                Assert.Null(w->Kernels.Find(key.Main, key.Turn));
+                Assert.True(w->Kernels.Find(key.Main, key.Turn) == null);
                 Assert.True(KernelFactory.TryGetTaps(w, grid, stampId, angle, Layer.Precision.Exact, &p, out _));
-                Assert.NotNull(w->Kernels.Find(key.Main, key.Turn));
+                Assert.True(w->Kernels.Find(key.Main, key.Turn) != null);
                 Assert.Equal(angle & 0xFFFF, (int)(key.Turn));
             }
 
@@ -661,9 +670,9 @@ public sealed unsafe class KernelCacheTests
             Assert.True(TileBake.Place(35.5f, 41.5f, 0f, 0f, 256, Size, StampCatalog.Get(stamp), 0, 256, Layer.Precision.Exact, out var p));
             Assert.True(KernelFactory.TryGetTaps(w, 0, stamp, 0, Layer.Precision.Exact, &p, out _));
             var key = new KernelKey(stamp, p.Sampling, 0, p.Fx, p.Fy, 0);
-            Assert.NotNull(w->Kernels.Find(key.Main, key.Turn));
+            Assert.True(w->Kernels.Find(key.Main, key.Turn) != null);
             Assert.True(Stamp.Free(stamp));
-            Assert.Null(w->Kernels.Find(key.Main, key.Turn));
+            Assert.True(w->Kernels.Find(key.Main, key.Turn) == null);
         }
         finally
         {

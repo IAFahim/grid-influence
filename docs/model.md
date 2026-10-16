@@ -888,7 +888,24 @@ digits. Concurrency: single thread.
   needs more than any earlier round, copying live bytes because regions reserved earlier in
   the same frame are still pending. The chunk arena stays a separate retained buffer, reset by
   every `Process`. The shared zero dense
-  page is allocated once with the arenas and never written afterwards.
+  page is allocated once with the arenas and never written afterwards. The per-world kernel
+  cache is fixed-capacity native storage held by value in `WorldCtx`: 32 entries, each owning a
+  4,096-`long` tap slot and 128 row-extent `int`s, plus a miss canvas and a row-extent scratch;
+  all five buffers are allocated zeroed together by the first insert and released exactly once
+  by `World.Free` before the context is zeroed (`World.Clear` keeps entries, because stamps are
+  immutable and only a stamp id leaving the catalog can invalidate them). Entry taps are values
+  copied out of the canvas, never pointers into stamp storage, so a freed stamp leaves no
+  dangling reference; because a freed id can be re-baked as a different stamp, a successful
+  `Stamp.Free` clears every live world's cache in the same process-wide scan that already
+  serializes catalog mutation. A `KernelTaps` handle points either into its owning entry —
+  valid until that slot is evicted by a later insert on the same cache, flushed by
+  `Stamp.Free`, or released by `World.Free` — or into the miss canvas, valid until the next
+  build on the same cache; callers consume taps before the next build. A kernel whose capture
+  rectangle exceeds 4,194,304 cells is refused and the caller emits through the placement
+  itself, which is exact by construction. Grid-edge clipping is folded into box extents
+  before bands form, so a placement whose extents differ from
+  `min(axis × sampling, kind cap)` — the only kernels that depend on absolute position — never
+  consults or fills an entry; its taps are captured from its own clipped placement.
   `NativeBuffer` growth zero-fills the newly committed region, so every buffer that reads
   beyond its written length — the source pending column and the generation and timed bytes
   after a column growth — reads zeros without a separate clearing pass; `ResizeUninitialized`
@@ -1008,7 +1025,12 @@ digits. Concurrency: single thread.
   Batch scratch uses the same aligned native buffers, and the layer-delta stride is 48 integers
   (192 bytes). The free ring is an
   `int` buffer from the same aligned allocator (natural alignment on netstandard2.1), read and
-  written only through scalar naturally aligned `int` accesses.
+  written only through scalar naturally aligned `int` accesses. The kernel cache's entry, tap,
+  row-extent, and canvas buffers are `NativeBuffer`s from the same 64-byte aligned allocator;
+  tap rows are read and written as naturally aligned `int` (an integer kernel's cells share its
+  long slot's alignment) or `long` scalars, and row extents are whole `int` pairs. The
+  builder's per-tile scratch — a 33×33 difference plane, a 32×32 dense plane, a 32×32 Q40
+  plane, and a 32-int carry row — is stack-allocated per call and cleared per tile.
 - **Concurrency**: `ApplyBatch`/`Sync`/`SyncTransforms`/`Place`/`Move`/`SetGain`/`Remove`/`Process`/`Record`/`StopRecording`/
   `Rewind` are serial per world; different
   worlds may run on different threads. `ProcessAll` is that serial-per-world rule walked over
@@ -1041,7 +1063,12 @@ digits. Concurrency: single thread.
   `Process`, so no reservation survives into the next frame. Warm `Process` and warm reads make
   no `NativeHeap` calls at all: slabs, directories, scratch, and every queue are sized by
   grow-to-max before steady state, and the hook counter (`NativeHeap.Calls`) is asserted flat
-  by a test across warm frames that crowd, move, and read.
+  by a test across warm frames that crowd, move, and read. Kernel-cache lookups and builds run
+  on the owning world's thread under that same serial rule, reading the placement and the
+  stamp variant read-only and writing only cache-owned buffers and their own stack; the
+  `Stamp.Free` flush rides the process-wide catalog scan already serialized above. No
+  production path on the place, process, or query route calls the builder, so warm frames make
+  no cache-driven heap calls either.
   Determinism is unaffected: tiles are
   independent, arithmetic is integer-exact, the dead set is a pure function of page content, and
   the order of removals has no observable effect on map contents. Warm `Process`
