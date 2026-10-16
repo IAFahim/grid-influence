@@ -285,7 +285,6 @@ public static unsafe partial class World
                 var tileX0 = tx << TileBake.TileBits;
                 var tileY0 = ty << TileBake.TileBits;
                 var tile = ty * tps + tx;
-                TilePlanes* set = null;
                 var dirty = -1;
                 long* plane = null;
                 int* ints32 = null;
@@ -310,7 +309,7 @@ public static unsafe partial class World
 
                             if (plane == null)
                             {
-                                set = EnsureSet(g, ld, tile);
+                                var set = EnsureSet(g, ld, tile);
                                 dirty = DirtyIndex(g, ld, tile);
                                 plane = taps.Plane == Plane.Tent ? ld->Store.EnsureT(ref *set) : ld->Store.EnsureB(ref *set);
                             }
@@ -330,7 +329,7 @@ public static unsafe partial class World
 
                             if (ints32 == null)
                             {
-                                set = EnsureSet(g, ld, tile);
+                                var set = EnsureSet(g, ld, tile);
                                 dirty = DirtyIndex(g, ld, tile);
                                 ints32 = ld->Store.Cells(*set).I;
                             }
