@@ -1104,6 +1104,19 @@ digits. Concurrency: single thread.
   tile's `I` plane (rows `< 32 − row₀`, columns `≤ 31`); a prefetch never faults and writes
   nothing. *Alignment*: every access is a naturally aligned `int`, `short` or `byte` load or
   store except the unaligned-safe eight-lane row add. *Concurrency*: one thread, no statics.
+  The single-tile narrow box emitter runs only when the clipped footprint equals the placement's
+  footprint, lies in one tile, spans at most eight cells, and its leading and tail bands do not
+  share a cell; it then needs no `ClipBands`. Its two eight-`int` `stackalloc` buffers are fully
+  stored by `LaneWeights3` and `BandLanes` (one 256-bit store each) before any read, so
+  `SkipLocalsInit` leaves no unwritten lane readable; `localX + cellsX ≤ 32`, `localY + cellsY ≤
+  32` and `column = min(localX, 24)` keep every eight-lane access inside the 32-`int` row, and
+  the rectangle it grows is exactly the one the general emitter grows for the same bands. The
+  vectorized tile summaries load only the 32 `short`s of a row (`row = page + y·32`, `y < 32`,
+  unaligned-safe loads over 64 B aligned pages), `FirstEqual` is called only on a row whose
+  maximum equals the searched value so it always finds a lane, `RescanMax` reads exactly the
+  32 `RowMaxima`, and the summary update uses full-row maxima over the rectangle's rows, which
+  gives the same maximum and first argmax as the rectangle alone because every cell outside the
+  rectangle is unchanged, at most the old maximum, and at or after the old first argmax.
   The module skips local zero-initialization (`SkipLocalsInit`): every `stackalloc` buffer is
   written before it is read — band and span arrays are filled up to the count their readers
   use, the lane buffer is cleared before each row band, cell scratch is cleared or fully emitted
