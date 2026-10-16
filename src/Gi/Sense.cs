@@ -8,6 +8,7 @@ namespace Gi;
 public static unsafe partial class World
 {
     private const long MaxReachQ8 = 1L << 24;
+    private const float MaxCellQ8 = 1073741824f;
 
     public static bool Covers(byte world, float x, float y)
     {
@@ -938,7 +939,12 @@ public static unsafe partial class World
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static long CellQ8(float value, float origin, int scaleQ8)
-        => (int)MathF.Floor((value - origin) * scaleQ8);
+    {
+        var q = (value - origin) * scaleQ8;
+        if (MathF.Abs(q) <= MaxCellQ8) return (int)MathF.Floor(q);
+
+        return q > 0f ? (long)MaxCellQ8 : -(long)MaxCellQ8;
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool Contains(GridCtx* g, long qx, long qy)

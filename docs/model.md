@@ -26,7 +26,12 @@ before reading command payloads, writing
   existing exclusive mutation phase — a token check is not a lock, and concurrent same-world
   mutation or a `Free`/`Clear`/`Rewind` racing a consumer remains forbidden. A grid
   (`Grid.New(world, power, x, y, size)`, up to 32 per world) is a power-of-two cell grid,
-  `2^power` cells per side (power 5–14), laid over a world-space rect `x,y,size`. Grids are
+  `2^power` cells per side (power 5–14), laid over a world-space rect `x,y,size`. The origin
+  and size must be finite, the size positive, and the truncated integer Q8 scale
+  `ScaleQ8 = trunc(2^power / size · 256)` must lie in `[1, 2^20]`; `Grid.New` throws
+  `ArgumentOutOfRangeException` naming `power`, `x`, `y`, or `size` otherwise and consumes no
+  grid id, and `GiValidation.TryGrid(power, x, y, size, out error)` applies the same rules from
+  the same source (`ValidationRules`). Grids are
   never freed singly, so their ids stay the dense range `0..Grid.Count(world)-1`;
   `Grid.CopyIds(world, ids)` copies them into a span and returns the count, and
   `Grid.TryGetSpec(world, grid, out power, out x, out y, out size)` returns the exact
@@ -111,8 +116,8 @@ before reading command payloads, writing
 - **Sources** are persistent placements: `World.Place(world, layer, x, y, stamp, gain)` returns an
   int id (`-1` when the world, layer, or stamp is invalid, the layer is derived, or `x`/`y` is
   non-finite); `Move`/`SetGain`/`Remove`/`Clear` mutate it (`Move` ignores non-finite `x`/`y`
-  coordinates; `World.TryGetSourceSpec(world, id, out spec)` reads a live source's current
-  position, quantized heading in radians, quantized scale, gain, layer, and stamp). `gain` is an integer −16–16 (stored as one
+  coordinates, and so do `Sync` and `SyncTransforms` row by row; `World.TryGetSourceSpec(world,
+  id, out spec)` reads a live source's current position, quantized heading in radians, quantized scale, gain, layer, and stamp). `gain` is an integer −16–16 (stored as one
   `sbyte`-ranged byte; deltas deposit exactly, so a negative gain subtracts). The id packs a
   7-bit generation above a 24-bit slot index. A freed slot — by `Remove`, by an `Expire` that comes
   due, or by a batch `Remove` — joins the tail of a per-world **free ring**, and `Place` (scalar or
@@ -128,7 +133,11 @@ before reading command payloads, writing
   Column growth zeroes the new generation bytes, so returned ids are deterministic across runs.
   Positions are
   float world units, converted to cell space per grid as `floor((x−ox)·scale·256)` in Q8 — the
-  integer part is the cell, the low byte is the sub-cell phase. Stamp extents are world-anchored:
+  integer part is the cell, the low byte is the sub-cell phase. The float Q8 position is
+  range-checked before the integer conversion — deposits and reads clamp it to ±2^30, and reads
+  map NaN to −2^30 — so no result depends on how a platform converts an out-of-range float; a
+  position that far out lies outside every grid, and so does a non-finite one. Stamp extents are
+  world-anchored:
   a `w×h` stamp covers `w×h` world cells at scale 1, and each grid scales the extent by its
   `ScaleQ8` (truncated integer Q8), so the same source covers the same world rect on every grid.
   Fractional leading/trailing edges become Q8 band weights (boxes) or bilinear phases (rasters).
@@ -247,8 +256,8 @@ before reading command payloads, writing
   reach, since, count, words)` writes one `ulong` per 64 agents — bit set when that agent's
   disk changed since the tick — zeros for quiet words, and returns the changed count.
   `World.Sync(world, sources, xs, ys, count)` is the fused column form of `Move`: it
-  validates generations, skips no-ops, and enqueues the same coalescing ops `Move` would,
-  batch after batch, with zero managed allocation. At 8,192 rows or more (and a free pool) the
+  validates generations, skips no-ops, ignores rows with a non-finite position, and enqueues
+  the same coalescing ops `Move` would, batch after batch, with zero managed allocation. At 8,192 rows or more (and a free pool) the
   query batches fan out over the worker pool in 1,024-row chunks aligned to word boundaries so every
   mask word has one writer; smaller or contended batches run the identical loop serially.
   `World.SyncTransforms(token, ranges)` borrows compact native pose columns through the same
@@ -256,9 +265,10 @@ before reading command payloads, writing
   columns (null preserves the current value), a row count, and an optional invalid mask.
   Rows apply in range order then row order — duplicates fold last-writer-wins into one pending
   op — with `UpdateTransform`'s field semantics but `Sync`'s bit-exact position compare:
-  `-0.0` and `+0.0` are different poses and NaN payload bits copy verbatim, where ordered
-  `Move`/`UpdateTransform` compare with `==`. Gain, fades, and expiry are never touched.
-  Stale/dead rows set their mask bit (bit `row & 63` of word `row >> 6`; cleared words leave
+  `-0.0` and `+0.0` are different poses, where ordered `Move`/`UpdateTransform` compare with
+  `==`. Gain, fades, and expiry are never touched. A row whose x or y is not finite is rejected
+  whole — its heading and scale are not applied either — and, like a stale or dead row, sets its
+  mask bit (bit `row & 63` of word `row >> 6`; cleared words leave
   tail bits zero and untouched words keep their contents) instead of producing a per-row
   result, and the call still returns `Applied`. Validation runs in a fixed order before any
   write — token (`StaleRevision`/`InvalidWorld`), descriptor structure (`InvalidRange` for
@@ -383,7 +393,8 @@ before reading command payloads, writing
   clipped edge strips (rows widened to `int32` vectors, one horizontal add per tile — 15 µs for
   a 1022² rect on a 1024² grid that page-cell scanning cost ~390 µs);
   `QueryAt` takes world-space floats and maps them with the deposits' own truncated
-  `ScaleQ8` product, so the cell it reads is the cell the deposit wrote;
+  `ScaleQ8` product, so the cell it reads is the cell the deposit wrote; a non-finite or
+  unreachably distant position reads 0;
   `QueryMax(world, grid, layer, out x, out y)` walks the max pyramid root-down — each node's
   cached max is matched against its valid child rectangle (edge nodes cover fewer than 8×8
   children; slots beyond the grid never enter a max or a match), then the winning tile scans its
@@ -404,7 +415,8 @@ before reading command payloads, writing
   `QueryGradient(world, grid, layer, x, y, out gx, out gy)` maps a world-space point with the
   same truncated `ScaleQ8` product as `QueryAt` and returns the central difference over resolved
   page cells — `Q(cx±1, cy)` and `Q(cx, cy±1)` as two ints; out-of-grid neighbors read 0, so
-  gradients at the border measure the drop toward empty space. ~5 ns per point;
+  gradients at the border measure the drop toward empty space, and a non-finite position
+  returns `(0, 0)`. ~5 ns per point;
   `ChangedTiles(world, grid, layer, int* dst)` returns how many tiles the most recent
   `Process` resolved on that (grid, layer) and copies the tile ids to `dst` when it is not
   null — repainting, incremental network sync, and dirty-rect presentation read one call
@@ -435,7 +447,9 @@ add one `int64` page sum per live page, so large sparse grids do not visit every
   `ScaleQ8` mapping), prefer a grid that contains the whole footprint, then the larger
   `ScaleQ8` (finer), then the lower grid id. No grid contains the point → `false` with every
   out value zeroed (`Covers(world, x, y)` tells "not covered" from "covered but clipped"), so an
-  uncovered point never reads as an empty field. A footprint no grid holds whole is answered on
+  uncovered point never reads as an empty field; a non-finite position is contained by no grid,
+  so `Covers` is `false` and every `TrySense*`, column read, `Changed`, and `ChangedMask` row
+  treats it as uncovered. A footprint no grid holds whole is answered on
   the finest grid containing the point, clipped, and reports `false`; answers are never
   stitched across grids, so a query crossing a fine grid's edge moves to the coarser grid that
   holds it instead of reading the fine grid's empty outside.
@@ -484,7 +498,7 @@ add one `int64` page sum per live page, so large sparse grids do not visit every
   or moved this frame is seen after the next `Process`. Values saturate at ±32767 and signed
   sources cancel; a layer meant to detect presence should hold same-signed sources.
 - **Determinism**: field contents are integer-only; the only float math is the world→cell
-  conversion (`multiply + floor`, correctly rounded IEEE ops) and the grid-scale truncation to
+  conversion (`multiply + range test + floor`, correctly rounded IEEE ops) and the grid-scale truncation to
   integer Q8 at grid creation. Mip baking, band weights, and the Q16.16 sampler are pure integer
   ops. Deposits are commutative integer
   adds, so pages are bit-identical across runs, machines, and resolve scheduling (sequential or
@@ -1006,7 +1020,8 @@ pass behind them was `perf`-profile guided, receipts first.
   shared zero page holds 4,096 B, so an absent input reads zeros in bounds — and writes the
   1,024 cells of its own page; `int32` totals stay inside `±2^31` by the weight bound above.
   Stamps clip to grid rects before marking (extents clamp to the grid size in Q8;
-  grids whose `ScaleQ8` truncates to 0 are skipped); tile-local box corners land in
+  `AddGrid` rejects a `ScaleQ8` outside `[1, 2^20]`, and the `ScaleQ8 == 0` guards on the read
+  and deposit paths are defensive); tile-local box corners land in
   `[0,32]×[0,32]` of the difference array (rows 0–32 exist for the exclusive far edge; column 32
   is written but never read, by design of the half-open prefix form). Tent and bell deposits
   write only cells `[max(First, tile), min(Last, tile + 31)]` per axis — inside `[0,31]×[0,31]`
@@ -1033,6 +1048,17 @@ pass behind them was `perf`-profile guided, receipts first.
   count never exceeds the number of slots and stays below the size at every push; the tail
   `head + count` is below twice the size and one conditional subtraction maps it into
   `[0, size)`, and a pop wraps `head + 1` to 0 at the size.
+- **Finite inputs**: `Sync` and `SyncTransforms` read `xs[i]` and `ys[i]` once per row on the
+  calling thread, before the finiteness test. Lifetime: the borrowed columns outlive the
+  synchronous call, as before. Aliasing: the loads are reads of columns no writer touches, since
+  mask aliasing is rejected first and workers start only after the scan. Alignment: `float*`
+  natural alignment, as for the other columns. Bounds: rows `0..Count-1` are inside the `Count`
+  floats each column names, the same extent valid rows already read, and the source-column
+  reads that follow are still ordered behind the slot bound, liveness, and generation tests.
+  Concurrency: no worker runs during the scan. Every float→integer conversion of a position is
+  preceded by a float range test — `CellQ8` on reads and `TileBake.Span` on deposits, both at
+  ±2^30 — or converts a value already reduced to a bounded range (`Turn` and `Scale` reduce in
+  double first), so no result depends on a platform's out-of-range conversion.
 
 ## Tool inspection
 

@@ -27,6 +27,7 @@ internal static unsafe partial class TileBake
         => (int)((value + 549755813888L + (value >> 63)) >> 40);
 
     private const long MaxExtent = 1L << 30;
+    private const float MaxPositionQ8 = 1073741824f;
     private const long MaxTentExtent = (1L << 23) - 2;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -46,7 +47,10 @@ internal static unsafe partial class TileBake
     private static void Span(float position, int originQ8, int length, int sampling, int size, bool clip, long cap,
         out int cell, out int phase, out int extent, out int first, out int end)
     {
-        var lead = (int)MathF.Floor(position) + ((long)originQ8 * sampling >> 8);
+        var bounded = MathF.Abs(position) <= MaxPositionQ8
+            ? position
+            : position > 0f ? MaxPositionQ8 : -MaxPositionQ8;
+        var lead = (int)MathF.Floor(bounded) + ((long)originQ8 * sampling >> 8);
         var full = Math.Min((long)length * sampling, cap);
         if (clip)
         {

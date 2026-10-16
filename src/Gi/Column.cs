@@ -60,6 +60,7 @@ public static unsafe partial class World
             var x = xs[i];
             var y = ys[i];
             if (*(int*)&x == *(int*)&s->X.Pointer[slot] && *(int*)&y == *(int*)&s->Y.Pointer[slot]) continue;
+            if (!float.IsFinite(x) || !float.IsFinite(y)) continue;
             EnqueueMutation(w, s, slot, x, y, (sbyte)s->Gain.Pointer[slot], s->Angle.Pointer[slot], s->Scale.Pointer[slot], true);
             s->X.Pointer[slot] = x;
             s->Y.Pointer[slot] = y;
