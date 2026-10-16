@@ -1150,6 +1150,62 @@ digits. Concurrency: single thread, and `ResolvePool.SerialOnly` keeps Gi from s
   ±2^30 — or converts a value already reduced to a bounded range (`Turn` and `Scale` reduce in
   double first), so no result depends on a platform's out-of-range conversion.
 
+### Floor probes
+
+The `benchmarks --floor` suites (P1–P8) make no Gi calls; this proof covers their unsafe code with
+the same headings. All probe state lives in the suites themselves, and every timed pass allocates
+0 B (measured per case).
+
+- **Lifetime**: every probe buffer comes from its suite's `FloorArena`. Each arena block is a
+  64-byte-aligned, zeroed `NativeMemory.AlignedAlloc` tracked in a list and freed exactly once, in
+  allocation order, when the suite is disposed — one `using` per suite, so construction, receipts,
+  timing, and free all happen inside that scope and no pointer escapes the run. Everything is
+  single-threaded: one suite exists at a time, and receipts run before any timing of that suite.
+- **Aliasing**: every buffer is a distinct arena block; kernels never write two buffers through one
+  pointer and never write their input arrays. Outputs are written only at indices `0..count−1`
+  (P6 vector stores and scalar edge writes alike; P8 stores at `list + found`). Checksum passes
+  clear, run, and re-hash the same buffers, so each pass is deterministic and repeatable. The P3
+  interleaved pair and its merge target are separate blocks; the merge adds source into target in
+  place and reads only what those two blocks hold.
+- **Alignment**: arena blocks are 64-byte aligned and each request is rounded up to the next 64-byte
+  boundary, so even an exact 64-byte-multiple request carries 64 spare tail bytes. Page bases,
+  histograms, the convolution ring, and query arrays all start block-aligned; SIMD access uses
+  unaligned-safe `Vector256` loads and stores at arbitrary element offsets (P2 merge steps, P8
+  left-pack stores at `found`-relative offsets, P4 row steps at multiples of the vector width from
+  the aligned bases).
+- **Concurrency**: none to prove. No locks, no shared mutable statics (registry tables are
+  immutable), no background work, no cross-thread observation; the process may be pinned with
+  `taskset` without affecting any claim above.
+- **Bounds**: index and query arrays are read past their logical end only by prefetch distances,
+  and those extra lanes never reach an output. P2/P3 prefetch `cells[i+16]` (interleaved
+  `cells[i+17]`), at most 15 ints past the 1M-int arrays — inside the 16 spare ints the arena's
+  64-byte rounding leaves after a 4 MB request. P6's scalar prefetch reads `cells[i+32]` and its
+  vector prefetch loads 8 ints at `i+32`, at most 31 ints past; its query arrays are allocated with
+  72 spare ints. P6's prefetch hints may compute an address from a −1 directory entry and so point
+  just outside a block — prefetch hints never fault, and the hinted values are never used as data.
+  P6's gathers are masked to lanes whose tile is present and whose cell is interior (column and row
+  both in `1..30`), so the west/east/north/south gathers stay inside the 32×32 page; border cells
+  take the scalar `Edge` path, which bounds-checks every tile crossing and the field edge. P8's
+  left-pack stores one full 8-int vector per block, so the tail store may write up to 7 lane slots
+  past the last packed result; `found` never exceeds the block's start index, so every store stays
+  within `list[0..count−1]`, and the result lists carry 8 spare ints — 16 after arena rounding. P7
+  requires disks fully inside the field and `radius ≤ 64`: centres are generated in
+  `[radius, side−radius]`, the guard `(uint)radius > 64` returns early, and the row-span walk then
+  indexes directory rows and row sums without edge clamping — a disk crossing the field edge would
+  read out of bounds, which is the probe's stated precondition, and the receipts sample the same
+  interior centre range at radii 0–64. P4's origin block carries 4 halo rows above the field and a
+  16-int left margin, so row taps `h[x−t]` for `t ≤ 7` stay inside the block, and the column pass
+  keeps its last 8 rows in a ring indexed by `y & 7`. P5 allocates full-grid planes and summaries
+  and indexes them by paged cell or tile index only.
+- **Carry-forward assumptions for T-3**, both receipt-checked here and to be restated when the
+  engine adopts these kernels: the P1 vector path uses the raw `vcvttps2dq`
+  (`ConvertToVector256Int32WithTruncation`), which is exact only for in-range inputs — an
+  out-of-range or NaN lane yields the indefinite `0x80000000` instead of a defined cell — and the
+  P4 vector column pass multiplies the row-pass `int64` values through their low 32 bits, so it
+  assumes every row-pass value fits in int32; the receipt bounds the impulse count
+  (`max count < 2048`, keeping row-pass values ≤ 2^29) and the fully widened scalar path stays the
+  reference.
+
 ## Tool inspection
 
 `tools/stats` reads internal state through friend access, without reflection, counters on the
