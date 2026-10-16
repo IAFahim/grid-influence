@@ -301,10 +301,19 @@ before reading command payloads, writing
   dirty tile resolves its difference
   array through a 2D prefix sum (horizontal inclusive prefix + previous-row carry), adds dense,
   adds each cell's tent and bell sums rounded once (`RoundQ40`) for tiles carrying those
-  buffers,
-  saturates to `short` **after** summation so cancellation is preserved, and writes the page's
+  buffers — the four-plane total `boxes + dense + tent + bell` is formed in `int64` and
+  saturates to `short` exactly once, **after** summation, so cancellation is preserved and two
+  planes that each fit `int32` but whose sum does not saturate with the correct sign instead of
+  wrapping — and writes the page's
   cell total into its `int64` sum slot and the page's maximum cell into its `int16` max slot
-  (both bit-identical across resolve paths). A tile that resolves to all-zero frees its block
+  (both bit-identical across resolve paths). The scalar resolve is that exact definition; the
+  AVX2 and Vector128 resolves keep `int32` sums behind a per-tile exactness guard: while every
+  cell's `|boxes|` and `|dense|` stay below `2^29` the `int32` total cannot wrap, because the
+  tent and bell terms are `RoundQ40` results and so lie in `[−2^23, 2^23]` for any `int64`
+  sums, so `|boxes + dense + tent + bell| < 2^31`; the guard accumulates `(v + 2^29)` over both
+  operands, and the first tile where any lane holds bit 30 or 31 restores its `previousRow`
+  carry from a private entry copy and resolves the whole tile through the scalar path, so every
+  resolve path publishes identical bytes. A tile that resolves to all-zero frees its block
   and leaves the map — a missing page reads as 0. A world holding at least 32 dirty tiles across
   all its (grid, layer) pairs fans the whole drain over a fixed worker pool — one flattened
   queue, chunks of eight tiles crossing layer boundaries freely; smaller totals and contended
@@ -509,6 +518,29 @@ add one `int64` page sum per live page, so large sparse grids do not visit every
   trigger compaction at the current capacity; only live-slot pressure requires growth.
   Tile resolution uses eight-cell AVX2 prefixes where available, with the existing four-cell
   SSE2/AdvSimd and scalar paths preserving the same integer sum and saturation semantics.
+
+## 1.x plane limits
+
+The resolve total itself is exact: the scalar resolve forms `boxes + dense + tent + bell` in
+`int64` and saturates once, so any `int32` box and dense values and any `int64` tent and bell
+sums combine without wrap. The planes below it still have finite width, and 1.x documents
+their limits rather than promoting (2.0 promotes by magnitude bound, V2-8):
+
+- **Box and dense planes (`int32`).** The largest per-cell contribution of one source is
+  `|value·gain| = 2048` (sbyte −128 × gain −16; 2,032 for 127 × 16), so both planes are exact
+  below `2^31 / 2048 = 1,048,576` maximum-amplitude sources stacked on one cell (1,056,832 at
+  2,032). At the bound the plane itself wraps, upstream of resolve: pinned by `PlaneLimitTests`,
+  1,048,575 `Stamp.Box(1,1,−128)` sources at gain −16 on one cell saturate to +32767, and
+  1,048,576 wrap to −32768.
+- **Tent and bell planes (`int64` Q40).** A maximum-strength kernel's peak product is
+  `value·gain·C·Wx·Wy = 2048·2^40`, so the exact per-cell sum wraps beyond
+  `2^63 / (2048·2^40) = 4,096` maximum-strength kernels stacked at one peak in a tile (4,128 at
+  2,032) — 256× past int16 saturation. Pinned by `PlaneLimitTests`: 4,095 read +32767 at the
+  peak cell, 4,096 wrap negative.
+- The vector resolves' exactness guard (above) covers exactly these bounds: within them every
+  cell's `|boxes|`, `|dense|` are the accumulated plane values the guard measures, and the
+  `RoundQ40` terms are bounded for any `int64` sum, so an untripped guard proves the `int32`
+  fast sum equal to the exact `int64` total.
 
 ## Usage
 
@@ -1059,6 +1091,21 @@ pass behind them was `perf`-profile guided, receipts first.
   preceded by a float range test — `CellQ8` on reads and `TileBake.Span` on deposits, both at
   ±2^30 — or converts a value already reduced to a bounded range (`Turn` and `Scale` reduce in
   double first), so no result depends on a platform's out-of-range conversion.
+- **Resolve entry copy and guard fallback**: the Vector128 and AVX2 resolves stack-allocate one
+  128 B `entry` row of 32 `int32` per call. Lifetime: it is private to the resolve call, on its
+  own stack frame, and no pointer to it escapes; it is fully written — vector stores covering
+  exactly cells 0–31 — from `previousRow` before the tile's first row is resolved, and read
+  only by the same call's restore loop after the guard trips, so under `SkipLocalsInit` no lane
+  is read before it is written. Aliasing: `entry` is fresh stack storage distinct from
+  `previousRow`, the tile's planes, and the page; the restore writes `previousRow[0..31]` only,
+  returning the carry to its entry values, so the scalar fallback resolves from the same
+  starting state the fast path used and its writes (output, `previousRow`, sum, max, `any`)
+  are the same tile-local set the fast path would have made. Alignment: the copy uses the
+  resolve's unaligned-safe vector loads and stores, correct for any `Prev` scratch slice
+  alignment. Concurrency: a tile is resolved by exactly one participant — the serial drain, one
+  pooled claim per tile, or the owning rebuild worker — and the guard check, restore, and
+  fallback all run inside that one resolve call, so no other writer can observe the
+  intermediate `previousRow` values.
 
 ## Tool inspection
 
