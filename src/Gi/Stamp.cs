@@ -50,6 +50,7 @@ internal static unsafe class StampCatalog
         if (v->Data != null) NativeHeap.Free(v->Data - v->Pitch - 1);
         if (v->Mips != null) NativeHeap.Free(v->Mips);
         *v = default;
+        World.FlushKernels();
         return true;
     }
 
