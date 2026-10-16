@@ -75,8 +75,8 @@ public static unsafe partial class World
         out short value, out float bestX, out float bestY)
     {
         value = 0;
-        bestX = x;
-        bestY = y;
+        bestX = 0;
+        bestY = 0;
         var w = GetContext(world);
         if (w == null || layer >= w->LayerCount) return false;
         if (!Pick(w, x, y, reach, 0, true, out var gi, out var complete)) return false;
@@ -158,8 +158,8 @@ public static unsafe partial class World
         out short value, out float nearestX, out float nearestY)
     {
         value = short.MinValue;
-        nearestX = x;
-        nearestY = y;
+        nearestX = 0;
+        nearestY = 0;
         var w = GetContext(world);
         if (w == null || layer >= w->LayerCount) return false;
         if (!Pick(w, x, y, reach, 0, true, out var gi, out var complete)) return false;
@@ -594,7 +594,7 @@ public static unsafe partial class World
             return Saturate(page - core);
         }
 
-        var boxes = (int)TileBake.Quadrant(DiffOf(block), lx, ly) + DenseOf(block)[cell];
+        var boxes = TileBake.Quadrant(DiffOf(block), lx, ly) + DenseOf(block)[cell];
         return Saturate(Absent(boxes, tents, bells, plane, core, smooth));
     }
 
@@ -622,7 +622,7 @@ public static unsafe partial class World
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int Absent(int boxes, long tents, long bells, Plane plane, int core, long smooth)
+    private static long Absent(long boxes, long tents, long bells, Plane plane, int core, long smooth)
         => boxes - core +
             TileBake.RoundQ40(tents - (plane == Plane.Tent ? smooth : 0)) +
             TileBake.RoundQ40(bells - (plane == Plane.Bell ? smooth : 0));
@@ -647,7 +647,7 @@ public static unsafe partial class World
         var lo = stackalloc int[n];
         var hi = stackalloc int[n];
         var core = stackalloc int[n * n];
-        var boxes = stackalloc int[n * n];
+        var boxes = stackalloc long[n * n];
         var wx = stackalloc long[n];
         var wy = stackalloc long[n];
         var plane = p->Plane;

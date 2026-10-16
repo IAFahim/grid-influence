@@ -38,8 +38,9 @@ public sealed unsafe class ColumnRejectTests : IDisposable
     {
         for (var i = 0; i < count; i++)
         {
+            var row = i / 4;
             xs[i] = 1.5f + i % 50;
-            ys[i] = 2.5f + i / 4 % 50;
+            ys[i] = 2.5f + row % 50;
         }
     }
 
@@ -314,7 +315,7 @@ public sealed unsafe class ColumnRejectTests : IDisposable
             Assert.False(World.SenseMaxColumn(_world, _layer, xp, null, null, count, vp, bxp, byp, mp));
 
         Assert.All(values, v => Assert.Equal(0, v));
-        Assert.Equal(xs, bx);
+        Assert.All(bx, v => Assert.Equal(0f, v));
         Assert.All(by, v => Assert.Equal(0f, v));
         AssertMaskCleared(whole, count);
     }
@@ -341,8 +342,8 @@ public sealed unsafe class ColumnRejectTests : IDisposable
             Assert.False(World.SenseNearestColumn(_world, _layer, xp, yp, rp, null, count, vp, nxp, nyp, mp));
 
         Assert.All(values, v => Assert.Equal(short.MinValue, v));
-        Assert.Equal(xs, nx);
-        Assert.Equal(ys, ny);
+        Assert.All(nx, v => Assert.Equal(0f, v));
+        Assert.All(ny, v => Assert.Equal(0f, v));
         AssertMaskCleared(found, count);
     }
 

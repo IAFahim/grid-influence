@@ -277,7 +277,7 @@ internal static partial class Verification
             var expected = OraclePick(s.Grids, x, y, reach, 0, true, out var complete);
             if (expected < 0)
             {
-                if (ok || value != short.MinValue || nx != x || ny != y) return false;
+                if (ok || value != short.MinValue || nx != 0 || ny != 0) return false;
                 continue;
             }
 

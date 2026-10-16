@@ -80,7 +80,7 @@ internal static unsafe partial class TileBake
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    internal static void IntegrateBoxes(int* difference, int* dense, int rows, int cols, int* cells)
+    internal static void IntegrateBoxes(int* difference, int* dense, int rows, int cols, long* cells)
     {
         var previous = stackalloc int[TileSize];
         new Span<int>(previous, TileSize).Clear();
@@ -92,7 +92,7 @@ internal static unsafe partial class TileBake
             {
                 carry += row[x];
                 previous[x] += carry;
-                cells[y * TileSize + x] = previous[x] + dense[y * TileSize + x];
+                cells[y * TileSize + x] = (long)previous[x] + dense[y * TileSize + x];
             }
         }
     }

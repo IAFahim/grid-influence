@@ -464,7 +464,10 @@ add one `int64` page sum per live page, so large sparse grids do not visit every
   configuration: among grids whose cell space contains the point (the deposits' own truncated
   `ScaleQ8` mapping), prefer a grid that contains the whole footprint, then the larger
   `ScaleQ8` (finer), then the lower grid id. No grid contains the point → `false` with every
-  out value zeroed (`Covers(world, x, y)` tells "not covered" from "covered but clipped"), so an
+  out value zeroed — `TrySenseNearest` keeps its `short.MinValue` not-found sentinel so
+  `value ≥ threshold` and the column `found` bits stay truthful, and the reported positions of
+  `TrySenseMax` and `TrySenseNearest` are zeroed rather than echoing the query point
+  (`Covers(world, x, y)` tells "not covered" from "covered but clipped"), so an
   uncovered point never reads as an empty field; a non-finite position is contained by no grid,
   so `Covers` is `false` and every `TrySense*`, column read, `Changed`, and `ChangedMask` row
   treats it as uncovered. A footprint no grid holds whole is answered on
@@ -499,7 +502,10 @@ add one `int64` page sum per live page, so large sparse grids do not visit every
   one-cell clip); tent and bell sources replace the rounded sum of their kernel with the
   rounded sum minus their exact product `value·gain·C·Wx·Wy`, which needs the cell's unrounded
   kernel sum — one load from the tile's tent or bell store. Saturated page cells rebuild every
-  component (box prefix, dense, tent, bell) before subtracting. Areas apply the same rule per
+  component (box prefix, dense, tent, bell) before subtracting, and the rebuilt fold forms the
+  box-plus-dense total in `int64` and saturates once, exactly as resolve does, so exclusion
+  matches the page on tiles whose planes each fit `int32` but whose sum does not. Areas apply
+  the same rule per
   cell of the source's footprint inside the disk, reading the stores directly and integrating
   the difference array only for tiles that hold a saturated cell.
   `World.Changed(world, layer, x, y, reach, since)` answers whether any tile holding a cell of
