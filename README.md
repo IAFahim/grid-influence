@@ -399,7 +399,7 @@ World.SyncTransforms(token, ranges);
 `SenseColumn` reads agent coordinates as `float*` and writes `short*` values (plus optional
 whole-tile flags); `ChangedMask` writes one `ulong` per 64 agents, zeros for the quiet ones;
 `Sync` is the fused form of `Move` for a whole column — gen-validated, coalescing, zero managed
-allocation. At 8,192+ rows they take the large-batch path. `SyncTransforms`
+allocation. `SyncTransforms`
 consumes the same host-native columns for full poses — 12 B per position-only row, 20 B with
 heading and scale, no flattening into commands, no per-row results — and reports stale rows as
 one mask bit instead.

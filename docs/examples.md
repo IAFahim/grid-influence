@@ -182,14 +182,13 @@ if (World.SyncTransforms(token, ranges) == World.BatchStatus.Applied)
 Each row is `UpdateTransform` with `World.Sync`'s bit-exact position compare — `-0.0` and
 `+0.0` are different poses — while heading/scale ignore non-finite values and quantize exactly
 like `Turn`/`Scale`, and a row with a non-finite x or y is rejected whole. Rows apply in range
-order then row order; duplicate ids fold into one merged pending op with the last row winning.
+order then row order; a duplicate id applies again, so the last row wins.
 Gain, fades, and expiry are never touched. Dead or stale-generation ids and non-finite positions
 set their invalid mask bit — bit `row & 63` of word `row >> 6`, tail bits zero — instead of
 producing a result row, and the
 call still returns `Applied`. Malformed descriptors, short masks, mask/column aliasing, or a
-stale token reject the whole call before any write. Under 8,192 rows the loop runs inline with
-zero scratch; above it a planning scan and the batch apply reuse the source-batch machinery
-before the call returns.
+stale token reject the whole call before any write. The loop runs inline with zero scratch at
+any row count before the call returns.
 
 ## Time
 

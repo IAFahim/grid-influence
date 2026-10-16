@@ -33,28 +33,6 @@ public static unsafe partial class World
         if (s->Mark[slot] != w->MarkEpoch) SnapshotPending(w, s, slot);
     }
 
-    private static void BeforeWriteState(WorldCtx* w, SourceColumns* s, int slot, in SourceBatchState state)
-    {
-        if (s->Mark[slot] != w->MarkEpoch)
-        {
-            var n = w->Pending.Length;
-            w->Pending.Resize(n + 1);
-            w->Pending.Pointer[n] = new JournalEntry
-            {
-                Slot = slot,
-                X = state.PositionX,
-                Y = state.PositionY,
-                Stamp = state.Stamp,
-                Layer = state.Layer,
-                Gain = state.Gain,
-                Alive = state.Alive,
-                Angle = state.Angle,
-                Scale = state.Scale,
-                Gen = state.Generation,
-            };
-        }
-    }
-
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void MarkChanged(WorldCtx* w, SourceColumns* s, int slot)
     {

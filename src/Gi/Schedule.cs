@@ -34,6 +34,18 @@ public static unsafe partial class World
     {
         if (!TrySource(world, source, out var w, out var s, out var i)) return;
 
+        WriteFade(w, s, i, gain, ticks);
+    }
+
+    public static void Expire(byte world, SourceId source, int ticks)
+    {
+        if (!TrySource(world, source, out var w, out var s, out var i)) return;
+
+        WriteExpire(w, s, i, ticks);
+    }
+
+    private static void WriteFade(WorldCtx* w, SourceColumns* s, int i, sbyte gain, int ticks)
+    {
         var target = (sbyte)Math.Clamp((int)gain, -MaxGain, MaxGain);
         var current = (sbyte)s->Gain[i];
         JournalSchedule(w, s, i);
@@ -59,10 +71,8 @@ public static unsafe partial class World
         Schedule(w, s, i);
     }
 
-    public static void Expire(byte world, SourceId source, int ticks)
+    private static void WriteExpire(WorldCtx* w, SourceColumns* s, int i, int ticks)
     {
-        if (!TrySource(world, source, out var w, out var s, out var i)) return;
-
         JournalSchedule(w, s, i);
         if (ticks <= 0)
         {

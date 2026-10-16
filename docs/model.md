@@ -241,8 +241,8 @@ before reading command payloads, writing
   `World.SyncTransforms(token, ranges)` borrows compact native pose columns through the same
   boundary: each `World.TransformRange` names ID/X/Y columns plus optional heading/scale
   columns (null preserves the current value), a row count, and an optional invalid mask.
-  Rows apply in range order then row order — duplicates fold last-writer-wins into one
-  changed-list entry — with `UpdateTransform`'s field semantics but `Sync`'s bit-exact position compare:
+  Rows apply in range order then row order — a duplicate id simply applies again, so the last
+  row wins and the slot is marked once — with `UpdateTransform`'s field semantics but `Sync`'s bit-exact position compare:
   `-0.0` and `+0.0` are different poses, where ordered `Move`/`UpdateTransform` compare with
   `==`. Gain, fades, and expiry are never touched. A row whose x or y is not finite is rejected
   whole — its heading and scale are not applied either — and, like a stale or dead row, sets its
@@ -254,12 +254,8 @@ before reading command payloads, writing
   words), total rows over 16,777,216 (`TooManyCommands`), then mask aliasing
   (`OverlappingBuffers` when a mask overlaps any column or another mask; read-only columns
   may share storage) — so a rejected call leaves masks and world byte-identical. The columns
-  are borrowed only for the synchronous call: under 8,192 total rows one inline pass on the
-  caller marks the same changed-list entries `Move`/`Turn`/`Scale` would with zero scratch;
-  above that a single sequential planning scan folds rows into one entry per unique source —
-  seeded from the current columns, so an unprocessed earlier edit merges rather than chains
-  — and the batch-apply phase then writes source columns and marks the changed list in one
-  sequential pass. No caller
+  are borrowed only for the synchronous call: one inline pass on the caller applies each row
+  through the same write helpers `Move`/`Turn`/`Scale` use, with zero scratch. No caller
   pointer survives the return.
 - **Source batches** use `World.ApplyBatch` over a sealed `ReadOnlySpan<World.SourceCommand>`
   and caller-owned result span. Input order defines command order; pending creation targets
@@ -267,11 +263,10 @@ before reading command payloads, writing
   stale handles and failed creations are explicit per-command results and do not abort unrelated
   commands. `Update` owns position, heading, scale, and gain, including fade cancellation. Partial
   methods change only their named fields. Ingestion does not tick or touch tiles; a later `Process`
-  deposits the result. Small all-`Update` batches fuse validation and mutation on the caller.
-  Large unique all-`Update` batches avoid hash grouping; other batches group commands by source
-  slot, preserving command order and virtual free-ring/generation transitions. Preparation and
-  source writes run as one sequential pass above 8,192 source rows. Timer and journal commits
-  stay on the caller.
+  deposits the result. After structural validation, commands apply in order through the same
+  write helpers as the scalar mutators — `Place` pops the real free ring, a `Remove` pushes it, and
+  a pending target resolves to the id its creating command returned — so a batch is exactly the
+  ordered scalar calls, with no planning pass, grouping or scratch.
 - **Process** runs due timers, sweeps the changed list as above, advances the mark epoch,
   appends the window's `Pending` snapshots to the journal when recording and clears them, and
   publishes: each dirty tile's rectangle is recomputed by `TileBake.Publish` from `I`, `T` and
@@ -889,9 +884,7 @@ digits. Concurrency: single thread.
   after a column growth, and the freshly added source chunks, which are allocated zeroed —
   reads zeros without a separate clearing pass; `ResizeUninitialized`
   is the audited exception, used only where the caller initializes the whole grown region
-  before any read: the slab free lists (push then write), and the batch source, command,
-  lookup, layer-delta, and operation buffers (every planned row, link, probe slot, and
-  counter is written before the phase that reads it).
+  before any read: the slab free lists (push then write).
   The layer recipe table (32 entries per world) is allocated by `World.New` and freed by
   `World.Free`. `Stamp` variants — base samples, mip chain, and box constants — are catalog-owned until
   `Stamp.Free` succeeds (no live source, pending snapshot, or journal entry in any world names the
@@ -925,11 +918,8 @@ digits. Concurrency: single thread.
   `SourceColumns`: allocated when source columns first grow, released once by `World.Free`, and
   regrown only on the owning thread by allocating the larger buffer, copying the live entries to
   its front in queue order, and freeing the old buffer, so no pointer into ring storage outlives
-  a call. Batch planning pops and pushes on a by-value copy that shares the committed storage;
-  the ring is reserved to its final size before the copy is taken and the copy is written back
-  before any column growth, so a copy never outlives a regrowth.
-  Source-batch rows, command links, lookup slots, and layer counters are
-  context-owned native buffers, retained for reuse and released by `World.Free`. `ApplyBatch`
+  a call. Batches pop and push the ring directly through the same `Place` and `Remove` helpers,
+  so no copy of the ring exists. `ApplyBatch`
   pins managed input/output spans for its entire call;
   native callers retain their buffers unchanged for the same interval. It retains no input or
   result pointer after returning.
@@ -962,16 +952,12 @@ digits. Concurrency: single thread.
   Batch input bytes and the written result prefix must be disjoint; overlapping spans are
   rejected before any writes. One batch row owns each distinct source slot, including all
   remove/recreate operations on that slot. Preparation writes only its row's private state.
-  Preparation assigns each entry a distinct row, so source columns, the mark column, and the
-  changed list have one writer each. Repeated targets fall back to grouping; the unique-update
-  probe temporarily tags the `BatchTag` column and restores every tag before preparing rows or
-  falling back. No external Gi call may observe that probe.
+  Each batch command applies on the calling thread in order, so source columns, the mark
+  column, and the changed list have one writer.
   A slot is in the free ring at most once: it is pushed only by the alive-to-dead transition
   (`Remove`, an expiry that comes due, a batch `Remove`, or the ascending rebuild of `Rewind`
   over the slots already dead) and popped only by the dead-to-alive transition of a `Place`, so
-  the entries from head through head plus count (modulo the ring size) are distinct slots. The
-  batch planner's copy writes only the positions at or after its own tail and is committed
-  unconditionally before the call proceeds. A kernel build reads one placement and its stamp
+  the entries from head through head plus count (modulo the ring size) are distinct slots. A kernel build reads one placement and its stamp
   variant read-only, emits through the tile-bake emitters into its own stack tile planes, and
   folds the result into the cache-owned canvas through a local copy of the placement whose
   tile rectangle is the unclamped footprint; nothing in a tile, page, or slab is written.
@@ -1008,8 +994,7 @@ digits. Concurrency: single thread.
   naturally aligned `SourceCommand`/`SourceResult` storage; no SIMD loads depend on their address.
   Borrowed `TransformRange` columns follow the same rule at their real widths — `int` ids,
   `float` positions/headings/scales, `ulong` mask words — with no per-row packing or decoding.
-  Batch scratch uses the same aligned native buffers, and the layer-delta stride is 48 integers
-  (192 bytes). The free ring is an
+  The free ring is an
   `int` buffer from the same aligned allocator (natural alignment on netstandard2.1), read and
   written only through scalar naturally aligned `int` accesses. The kernel cache's entry, tap,
   row-extent, and canvas buffers are `NativeBuffer`s from the same 64-byte aligned allocator;
@@ -1082,9 +1067,8 @@ digits. Concurrency: single thread.
   the accepted path writes. Alignment is natural alignment of
   `float`, `short`, `long`, and `ulong`, each accessed whole. There is no concurrency: the
   calling thread is the only one to hold these pointers on a rejected call.
-  Source-batch preparation and application run on the calling thread in fixed phases —
-  plan, prepare rows, write source columns and mark the changed list, commit — and only the caller
-  changes a heap, journal length, free ring, source count, or directory, between phases.
+  Source-batch application runs on the calling thread, command by command, and only the
+  caller changes a heap, journal length, free ring, source count, or directory, between commands.
   Hosts may record independent buffers while
   Gi readers run; they must join producer writes and Gi readers before `ApplyBatch` or `Process`.
   The sweep reads the changed list, the source columns, and the deposited records by slot
@@ -1123,17 +1107,13 @@ digits. Concurrency: single thread.
   use, the lane buffer is cleared before each row band, cell scratch is cleared or fully emitted
   first, and the publish rows are cleared when their store is absent.
   The free ring is read and written only by the world's owning thread — `Place`, `Remove`,
-  expiry inside `Process`, `Rewind`, `Clear`, and the batch planner and its commit — inside the
+  expiry inside `Process`, `Rewind`, `Clear`, and batch `Place` and `Remove` — inside the
   serial-per-world rule. No other phase touches the ring, and readers never do.
 - **Bounds**: source batches reject more than 2^24 commands before multiplying byte lengths.
   Creation references name earlier `Place` indexes, so results are initialized before those
-  references are read. Generation and liveness validation precede source-column access. The
-  planner reserves at most `min(command count, old source count + creation count)` rows and
-  stores at most one row per distinct slot. The hash table is a power of two with at least
-  twice that row capacity; command links point forward within the input. Source capacity is
-  capped at 2^24 slots. All source, journal, and timer reservations finish before
-  rows are written; row chunks clamp to the actual affected-row count. Layer and
-  stamp validation precede new-source grouping. Result writes stop at the command count.
+  references are read. Generation and liveness validation precede source-column access. Source capacity is
+  capped at 2^24 slots. Layer and stamp validation precede slot allocation, and column growth
+  only appends chunks, so no earlier slot pointer moves. Result writes stop at the command count.
   Derived recombination reads exactly the 1,024 cells of each input page — the
   shared zero page holds 4,096 B, so an absent input reads zeros in bounds — and writes the
   1,024 cells of its own page; `int32` totals stay inside `±2^31` by the weight bound above.
@@ -1160,8 +1140,8 @@ digits. Concurrency: single thread.
   `EmitRaster` with `x1 = min(x1, cx+1)` clips its loops to that single cell. Sum stores
   accumulate in `int64` with wrap-around; only each cell's final sum must fit, which the
   4,096-kernel stacking bound above guarantees. The free ring's size is never below the source
-  column capacity: every column growth reserves the ring to the new capacity, and a batch reserves
-  it to `min(2^24, slots + creations)` before planning. A slot is in the ring at most once, so the
+  column capacity: every column growth reserves the ring to the new capacity, and a batch place grows
+  it to the grown capacity. A slot is in the ring at most once, so the
   count never exceeds the number of slots and stays below the size at every push; the tail
   `head + count` is below twice the size and one conditional subtraction maps it into
   `[0, size)`, and a pop wraps `head + 1` to 0 at the size.

@@ -69,14 +69,12 @@ internal static unsafe class Inspection
             SourceCapacity = s->Slots,
             GridBytes = World.MaxGrids * sizeof(GridCtx),
             LayerBytes = World.MaxLayers * sizeof(LayerRecipe),
-            ScratchBytes = (long)w->BatchSources.Capacity * sizeof(SourceBatchEntry) +
-                (long)w->BatchCommands.Capacity * sizeof(SourceBatchLink) +
-                (long)w->BatchLookup.Capacity * sizeof(int),
+            ScratchBytes = 0,
             KernelBytes = w->Kernels.Bytes,
             SourceBytes = (long)s->Chunks * SourceColumns.ChunkSlots *
                 (2 * sizeof(float) + 4 * sizeof(byte) + 2 * sizeof(ushort) + sizeof(uint) + sizeof(int)) +
                 (s->Chunks != 0 ? 10L * SourceColumns.MaxChunks * sizeof(void*) : 0) +
-                (long)(s->JStamp.Capacity + s->BatchTag.Capacity) * sizeof(int) +
+                (long)s->JStamp.Capacity * sizeof(int) +
                 s->Timed.Capacity + s->FadeFrom.Capacity + s->FadeTo.Capacity +
                 ((long)s->FadeStart.Capacity + s->FadeTicks.Capacity + s->ExpireAt.Capacity + s->TimedAt.Capacity) * sizeof(int) +
                 (long)s->Free.Capacity * sizeof(int),
