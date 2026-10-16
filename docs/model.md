@@ -759,7 +759,10 @@ pass behind them was `perf`-profile guided, receipts first.
   the process. The resolve pool (background worker
   threads, one `Prev`-width scratch slice per worker, the shared dead-index buffer, and the
   1024-entry task buffer sized to 32 grids × 32 layers) is created
-  lazily by the first ≥32-dirty-tile `Process` and lives for the process; its native scratch is
+  lazily by the first ≥32-dirty-tile `Process` on a host with more than one processor and lives
+  for the process; on a one-processor host (`Environment.ProcessorCount == 1`, including
+  `taskset` to one CPU and `DOTNET_PROCESSOR_COUNT=1`) `TryAcquire` returns false before `Create`,
+  so no worker thread, scratch, or wake event ever exists and every phase runs inline; its native scratch is
   never freed and its threads never terminate. `QueryRegion` writes only the caller's
   destination; `ChangedTiles` copies from the changed list (stable between `Process` calls,
   swapped — never written in place — on the owning thread) into the caller's buffer. `World.Free` releases each allocation listed above exactly once on the
@@ -973,6 +976,19 @@ pass behind them was `perf`-profile guided, receipts first.
   value and mask outputs are written at disjoint indices, and the world is read-only during the
   round under the serial-per-world rule. Alignment is that of the serial loop: natural alignment
   for `float`, `short`, and `ulong` elements, each accessed whole.
+  Rejected column reads (`SenseColumn`, `SenseGradientColumn`, `SenseAreaColumn`, `SenseMaxColumn`,
+  `SenseNearestColumn`, `ChangedMask`) write their outputs before returning on a world that is not
+  live, a layer out of range, or a null required column. Every non-null output column and mask gets
+  the rows an unfillable row would hold in the per-row `TrySense*` form: zero values, gradients,
+  totals, and mask words; `short.MinValue` for nearest values; the query point for best and nearest
+  positions (zero when the query column is null). The return value is unchanged, and nothing is
+  written when `count <= 0`. Lifetime and aliasing: the writes run on the calling thread alone,
+  before and without acquiring the pool, over exactly `count` rows and `(count + 63) >> 6` mask
+  words (the word count is formed in unsigned arithmetic, so it cannot overflow), the same extents
+  the accepted path writes; a position echo uses overlap-safe `Span.CopyTo`, so a caller that
+  aliases an output column with its query column stays correct. Alignment is natural alignment of
+  `float`, `short`, `long`, and `ulong`, each accessed whole. There is no concurrency: no pool
+  worker holds these pointers on a rejected call.
   Source-batch rounds claim disjoint 128-row chunks. Pool acquisition protects their world and
   command pointers, cursor, count, and phase; a contending world uses its own inline ranges and
   does not read or modify these pool statics. Preparation is phase 6 and writes only batch rows;

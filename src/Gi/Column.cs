@@ -5,10 +5,10 @@ public static unsafe partial class World
     public static bool SenseColumn(byte world, byte layer, float* xs, float* ys, int count, short* values, ulong* whole)
     {
         var w = GetContext(world);
-        if (w == null || layer >= w->LayerCount) return false;
+        if (w == null || layer >= w->LayerCount) return Unfilled(values, whole, count);
         if (count <= 0) return true;
 
-        if (whole != null) new Span<ulong>(whole, (count + 63) >> 6).Clear();
+        ClearBits(whole, count);
 
         if (count >= ResolvePool.ColumnThreshold && ResolvePool.TryAcquire())
         {
@@ -23,9 +23,15 @@ public static unsafe partial class World
     public static int ChangedMask(byte world, byte layer, float* xs, float* ys, float reach, int since, int count, ulong* words)
     {
         var w = GetContext(world);
-        if (w == null || layer >= w->LayerCount || count <= 0) return 0;
+        if (w == null || layer >= w->LayerCount)
+        {
+            ClearBits(words, count);
+            return 0;
+        }
 
-        new Span<ulong>(words, (count + 63) >> 6).Clear();
+        if (count <= 0) return 0;
+
+        ClearBits(words, count);
 
         if (count >= ResolvePool.ColumnThreshold && ResolvePool.TryAcquire())
         {
