@@ -570,6 +570,40 @@ their limits rather than promoting (2.0 promotes by magnitude bound, V2-8):
   `RoundQ40` terms are bounded for any `int64` sum, so an untripped guard proves the `int32`
   fast sum equal to the exact `int64` total.
 
+## v2 tile planes and publish
+
+The v2 plane set (ROADMAP D6) is built but not yet wired into `Process` — V2-6 connects it, and
+until then no engine path reads or writes it, so pages, receipts and corpus bytes are unchanged.
+A `PlaneStore` holds four fixed-size slabs: 2,048 B **pages** (32×32 `int16`), 4,096 B **`I`
+planes** (32×32 `int32`, always allocated with the tile), 8,192 B **`T`/`B` planes** (32×32
+`int64` Q40, attached on the tile's first tent or bell use), and 256 B **summary blocks**. A
+summary block holds the `int64` cell sum, the `int16` maximum with the first argmax of its row
+(32×32 tiles, so both coordinates are `int16`), the `int32` epoch, 32 `int32` row sums, and 32
+`int16` row maxima. A fresh unit is zero, which is a consistent summary of an all-zero page
+(maximum 0 at (0,0)).
+
+`TileBake.Publish(tile, rect)` recomputes every cell of the tile-local rectangle as
+`Sat16(I + RoundQ40(T) + RoundQ40(B))` — the total formed once in `int64`, exactly the scalar
+resolve over a zero difference plane and zero row carry, so publish equals resolve cell for cell
+and summary for summary (sum and maximum) on the equivalent planes. Each new cell is compared
+with the published page before it is stored; a tile is changed exactly when a published byte
+differs (D4), and the summary epoch is written with the caller's tick only on that condition,
+matching the epochs `Process` writes today. A rectangle covering at least half the tile's cells
+is published as the whole tile. Summaries update exactly: every touched row's sum and maximum
+are recomputed from the published page, the tile sum is the `int64` sum of all 32 row sums, and
+the tile maximum keeps its first argmax — the whole tile is rescanned only when the old maximum
+cell decreased; otherwise a larger rect cell raises the maximum, and an equal rect cell before
+the old argmax moves the argmax earlier (an equal or smaller cell after it changes nothing).
+
+The scalar publish is that exact definition. The Vector128 and AVX2 publishes round the `T` and
+`B` rows once per row through the resolve's own `SmoothRow` and form `I + tent + bell` in
+`int32` behind the resolve's exactness guard over `I` (`|I| < 2^29`; the `RoundQ40` terms lie in
+`[−2^23, 2^23]` for any `int64` sums, so the `int32` total cannot wrap). Publish has no
+cross-cell carry — each cell reads only its own plane cells — so the guard runs per row and a
+tripped row falls back to the exact scalar row instead of redoing the tile. Every path
+publishes identical bytes, summaries, changed bits and epochs. The plane widths and their
+documented limits are the 1.x ones above; promotion is V2-8.
+
 ## Usage
 
 ```csharp
@@ -1181,6 +1215,29 @@ digits. Concurrency: single thread.
   restore, merge, and fallback all run inside that one resolve call, so no other writer can
   observe the intermediate `previousRow` values, the staged page, or the half-merged published
   page.
+- **v2 tile planes and publish**: the `PlaneStore` slabs (2,048 B pages, 4,096 B `I` planes,
+  8,192 B `T`/`B` planes, 256 B summaries) follow the block-slab rules above: units are
+  addressed only by index, zero-filled by their taker, recycled whole through the free lists,
+  and released by `Reset`. Lifetime: a `TilePlanes` set holds five unit indices and no
+  pointers; `PlaneCells` pointers are materialized per call from the indices and never survive
+  a `Take`, `Give`, or `Reset`, so a slab doubling that moves a region cannot dangle one; the
+  store is owned by its holder on one thread (a test today; the owning (grid, layer) once V2-6
+  wires it) and freed by `Reset`. Aliasing: one publish call owns its tile — it writes the
+  plane page, the summary block, and its two stack rows (`tentOut`, `bellOut`) only; the page
+  is read for the old-cell compare group by group before the same group's store, so no cell is
+  compared against an already-updated value, and the summary recomputation reads the fully
+  stored page. Alignment: strides are multiples of 64 B over the 64 B aligned regions
+  (naturally aligned scalar-only access on netstandard2.1), the summary fields sit at offsets
+  0, 8, 10, 12, 16, 20, and 148 of the 256 B unit — each naturally aligned — and the vector
+  loads and stores on `I` rows, rounded rows, and page rows use unaligned-safe semantics.
+  Concurrency: a tile is published by exactly one call on the owning thread; there are no
+  statics and no locks. Bounds: rectangles are tile-local with `0 ≤ x0 ≤ x1 ≤ 32` (the
+  engine's dirty rectangles are clipped to the tile before publish); the guard and commit
+  loops read `I`, the rounded rows, and the page only inside `[x0, vectorEnd)` with
+  `vectorEnd = x1 − ((x1 − x0) & 7)` — full 8-cell groups inside the row — and any remainder
+  cells take the scalar tail, so no access passes the 32-cell row end; the row-summary
+  recomputation reads exactly the 32 published cells of each touched row, and the rescan reads
+  exactly the 1,024 published cells.
 
 ### Floor probes
 
