@@ -543,6 +543,8 @@ public static unsafe partial class World
                 if (IsDerived(w, l)) continue;
 
                 var ld = g->Layers + l;
+                var transient = IsTransient(w, l);
+                if (transient) RestartStale(g, ld);
                 if (ld->InDirty == null) continue;
 
                 var dirty = ld->Dirty.Pointer;
@@ -565,6 +567,7 @@ public static unsafe partial class World
                     else
                     {
                         ld->Max.Update(tps, tile, ld->Store.Cells(*set).Summary->Max);
+                        if (transient) RetireTransientTile(ld, set, tile);
                     }
 
                     if ((outcome & ResolveOutcome.Changed) != 0) dirty[kept++] = tile;
@@ -574,5 +577,27 @@ public static unsafe partial class World
                 ld->Rects.Resize(0);
             }
         }
+    }
+
+    private static void RestartStale(GridCtx* g, LayerData* ld)
+    {
+        for (var i = 0; i < ld->Stale.Length; i++)
+        {
+            var dirty = DirtyIndex(g, ld, ld->Stale.Pointer[i]);
+            ld->Rects.Pointer[dirty] = new TileRect { X0 = 0, Y0 = 0, X1 = TileBake.TileSize, Y1 = TileBake.TileSize };
+        }
+
+        ld->Stale.Resize(0);
+    }
+
+    private static void RetireTransientTile(LayerData* ld, TilePlanes* set, int tile)
+    {
+        var cells = ld->Store.Cells(*set);
+        new Span<int>(cells.I, TileBake.TileSize * TileBake.TileSize).Clear();
+        if (cells.T != null) new Span<long>(cells.T, TileBake.TileSize * TileBake.TileSize).Clear();
+        if (cells.B != null) new Span<long>(cells.B, TileBake.TileSize * TileBake.TileSize).Clear();
+        var n = ld->Stale.Length;
+        ld->Stale.Resize(n + 1);
+        ld->Stale.Pointer[n] = tile;
     }
 }

@@ -113,7 +113,7 @@ internal static unsafe class Inspection
                 result.SlabBytes += ld->Store.Bytes + ld->Sets.Bytes;
                 result.SlabFreeUnits += ld->Store.Pages.FreeCount + ld->Store.Int32s.FreeCount +
                     ld->Store.Int64s.FreeCount + ld->Store.Summaries.FreeCount + ld->Sets.FreeCount;
-                result.DirtyQueueBytes += (long)(ld->Dirty.Capacity + ld->Changed.Capacity) * sizeof(int) +
+                result.DirtyQueueBytes += (long)(ld->Dirty.Capacity + ld->Changed.Capacity + ld->Stale.Capacity) * sizeof(int) +
                     (long)ld->Rects.Capacity * sizeof(TileRect);
                 result.PyramidBytes += ld->Max.Bytes;
                 if (ld->InDirty != null) result.DirtyFlagBytes += 2L * g->TileCount * sizeof(int);

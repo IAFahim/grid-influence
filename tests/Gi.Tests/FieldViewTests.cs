@@ -58,8 +58,10 @@ public unsafe class FieldViewTests
 
             Assert.Equal(0, World.View(w, 5, a).Size);
             Assert.Equal(0, World.View(w, 0, 99).Size);
-            Assert.Equal(0, World.View(99, 0, a).Size);
-            Assert.Equal(0, World.View(99, 0, a)[3, 3]);
+            var freed = World.New();
+            World.Free(freed);
+            Assert.Equal(0, World.View(freed, 0, a).Size);
+            Assert.Equal(0, World.View(freed, 0, a)[3, 3]);
         }
         finally
         {

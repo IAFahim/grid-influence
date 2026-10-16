@@ -58,6 +58,21 @@ before reading command payloads, writing
   world's `LayerRecipe` table and survives `Clear`. A layer either
   receives deposits (`Layer.New`) or is **derived** (`Layer.Sum`/`Min`/`Max`/
   `Mask`): its cells are a pure function of other layers' cells, maintained by `Process` (below).
+  A deposited layer is **persistent** (its sources stay until removed) or **transient**
+  (`Layer.New(world, Layer.Residency.Transient, precision)`): a transient layer has no sources,
+  only **splats** — `World.Splat(world, layer, xs, ys, stamp, gain)`, the per-element overload
+  taking a stamp and a gain per row, or a `World.SplatWriter` from `World.BeginSplat` — each a
+  stamp at a position with unit scale and no angle, snapped by the layer's precision and
+  emitted into the tile planes exactly like a persistent source's deposit, on every grid. Splats
+  accumulate between `Process` calls and the layer's published pages change only at `Process`,
+  so reads keep seeing the previous frame until then. `Process` publishes the frame's splats and
+  the next frame starts empty: after each publish a transient tile's `I`, `T` and `B` planes are
+  zeroed and the tile joins the layer's stale list, and the next `Process` republishes every
+  stale tile in full, so a tile that received no splat reads zero and `Changed` reports it
+  exactly when its bytes differ from the previous frame. The persistent mutators — `Place` and
+  the batch `Place` — reject a transient layer as an invalid layer, and `Splat` on a
+  persistent or derived layer applies nothing. Derived layers read a transient input like any
+  other.
   Deposited and derived layers share one table: a world holds at most `World.MaxLayers` (32)
   layers in total, so a derived combo takes one of the same slots as a raw channel and the plan
   is `raw + derived ≤ 32`.
@@ -943,6 +958,13 @@ digits. Concurrency: single thread.
   pins managed input/output spans for its entire call;
   native callers retain their buffers unchanged for the same interval. It retains no input or
   result pointer after returning.
+- **Transient layers**: the stale list is a context-owned `NativeBuffer<int>` per (grid, layer),
+  appended to by publish on the owning thread, consumed and cleared by the next publish, reset by
+  `Clear` and freed with the layer. Publish zeroes a tile's planes only after it has computed the
+  tile's page from them, through pointers materialized from the tile's own set, and the next
+  frame's splats write the zeroed planes through the same emitters as persistent deposits (same
+  bounds, alignment and single-thread rules). A tile that is dropped (its page publishes to
+  zero) takes its planes with it and never enters the stale list.
 - **Field view**: *Lifetime*: a `FieldView` holds the layer and grid constants it was built from
   and one cached page pointer; both name directory and slab storage that only `Process`, `Clear`,
   `Rewind` and `World.Free` can grow, move or release, so a view must not be used across them (a

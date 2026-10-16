@@ -29,6 +29,7 @@ internal struct LayerRecipe
     public short Low;
     public short High;
     public uint Reads;
+    public byte Transient;
 }
 
 public static unsafe partial class World
@@ -73,6 +74,8 @@ public static unsafe partial class World
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static bool IsDerived(WorldCtx* w, int layer) => w->Recipes[layer].Op != LayerOp.Base;
+
+    internal static bool IsTransient(WorldCtx* w, int layer) => w->Recipes[layer].Transient != 0;
 
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
