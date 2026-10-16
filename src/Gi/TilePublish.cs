@@ -189,6 +189,40 @@ internal static unsafe partial class TileBake
         return changed;
     }
 
+    internal static bool AllZero(int* values, int count)
+    {
+        var i = 0;
+#if NET
+        if (Vector256.IsHardwareAccelerated)
+        {
+            var seen = Vector256<int>.Zero;
+            for (; i + 8 <= count; i += 8) seen |= Vector256.Load(values + i);
+            if (seen != Vector256<int>.Zero) return false;
+        }
+#endif
+        for (; i < count; i++)
+            if (values[i] != 0) return false;
+
+        return true;
+    }
+
+    internal static bool AllZero(long* values, int count)
+    {
+        var i = 0;
+#if NET
+        if (Vector256.IsHardwareAccelerated)
+        {
+            var seen = Vector256<long>.Zero;
+            for (; i + 4 <= count; i += 4) seen |= Vector256.Load(values + i);
+            if (seen != Vector256<long>.Zero) return false;
+        }
+#endif
+        for (; i < count; i++)
+            if (values[i] != 0) return false;
+
+        return true;
+    }
+
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif

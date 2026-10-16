@@ -564,7 +564,7 @@ public static unsafe partial class World
 
                     var rect = rects + i;
                     var outcome = TileBake.Publish(&ld->Store, set, rect->X0, rect->Y0, rect->X1, rect->Y1, w->Tick);
-                    if ((outcome & ResolveOutcome.Empty) != 0)
+                    if ((outcome & ResolveOutcome.Empty) != 0 && (transient || ld->Store.PlanesZero(*set)))
                     {
                         DropPage(ld, tile);
                         ld->Max.Update(tps, tile, 0);

@@ -102,6 +102,14 @@ internal unsafe struct PlaneStore
         return (long*)Int64s.Unit(tile.B);
     }
 
+    public readonly bool PlanesZero(in TilePlanes tile)
+    {
+        var count = TileBake.TileSize * TileBake.TileSize;
+        if (tile.I >= 0 && !TileBake.AllZero((int*)Int32s.Unit(tile.I), count)) return false;
+        if (tile.T >= 0 && !TileBake.AllZero((long*)Int64s.Unit(tile.T), count)) return false;
+        return tile.B < 0 || TileBake.AllZero((long*)Int64s.Unit(tile.B), count);
+    }
+
     public readonly PlaneCells Cells(in TilePlanes tile) => new()
     {
         Page = (short*)Pages.Unit(tile.Page),
