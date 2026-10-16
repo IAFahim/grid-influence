@@ -127,24 +127,25 @@ before reading command payloads, writing
   reissued. `Stamp.TryGetSpec(stamp, out spec)` returns a live stamp's `Stamp.Spec`
   (`Stamp.Shape`, cell width and height, peak `sbyte` value, and exact `ArcDegrees` 1–360) and
   `false` for `0` or a freed handle.
-- **Sources** are persistent placements: `World.Place(world, layer, x, y, stamp, gain)` returns an
-  int id (`-1` when the world, layer, or stamp is invalid, the layer is derived, or `x`/`y` is
-  non-finite); `Move`/`SetGain`/`Remove`/`Clear` mutate it (`Move` ignores non-finite `x`/`y`
+- **Sources** are persistent placements: `World.Place(world, layer, x, y, stamp, gain)` returns a
+  `World.SourceId(uint Slot, uint Generation)` (`default` when the world, layer, or stamp is
+  invalid, the layer is derived, or `x`/`y` is non-finite); `Move`/`SetGain`/`Remove`/`Clear`
+  mutate it (`Move` ignores non-finite `x`/`y`
   coordinates, and so do `Sync` and `SyncTransforms` row by row; `World.TryGetSourceSpec(world,
   id, out spec)` reads a live source's current position, quantized heading in radians, quantized scale, gain, layer, and stamp). `gain` is an integer −16–16 (stored as one
-  `sbyte`-ranged byte; deltas deposit exactly, so a negative gain subtracts). The id packs a
-  7-bit generation above a 24-bit slot index. A freed slot — by `Remove`, by an `Expire` that comes
+  `sbyte`-ranged byte; deltas deposit exactly, so a negative gain subtracts). The id carries a
+  32-bit generation beside a slot index below 2^24. A freed slot — by `Remove`, by an `Expire` that comes
   due, or by a batch `Remove` — joins the tail of a per-world **free ring**, and `Place` (scalar or
   batch) takes the head, so the slot freed longest ago is the next to be filled and a slot just freed
   is the last: with `F` slots free, one slot is refilled at most once per `F` places. Filling a
   slot bumps its generation, so a stale id (dead slot, recycled slot, or out-of-range) is an inert
-  no-op for `Move`/`SetGain`/`Remove`. Generations wrap after 128 fills of one slot: a stale id
-  addresses a live source again once its slot has been refilled 128 times, so while at least `F`
-  slots stay free an alias needs at least 127·`F` further places. That ABA hazard is the 1.x id
-  format's limit and is retired by 2.0's `World.SourceId` (32-bit generations, retired slots),
-  not worked around here. `Place` returns `-1` once 2^24 slots are live. `Clear` empties every slot and the
-  free ring but keeps the generation bytes, so pre-clear ids stay stale.
-  Column growth zeroes the new generation bytes, so returned ids are deterministic across runs.
+  no-op for `Move`/`SetGain`/`Remove`. A slot whose generation reaches `uint.MaxValue` is
+  **retired**: it is never pushed back onto the ring (by `Remove`, expiry, batch remove, or the
+  `Rewind` rebuild), so no id is ever reissued and a stale id can never address a live source —
+  the 1.x 7-bit ABA hazard is gone. `Place` returns `default` once 2^24 slots are live or every
+  slot is retired. `Clear` empties every slot and the
+  free ring but keeps the generations counting, so pre-clear ids stay stale.
+  New chunks are zero-filled, so returned ids are deterministic across runs.
   Positions are
   float world units, converted to cell space per grid as `floor((x−ox)·scale·256)` in Q8 — the
   integer part is the cell, the low byte is the sub-cell phase. The float Q8 position is
@@ -391,10 +392,10 @@ before reading command payloads, writing
   from the (due, slot) order. Ticks count `Process` calls, not time: Gi has no clock.
 - **Rewind**: `Record` drops any prior journal and starts appending a copy of every op the
   world's `Process` calls apply — the op already stores the applied-from and applied-to states
-  plus the slot's generation, so the journal is an undo log costing one 32 B unmanaged append
+  plus the slot's 32-bit generation, so the journal is an undo log costing one unmanaged append
   per applied op. `Rewind` consumes the journal in reverse: each entry restores its slot's
   columns to the recorded from-state (position, stamp, layer, gain, liveness, and — only when
-  the source was alive before the window — the generation byte, so a removed source revives
+  the source was alive before the window — the generation, so a removed source revives
   with its exact pre-window id while a rolled-back place's id stays stale) and enqueues the
   inverse deposit pair `{retract latest applied, apply recorded from}`; per-slot queue merging
   collapses multi-window journals to one net op per slot exactly like ordinary mutations.
@@ -578,7 +579,7 @@ byte grid  = Grid.New(world, power: 8, x: 0f, y: 0f, size: 256f);   // 256×256 
 byte layer = Layer.New(world);
 byte stamp = Stamp.New(samples, 16, 16);   // or Stamp.Box(8, 8, 100) / Stamp.Tent(12, 12, 90)
 
-int source = World.Place(world, layer, x: 128.5f, y: 64f, stamp, gain: 8);
+World.SourceId source = World.Place(world, layer, x: 128.5f, y: 64f, stamp, gain: 8);
 World.Move(world, source, 129f, 64f);      // relocates — queued, applied at Process
 World.SetGain(world, source, 4);           // adjusts weight in place
 World.Process(world);                      // applies queued ops, resolves dirty tiles
@@ -858,9 +859,10 @@ digits. Concurrency: single thread.
   `Process` while recording, consumed by `Rewind`, cleared by `Record`, `StopRecording`, and
   `Clear`, with the pending tail
   zeroed at column growth so fresh slots read "no op" and the whole column wiped by `Clear` —
-  and `SourceColumns` buffers — positions, stamp,
-  layer, gain, angle, scale, schedule columns, liveness, the free-slot ring, and the generation
-  bytes — the timer heap and schedule journal (reset by `Clear`, capacity retained), and, per
+  and `SourceColumns` — hot columns in 16,384-slot chunks (positions, stamp,
+  layer, gain, angle, scale, liveness, and the 32-bit generations), the schedule columns
+  (timed, fade bookkeeping, expiry, due) kept separately as plain buffers, and the free-slot
+  ring — the timer heap and schedule journal (reset by `Clear`, capacity retained), and, per
   (grid, layer), the dirty flags and tile epochs (allocated together by the layer's first marked
   tile on that grid and kept until `World.Free`), and
   the max pyramid: a flat `int16` slot array plus per-level offset and side tables, allocated
@@ -890,8 +892,9 @@ digits. Concurrency: single thread.
   every `Process`. The shared zero dense
   page is allocated once with the arenas and never written afterwards.
   `NativeBuffer` growth zero-fills the newly committed region, so every buffer that reads
-  beyond its written length — the source pending column and the generation and timed bytes
-  after a column growth — reads zeros without a separate clearing pass; `ResizeUninitialized`
+  beyond its written length — the source pending column and the timed bytes
+  after a column growth, and the freshly added source chunks, which are allocated zeroed —
+  reads zeros without a separate clearing pass; `ResizeUninitialized`
   is the audited exception, used only where the caller initializes the whole grown region
   before any read: the slab free lists (push then write), and the batch source, command,
   lookup, layer-delta, and operation buffers (every planned row, link, probe slot, and

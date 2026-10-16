@@ -116,7 +116,7 @@ same 32-layer budget as deposited ones (`World.MaxLayers`). `Layer.Count` and
 ## Sources
 
 ```csharp
-int me = World.Place(world, food, 128.5f, y: 64f, dome, gain: 8);  // returns a source id
+World.SourceId me = World.Place(world, food, 128.5f, y: 64f, dome, gain: 8);  // returns a source id
 World.Move(world, me, 130f, 64f);            // queued, sub-cell exact
 World.Turn(world, me, MathF.PI / 4f);        // radians, works on every stamp kind
 World.Scale(world, me, 1.5f);                // size × 1.5, one stamp serves every radius

@@ -56,8 +56,8 @@ movement producer must not replace a gain written by a different producer.
 
 An internal complete-state record carries world positions, heading, scale, and gain. World,
 layer, and stamp handles remain bytes; gain remains signed and bounded by Gi's actual range.
-Source IDs remain full `int` values: the 24-bit slot and 7-bit generation cannot be reduced to
-a slot index. Invalid/stale handles retain the direct API's behavior.
+Source IDs are `World.SourceId` values — a slot index and a 32-bit generation — and cannot be
+reduced to a slot index. Invalid/stale ids retain the direct API's behavior.
 
 Deferred creation uses a batch/producer-scoped ticket and result mapping. Tickets are not
 encoded as ordinary source IDs. A host owner can disappear before creation completes: retain
@@ -109,7 +109,7 @@ var results = new World.SourceResult[commands.Length];
 // After sealing input and joining its producers and the world's Gi readers:
 var status = World.ApplyBatch(world, commands, results);
 if (status != World.BatchStatus.Applied) return;
-int createdSource = results[0].SourceId;
+World.SourceId createdSource = results[0].SourceId;
 bool created = results[0].Status == World.SourceResultStatus.Applied;
 World.Process(world);
 ```
@@ -191,8 +191,8 @@ mutation phase: a token check is not a lock, concurrent same-world `ApplyBatch` 
 unsafe, and `Free`/`Clear`/`Rewind` must not race a consumer — the host still joins producer,
 writer, and reader fences before lifecycle controls. `Rewind` rejects old queued epochs but
 does not restore host-side entity ownership: a paired ECS rollback must restore its own
-source mapping. The 7-bit source-generation wrap is a separate limit and is not solved by a
-world token.
+source mapping. Source-id aliasing is not a limit in 2.0 (a slot is retired when its generation reaches
+`uint.MaxValue`) and is not solved by a world token either way.
 
 ## Borrowed transform ranges
 
