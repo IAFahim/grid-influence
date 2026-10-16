@@ -73,8 +73,10 @@ internal sealed unsafe class ReferenceWorld
         public short High;
         public uint Reads;
         public Layer.Precision Precision;
+        public bool Transient;
     }
 
+    private readonly List<Source> _splats = new();
     private readonly List<GridData> _grids = new();
     private readonly List<Recipe> _layers = new();
     private Source[] _now = new Source[64];
@@ -116,10 +118,28 @@ internal sealed unsafe class ReferenceWorld
         return (byte)(_grids.Count - 1);
     }
 
-    public byte AddLayer(Layer.Precision precision)
+    public byte AddLayer(Layer.Precision precision, bool transient = false)
     {
-        _layers.Add(new Recipe { Op = LayerOp.Base, Reads = 1u << _layers.Count, Precision = precision });
+        _layers.Add(new Recipe { Op = LayerOp.Base, Reads = 1u << _layers.Count, Precision = precision, Transient = transient });
         return (byte)(_layers.Count - 1);
+    }
+
+    public bool Splat(byte layer, float x, float y, byte stamp, sbyte gain)
+    {
+        if (layer >= _layers.Count || _layers[layer].Op != LayerOp.Base || !_layers[layer].Transient ||
+            !StampCatalog.Valid(stamp) || !float.IsFinite(x) || !float.IsFinite(y)) return false;
+
+        _splats.Add(new Source
+        {
+            X = x,
+            Y = y,
+            Stamp = stamp,
+            Layer = layer,
+            Gain = (sbyte)Math.Clamp((int)gain, -MaxGain, MaxGain),
+            Scale = UnitScale,
+            Alive = true,
+        });
+        return true;
     }
 
     public byte AddDerived(LayerOp op, byte a, byte b, int weightA, int weightB, int shift, short low, short high)
@@ -445,10 +465,12 @@ internal sealed unsafe class ReferenceWorld
             {
                 var ld = Data(g, l);
                 var r = _layers[l];
-                if (r.Op == LayerOp.Base) ResolveBase(g, ld, l, (crowded & (1u << l)) != 0);
+                if (r.Op == LayerOp.Base) ResolveBase(g, ld, l, r.Transient || (crowded & (1u << l)) != 0);
                 else ResolveDerived(g, ld, l, in r);
             }
         }
+
+        _splats.Clear();
 
         foreach (var slot in _pendingOrder) _pending[slot] = false;
         _pendingOrder.Clear();
@@ -461,12 +483,15 @@ internal sealed unsafe class ReferenceWorld
         var tps = g.TilesPerSide;
         var precision = _layers[layer].Precision;
         var processed = new HashSet<int>();
+        var transient = _layers[layer].Transient;
+        var sources = transient ? _splats.ToArray() : _now;
+        var sourceCount = transient ? sources.Length : _count;
         if (crowded)
         {
-            ld.Epochs ??= new int[g.TileCount];
-            for (var i = 0; i < _count; i++)
+            if (!transient) ld.Epochs ??= new int[g.TileCount];
+            for (var i = 0; i < sourceCount; i++)
             {
-                ref readonly var s = ref _now[i];
+                ref readonly var s = ref sources[i];
                 if (!s.Alive || s.Gain == 0 || s.Layer != layer) continue;
                 MarkCovered(g, in s, precision, processed);
             }
@@ -475,6 +500,7 @@ internal sealed unsafe class ReferenceWorld
             if (prev != null)
                 for (var t = 0; t < g.TileCount; t++)
                     if (TileNonZero(prev, size, (t % tps) << 5, (t / tps) << 5)) processed.Add(t);
+            if (transient && processed.Count != 0) ld.Epochs ??= new int[g.TileCount];
         }
         else
         {
@@ -493,9 +519,9 @@ internal sealed unsafe class ReferenceWorld
         BigInteger[]? core = null;
         BigInteger[]? tent = null;
         BigInteger[]? bell = null;
-        for (var i = 0; i < _count; i++)
+        for (var i = 0; i < sourceCount; i++)
         {
-            ref readonly var s = ref _now[i];
+            ref readonly var s = ref sources[i];
             if (!s.Alive || s.Gain == 0 || s.Layer != layer) continue;
             var v = StampCatalog.Get(s.Stamp);
             if (!TileBake.Place(s.X, s.Y, g.OriginX, g.OriginY, g.ScaleQ8, size, v, s.Angle, s.Scale, precision, out var p))
@@ -700,7 +726,10 @@ internal sealed unsafe class ReferenceWorld
                 _pendingOrder.Add(slot);
             }
 
-            _pendingFrom[slot] = _deposited[slot];
+            var deposited = _deposited[slot];
+            if (!deposited.Alive) deposited.Gain = 0;
+            _pendingFrom[slot] = deposited;
+            _pendingToGain[slot] = _now[slot].Alive ? _now[slot].Gain : (sbyte)0;
         }
 
         _journal.Clear();
@@ -753,6 +782,7 @@ internal sealed unsafe class ReferenceWorld
             _deposited[i].Alive = false;
         }
         _count = 0;
+        _splats.Clear();
         _free.Clear();
         _pendingOrder.Clear();
         Array.Clear(_pending, 0, _pending.Length);

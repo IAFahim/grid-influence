@@ -6,6 +6,8 @@ public unsafe class StreamDifferentialTests
 {
     private const int GateStreams = 10_500;
     private const int GateSeedBase = 900_000;
+    private const int TransientStreams = 1200;
+    private const int TransientSeedBase = 950_000;
     private const int HeavyStreams = 48;
     private const int HeavySeedBase = 500_000;
 
@@ -15,6 +17,21 @@ public unsafe class StreamDifferentialTests
         for (var i = 0; i < GateStreams; i++)
         {
             var setup = StreamGenerator.Generate(GateSeedBase + i, (PrecisionMode)(i % 3), StreamProfile.Gate);
+            var mismatch = StreamRunner.TryRun(setup, setup.Commands);
+            if (mismatch == null) continue;
+
+            var minimized = StreamMinimizer.Minimize(setup, setup.Commands, null);
+            throw new Xunit.Sdk.XunitException(
+                $"{mismatch.Message}\nminimized to {minimized.Count} commands\n{StreamMinimizer.PrintAsCSharpTest(setup, minimized)}");
+        }
+    }
+
+    [Fact]
+    public void TransientStreamsPassAtExactCellAndQuarter()
+    {
+        for (var i = 0; i < TransientStreams; i++)
+        {
+            var setup = StreamGenerator.Generate(TransientSeedBase + i, (PrecisionMode)(i % 3), StreamProfile.Transient);
             var mismatch = StreamRunner.TryRun(setup, setup.Commands);
             if (mismatch == null) continue;
 

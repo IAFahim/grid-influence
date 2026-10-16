@@ -544,7 +544,12 @@ public static unsafe partial class World
 
                 var ld = g->Layers + l;
                 var transient = IsTransient(w, l);
-                if (transient) RestartStale(g, ld);
+                if (transient)
+                {
+                    FlushHistogram(w, gi, g, ld, (byte)l);
+                    RestartStale(g, ld);
+                }
+
                 if (ld->InDirty == null) continue;
 
                 var dirty = ld->Dirty.Pointer;

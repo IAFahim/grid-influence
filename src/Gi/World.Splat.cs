@@ -68,6 +68,7 @@ public static unsafe partial class World
         if (!float.IsFinite(x) || !float.IsFinite(y)) return false;
 
         var mask = w->Recipes[layer].AnchorMask;
+        var cellPrecision = w->Recipes[layer].PhaseBits == 0;
         var key = new DepositRecord
         {
             Layer = layer,
@@ -83,6 +84,17 @@ public static unsafe partial class World
 
             key.Ax = TileBake.AnchorQ8(x, g->OriginX, g->ScaleQ8, mask);
             key.Ay = TileBake.AnchorQ8(y, g->OriginY, g->ScaleQ8, mask);
+            if (cellPrecision)
+            {
+                var cx = key.Ax >> 8;
+                var cy = key.Ay >> 8;
+                if ((uint)cx < (uint)g->Size && (uint)cy < (uint)g->Size)
+                {
+                    if (key.Gain != 0) HistAdd(g, g->Layers + layer, stamp, cx, cy, key.Gain);
+                    continue;
+                }
+            }
+
             EmitDelta(w, gi, in key, 1);
         }
 
