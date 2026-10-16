@@ -73,6 +73,7 @@ public static unsafe partial class World
         var count = w->Changed.Length;
         for (var i = 0; i < count; i++)
         {
+            if (i + PrefetchAhead < count) PrefetchTarget(w, s, slots[i + PrefetchAhead]);
             var slot = slots[i];
             var layer = s->Layer[slot];
             var stamp = s->Stamp[slot];
@@ -148,6 +149,12 @@ public static unsafe partial class World
                     break;
                 }
         }
+        if (p.Plane == Plane.Difference)
+        {
+            EmitBoxDelta(g, ld, &p, gain);
+            return;
+        }
+
         if (KernelFactory.TryGetTaps(w, gi, record.Stamp, record.Angle, precision, &p, out var taps))
         {
             EmitKernelTaps(w, g, ld, in taps, p.Px, p.Py, gain);
@@ -155,6 +162,97 @@ public static unsafe partial class World
         }
 
         EmitFallback(g, ld, &p, gain);
+    }
+
+    #if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    #endif
+    private static void EmitBoxDelta(GridCtx* g, LayerData* ld, Placement* p, int gain)
+    {
+        var xLo = stackalloc int[3];
+        var xHi = stackalloc int[3];
+        var xWeight = stackalloc int[3];
+        var yLo = stackalloc int[3];
+        var yHi = stackalloc int[3];
+        var yWeight = stackalloc int[3];
+        var cx0 = Math.Max(p->X0, 0);
+        var cy0 = Math.Max(p->Y0, 0);
+        var cx1 = Math.Min(p->X1, g->Size);
+        var cy1 = Math.Min(p->Y1, g->Size);
+        var tps = g->TilesPerSide;
+        var constant = p->V->Constant;
+        var lanes = stackalloc int[TileBake.LaneCount];
+        for (var ty = cy0 >> TileBake.TileBits; ty <= (cy1 - 1) >> TileBake.TileBits; ty++)
+        for (var tx = cx0 >> TileBake.TileBits; tx <= (cx1 - 1) >> TileBake.TileBits; tx++)
+        {
+            var tileX0 = tx << TileBake.TileBits;
+            var tileY0 = ty << TileBake.TileBits;
+            var liveX = TileBake.ClipBands(p->Px, p->Fx, p->ExtentX, tileX0, tileX0 + TileBake.TileSize, xLo, xHi, xWeight);
+            var liveY = TileBake.ClipBands(p->Py, p->Fy, p->ExtentY, tileY0, tileY0 + TileBake.TileSize, yLo, yHi, yWeight);
+            if (liveX == 0 || liveY == 0) continue;
+
+            var tile = ty * tps + tx;
+            var narrow = TileBake.LanesSupported && xHi[liveX - 1] - xLo[0] <= TileBake.LaneCount;
+            var column = Math.Min(xLo[0], TileBake.TileSize - TileBake.LaneCount);
+            var lead = xLo[0] - column;
+            int* plane = null;
+            for (var y = 0; y < liveY; y++)
+            {
+                var weightY = yWeight[y];
+                if (narrow)
+                {
+                    new Span<int>(lanes, TileBake.LaneCount).Clear();
+                    var any = 0;
+                    for (var x = 0; x < liveX; x++)
+                    {
+                        var value = TileBake.RoundQ16(constant * xWeight[x] * weightY) * gain;
+                        any |= value;
+                        for (var lane = xLo[x] - xLo[0] + lead; lane < xHi[x] - xLo[0] + lead; lane++) lanes[lane] += value;
+                    }
+
+                    if (any == 0) continue;
+
+                    if (plane == null)
+                    {
+                        var set = EnsureSet(g, ld, tile);
+                        plane = ld->Store.Cells(*set).I;
+                        DirtyIndex(g, ld, tile);
+                    }
+
+                    TileBake.AddRows(plane, yLo[y], yHi[y], column, lanes);
+                    continue;
+                }
+
+                for (var x = 0; x < liveX; x++)
+                {
+                    var value = TileBake.RoundQ16(constant * xWeight[x] * weightY) * gain;
+                    if (value == 0) continue;
+
+                    if (plane == null)
+                    {
+                        var set = EnsureSet(g, ld, tile);
+                        plane = ld->Store.Cells(*set).I;
+                        DirtyIndex(g, ld, tile);
+                    }
+
+                    var row0 = yLo[y];
+                    var row1 = yHi[y];
+                    var col0 = xLo[x];
+                    var col1 = xHi[x];
+                    for (var row = row0; row < row1; row++)
+                        TileBake.AddConstant(plane + row * TileBake.TileSize, col0, col1, value);
+                }
+            }
+
+            if (plane != null)
+            {
+                var rect = &ld->Rects.Pointer[ld->InDirty[tile] - 1];
+                if (xLo[0] < rect->X0) rect->X0 = xLo[0];
+                if (yLo[0] < rect->Y0) rect->Y0 = yLo[0];
+                if (xHi[liveX - 1] > rect->X1) rect->X1 = xHi[liveX - 1];
+                if (yHi[liveY - 1] > rect->Y1) rect->Y1 = yHi[liveY - 1];
+            }
+        }
     }
 
     private static void EmitKernelTaps(WorldCtx* w, GridCtx* g, LayerData* ld, in KernelTaps taps, int px, int py, int gain)
@@ -274,10 +372,6 @@ public static unsafe partial class World
             var cells = ld->Store.Cells(*set);
             switch (p->Plane)
             {
-                case Plane.Difference:
-                    TileBake.AccumulateBoxCells(cells.I, tileX0, tileY0, p->Px, p->Py, p->Fx, p->Fy,
-                        p->ExtentX, p->ExtentY, p->V, gain);
-                    break;
                 case Plane.Dense when p->Turned:
                     TileBake.EmitTurnedDense(cells.I, tileX0, tileY0, p, gain);
                     break;

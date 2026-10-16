@@ -30,6 +30,60 @@ internal static unsafe partial class TileBake
     internal static int RoundQ16(int value)
         => (value + 32768 + (value >> 31)) >> 16;
 
+    internal const int LaneCount = 8;
+
+    internal static bool LanesSupported
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get
+        {
+#if NET
+            return Vector256.IsHardwareAccelerated;
+#else
+            return false;
+#endif
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static void AddRows(int* plane, int rowFirst, int rowEnd, int column, int* lanes)
+    {
+#if NET
+        var add = Vector256.Load(lanes);
+        for (var row = rowFirst; row < rowEnd; row++)
+        {
+            var at = plane + row * TileSize + column;
+            Vector256.Store(Vector256.Load(at) + add, at);
+        }
+#else
+        for (var row = rowFirst; row < rowEnd; row++)
+            for (var lane = 0; lane < LaneCount; lane++)
+                plane[row * TileSize + column + lane] += lanes[lane];
+#endif
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static void AddConstant(int* cells, int first, int end, int value)
+    {
+#if NET
+        if (Avx2.IsSupported)
+        {
+            var add = Vector256.Create(value);
+            var i = first;
+            var limit = end - 8;
+            for (; i <= limit; i += 8)
+            {
+                var current = Vector256.Load(cells + i);
+                Vector256.Store(current + add, cells + i);
+            }
+
+            for (; i < end; i++) cells[i] += value;
+            return;
+        }
+#endif
+        for (var i = first; i < end; i++) cells[i] += value;
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static int RoundQ40(long value)
         => (int)((value + 549755813888L + (value >> 63)) >> 40);
@@ -133,7 +187,7 @@ internal static unsafe partial class TileBake
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int ClipBands(
+    internal static int ClipBands(
         int origin, int phase, int extent, int tileLo, int tileHi,
         int* bandLo, int* bandHi, int* bandWeight)
     {
