@@ -1,4 +1,9 @@
 using System.Runtime.CompilerServices;
+#if NET
+using System.Numerics;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
+#endif
 
 namespace Gi;
 
@@ -11,6 +16,8 @@ internal unsafe struct HistClass
 internal unsafe struct HistState
 {
     public const int PageBytes = TileBake.TileSize * TileBake.TileSize * sizeof(int);
+    public const int PageShift = 10;
+    public const int WindowStride = WindowSide + 8;
     public const int WindowSide = 2 * TileBake.TileSize - 1;
 
     public HistClass* Classes;
@@ -21,6 +28,7 @@ internal unsafe struct HistState
     public int MarkStamp;
     public int* Window;
     public int* Strip;
+    public int* Out;
 
     public void Release(int tileCount)
     {
@@ -41,6 +49,7 @@ internal unsafe struct HistState
         NativeHeap.Free(OutMark);
         NativeHeap.Free(Window);
         NativeHeap.Free(Strip);
+        NativeHeap.Free(Out);
         this = default;
     }
 }
@@ -53,8 +62,9 @@ public static unsafe partial class World
 
         var hist = (HistState*)NativeHeap.AllocZeroed((nuint)sizeof(HistState));
         hist->Classes = (HistClass*)NativeHeap.AllocZeroed((nuint)(256 * sizeof(HistClass)));
-        hist->Window = (int*)NativeHeap.AllocZeroed((nuint)(HistState.WindowSide * HistState.WindowSide * sizeof(int)));
+        hist->Window = (int*)NativeHeap.AllocZeroed((nuint)(HistState.WindowStride * HistState.WindowSide * sizeof(int)));
         hist->Strip = (int*)NativeHeap.AllocZeroed((nuint)(HistState.WindowSide * TileBake.TileSize * sizeof(int)));
+        hist->Out = (int*)NativeHeap.AllocZeroed((nuint)(TileBake.TileSize * TileBake.TileSize * sizeof(int)));
         ld->Hist = hist;
         return hist;
     }
@@ -97,6 +107,96 @@ public static unsafe partial class World
         cls->Tiles.Pointer[count] = tile;
         return page;
     }
+
+#if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    private static int SplatBlocks(
+        WorldCtx* w, int gi, GridCtx* g, LayerData* ld, HistState* hist, HistClass* cls,
+        ref DepositRecord key, int mask, float* xs, float* ys, int count)
+    {
+        var originX = Vector256.Create(g->OriginX);
+        var originY = Vector256.Create(g->OriginY);
+        var scale = Vector256.Create((float)g->ScaleQ8);
+        var limit = Vector256.Create(g->Size - 1);
+        var infinity = Vector256.Create(float.PositiveInfinity);
+        var tilesPerSide = Vector256.Create(g->TilesPerSide);
+        var tileMask = Vector256.Create(TileBake.TileSize - 1);
+        var one = Vector256.Create(1);
+        var directory = cls->Directory;
+        var tiles = stackalloc int[8];
+        var offsets = stackalloc int[8];
+        var gain = (int)key.Gain;
+        var i = 0;
+        for (; i + 8 <= count; i += 8)
+        {
+            var x = Vector256.Load(xs + i);
+            var y = Vector256.Load(ys + i);
+            var cx = Vector256.ShiftRightArithmetic(
+                Avx.ConvertToVector256Int32WithTruncation(Vector256.Floor((x - originX) * scale)), 8);
+            var cy = Vector256.ShiftRightArithmetic(
+                Avx.ConvertToVector256Int32WithTruncation(Vector256.Floor((y - originY) * scale)), 8);
+            var clampedX = Vector256.Min(Vector256.Max(cx, Vector256<int>.Zero), limit);
+            var clampedY = Vector256.Min(Vector256.Max(cy, Vector256<int>.Zero), limit);
+            var inside = Vector256.Equals(clampedX, cx) & Vector256.Equals(clampedY, cy)
+                & (Vector256.LessThan(Vector256.Abs(x), infinity) & Vector256.LessThan(Vector256.Abs(y), infinity)).AsInt32();
+            var accepted = (uint)inside.AsSingle().ExtractMostSignificantBits();
+            var tileVector = Vector256.ShiftRightArithmetic(clampedY, TileBake.TileBits) * tilesPerSide
+                + Vector256.ShiftRightArithmetic(clampedX, TileBake.TileBits);
+            var local = Vector256.ShiftLeft(clampedY & tileMask, TileBake.TileBits) + (clampedX & tileMask);
+            var firstTile = tileVector.GetElement(0);
+            if (accepted == 0xFF && Vector256.Equals(tileVector, Vector256.Create(firstTile)).AsSingle().ExtractMostSignificantBits() == 0xFF)
+            {
+                var slot = directory[firstTile] - 1;
+                int* page = slot >= 0 ? (int*)hist->Pages.Unit(slot) : HistPage(g, ld, hist, cls, firstTile);
+                local.Store(offsets);
+                page[offsets[0]] += gain;
+                page[offsets[1]] += gain;
+                page[offsets[2]] += gain;
+                page[offsets[3]] += gain;
+                page[offsets[4]] += gain;
+                page[offsets[5]] += gain;
+                page[offsets[6]] += gain;
+                page[offsets[7]] += gain;
+                continue;
+            }
+
+            var slots = Avx2.GatherVector256(directory, tileVector, 4);
+            var missing = Vector256.Equals(slots, Vector256<int>.Zero).AsSingle().ExtractMostSignificantBits() & accepted;
+            if (missing != 0)
+            {
+                tileVector.Store(tiles);
+                for (var bits = missing; bits != 0; bits &= bits - 1)
+                    HistPage(g, ld, hist, cls, tiles[BitOperations.TrailingZeroCount(bits)]);
+
+                slots = Avx2.GatherVector256(directory, tileVector, 4);
+            }
+
+            var pages = (int*)hist->Pages.Region;
+            (Vector256.ShiftLeft(slots - one, HistState.PageShift) + local).Store(offsets);
+            if (accepted == 0xFF)
+            {
+                pages[offsets[0]] += gain;
+                pages[offsets[1]] += gain;
+                pages[offsets[2]] += gain;
+                pages[offsets[3]] += gain;
+                pages[offsets[4]] += gain;
+                pages[offsets[5]] += gain;
+                pages[offsets[6]] += gain;
+                pages[offsets[7]] += gain;
+                continue;
+            }
+
+            for (var bits = accepted; bits != 0; bits &= bits - 1)
+                pages[offsets[BitOperations.TrailingZeroCount(bits)]] += gain;
+
+            for (var lane = 0; lane < 8; lane++)
+                if ((accepted >> lane & 1) == 0)
+                    SplatOne(w, gi, g, ld, hist, cls, ref key, mask, xs[i + lane], ys[i + lane]);
+        }
+
+        return i;
+    }
+#endif
 
     private static void FlushHistogram(WorldCtx* w, int gi, GridCtx* g, LayerData* ld, byte layer)
     {
@@ -248,86 +348,170 @@ public static unsafe partial class World
             var ty0 = (outTile / tps) << TileBake.TileBits;
             GatherWindow(hist, cls, tps, size, tx0 - ox - width + 1, ty0 - oy - height + 1, windowWidth, windowHeight);
 
-            var window = hist->Window;
-            var strip = hist->Strip;
+            if (SumWindow(hist, width, height, windowHeight) == 0) continue;
+
+            var sums = hist->Out;
+
+            var set = EnsureSet(g, ld, outTile);
+            var plane = ld->Store.Cells(*set).I;
+            var dirty = DirtyIndex(g, ld, outTile);
+            ld->Rects.Pointer[dirty] = new TileRect { X0 = 0, Y0 = 0, X1 = TileBake.TileSize, Y1 = TileBake.TileSize };
+            AddScaled(plane, sums, value);
+        }
+    }
+
+    private static int SumWindow(HistState* hist, int width, int height, int windowHeight)
+    {
+        var window = hist->Window;
+        var strip = hist->Strip;
+        var sums = hist->Out;
+#if NET
+        if (Vector256.IsHardwareAccelerated)
+        {
             for (var wy = 0; wy < windowHeight; wy++)
             {
-                var row = window + wy * HistState.WindowSide;
-                var sum = 0;
-                for (var i = 0; i < width; i++) sum += row[i];
+                var row = window + wy * HistState.WindowStride;
                 var outRow = strip + wy * TileBake.TileSize;
-                outRow[0] = sum;
-                for (var x = 1; x < TileBake.TileSize; x++)
+                for (var block = 0; block < TileBake.TileSize; block += 8)
                 {
-                    sum += row[x + width - 1] - row[x - 1];
-                    outRow[x] = sum;
+                    var acc = Vector256.Load(row + block);
+                    for (var i = 1; i < width; i++) acc += Vector256.Load(row + block + i);
+                    acc.Store(outRow + block);
                 }
             }
 
-            int* plane = null;
+            var seen = Vector256<int>.Zero;
             for (var y = 0; y < TileBake.TileSize; y++)
+            for (var block = 0; block < TileBake.TileSize; block += 8)
             {
-                for (var x = 0; x < TileBake.TileSize; x++)
-                {
-                    var sum = 0;
-                    for (var j = 0; j < height; j++) sum += strip[(y + j) * TileBake.TileSize + x];
-                    if (sum == 0) continue;
+                var acc = Vector256.Load(strip + y * TileBake.TileSize + block);
+                for (var j = 1; j < height; j++) acc += Vector256.Load(strip + (y + j) * TileBake.TileSize + block);
+                acc.Store(sums + y * TileBake.TileSize + block);
+                seen |= acc;
+            }
 
-                    if (plane == null)
-                    {
-                        var set = EnsureSet(g, ld, outTile);
-                        plane = ld->Store.Cells(*set).I;
-                        var dirty = DirtyIndex(g, ld, outTile);
-                        ld->Rects.Pointer[dirty] = new TileRect { X0 = 0, Y0 = 0, X1 = TileBake.TileSize, Y1 = TileBake.TileSize };
-                    }
-
-                    plane[y * TileBake.TileSize + x] += sum * value;
-                }
+            return seen == Vector256<int>.Zero ? 0 : 1;
+        }
+#endif
+        for (var wy = 0; wy < windowHeight; wy++)
+        {
+            var row = window + wy * HistState.WindowStride;
+            var outRow = strip + wy * TileBake.TileSize;
+            var sum = 0;
+            for (var i = 0; i < width; i++) sum += row[i];
+            outRow[0] = sum;
+            for (var x = 1; x < TileBake.TileSize; x++)
+            {
+                sum += row[x + width - 1] - row[x - 1];
+                outRow[x] = sum;
             }
         }
+
+        var any = 0;
+        for (var y = 0; y < TileBake.TileSize; y++)
+        for (var x = 0; x < TileBake.TileSize; x++)
+        {
+            var sum = 0;
+            for (var j = 0; j < height; j++) sum += strip[(y + j) * TileBake.TileSize + x];
+            sums[y * TileBake.TileSize + x] = sum;
+            any |= sum;
+        }
+
+        return any;
+    }
+
+    private static void AddScaled(int* plane, int* sums, int value)
+    {
+        var i = 0;
+#if NET
+        if (Vector256.IsHardwareAccelerated)
+        {
+            var scale = Vector256.Create(value);
+            for (; i + 8 <= TileBake.TileSize * TileBake.TileSize; i += 8)
+                (Vector256.Load(plane + i) + Vector256.Load(sums + i) * scale).Store(plane + i);
+        }
+#endif
+        for (; i < TileBake.TileSize * TileBake.TileSize; i++) plane[i] += sums[i] * value;
     }
 
     private static void GatherWindow(
         HistState* hist, HistClass* cls, int tps, int size, int x0, int y0, int windowWidth, int windowHeight)
     {
         var window = hist->Window;
-        for (var wy = 0; wy < windowHeight; wy++)
+        var wy = 0;
+        while (wy < windowHeight)
         {
-            var row = window + wy * HistState.WindowSide;
             var ay = y0 + wy;
+            int rows;
             if ((uint)ay >= (uint)size)
             {
-                new Span<int>(row, windowWidth).Clear();
+                rows = ay < 0 ? Math.Min(-ay, windowHeight - wy) : windowHeight - wy;
+                ClearBlock(window + wy * HistState.WindowStride, rows, windowWidth);
+                wy += rows;
                 continue;
             }
 
+            var tileRow = ay >> TileBake.TileBits;
+            rows = Math.Min(windowHeight - wy, ((tileRow + 1) << TileBake.TileBits) - ay);
+            var rowTiles = tileRow * tps;
+            var rowAt = (ay & (TileBake.TileSize - 1)) * TileBake.TileSize;
+            var target = window + wy * HistState.WindowStride;
             var x = 0;
             while (x < windowWidth)
             {
                 var ax = x0 + x;
                 if ((uint)ax >= (uint)size)
                 {
-                    row[x++] = 0;
+                    var outside = ax < 0 ? Math.Min(-ax, windowWidth - x) : windowWidth - x;
+                    ClearBlock(target + x, rows, outside);
+                    x += outside;
                     continue;
                 }
 
                 var tileColumn = ax >> TileBake.TileBits;
                 var span = Math.Min(windowWidth - x, ((tileColumn + 1) << TileBake.TileBits) - ax);
-                var slot = cls->Directory[(ay >> TileBake.TileBits) * tps + tileColumn] - 1;
-                if (slot < 0)
-                {
-                    new Span<int>(row + x, span).Clear();
-                }
-                else
-                {
-                    var page = (int*)hist->Pages.Unit(slot);
-                    Buffer.MemoryCopy(
-                        page + (ay & (TileBake.TileSize - 1)) * TileBake.TileSize + (ax & (TileBake.TileSize - 1)),
-                        row + x, span * sizeof(int), span * sizeof(int));
-                }
-
+                var slot = cls->Directory[rowTiles + tileColumn] - 1;
+                if (slot < 0) ClearBlock(target + x, rows, span);
+                else CopyBlock(target + x, (int*)hist->Pages.Unit(slot) + rowAt + (ax & (TileBake.TileSize - 1)), rows, span);
                 x += span;
             }
+
+            wy += rows;
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void CopyBlock(int* destination, int* source, int rows, int span)
+    {
+        for (var r = 0; r < rows; r++)
+        {
+            var to = destination + r * HistState.WindowStride;
+            var from = source + r * TileBake.TileSize;
+#if NET
+            if (Vector256.IsHardwareAccelerated)
+            {
+                for (var k = 0; k < span; k += 8) Vector256.Store(Vector256.Load(from + k), to + k);
+                continue;
+            }
+#endif
+            for (var k = 0; k < span; k++) to[k] = from[k];
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void ClearBlock(int* destination, int rows, int span)
+    {
+        for (var r = 0; r < rows; r++)
+        {
+            var to = destination + r * HistState.WindowStride;
+#if NET
+            if (Vector256.IsHardwareAccelerated)
+            {
+                for (var k = 0; k < span; k += 8) Vector256.Store(Vector256<int>.Zero, to + k);
+                continue;
+            }
+#endif
+            for (var k = 0; k < span; k++) to[k] = 0;
         }
     }
 }

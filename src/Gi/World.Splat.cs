@@ -1,4 +1,8 @@
 using System.Runtime.CompilerServices;
+#if NET
+using System.Numerics;
+using System.Runtime.Intrinsics;
+#endif
 
 namespace Gi;
 
@@ -10,10 +14,87 @@ public static unsafe partial class World
         if (w == null || !CanSplat(w, layer, stamp)) return 0;
 
         var count = Math.Min(xs.Length, ys.Length);
+        if (w->Recipes[layer].PhaseBits == 0)
+        {
+            fixed (float* px = xs)
+            fixed (float* py = ys)
+                return SplatCells(w, layer, px, py, count, stamp, gain);
+        }
+
         var applied = 0;
         for (var i = 0; i < count; i++)
             if (EmitSplat(w, layer, xs[i], ys[i], stamp, gain)) applied++;
         return applied;
+    }
+
+    private static int SplatCells(WorldCtx* w, byte layer, float* xs, float* ys, int count, byte stamp, sbyte gain)
+    {
+        var applied = CountFinite(xs, ys, count);
+        var clamped = (sbyte)Math.Clamp((int)gain, -MaxGain, MaxGain);
+        if (clamped == 0) return applied;
+
+        var mask = w->Recipes[layer].AnchorMask;
+        var key = new DepositRecord { Layer = layer, Stamp = stamp, Gain = clamped, Alive = 1, Scale = UnitScale };
+        for (var gi = 0; gi < w->GridCount; gi++)
+        {
+            var g = w->Grids + gi;
+            if (g->ScaleQ8 == 0) continue;
+
+            var ld = g->Layers + layer;
+            var hist = EnsureHist(ld);
+            var cls = hist->Classes + stamp;
+            if (cls->Directory == null) cls->Directory = (int*)NativeHeap.AllocZeroed((nuint)g->TileCount * sizeof(int));
+
+            var done = 0;
+#if NET
+            if (Vector256.IsHardwareAccelerated) done = SplatBlocks(w, gi, g, ld, hist, cls, ref key, mask, xs, ys, count);
+#endif
+            for (var i = done; i < count; i++)
+                SplatOne(w, gi, g, ld, hist, cls, ref key, mask, xs[i], ys[i]);
+        }
+
+        return applied;
+    }
+
+    private static void SplatOne(
+        WorldCtx* w, int gi, GridCtx* g, LayerData* ld, HistState* hist, HistClass* cls,
+        ref DepositRecord key, int mask, float x, float y)
+    {
+        if (!float.IsFinite(x) || !float.IsFinite(y)) return;
+
+        var cx = TileBake.AnchorQ8(x, g->OriginX, g->ScaleQ8, mask) >> 8;
+        var cy = TileBake.AnchorQ8(y, g->OriginY, g->ScaleQ8, mask) >> 8;
+        if ((uint)cx >= (uint)g->Size || (uint)cy >= (uint)g->Size)
+        {
+            key.Ax = cx << 8;
+            key.Ay = cy << 8;
+            EmitDelta(w, gi, in key, 1);
+            return;
+        }
+
+        var tile = (cy >> TileBake.TileBits) * g->TilesPerSide + (cx >> TileBake.TileBits);
+        HistPage(g, ld, hist, cls, tile)[(cy & (TileBake.TileSize - 1)) * TileBake.TileSize + (cx & (TileBake.TileSize - 1))] += key.Gain;
+    }
+
+    private static int CountFinite(float* xs, float* ys, int count)
+    {
+        var finite = 0;
+        var i = 0;
+#if NET
+        if (Vector256.IsHardwareAccelerated)
+        {
+            var limit = Vector256.Create(float.PositiveInfinity);
+            for (; i + 8 <= count; i += 8)
+            {
+                var both = Vector256.LessThan(Vector256.Abs(Vector256.Load(xs + i)), limit)
+                    & Vector256.LessThan(Vector256.Abs(Vector256.Load(ys + i)), limit);
+                finite += BitOperations.PopCount(both.ExtractMostSignificantBits());
+            }
+        }
+#endif
+        for (; i < count; i++)
+            if (float.IsFinite(xs[i]) && float.IsFinite(ys[i])) finite++;
+        return finite;
     }
 
     public static int Splat(
