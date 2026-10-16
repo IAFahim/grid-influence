@@ -571,6 +571,40 @@ their limits rather than promoting (2.0 promotes by magnitude bound, V2-8):
   `RoundQ40` terms are bounded for any `int64` sum, so an untripped guard proves the `int32`
   fast sum equal to the exact `int64` total.
 
+## v2 tile planes and publish
+
+The v2 plane set (ROADMAP D6) is built but not yet wired into `Process` — V2-6 connects it, and
+until then no engine path reads or writes it, so pages, receipts and corpus bytes are unchanged.
+A `PlaneStore` holds four fixed-size slabs: 2,048 B **pages** (32×32 `int16`), 4,096 B **`I`
+planes** (32×32 `int32`, always allocated with the tile), 8,192 B **`T`/`B` planes** (32×32
+`int64` Q40, attached on the tile's first tent or bell use), and 256 B **summary blocks**. A
+summary block holds the `int64` cell sum, the `int16` maximum with the first argmax of its row
+(32×32 tiles, so both coordinates are `int16`), the `int32` epoch, 32 `int32` row sums, and 32
+`int16` row maxima. A fresh unit is zero, which is a consistent summary of an all-zero page
+(maximum 0 at (0,0)).
+
+`TileBake.Publish(tile, rect)` recomputes every cell of the tile-local rectangle as
+`Sat16(I + RoundQ40(T) + RoundQ40(B))` — the total formed once in `int64`, exactly the scalar
+resolve over a zero difference plane and zero row carry, so publish equals resolve cell for cell
+and summary for summary (sum and maximum) on the equivalent planes. Each new cell is compared
+with the published page before it is stored; a tile is changed exactly when a published byte
+differs (D4), and the summary epoch is written with the caller's tick only on that condition,
+matching the epochs `Process` writes today. A rectangle covering at least half the tile's cells
+is published as the whole tile. Summaries update exactly: every touched row's sum and maximum
+are recomputed from the published page, the tile sum is the `int64` sum of all 32 row sums, and
+the tile maximum keeps its first argmax — the whole tile is rescanned only when the old maximum
+cell decreased; otherwise a larger rect cell raises the maximum, and an equal rect cell before
+the old argmax moves the argmax earlier (an equal or smaller cell after it changes nothing).
+
+The scalar publish is that exact definition. The Vector128 and AVX2 publishes round the `T` and
+`B` rows once per row through the resolve's own `SmoothRow` and form `I + tent + bell` in
+`int32` behind the resolve's exactness guard over `I` (`|I| < 2^29`; the `RoundQ40` terms lie in
+`[−2^23, 2^23]` for any `int64` sums, so the `int32` total cannot wrap). Publish has no
+cross-cell carry — each cell reads only its own plane cells — so the guard runs per row and a
+tripped row falls back to the exact scalar row instead of redoing the tile. Every path
+publishes identical bytes, summaries, changed bits and epochs. The plane widths and their
+documented limits are the 1.x ones above; promotion is V2-8.
+
 ## Usage
 
 ```csharp
@@ -890,7 +924,24 @@ digits. Concurrency: single thread.
   needs more than any earlier round, copying live bytes because regions reserved earlier in
   the same frame are still pending. The chunk arena stays a separate retained buffer, reset by
   every `Process`. The shared zero dense
-  page is allocated once with the arenas and never written afterwards.
+  page is allocated once with the arenas and never written afterwards. The per-world kernel
+  cache is fixed-capacity native storage held by value in `WorldCtx`: 32 entries, each owning a
+  4,096-`long` tap slot and 128 row-extent `int`s, plus a miss canvas and a row-extent scratch;
+  all five buffers are allocated zeroed together by the first insert and released exactly once
+  by `World.Free` before the context is zeroed (`World.Clear` keeps entries, because stamps are
+  immutable and only a stamp id leaving the catalog can invalidate them). Entry taps are values
+  copied out of the canvas, never pointers into stamp storage, so a freed stamp leaves no
+  dangling reference; because a freed id can be re-baked as a different stamp, a successful
+  `Stamp.Free` clears every live world's cache in the same process-wide scan that already
+  serializes catalog mutation. A `KernelTaps` handle points either into its owning entry —
+  valid until that slot is evicted by a later insert on the same cache, flushed by
+  `Stamp.Free`, or released by `World.Free` — or into the miss canvas, valid until the next
+  build on the same cache; callers consume taps before the next build. A kernel whose capture
+  rectangle exceeds 4,194,304 cells is refused and the caller emits through the placement
+  itself, which is exact by construction. Grid-edge clipping is folded into box extents
+  before bands form, so a placement whose extents differ from
+  `min(axis × sampling, kind cap)` — the only kernels that depend on absolute position — never
+  consults or fills an entry; its taps are captured from its own clipped placement.
   `NativeBuffer` growth zero-fills the newly committed region, so every buffer that reads
   beyond its written length — the source pending column and the timed bytes
   after a column growth, and the freshly added source chunks, which are allocated zeroed —
@@ -981,7 +1032,10 @@ digits. Concurrency: single thread.
   over the slots already dead) and popped only by the dead-to-alive transition of a `Place`, so
   the entries from head through head plus count (modulo the ring size) are distinct slots. The
   batch planner's copy writes only the positions at or after its own tail and is committed
-  unconditionally before the call proceeds.
+  unconditionally before the call proceeds. A kernel build reads one placement and its stamp
+  variant read-only, emits through the tile-bake emitters into its own stack tile planes, and
+  folds the result into the cache-owned canvas through a local copy of the placement whose
+  tile rectangle is the unclamped footprint; nothing in a tile, page, or slab is written.
 - **Alignment**: slab regions, directories, native buffers, the bump scratch, and prefix scratch
   use 64-byte aligned allocations. A slab's stride is a multiple of 64 B — 6,528 B blocks,
   2,112 B headers, 4,096 B dense, 8,192 B tent/bell — so every unit base off the 64 B aligned
@@ -1025,7 +1079,12 @@ digits. Concurrency: single thread.
   Batch scratch uses the same aligned native buffers, and the layer-delta stride is 48 integers
   (192 bytes). The free ring is an
   `int` buffer from the same aligned allocator (natural alignment on netstandard2.1), read and
-  written only through scalar naturally aligned `int` accesses.
+  written only through scalar naturally aligned `int` accesses. The kernel cache's entry, tap,
+  row-extent, and canvas buffers are `NativeBuffer`s from the same 64-byte aligned allocator;
+  tap rows are read and written as naturally aligned `int` (an integer kernel's cells share its
+  long slot's alignment) or `long` scalars, and row extents are whole `int` pairs. The
+  builder's per-tile scratch — a 33×33 difference plane, a 32×32 dense plane, a 32×32 Q40
+  plane, and a 32-int carry row — is stack-allocated per call and cleared per tile.
 - **Concurrency**: `ApplyBatch`/`Sync`/`SyncTransforms`/`Place`/`Move`/`SetGain`/`Remove`/`Process`/`Record`/`StopRecording`/
   `Rewind` are serial per world; different
   worlds may run on different threads. `ProcessAll` is that serial-per-world rule walked over
@@ -1058,7 +1117,12 @@ digits. Concurrency: single thread.
   `Process`, so no reservation survives into the next frame. Warm `Process` and warm reads make
   no `NativeHeap` calls at all: slabs, directories, scratch, and every queue are sized by
   grow-to-max before steady state, and the hook counter (`NativeHeap.Calls`) is asserted flat
-  by a test across warm frames that crowd, move, and read.
+  by a test across warm frames that crowd, move, and read. Kernel-cache lookups and builds run
+  on the owning world's thread under that same serial rule, reading the placement and the
+  stamp variant read-only and writing only cache-owned buffers and their own stack; the
+  `Stamp.Free` flush rides the process-wide catalog scan already serialized above. No
+  production path on the place, process, or query route calls the builder, so warm frames make
+  no cache-driven heap calls either.
   Determinism is unaffected: tiles are
   independent, arithmetic is integer-exact, the dead set is a pure function of page content, and
   the order of removals has no observable effect on map contents. Warm `Process`
@@ -1198,6 +1262,29 @@ digits. Concurrency: single thread.
   restore, merge, and fallback all run inside that one resolve call, so no other writer can
   observe the intermediate `previousRow` values, the staged page, or the half-merged published
   page.
+- **v2 tile planes and publish**: the `PlaneStore` slabs (2,048 B pages, 4,096 B `I` planes,
+  8,192 B `T`/`B` planes, 256 B summaries) follow the block-slab rules above: units are
+  addressed only by index, zero-filled by their taker, recycled whole through the free lists,
+  and released by `Reset`. Lifetime: a `TilePlanes` set holds five unit indices and no
+  pointers; `PlaneCells` pointers are materialized per call from the indices and never survive
+  a `Take`, `Give`, or `Reset`, so a slab doubling that moves a region cannot dangle one; the
+  store is owned by its holder on one thread (a test today; the owning (grid, layer) once V2-6
+  wires it) and freed by `Reset`. Aliasing: one publish call owns its tile — it writes the
+  plane page, the summary block, and its two stack rows (`tentOut`, `bellOut`) only; the page
+  is read for the old-cell compare group by group before the same group's store, so no cell is
+  compared against an already-updated value, and the summary recomputation reads the fully
+  stored page. Alignment: strides are multiples of 64 B over the 64 B aligned regions
+  (naturally aligned scalar-only access on netstandard2.1), the summary fields sit at offsets
+  0, 8, 10, 12, 16, 20, and 148 of the 256 B unit — each naturally aligned — and the vector
+  loads and stores on `I` rows, rounded rows, and page rows use unaligned-safe semantics.
+  Concurrency: a tile is published by exactly one call on the owning thread; there are no
+  statics and no locks. Bounds: rectangles are tile-local with `0 ≤ x0 ≤ x1 ≤ 32` (the
+  engine's dirty rectangles are clipped to the tile before publish); the guard and commit
+  loops read `I`, the rounded rows, and the page only inside `[x0, vectorEnd)` with
+  `vectorEnd = x1 − ((x1 − x0) & 7)` — full 8-cell groups inside the row — and any remainder
+  cells take the scalar tail, so no access passes the 32-cell row end; the row-summary
+  recomputation reads exactly the 32 published cells of each touched row, and the rescan reads
+  exactly the 1,024 published cells.
 
 ### Floor probes
 
