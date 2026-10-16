@@ -2,6 +2,7 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 
 namespace Gi;
 
@@ -146,31 +147,46 @@ internal static unsafe class SimdOps
         return maximum;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector256<int> PairSums(Vector256<short> values, Vector256<short> ones)
+    {
+        if (Avx2.IsSupported) return Avx2.MultiplyAddAdjacent(values, ones);
+
+        var (low, high) = Vector256.Widen(values);
+        return low + high;
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    internal static long RaggedSum(short* rows, int tileX, int rowCount, int* rowLow, int* rowHigh)
+    internal static long RaggedSum(short* rows, int* rowSums, int tileX, int rowCount, int* rowLow, int* rowHigh)
     {
         if (Vector256.IsHardwareAccelerated)
         {
             var indicesLow = Vector256.Create((short)0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
             var indicesHigh = indicesLow + Vector256.Create((short)16);
+            var ones = Vector256.Create((short)1);
             var total = Vector256<int>.Zero;
+            var whole = 0L;
             for (var r = 0; r < rowCount; r++)
             {
                 var first = Math.Max(rowLow[r], tileX) - tileX;
                 var end = Math.Min(rowHigh[r], tileX + TileBake.TileSize) - tileX;
                 if (end <= first) continue;
 
+                if (rowSums != null && end - first == TileBake.TileSize)
+                {
+                    whole += rowSums[r];
+                    continue;
+                }
+
                 var from = Vector256.Create((short)first);
                 var to = Vector256.Create((short)end);
                 var row = rows + r * TileBake.TileSize;
                 var low = Vector256.Load(row) & Vector256.GreaterThanOrEqual(indicesLow, from) & Vector256.LessThan(indicesLow, to);
                 var high = Vector256.Load(row + 16) & Vector256.GreaterThanOrEqual(indicesHigh, from) & Vector256.LessThan(indicesHigh, to);
-                var (w0, w1) = Vector256.Widen(low);
-                var (w2, w3) = Vector256.Widen(high);
-                total += w0 + w1 + w2 + w3;
+                total += PairSums(low, ones) + PairSums(high, ones);
             }
 
-            return Vector256.Sum(total);
+            return whole + Vector256.Sum(total);
         }
 
         if (Vector128.IsHardwareAccelerated)
@@ -178,11 +194,18 @@ internal static unsafe class SimdOps
             var baseIndices = Vector128.Create((short)0, 1, 2, 3, 4, 5, 6, 7);
             var step = Vector128.Create((short)8);
             var total = Vector128<int>.Zero;
+            var whole = 0L;
             for (var r = 0; r < rowCount; r++)
             {
                 var first = Math.Max(rowLow[r], tileX) - tileX;
                 var end = Math.Min(rowHigh[r], tileX + TileBake.TileSize) - tileX;
                 if (end <= first) continue;
+
+                if (rowSums != null && end - first == TileBake.TileSize)
+                {
+                    whole += rowSums[r];
+                    continue;
+                }
 
                 var from = Vector128.Create((short)first);
                 var to = Vector128.Create((short)end);
@@ -199,7 +222,7 @@ internal static unsafe class SimdOps
                 }
             }
 
-            return Vector128.Sum(total);
+            return whole + Vector128.Sum(total);
         }
 
         var sum = 0L;
@@ -207,6 +230,14 @@ internal static unsafe class SimdOps
         {
             var first = Math.Max(rowLow[r], tileX) - tileX;
             var end = Math.Min(rowHigh[r], tileX + TileBake.TileSize) - tileX;
+            if (end <= first) continue;
+
+            if (rowSums != null && end - first == TileBake.TileSize)
+            {
+                sum += rowSums[r];
+                continue;
+            }
+
             var row = rows + r * TileBake.TileSize;
             for (var i = first; i < end; i++) sum += row[i];
         }
