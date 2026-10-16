@@ -37,7 +37,7 @@ public static unsafe partial class World
             onlyUpdates &= (command.Kind == SourceCommandKind.Update ||
                             command.Kind == SourceCommandKind.UpdateTransform) && !command.Target.Pending;
             if (!command.Target.Pending) continue;
-            var creationIndex = command.Target.Identifier;
+            var creationIndex = command.Target.Command;
             if ((uint)creationIndex >= (uint)index || commands[creationIndex].Kind != SourceCommandKind.Place)
                 return BatchStatus.InvalidReference;
         }
@@ -82,19 +82,19 @@ public static unsafe partial class World
         for (var index = 0; index < commands.Length; index++)
         {
             ref readonly var command = ref commands[index];
-            var identifier = command.Target.Identifier;
-            var slot = identifier & SourceIndexMask;
-            if (identifier < 0 || slot >= source->Count || source->Alive.Pointer[slot] == 0 ||
-                (uint)identifier >> 24 != source->Gen.Pointer[slot])
+            var identifier = command.Target.Source;
+            var slot = (int)identifier.Slot;
+            if ((uint)slot >= (uint)source->Count || source->Alive[slot] == 0 ||
+                identifier.Generation != source->Gen[slot])
             {
-                results[index] = new SourceResult(-1, SourceResultStatus.InvalidSource);
+                results[index] = new SourceResult(default, SourceResultStatus.InvalidSource);
                 continue;
             }
 
-            var oldX = source->X.Pointer[slot];
-            var oldY = source->Y.Pointer[slot];
-            var oldAngle = source->Angle.Pointer[slot];
-            var oldScale = source->Scale.Pointer[slot];
+            var oldX = source->X[slot];
+            var oldY = source->Y[slot];
+            var oldAngle = source->Angle[slot];
+            var oldScale = source->Scale[slot];
             var angle = oldAngle;
             if (float.IsFinite(command.HeadingRadians)) angle = QuantizeSourceBatchAngle(command.HeadingRadians);
             var scale = oldScale;
@@ -102,25 +102,25 @@ public static unsafe partial class World
             var finitePosition = float.IsFinite(command.PositionX) && float.IsFinite(command.PositionY);
             var positionX = finitePosition ? command.PositionX : oldX;
             var positionY = finitePosition ? command.PositionY : oldY;
-            var layer = source->Layer.Pointer[slot];
+            var layer = source->Layer[slot];
             var posChanged = (positionX != oldX || positionY != oldY) && PositionChanged(context, layer, oldX, oldY, positionX, positionY);
             var angChanged = angle != oldAngle && AngleChanged(context, layer, oldAngle, angle);
             var scaleChanged = scale != oldScale;
             if (command.Kind == SourceCommandKind.UpdateTransform)
             {
-                var currentGain = (sbyte)source->Gain.Pointer[slot];
+                var currentGain = (sbyte)source->Gain[slot];
                 if (posChanged) EnqueueMutation(context, source, slot, positionX, positionY, currentGain, oldAngle, oldScale, true);
-                source->X.Pointer[slot] = positionX;
-                source->Y.Pointer[slot] = positionY;
+                source->X[slot] = positionX;
+                source->Y[slot] = positionY;
                 if (angChanged) EnqueueMutation(context, source, slot, positionX, positionY, currentGain, angle, oldScale, true);
-                source->Angle.Pointer[slot] = angle;
+                source->Angle[slot] = angle;
                 if (scaleChanged) EnqueueMutation(context, source, slot, positionX, positionY, currentGain, angle, scale, true);
-                source->Scale.Pointer[slot] = scale;
+                source->Scale[slot] = scale;
                 results[index] = new SourceResult(identifier, SourceResultStatus.Applied);
                 continue;
             }
 
-            var oldGain = source->Gain.Pointer[slot];
+            var oldGain = source->Gain[slot];
             var gain = (byte)Math.Clamp((int)command.Gain, -MaxGain, MaxGain);
             if ((source->Timed.Pointer[slot] & Fading) != 0)
             {
@@ -130,17 +130,17 @@ public static unsafe partial class World
 
             var signedOldGain = (sbyte)oldGain;
             if (posChanged) EnqueueMutation(context, source, slot, positionX, positionY, signedOldGain, oldAngle, oldScale, true);
-            source->X.Pointer[slot] = positionX;
-            source->Y.Pointer[slot] = positionY;
+            source->X[slot] = positionX;
+            source->Y[slot] = positionY;
             if (angChanged) EnqueueMutation(context, source, slot, positionX, positionY, signedOldGain, angle, oldScale, true);
-            source->Angle.Pointer[slot] = angle;
+            source->Angle[slot] = angle;
             if (scaleChanged) EnqueueMutation(context, source, slot, positionX, positionY, signedOldGain, angle, scale, true);
-            source->Scale.Pointer[slot] = scale;
+            source->Scale[slot] = scale;
             if (gain != oldGain)
             {
                 CountGain(context, layer, oldGain, gain);
                 EnqueueMutation(context, source, slot, positionX, positionY, (sbyte)gain, angle, scale, true);
-                source->Gain.Pointer[slot] = gain;
+                source->Gain[slot] = gain;
             }
 
             results[index] = new SourceResult(identifier, SourceResultStatus.Applied);
@@ -156,14 +156,14 @@ public static unsafe partial class World
         var unique = true;
         for (var index = 0; index < count; index++)
         {
-            var identifier = commands[index].Target.Identifier;
-            var slot = identifier & SourceIndexMask;
+            var identifier = commands[index].Target.Source;
+            var slot = (int)identifier.Slot;
             var link = context->BatchCommands.Pointer + index;
             *link = new SourceBatchLink { Entry = -1, Next = -1 };
-            if (identifier < 0 || slot >= source->Count || source->Alive.Pointer[slot] == 0 ||
-                (uint)identifier >> 24 != source->Gen.Pointer[slot])
+            if ((uint)slot >= (uint)source->Count || source->Alive[slot] == 0 ||
+                identifier.Generation != source->Gen[slot])
             {
-                results[index] = new SourceResult(-1, SourceResultStatus.InvalidSource);
+                results[index] = new SourceResult(default, SourceResultStatus.InvalidSource);
                 continue;
             }
 
@@ -179,7 +179,7 @@ public static unsafe partial class World
                 Slot = slot, FirstCommand = index, LastCommand = index,
                 FirstDepositCommand = -1, FirstScheduleCommand = -1, OperationIndex = -1,
                 OriginalPending = pending,
-                PlannedGeneration = source->Gen.Pointer[slot], PlannedAlive = 1
+                PlannedGeneration = source->Gen[slot], PlannedAlive = 1
             };
             link->Entry = entries;
             context->Pending.Pointer[slot] = -(entries + 1);
@@ -222,19 +222,19 @@ public static unsafe partial class World
             {
                 if (command.Layer >= context->LayerCount || IsDerived(context, command.Layer))
                 {
-                    results[index] = new SourceResult(-1, SourceResultStatus.InvalidLayer);
+                    results[index] = new SourceResult(default, SourceResultStatus.InvalidLayer);
                     continue;
                 }
 
                 if (!StampCatalog.Valid(command.Stamp))
                 {
-                    results[index] = new SourceResult(-1, SourceResultStatus.InvalidStamp);
+                    results[index] = new SourceResult(default, SourceResultStatus.InvalidStamp);
                     continue;
                 }
 
                 if (!float.IsFinite(command.PositionX) || !float.IsFinite(command.PositionY))
                 {
-                    results[index] = new SourceResult(-1, SourceResultStatus.InvalidSource);
+                    results[index] = new SourceResult(default, SourceResultStatus.InvalidSource);
                     continue;
                 }
 
@@ -246,7 +246,7 @@ public static unsafe partial class World
                 {
                     if (sourceCount >= MaxSourceSlots)
                     {
-                        results[index] = new SourceResult(-1, SourceResultStatus.SourceLimitReached);
+                        results[index] = new SourceResult(default, SourceResultStatus.SourceLimitReached);
                         continue;
                     }
 
@@ -255,32 +255,32 @@ public static unsafe partial class World
                 }
 
                 var entry = context->BatchSources.Pointer + entryIndex;
-                entry->PlannedGeneration = (byte)((entry->PlannedGeneration + 1) & 127);
+                entry->PlannedGeneration++;
                 entry->PlannedAlive = 1;
-                results[index] = new SourceResult((entry->PlannedGeneration << 24) | slot, SourceResultStatus.Applied);
+                results[index] = new SourceResult(new SourceId((uint)slot, entry->PlannedGeneration), SourceResultStatus.Applied);
             }
             else
             {
                 var sourceId = command.Target.Pending
-                    ? results[command.Target.Identifier].SourceId
-                    : command.Target.Identifier;
-                slot = sourceId & SourceIndexMask;
-                if (sourceId < 0 || slot >= sourceCount)
+                    ? results[command.Target.Command].SourceId
+                    : command.Target.Source;
+                slot = (int)sourceId.Slot;
+                if (sourceId.Generation == 0 || (uint)slot >= (uint)sourceCount)
                 {
-                    results[index] = new SourceResult(-1, SourceResultStatus.InvalidSource);
+                    results[index] = new SourceResult(default, SourceResultStatus.InvalidSource);
                     continue;
                 }
 
                 entryIndex = FindSourceBatchEntry(context, slot);
                 var generation = entryIndex >= 0
                     ? context->BatchSources.Pointer[entryIndex].PlannedGeneration
-                    : context->Sources.Gen.Pointer[slot];
+                    : context->Sources.Gen[slot];
                 var alive = entryIndex >= 0
                     ? context->BatchSources.Pointer[entryIndex].PlannedAlive
-                    : context->Sources.Alive.Pointer[slot];
-                if (alive == 0 || (uint)sourceId >> 24 != generation)
+                    : context->Sources.Alive[slot];
+                if (alive == 0 || sourceId.Generation != generation)
                 {
-                    results[index] = new SourceResult(-1, SourceResultStatus.InvalidSource);
+                    results[index] = new SourceResult(default, SourceResultStatus.InvalidSource);
                     continue;
                 }
 
@@ -289,7 +289,7 @@ public static unsafe partial class World
                 {
                     var entry = context->BatchSources.Pointer + entryIndex;
                     entry->PlannedAlive = 0;
-                    ring.Push(slot);
+                    if (entry->PlannedGeneration != uint.MaxValue) ring.Push(slot);
                 }
 
                 results[index] = new SourceResult(sourceId, SourceResultStatus.Applied);
@@ -334,9 +334,9 @@ public static unsafe partial class World
             FirstDepositCommand = -1,
             FirstScheduleCommand = -1,
             OperationIndex = -1,
-            OriginalPending = slot < source->X.Length ? context->Pending.Pointer[slot] : 0,
-            PlannedGeneration = slot < source->X.Length ? source->Gen.Pointer[slot] : (byte)0,
-            PlannedAlive = slot < source->Count ? source->Alive.Pointer[slot] : (byte)0
+            OriginalPending = slot < source->Slots ? context->Pending.Pointer[slot] : 0,
+            PlannedGeneration = slot < source->Slots ? source->Gen[slot] : 0u,
+            PlannedAlive = slot < source->Count ? source->Alive[slot] : (byte)0
         };
         context->BatchLookup.Pointer[lookupIndex] = index + 1;
         return index;
@@ -351,7 +351,7 @@ public static unsafe partial class World
             var slot = entry->Slot;
             var state = slot < source->Count ? ReadSourceBatchState(source, slot) : new SourceBatchState
             {
-                Generation = source->Gen.Pointer[slot],
+                Generation = source->Gen[slot],
                 Scale = UnitScale
             };
             entry->InitialAlive = state.Alive;
@@ -388,11 +388,11 @@ public static unsafe partial class World
 
     private static SourceBatchState ReadSourceBatchState(SourceColumns* source, int slot) => new()
     {
-        PositionX = source->X.Pointer[slot], PositionY = source->Y.Pointer[slot],
-        Angle = source->Angle.Pointer[slot], Scale = source->Scale.Pointer[slot],
-        Stamp = source->Stamp.Pointer[slot], Layer = source->Layer.Pointer[slot],
-        Gain = source->Gain.Pointer[slot], Alive = source->Alive.Pointer[slot],
-        Generation = source->Gen.Pointer[slot], Timed = source->Timed.Pointer[slot],
+        PositionX = source->X[slot], PositionY = source->Y[slot],
+        Angle = source->Angle[slot], Scale = source->Scale[slot],
+        Stamp = source->Stamp[slot], Layer = source->Layer[slot],
+        Gain = source->Gain[slot], Alive = source->Alive[slot],
+        Generation = source->Gen[slot], Timed = source->Timed.Pointer[slot],
         FadeFrom = source->FadeFrom.Pointer[slot], FadeTo = source->FadeTo.Pointer[slot],
         FadeStart = source->FadeStart.Pointer[slot], FadeTicks = source->FadeTicks.Pointer[slot],
         ExpireAt = source->ExpireAt.Pointer[slot], Due = source->Due.Pointer[slot]
@@ -414,7 +414,7 @@ public static unsafe partial class World
                 state.Scale = UnitScale;
                 state.Timed = 0;
                 state.Alive = 1;
-                state.Generation = (byte)((state.Generation + 1) & 127);
+                state.Generation += 1;
                 MarkSourceBatchSchedule(entry, index);
                 if (entry->OriginalPending == 0 && entry->FirstDepositCommand < 0)
                 {
@@ -637,15 +637,15 @@ public static unsafe partial class World
                 if (nextCounted) deltas[state.Layer]++;
             }
 
-            source->X.Pointer[slot] = state.PositionX;
-            source->Y.Pointer[slot] = state.PositionY;
-            source->Angle.Pointer[slot] = state.Angle;
-            source->Scale.Pointer[slot] = state.Scale;
-            source->Stamp.Pointer[slot] = state.Stamp;
-            source->Layer.Pointer[slot] = state.Layer;
-            source->Gain.Pointer[slot] = state.Gain;
-            source->Alive.Pointer[slot] = state.Alive;
-            source->Gen.Pointer[slot] = state.Generation;
+            source->X[slot] = state.PositionX;
+            source->Y[slot] = state.PositionY;
+            source->Angle[slot] = state.Angle;
+            source->Scale[slot] = state.Scale;
+            source->Stamp[slot] = state.Stamp;
+            source->Layer[slot] = state.Layer;
+            source->Gain[slot] = state.Gain;
+            source->Alive[slot] = state.Alive;
+            source->Gen[slot] = state.Generation;
             source->Timed.Pointer[slot] = state.Timed;
             source->FadeFrom.Pointer[slot] = state.FadeFrom;
             source->FadeTo.Pointer[slot] = state.FadeTo;

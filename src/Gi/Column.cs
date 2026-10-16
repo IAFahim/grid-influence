@@ -34,7 +34,7 @@ public static unsafe partial class World
         return ChangedRange(w, layer, xs, ys, reach, since, words, 0, count);
     }
 
-    public static void Sync(byte world, int* sources, float* xs, float* ys, int count)
+    public static void Sync(byte world, SourceId* sources, float* xs, float* ys, int count)
     {
         var w = GetContext(world);
         if (w == null) return;
@@ -45,7 +45,7 @@ public static unsafe partial class World
 #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
 #endif
-    internal static void SyncColumns(WorldCtx* w, int* sources, float* xs, float* ys, int count)
+    internal static void SyncColumns(WorldCtx* w, SourceId* sources, float* xs, float* ys, int count)
     {
         if (count <= 0 || sources == null || xs == null || ys == null) return;
 
@@ -62,23 +62,23 @@ public static unsafe partial class World
                 for (var i = 0; i < count; i++)
                 {
                     var id = sources[i];
-                    var slot = id & SourceIndexMask;
-                    if ((uint)slot >= (uint)s->Count || s->Alive.Pointer[slot] == 0) continue;
-                    if ((id & ~SourceIndexMask) != (s->Gen.Pointer[slot] << 24)) continue;
+                    var slot = (int)id.Slot;
+                    if ((uint)slot >= (uint)s->Count || s->Alive[slot] == 0) continue;
+                    if (id.Generation != s->Gen[slot]) continue;
 
                     var x = xs[i];
                     var y = ys[i];
-                    var oldX = s->X.Pointer[slot];
-                    var oldY = s->Y.Pointer[slot];
+                    var oldX = s->X[slot];
+                    var oldY = s->Y[slot];
                     if (*(int*)&x == *(int*)&oldX && *(int*)&y == *(int*)&oldY) continue;
                     if (!float.IsFinite(x) || !float.IsFinite(y)) continue;
-                    var mask = recipes[s->Layer.Pointer[slot]].AnchorMask;
+                    var mask = recipes[s->Layer[slot]].AnchorMask;
                     var dx = TileBake.AnchorQ8(oldX, ox, scaleQ8, mask) ^ TileBake.AnchorQ8(x, ox, scaleQ8, mask);
                     var dy = TileBake.AnchorQ8(oldY, oy, scaleQ8, mask) ^ TileBake.AnchorQ8(y, oy, scaleQ8, mask);
                     if ((dx | dy) != 0)
-                        EnqueueMutation(w, s, slot, x, y, (sbyte)s->Gain.Pointer[slot], s->Angle.Pointer[slot], s->Scale.Pointer[slot], true);
-                    s->X.Pointer[slot] = x;
-                    s->Y.Pointer[slot] = y;
+                        EnqueueMutation(w, s, slot, x, y, (sbyte)s->Gain[slot], s->Angle[slot], s->Scale[slot], true);
+                    s->X[slot] = x;
+                    s->Y[slot] = y;
                 }
 
                 return;
@@ -88,20 +88,20 @@ public static unsafe partial class World
         for (var i = 0; i < count; i++)
         {
             var id = sources[i];
-            var slot = id & SourceIndexMask;
-            if ((uint)slot >= (uint)s->Count || s->Alive.Pointer[slot] == 0) continue;
-            if ((id & ~SourceIndexMask) != (s->Gen.Pointer[slot] << 24)) continue;
+            var slot = (int)id.Slot;
+            if ((uint)slot >= (uint)s->Count || s->Alive[slot] == 0) continue;
+            if (id.Generation != s->Gen[slot]) continue;
 
             var x = xs[i];
             var y = ys[i];
-            var oldX = s->X.Pointer[slot];
-            var oldY = s->Y.Pointer[slot];
+            var oldX = s->X[slot];
+            var oldY = s->Y[slot];
             if (*(int*)&x == *(int*)&oldX && *(int*)&y == *(int*)&oldY) continue;
             if (!float.IsFinite(x) || !float.IsFinite(y)) continue;
-            if (PositionChanged(w, s->Layer.Pointer[slot], oldX, oldY, x, y))
-                EnqueueMutation(w, s, slot, x, y, (sbyte)s->Gain.Pointer[slot], s->Angle.Pointer[slot], s->Scale.Pointer[slot], true);
-            s->X.Pointer[slot] = x;
-            s->Y.Pointer[slot] = y;
+            if (PositionChanged(w, s->Layer[slot], oldX, oldY, x, y))
+                EnqueueMutation(w, s, slot, x, y, (sbyte)s->Gain[slot], s->Angle[slot], s->Scale[slot], true);
+            s->X[slot] = x;
+            s->Y[slot] = y;
         }
     }
 

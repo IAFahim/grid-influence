@@ -182,7 +182,7 @@ public sealed unsafe class PrecisionTests
             var derived = Layer.Sum(world, baseLayer, 2, otherLayer, -1);
 
             var rng = new Random(707 + phaseBits);
-            var ids = new int[36];
+            var ids = new World.SourceId[36];
             var xs = new float[ids.Length];
             var ys = new float[ids.Length];
             for (var i = 0; i < ids.Length; i++)

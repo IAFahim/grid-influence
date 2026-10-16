@@ -37,7 +37,7 @@ public sealed unsafe class CrowdTests
         ys[i] = (ys[i] * 1.00029f + i * 0.113f + frame * 2.071f) % 996f + 14f;
     }
 
-    private static void MoveAll(byte w, int[] ids, float[] xs, float[] ys, int frame)
+    private static void MoveAll(byte w, World.SourceId[] ids, float[] xs, float[] ys, int frame)
     {
         for (var i = 0; i < ids.Length; i++)
         {
@@ -46,7 +46,7 @@ public sealed unsafe class CrowdTests
         }
     }
 
-    private static void StepIncremental(byte w, int[] ids, float[] xs, float[] ys, int frame, int batch)
+    private static void StepIncremental(byte w, World.SourceId[] ids, float[] xs, float[] ys, int frame, int batch)
     {
         for (var start = 0; start < ids.Length; start += batch)
         {
@@ -85,8 +85,8 @@ public sealed unsafe class CrowdTests
         var box = Catalog.Box8;
         var rng = new Random(7);
         const int count = 20_000;
-        var crowdedIds = new int[count];
-        var steppedIds = new int[count];
+        var crowdedIds = new World.SourceId[count];
+        var steppedIds = new World.SourceId[count];
         var crowdedXs = new float[count];
         var crowdedYs = new float[count];
         var steppedXs = new float[count];
@@ -143,8 +143,8 @@ public sealed unsafe class CrowdTests
         var otherO = Layer.New(oracle);
         const int count = 400;
         var rng = new Random(31);
-        var crowdedIds = new int[count];
-        var steppedIds = new int[count];
+        var crowdedIds = new World.SourceId[count];
+        var steppedIds = new World.SourceId[count];
         var crowdedXs = new float[count];
         var crowdedYs = new float[count];
         var steppedXs = new float[count];
@@ -209,7 +209,7 @@ public sealed unsafe class CrowdTests
         var box = Catalog.Box9;
         var rng = new Random(41);
         const int count = 200;
-        var ids = new int[count];
+        var ids = new World.SourceId[count];
         var xs = new float[count];
         var ys = new float[count];
         for (var i = 0; i < count; i++)
@@ -252,7 +252,7 @@ public sealed unsafe class CrowdTests
         var box = Catalog.Box7;
         var rng = new Random(53);
         const int count = 300;
-        var ids = new int[count];
+        var ids = new World.SourceId[count];
         var xs = new float[count];
         var ys = new float[count];
         for (var i = 0; i < count; i++)
@@ -296,7 +296,7 @@ public sealed unsafe class CrowdTests
         var box = Catalog.Box10;
         var rng = new Random(59);
         const int count = 250;
-        var ids = new int[count];
+        var ids = new World.SourceId[count];
         var xs = new float[count];
         var ys = new float[count];
         for (var i = 0; i < count; i++)
@@ -316,7 +316,7 @@ public sealed unsafe class CrowdTests
         var so = Layer.Sum(oracle, lo, 2, qo, 1);
         var mo = Layer.Max(oracle, lo, qo);
         var ko = Layer.Mask(oracle, lo, qo, 50, 300);
-        var oracleIds = new int[count];
+        var oracleIds = new World.SourceId[count];
         var oracleXs = new float[count];
         var oracleYs = new float[count];
         for (var i = 0; i < count; i++)
@@ -354,7 +354,7 @@ public sealed unsafe class CrowdTests
         var box = Catalog.Box9;
         var rng = new Random(61);
         const int count = 200;
-        var ids = new int[count];
+        var ids = new World.SourceId[count];
         var xs = new float[count];
         var ys = new float[count];
         for (var i = 0; i < count; i++)
@@ -439,7 +439,7 @@ public sealed unsafe class CrowdTests
         var l = Layer.New(w);
         var box = Catalog.Box12;
         var rng = new Random(73);
-        var ids = new int[900];
+        var ids = new World.SourceId[900];
         for (var i = 0; i < ids.Length; i++)
             ids[i] = World.Place(w, l, (float)(rng.NextDouble() * 256), (float)(rng.NextDouble() * 256), box, 6);
         World.Process(w);
@@ -490,7 +490,7 @@ public sealed unsafe class CrowdTests
         var lo = Layer.New(oracle);
         var rng = new Random(79);
         const int count = 600;
-        var ids = new int[count];
+        var ids = new World.SourceId[count];
         for (var i = 0; i < count; i++)
         {
             var x = (float)(rng.NextDouble() * 240 + 8);
@@ -515,7 +515,7 @@ public sealed unsafe class CrowdTests
 
         for (var i = 0; i < count; i++)
             if ((i & 3) != 0) World.Move(oracle, ids[i], xs[i], ys[i]);
-        fixed (int* ip = ids)
+        fixed (World.SourceId* ip = ids)
         fixed (float* xp = xs, yp = ys)
         {
             World.Sync(w, ip, xp, yp, count);
@@ -536,7 +536,7 @@ public sealed unsafe class CrowdTests
         var box = Catalog.Box8;
         var rng = new Random(83);
         const int count = 20_000;
-        var ids = new int[count];
+        var ids = new World.SourceId[count];
         var xs = new float[count];
         var ys = new float[count];
         for (var i = 0; i < count; i++)
@@ -571,7 +571,7 @@ public sealed unsafe class CrowdTests
         var l = Layer.New(w);
         var box = Catalog.Box12;
         var rng = new Random(89);
-        var ids = new int[4000];
+        var ids = new World.SourceId[4000];
         for (var i = 0; i < ids.Length; i++)
             ids[i] = World.Place(w, l, (float)(rng.NextDouble() * 1024), (float)(rng.NextDouble() * 1024), box, 6);
         World.Process(w);

@@ -10,11 +10,11 @@ internal sealed unsafe class CorpusRunner
 
     private readonly StreamSetup _setup;
     private readonly TextWriter _output;
-    private readonly List<int> _attemptIds = [];
+    private readonly List<World.SourceId> _attemptIds = [];
     private readonly int[] _tiles = new int[MaxTiles];
     private readonly float[] _columnXs = new float[MaxColumn];
     private readonly float[] _columnYs = new float[MaxColumn];
-    private readonly int[] _columnExcludes = new int[MaxColumn];
+    private readonly World.SourceId[] _columnExcludes = new World.SourceId[MaxColumn];
     private readonly short[] _columnValues = new short[MaxColumn];
     private readonly float[] _gradientXs = new float[MaxColumn];
     private readonly float[] _gradientYs = new float[MaxColumn];
@@ -186,21 +186,21 @@ internal sealed unsafe class CorpusRunner
         }
     }
 
-    private int Id(int handle)
-        => (uint)handle < (uint)_attemptIds.Count ? _attemptIds[handle] : -1;
+    private World.SourceId Id(int handle)
+        => (uint)handle < (uint)_attemptIds.Count ? _attemptIds[handle] : default;
 
     private void ExecuteSync(StreamCommand command)
     {
         var count = Math.Min(command.Int0, MaxColumn);
         var rng = new SplitMix64(command.Aux ^ StreamOperands.AuxSalt);
         var target = _setup.Grids[command.Grid];
-        var ids = new int[Math.Max(1, count)];
+        var ids = new World.SourceId[Math.Max(1, count)];
         var xs = new float[Math.Max(1, count)];
         var ys = new float[Math.Max(1, count)];
         for (var i = 0; i < count; i++) ids[i] = Id(command.Handle + i);
         StreamOperands.ColumnPositions(ref rng, target, xs, ys, count);
 
-        fixed (int* pIds = ids)
+        fixed (World.SourceId* pIds = ids)
         fixed (float* pXs = xs, pYs = ys)
         {
             World.Sync(_world, pIds, pXs, pYs, count);
@@ -371,11 +371,11 @@ internal sealed unsafe class CorpusRunner
                 StreamOperands.ColumnPositions(ref rng, _setup.Grids[command.Grid], _columnXs, _columnYs, count);
                 if (command.Read == ReadKind.SenseColumnEx)
                     for (var i = 0; i < count; i++)
-                        _columnExcludes[i] = i == 0 ? exclude : -1;
+                        _columnExcludes[i] = i == 0 ? exclude : default;
                 bool complete;
                 Array.Clear(_words);
                 fixed (float* pXs = _columnXs, pYs = _columnYs)
-                fixed (int* pExcludes = _columnExcludes)
+                fixed (World.SourceId* pExcludes = _columnExcludes)
                 fixed (short* pValues = _columnValues)
                 fixed (ulong* pWords = _words)
                 {

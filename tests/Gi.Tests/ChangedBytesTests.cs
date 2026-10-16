@@ -82,7 +82,7 @@ public sealed unsafe class ChangedBytesTests
         World.Remove(w, s);
         var replacement = World.Place(w, l, 20f, 20f, box, 5);
         World.Process(w);
-        Assert.True(replacement > 0);
+        Assert.True(replacement != default);
         Assert.Empty(Drain(w, g, l));
         Assert.Empty(Since(w, g, l, since));
         Assert.Equal(250, World.Query(w, g, l, 20, 20));
@@ -174,8 +174,8 @@ public sealed unsafe class ChangedBytesTests
             var deltaLayer = Layer.New(deltaWorld);
             var xs = new float[movers];
             var ys = new float[movers];
-            var crowdIds = new int[movers];
-            var deltaIds = new int[movers];
+            var crowdIds = new World.SourceId[movers];
+            var deltaIds = new World.SourceId[movers];
             for (var i = 0; i < movers; i++)
             {
                 xs[i] = 16f + (i * 3.71f) % 88f;
@@ -230,7 +230,7 @@ public sealed unsafe class ChangedBytesTests
         var stamps = new[] { Stamp.Box(8, 8, 60), Stamp.Tent(7, 7, 50) };
         var rng = new Random(93);
         const int count = 120;
-        var ids = new int[count];
+        var ids = new World.SourceId[count];
         var live = new bool[count];
         for (var i = 0; i < count; i++)
         {

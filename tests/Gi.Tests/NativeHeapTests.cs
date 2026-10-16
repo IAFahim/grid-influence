@@ -14,7 +14,7 @@ public unsafe class NativeHeapTests
         var box = Stamp.Box(8, 8, 40);
         var tent = Stamp.Tent(10, 10, 40);
         var count = 64;
-        var ids = new int[count];
+        var ids = new World.SourceId[count];
         var xs = new float[count];
         var ys = new float[count];
         for (var i = 0; i < count; i++)
@@ -30,7 +30,7 @@ public unsafe class NativeHeapTests
         var gradientX = new float[count];
         var gradientY = new float[count];
         var whole = new ulong[(count + 63) >> 6];
-        fixed (int* idPointer = ids)
+        fixed (World.SourceId* idPointer = ids)
         fixed (float* xPointer = xs)
         fixed (float* yPointer = ys)
         fixed (short* valuePointer = values)

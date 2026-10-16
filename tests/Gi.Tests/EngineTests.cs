@@ -605,13 +605,14 @@ public sealed class EngineTests
     [Fact]
     public void InvalidWorld_DoesNotAccessNativeArena()
     {
-        Assert.Equal(-1, World.Place(255, 0, 0f, 0f, 1, 1));
+        Assert.Equal(default(World.SourceId), World.Place(255, 0, 0f, 0f, 1, 1));
         Assert.Equal(0, World.Query(255, 0, 0, 0, 0));
         Assert.Equal(0, World.Query(255, 0, 0, 0, 0, 32, 32));
         Assert.Equal(0, World.QueryAt(255, 0, 0, 0f, 0f));
-        World.Move(255, 0, 0f, 0f);
-        World.SetGain(255, 0, 1);
-        World.Remove(255, 0);
+        World.Move(0, new World.SourceId(255, 1), 0f, 0f);
+        World.Move(0, default, 0f, 0f);
+        World.SetGain(255, new World.SourceId(0, 1), 1);
+        World.Remove(255, new World.SourceId(0, 1));
         World.Process(255);
         World.Clear(255);
         Assert.Throws<ArgumentOutOfRangeException>(() => Grid.New(255, 5, 0f, 0f, 32f));
@@ -634,7 +635,7 @@ public sealed class EngineTests
         var stamp = Stamp.Box(4, 4, 100);
         try
         {
-            Assert.Equal(-1, World.Place(w, l, x, y, stamp, 2));
+            Assert.Equal(default(World.SourceId), World.Place(w, l, x, y, stamp, 2));
             var source = World.Place(w, l, 32f, 32f, stamp, 2);
             World.Move(w, source, x, y);
             World.Process(w);
@@ -799,7 +800,7 @@ public sealed class EngineTests
         Assert.Equal(1, pending.LiveSources);
         Assert.Equal(0, pending.LiveTiles);
         Assert.Equal(0, pending.DirtyTiles);
-        Assert.Equal(64 * 40, pending.SourceBytes);
+        Assert.Equal(778_240, pending.SourceBytes);
         Assert.Equal(0, pending.DirectoryBytes + pending.SlabBytes + pending.DifferenceBytes + pending.DenseBytes + pending.PageBytes);
         World.Process(w);
         var processed = Stats.Inspection.Read(w);
@@ -812,12 +813,12 @@ public sealed class EngineTests
         World.Clear(w);
         var cleared = Stats.Inspection.Read(w);
         Assert.Equal(0, cleared.SourceSlots);
-        Assert.Equal(64, cleared.SourceCapacity);
+        Assert.Equal(16_384, cleared.SourceCapacity);
         Assert.Equal(0, cleared.LiveTiles);
         Assert.Equal(1, cleared.Directories);
         Assert.Equal(16, cleared.DirectoryBytes);
         Assert.Equal(16 * World.BlockBytes + 64, cleared.SlabBytes);
-        Assert.Equal(empty.WorldBytes + 64 * 40 + 20 + 64 + 16 * sizeof(DepositOp) + 64 * sizeof(int) +
+        Assert.Equal(empty.WorldBytes + 778_240 + 20 + 64 + 16 * sizeof(DepositOp) + 16_384 * sizeof(int) +
             16 + 16 * World.BlockBytes + 64, cleared.WorldBytes);
     }
 
@@ -1053,7 +1054,7 @@ public sealed class EngineTests
         var l = Layer.New(w);
         var stamp = Stamp.Box(4, 4, 40);
         var survivor = World.Place(w, l, 12f, 12f, stamp, 5);
-        var first = -1;
+        var first = default(World.SourceId);
         for (var i = 0; i < 500; i++)
         {
             var id = World.Place(w, l, 40f, 40f, stamp, 3);
@@ -1085,11 +1086,11 @@ public sealed class EngineTests
         var w = World.New();
         var l = Layer.New(w);
         var stamp = Stamp.Box(2, 2, 10);
-        Assert.Equal(1 << 24, World.Place(w, l, 1f, 1f, stamp, 1));
+        Assert.Equal(new World.SourceId(0, 1), World.Place(w, l, 1f, 1f, stamp, 1));
         for (var i = 0; i < 200; i++) World.Place(w, l, 2f, 2f, stamp, 1);
-        Assert.Equal((1 << 24) | 201, World.Place(w, l, 3f, 3f, stamp, 1));
+        Assert.Equal(new World.SourceId(201, 1), World.Place(w, l, 3f, 3f, stamp, 1));
         World.Clear(w);
-        Assert.Equal(2 << 24, World.Place(w, l, 4f, 4f, stamp, 1));
+        Assert.Equal(new World.SourceId(0, 2), World.Place(w, l, 4f, 4f, stamp, 1));
     }
 
     [Fact]
@@ -1100,7 +1101,7 @@ public sealed class EngineTests
         var l = Layer.New(w);
         var stamp = Stamp.Box(12, 12, 40);
         var rng = new Random(61);
-        var ids = new int[40];
+        var ids = new World.SourceId[40];
         for (var i = 0; i < ids.Length; i++)
             ids[i] = World.Place(w, l,
                 (float)(rng.NextDouble() * 244 + 6), (float)(rng.NextDouble() * 244 + 6),
@@ -1155,7 +1156,7 @@ public sealed class EngineTests
             var gs = Grid.New(stepped, 8, 0f, 0f, 256f);
             var lb = Layer.New(batched);
             var ls = Layer.New(stepped);
-            var ids = new int[30];
+            var ids = new World.SourceId[30];
             var live = new bool[30];
             for (var step = 0; step < 120; step++)
             {
@@ -1172,17 +1173,17 @@ public sealed class EngineTests
                         live[k] = true;
                         break;
                     case 1:
-                        if (!live[k] || ids[k] < 0) break;
+                        if (!live[k] || ids[k] == default) break;
                         World.Move(batched, ids[k], x, y);
                         World.Move(stepped, ids[k], x, y);
                         break;
                     case 2:
-                        if (!live[k] || ids[k] < 0) break;
+                        if (!live[k] || ids[k] == default) break;
                         World.SetGain(batched, ids[k], gain);
                         World.SetGain(stepped, ids[k], gain);
                         break;
                     default:
-                        if (!live[k] || ids[k] < 0) break;
+                        if (!live[k] || ids[k] == default) break;
                         World.Remove(batched, ids[k]);
                         World.Remove(stepped, ids[k]);
                         live[k] = false;
@@ -1214,7 +1215,7 @@ public sealed class EngineTests
         var g = Grid.New(w, 8, 0f, 0f, 256f);
         var l = Layer.New(w);
         var stamp = Stamp.Box(12, 12, 40);
-        var ids = new int[200];
+        var ids = new World.SourceId[200];
         for (var i = 0; i < ids.Length; i++)
             ids[i] = World.Place(w, l, (i * 13.7f) % 240f + 8f, (i * 7.3f) % 240f + 8f, stamp, 7);
         for (var i = 0; i < ids.Length; i++) World.Remove(w, ids[i]);
@@ -1296,7 +1297,7 @@ public sealed class EngineTests
         var tents = new byte[widths.Length];
         for (var k = 0; k < widths.Length; k++) tents[k] = Stamp.Tent((ushort)widths[k], (ushort)widths[k], 40);
         const int count = 80;
-        var ids = new int[count];
+        var ids = new World.SourceId[count];
         var sx = new float[count];
         var sy = new float[count];
         var ssize = new int[count];
@@ -1391,7 +1392,7 @@ public sealed class EngineTests
         var bells = new byte[widths.Length];
         for (var k = 0; k < widths.Length; k++) bells[k] = Stamp.Bell((ushort)widths[k], (ushort)widths[k], 40);
         const int count = 80;
-        var ids = new int[count];
+        var ids = new World.SourceId[count];
         var sx = new float[count];
         var sy = new float[count];
         var ssize = new int[count];
@@ -1624,7 +1625,7 @@ public sealed class EngineTests
         var l = Layer.New(w);
         var box = Stamp.Box(12, 12, 40);
         var rng = new Random(31);
-        var ids = new int[60];
+        var ids = new World.SourceId[60];
         for (var i = 0; i < ids.Length; i++)
             ids[i] = World.Place(w, l,
                 (float)(rng.NextDouble() * 244 + 6),
@@ -1738,7 +1739,7 @@ public sealed class EngineTests
         for (var i = 0; i < layers.Length; i++) layers[i] = Layer.New(w);
         var stamp = Stamp.Box(20, 20, 25);
         var rng = new Random(53);
-        var ids = new int[120];
+        var ids = new World.SourceId[120];
         for (var round = 0; round < 4; round++)
         {
             for (var i = 0; i < ids.Length; i++)

@@ -7,15 +7,33 @@ using System.Runtime.Intrinsics.X86;
 
 namespace Gi;
 
-internal struct SourceColumns
+internal unsafe struct SourceColumn<T> where T : unmanaged
 {
-    public NativeBuffer<float> X;
-    public NativeBuffer<float> Y;
-    public NativeBuffer<byte> Stamp;
-    public NativeBuffer<byte> Layer;
-    public NativeBuffer<byte> Gain;
-    public NativeBuffer<ushort> Angle;
-    public NativeBuffer<ushort> Scale;
+    public T** Chunks;
+
+    public ref T this[int slot]
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => ref Chunks[slot >> SourceColumns.ChunkBits][slot & SourceColumns.ChunkMask];
+    }
+}
+
+internal unsafe struct SourceColumns
+{
+    public const int ChunkSlots = 16384;
+    public const int ChunkBits = 14;
+    public const int ChunkMask = ChunkSlots - 1;
+    public const int MaxChunks = World.MaxSourceSlots >> ChunkBits;
+
+    public SourceColumn<float> X;
+    public SourceColumn<float> Y;
+    public SourceColumn<byte> Stamp;
+    public SourceColumn<byte> Layer;
+    public SourceColumn<byte> Gain;
+    public SourceColumn<ushort> Angle;
+    public SourceColumn<ushort> Scale;
+    public SourceColumn<byte> Alive;
+    public SourceColumn<uint> Gen;
     public NativeBuffer<byte> Timed;
     public NativeBuffer<sbyte> FadeFrom;
     public NativeBuffer<sbyte> FadeTo;
@@ -23,20 +41,56 @@ internal struct SourceColumns
     public NativeBuffer<int> FadeTicks;
     public NativeBuffer<int> ExpireAt;
     public NativeBuffer<int> Due;
-    public NativeBuffer<byte> Alive;
     public FreeRing Free;
-    public NativeBuffer<byte> Gen;
     public int Count;
+    public int Chunks;
+
+    public readonly int Slots => Chunks << ChunkBits;
+
+    public void AddChunks(int chunks)
+    {
+        if (Chunks == 0)
+        {
+            var pointers = (nuint)(MaxChunks * sizeof(void*));
+            X.Chunks = (float**)NativeHeap.AllocZeroed(pointers);
+            Y.Chunks = (float**)NativeHeap.AllocZeroed(pointers);
+            Stamp.Chunks = (byte**)NativeHeap.AllocZeroed(pointers);
+            Layer.Chunks = (byte**)NativeHeap.AllocZeroed(pointers);
+            Gain.Chunks = (byte**)NativeHeap.AllocZeroed(pointers);
+            Angle.Chunks = (ushort**)NativeHeap.AllocZeroed(pointers);
+            Scale.Chunks = (ushort**)NativeHeap.AllocZeroed(pointers);
+            Alive.Chunks = (byte**)NativeHeap.AllocZeroed(pointers);
+            Gen.Chunks = (uint**)NativeHeap.AllocZeroed(pointers);
+        }
+
+        for (var i = 0; i < chunks; i++)
+        {
+            var chunk = Chunks;
+            X.Chunks[chunk] = (float*)NativeHeap.AllocZeroed((nuint)(ChunkSlots * sizeof(float)));
+            Y.Chunks[chunk] = (float*)NativeHeap.AllocZeroed((nuint)(ChunkSlots * sizeof(float)));
+            Stamp.Chunks[chunk] = (byte*)NativeHeap.AllocZeroed(ChunkSlots);
+            Layer.Chunks[chunk] = (byte*)NativeHeap.AllocZeroed(ChunkSlots);
+            Gain.Chunks[chunk] = (byte*)NativeHeap.AllocZeroed(ChunkSlots);
+            Angle.Chunks[chunk] = (ushort*)NativeHeap.AllocZeroed((nuint)(ChunkSlots * sizeof(ushort)));
+            Scale.Chunks[chunk] = (ushort*)NativeHeap.AllocZeroed((nuint)(ChunkSlots * sizeof(ushort)));
+            Alive.Chunks[chunk] = (byte*)NativeHeap.AllocZeroed(ChunkSlots);
+            Gen.Chunks[chunk] = (uint*)NativeHeap.AllocZeroed((nuint)(ChunkSlots * sizeof(uint)));
+            Chunks++;
+        }
+    }
 
     public void Release()
     {
-        X.Free();
-        Y.Free();
-        Stamp.Free();
-        Layer.Free();
-        Gain.Free();
-        Angle.Free();
-        Scale.Free();
+        ReleaseColumn(ref X);
+        ReleaseColumn(ref Y);
+        ReleaseColumn(ref Stamp);
+        ReleaseColumn(ref Layer);
+        ReleaseColumn(ref Gain);
+        ReleaseColumn(ref Angle);
+        ReleaseColumn(ref Scale);
+        ReleaseColumn(ref Alive);
+        ReleaseColumn(ref Gen);
+        Chunks = 0;
         Timed.Free();
         FadeFrom.Free();
         FadeTo.Free();
@@ -44,9 +98,16 @@ internal struct SourceColumns
         FadeTicks.Free();
         ExpireAt.Free();
         Due.Free();
-        Alive.Free();
         Free.Release();
-        Gen.Free();
+    }
+
+    private void ReleaseColumn<T>(ref SourceColumn<T> column) where T : unmanaged
+    {
+        if (column.Chunks == null) return;
+
+        for (var i = 0; i < Chunks; i++) NativeHeap.Free(column.Chunks[i]);
+        NativeHeap.Free(column.Chunks);
+        column.Chunks = null;
     }
 }
 
@@ -107,7 +168,7 @@ internal struct DepositOp
     public sbyte ToGain;
     public byte AliveFrom;
     public byte AliveTo;
-    public byte FromGen;
+    public uint FromGen;
     public ushort FromAngle;
     public ushort ToAngle;
     public ushort FromScale;
@@ -187,7 +248,6 @@ public static unsafe partial class World
     private const int MaxGain = ValidationRules.MaxGain;
     private const ushort UnitScale = 256;
     internal const int MaxSourceSlots = 1 << 24;
-    internal const int SourceIndexMask = MaxSourceSlots - 1;
     internal const int Cells = TileBake.TileSize * TileBake.TileSize;
     internal const int DenseBytes = Cells * sizeof(int);
     internal const int DiffBytes = TileBake.DiffRows * TileBake.DiffPitch * sizeof(int);
@@ -273,6 +333,32 @@ public static unsafe partial class World
 
     public static int Revision(byte world) => world < _worldCount ? Runtime.WorldRevisions[world] : 0;
 
+    public readonly struct SourceId : IEquatable<SourceId>
+    {
+        public readonly uint Slot;
+        public readonly uint Generation;
+
+        public SourceId(uint slot, uint generation)
+        {
+            Slot = slot;
+            Generation = generation;
+        }
+
+        public bool Equals(SourceId other) => Slot == other.Slot && Generation == other.Generation;
+
+        public override bool Equals(object? obj) => obj is SourceId other && Equals(other);
+
+        public override int GetHashCode() => (int)(Slot * 31u ^ Generation);
+
+        public override string ToString()
+            => "slot " + Slot.ToString(System.Globalization.CultureInfo.InvariantCulture) +
+               " generation " + Generation.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        public static bool operator ==(SourceId left, SourceId right) => left.Equals(right);
+
+        public static bool operator !=(SourceId left, SourceId right) => !left.Equals(right);
+    }
+
     public readonly struct SourceSpec
     {
         public readonly float X;
@@ -295,19 +381,19 @@ public static unsafe partial class World
         }
     }
 
-    public static bool TryGetSourceSpec(byte world, int source, out SourceSpec spec)
+    public static bool TryGetSourceSpec(byte world, SourceId source, out SourceSpec spec)
     {
         spec = default;
         if (!TrySource(world, source, out _, out var s, out var i)) return false;
 
         spec = new SourceSpec(
-            s->X.Pointer[i],
-            s->Y.Pointer[i],
-            s->Angle.Pointer[i] * ((float)Math.PI * 2 / 65536),
-            s->Scale.Pointer[i] / 256f,
-            (sbyte)s->Gain.Pointer[i],
-            s->Layer.Pointer[i],
-            s->Stamp.Pointer[i]);
+            s->X[i],
+            s->Y[i],
+            s->Angle[i] * ((float)Math.PI * 2 / 65536),
+            s->Scale[i] / 256f,
+            (sbyte)s->Gain[i],
+            s->Layer[i],
+            s->Stamp[i]);
         return true;
     }
 
@@ -478,53 +564,54 @@ public static unsafe partial class World
     internal static bool AngleChanged(WorldCtx* w, byte layer, ushort oldAngle, ushort newAngle)
         => w->GridCount > 0 && ((oldAngle ^ newAngle) & w->Recipes[layer].TurnMask) != 0;
 
-    public static int Place(byte world, byte layer, float x, float y, byte stamp, sbyte gain)
+    public static SourceId Place(byte world, byte layer, float x, float y, byte stamp, sbyte gain)
     {
         var w = GetContext(world);
         if (w == null || layer >= w->LayerCount || !StampCatalog.Valid(stamp) || IsDerived(w, layer) ||
-            !float.IsFinite(x) || !float.IsFinite(y)) return -1;
+            !float.IsFinite(x) || !float.IsFinite(y)) return default;
 
         var s = &w->Sources;
-        if (!s->Free.TryPop(out var i))
+        int i;
+        if (!s->Free.TryPop(out i))
         {
-            if (s->Count >= MaxSourceSlots) return -1;
-            if (s->Count == s->X.Length) GrowSources(s, w);
+            if (s->Count >= MaxSourceSlots) return default;
+            if (s->Count == s->Slots) EnsureSourceCapacity(s, w, s->Count + 1);
             i = s->Count++;
         }
 
         var g = (byte)Math.Clamp((int)gain, -MaxGain, MaxGain);
-        var gen = (byte)((s->Gen.Pointer[i] + 1) & 127);
-        s->Gen.Pointer[i] = gen;
-        s->X.Pointer[i] = x;
-        s->Y.Pointer[i] = y;
-        s->Stamp.Pointer[i] = stamp;
-        s->Layer.Pointer[i] = layer;
-        s->Gain.Pointer[i] = g;
-        s->Angle.Pointer[i] = 0;
-        s->Scale.Pointer[i] = UnitScale;
+        var gen = s->Gen[i] + 1;
+        s->Gen[i] = gen;
+        s->X[i] = x;
+        s->Y[i] = y;
+        s->Stamp[i] = stamp;
+        s->Layer[i] = layer;
+        s->Gain[i] = g;
+        s->Angle[i] = 0;
+        s->Scale[i] = UnitScale;
         JournalSchedule(w, s, i);
         s->Timed.Pointer[i] = 0;
-        s->Alive.Pointer[i] = 1;
+        s->Alive[i] = 1;
         if (g != 0) w->LayerLive[layer]++;
         EnqueuePlace(w, i, x, y, stamp, layer, (sbyte)g);
-        return (gen << 24) | i;
+        return new SourceId((uint)i, gen);
     }
 
-    public static void Move(byte world, int source, float x, float y)
+    public static void Move(byte world, SourceId source, float x, float y)
     {
         if (!float.IsFinite(x) || !float.IsFinite(y)) return;
         if (!TrySource(world, source, out var w, out var s, out var i)) return;
 
-        var oldX = s->X.Pointer[i];
-        var oldY = s->Y.Pointer[i];
+        var oldX = s->X[i];
+        var oldY = s->Y[i];
         if (oldX == x && oldY == y) return;
-        if (PositionChanged(w, s->Layer.Pointer[i], oldX, oldY, x, y))
-            EnqueueMutation(w, s, i, x, y, (sbyte)s->Gain.Pointer[i], s->Angle.Pointer[i], s->Scale.Pointer[i], true);
-        s->X.Pointer[i] = x;
-        s->Y.Pointer[i] = y;
+        if (PositionChanged(w, s->Layer[i], oldX, oldY, x, y))
+            EnqueueMutation(w, s, i, x, y, (sbyte)s->Gain[i], s->Angle[i], s->Scale[i], true);
+        s->X[i] = x;
+        s->Y[i] = y;
     }
 
-    public static void SetGain(byte world, int source, sbyte gain)
+    public static void SetGain(byte world, SourceId source, sbyte gain)
     {
         if (!TrySource(world, source, out var w, out var s, out var i)) return;
 
@@ -535,54 +622,54 @@ public static unsafe partial class World
             s->Timed.Pointer[i] &= unchecked((byte)~Fading);
         }
 
-        if (next == s->Gain.Pointer[i]) return;
+        if (next == s->Gain[i]) return;
 
-        CountGain(w, s->Layer.Pointer[i], s->Gain.Pointer[i], next);
-        EnqueueMutation(w, s, i, s->X.Pointer[i], s->Y.Pointer[i], (sbyte)next, s->Angle.Pointer[i], s->Scale.Pointer[i], true);
-        s->Gain.Pointer[i] = next;
+        CountGain(w, s->Layer[i], s->Gain[i], next);
+        EnqueueMutation(w, s, i, s->X[i], s->Y[i], (sbyte)next, s->Angle[i], s->Scale[i], true);
+        s->Gain[i] = next;
     }
 
-    public static void Turn(byte world, int source, float angle)
+    public static void Turn(byte world, SourceId source, float angle)
     {
         if (!TrySource(world, source, out var w, out var s, out var i) || !float.IsFinite(angle)) return;
 
         var turns = angle * (1.0 / (2 * Math.PI));
         turns -= Math.Floor(turns);
         var next = (ushort)((int)(turns * 65536.0) & 0xFFFF);
-        var old = s->Angle.Pointer[i];
+        var old = s->Angle[i];
         if (next == old) return;
 
-        if (AngleChanged(w, s->Layer.Pointer[i], old, next))
-            EnqueueMutation(w, s, i, s->X.Pointer[i], s->Y.Pointer[i], (sbyte)s->Gain.Pointer[i], next, s->Scale.Pointer[i], true);
-        s->Angle.Pointer[i] = next;
+        if (AngleChanged(w, s->Layer[i], old, next))
+            EnqueueMutation(w, s, i, s->X[i], s->Y[i], (sbyte)s->Gain[i], next, s->Scale[i], true);
+        s->Angle[i] = next;
     }
 
-    public static void Scale(byte world, int source, float scale)
+    public static void Scale(byte world, SourceId source, float scale)
     {
         if (!TrySource(world, source, out var w, out var s, out var i) || !float.IsFinite(scale)) return;
 
         var q8 = Math.Floor(scale * 256.0);
         var next = (ushort)(q8 < 1 ? 1 : q8 > ushort.MaxValue ? ushort.MaxValue : q8);
-        if (next == s->Scale.Pointer[i]) return;
+        if (next == s->Scale[i]) return;
 
-        EnqueueMutation(w, s, i, s->X.Pointer[i], s->Y.Pointer[i], (sbyte)s->Gain.Pointer[i], s->Angle.Pointer[i], next, true);
-        s->Scale.Pointer[i] = next;
+        EnqueueMutation(w, s, i, s->X[i], s->Y[i], (sbyte)s->Gain[i], s->Angle[i], next, true);
+        s->Scale[i] = next;
     }
 
-    public static void Remove(byte world, int source)
+    public static void Remove(byte world, SourceId source)
     {
         if (!TrySource(world, source, out var w, out var s, out var i)) return;
 
-        if (s->Gain.Pointer[i] != 0) w->LayerLive[s->Layer.Pointer[i]]--;
-        EnqueueMutation(w, s, i, s->X.Pointer[i], s->Y.Pointer[i], 0, s->Angle.Pointer[i], s->Scale.Pointer[i], false);
+        if (s->Gain[i] != 0) w->LayerLive[s->Layer[i]]--;
+        EnqueueMutation(w, s, i, s->X[i], s->Y[i], 0, s->Angle[i], s->Scale[i], false);
         if (s->Timed.Pointer[i] != 0)
         {
             JournalSchedule(w, s, i);
             s->Timed.Pointer[i] = 0;
         }
 
-        s->Alive.Pointer[i] = 0;
-        s->Free.Push(i);
+        s->Alive[i] = 0;
+        if (s->Gen[i] != uint.MaxValue) s->Free.Push(i);
     }
 
     private static void EnqueuePlace(WorldCtx* w, int slot, float x, float y, byte stamp, byte layer, sbyte gain)
@@ -622,7 +709,7 @@ public static unsafe partial class World
         freshOp->ToScale = UnitScale;
         freshOp->AliveFrom = 0;
         freshOp->AliveTo = 1;
-        freshOp->FromGen = w->Sources.Gen.Pointer[slot];
+        freshOp->FromGen = w->Sources.Gen[slot];
         w->Pending.Pointer[slot] = n + 1;
     }
 
@@ -642,19 +729,19 @@ public static unsafe partial class World
             return;
         }
 
-        var stamp = s->Stamp.Pointer[slot];
-        var layer = s->Layer.Pointer[slot];
+        var stamp = s->Stamp[slot];
+        var layer = s->Layer[slot];
         var n = w->Ops.Length;
         w->Ops.Resize(n + 1);
         var op2 = w->Ops.Pointer + n;
         op2->Slot = slot;
-        op2->FromX = s->X.Pointer[slot];
-        op2->FromY = s->Y.Pointer[slot];
+        op2->FromX = s->X[slot];
+        op2->FromY = s->Y[slot];
         op2->FromStamp = stamp;
         op2->FromLayer = layer;
-        op2->FromGain = (sbyte)s->Gain.Pointer[slot];
-        op2->FromAngle = s->Angle.Pointer[slot];
-        op2->FromScale = s->Scale.Pointer[slot];
+        op2->FromGain = (sbyte)s->Gain[slot];
+        op2->FromAngle = s->Angle[slot];
+        op2->FromScale = s->Scale[slot];
         op2->ToX = x;
         op2->ToY = y;
         op2->ToStamp = stamp;
@@ -664,7 +751,7 @@ public static unsafe partial class World
         op2->ToScale = scale;
         op2->AliveFrom = 1;
         op2->AliveTo = (byte)(alive ? 1 : 0);
-        op2->FromGen = s->Gen.Pointer[slot];
+        op2->FromGen = s->Gen[slot];
         w->Pending.Pointer[slot] = n + 1;
     }
 
@@ -901,12 +988,12 @@ public static unsafe partial class World
         int chainsRegion, int denseRegion, int* tails, NativeBuffer<RebuildChunk>* arena, NativeBuffer<Placement>* placements)
     {
         var s = &w->Sources;
-        if (s->Alive.Pointer[sourceIndex] == 0 || s->Layer.Pointer[sourceIndex] != layer) return;
-        var gain = (sbyte)s->Gain.Pointer[sourceIndex];
+        if (s->Alive[sourceIndex] == 0 || s->Layer[sourceIndex] != layer) return;
+        var gain = (sbyte)s->Gain[sourceIndex];
         if (gain == 0) return;
-        var stamp = s->Stamp.Pointer[sourceIndex];
-        if (!TileBake.Place(s->X.Pointer[sourceIndex], s->Y.Pointer[sourceIndex], g->OriginX, g->OriginY, g->ScaleQ8, g->Size,
-            StampCatalog.Get(stamp), s->Angle.Pointer[sourceIndex], s->Scale.Pointer[sourceIndex], LayerPrecision(w, layer), out var p)) return;
+        var stamp = s->Stamp[sourceIndex];
+        if (!TileBake.Place(s->X[sourceIndex], s->Y[sourceIndex], g->OriginX, g->OriginY, g->ScaleQ8, g->Size,
+            StampCatalog.Get(stamp), s->Angle[sourceIndex], s->Scale[sourceIndex], LayerPrecision(w, layer), out var p)) return;
 
         uint stampSlot = stamp | ((uint)slotIndex << 8);
         var local = 0;
@@ -1117,7 +1204,7 @@ public static unsafe partial class World
         if (w == null) return;
         Runtime.WorldRevisions[world]++;
         var s = &w->Sources;
-        new Span<byte>(s->Alive.Pointer, s->Count).Clear();
+        for (var i = 0; i < s->Count; i++) s->Alive[i] = 0;
         s->Count = 0;
         s->Free.Clear();
         w->Ops.Resize(0);
@@ -1212,23 +1299,26 @@ public static unsafe partial class World
         new Span<int>(w->LayerLive, w->LayerCount).Clear();
         for (var i = 0; i < s->Count; i++)
         {
-            if (s->Alive.Pointer[i] == 0) s->Free.Push(i);
-            else if (s->Gain.Pointer[i] != 0) w->LayerLive[s->Layer.Pointer[i]]++;
+            if (s->Alive[i] != 0)
+            {
+                if (s->Gain[i] != 0) w->LayerLive[s->Layer[i]]++;
+            }
+            else if (s->Gen[i] != uint.MaxValue) s->Free.Push(i);
         }
     }
 
     private static void RestoreSlot(SourceColumns* s, DepositOp* op)
     {
         var slot = op->Slot;
-        s->X.Pointer[slot] = op->FromX;
-        s->Y.Pointer[slot] = op->FromY;
-        s->Stamp.Pointer[slot] = op->FromStamp;
-        s->Layer.Pointer[slot] = op->FromLayer;
-        s->Gain.Pointer[slot] = (byte)op->FromGain;
-        s->Angle.Pointer[slot] = op->FromAngle;
-        s->Scale.Pointer[slot] = op->FromScale;
-        s->Alive.Pointer[slot] = op->AliveFrom;
-        if (op->AliveFrom != 0) s->Gen.Pointer[slot] = op->FromGen;
+        s->X[slot] = op->FromX;
+        s->Y[slot] = op->FromY;
+        s->Stamp[slot] = op->FromStamp;
+        s->Layer[slot] = op->FromLayer;
+        s->Gain[slot] = (byte)op->FromGain;
+        s->Angle[slot] = op->FromAngle;
+        s->Scale[slot] = op->FromScale;
+        s->Alive[slot] = op->AliveFrom;
+        if (op->AliveFrom != 0) s->Gen[slot] = op->FromGen;
     }
 
     private static void EnqueueRewind(WorldCtx* w, DepositOp* entry)
@@ -1279,7 +1369,7 @@ public static unsafe partial class World
             var w = Runtime.Worlds + wi;
             var s = &w->Sources;
             for (var i = 0; i < s->Count; i++)
-                if (s->Alive.Pointer[i] != 0 && s->Stamp.Pointer[i] == stamp) return true;
+                if (s->Alive[i] != 0 && s->Stamp[i] == stamp) return true;
             if (References(w->Ops, stamp) || References(w->Journal, stamp)) return true;
         }
 
@@ -1293,13 +1383,12 @@ public static unsafe partial class World
         return false;
     }
 
-    private static bool TrySource(byte world, int source, out WorldCtx* w, out SourceColumns* s, out int index)
+    private static bool TrySource(byte world, SourceId source, out WorldCtx* w, out SourceColumns* s, out int index)
     {
         w = GetContext(world);
         s = w == null ? null : &w->Sources;
-        index = source & SourceIndexMask;
-        return s != null && (uint)index < (uint)s->Count && s->Alive.Pointer[index] != 0 &&
-            (source & ~SourceIndexMask) == (s->Gen.Pointer[index] << 24);
+        index = (int)source.Slot;
+        return s != null && (uint)index < (uint)s->Count && s->Alive[index] != 0 && source.Generation == s->Gen[index];
     }
 
     private static LayerData* EnsureDirty(GridCtx* g, byte layer)
@@ -1578,23 +1667,12 @@ public static unsafe partial class World
         w->Scratch.Reset();
     }
 
-    private static void GrowSources(SourceColumns* s, WorldCtx* w)
-    {
-        EnsureSourceCapacity(s, w, Math.Max(64, s->X.Length * 2));
-    }
-
     private static void EnsureSourceCapacity(SourceColumns* s, WorldCtx* w, int required)
     {
-        var initialized = s->X.Length;
+        var initialized = s->Slots;
         if (required <= initialized) return;
-        var capacity = Math.Min(MaxSourceSlots, Math.Max(required, Math.Max(64, initialized * 2)));
-        s->X.Resize(capacity);
-        s->Y.Resize(capacity);
-        s->Stamp.Resize(capacity);
-        s->Layer.Resize(capacity);
-        s->Gain.Resize(capacity);
-        s->Angle.Resize(capacity);
-        s->Scale.Resize(capacity);
+        var capacity = Math.Min(MaxSourceSlots, (required + SourceColumns.ChunkMask) & ~SourceColumns.ChunkMask);
+        s->AddChunks((capacity - initialized) >> SourceColumns.ChunkBits);
         s->Timed.Resize(capacity);
         s->FadeFrom.Resize(capacity);
         s->FadeTo.Resize(capacity);
@@ -1602,9 +1680,7 @@ public static unsafe partial class World
         s->FadeTicks.Resize(capacity);
         s->ExpireAt.Resize(capacity);
         s->Due.Resize(capacity);
-        s->Alive.Resize(capacity);
         s->Free.Reserve(capacity);
-        s->Gen.Resize(capacity);
         w->Pending.Resize(capacity);
     }
 

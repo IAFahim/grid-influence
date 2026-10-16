@@ -27,7 +27,7 @@ public sealed unsafe class ColumnBudgetTests : IDisposable
         const int count = 65;
         var xs = stackalloc float[count];
         var ys = stackalloc float[count];
-        var excludes = stackalloc int[count];
+        var excludes = stackalloc World.SourceId[count];
         var values = stackalloc short[count];
         var gx = stackalloc float[count];
         var gy = stackalloc float[count];
@@ -36,7 +36,7 @@ public sealed unsafe class ColumnBudgetTests : IDisposable
         {
             xs[i] = i % 3 == 0 ? -1f : 1.5f;
             ys[i] = 1.5f;
-            excludes[i] = -1;
+            excludes[i] = default;
         }
 
         for (var mode = 0; mode < 3; mode++)
@@ -108,7 +108,7 @@ public sealed unsafe class ColumnBudgetTests : IDisposable
         World.Process(_world);
         var xs = new float[count];
         var ys = new float[count];
-        var excludes = new int[count];
+        var excludes = new World.SourceId[count];
         var values = new short[count];
         var gx = new float[count];
         var gy = new float[count];
@@ -117,11 +117,11 @@ public sealed unsafe class ColumnBudgetTests : IDisposable
         {
             xs[i] = 1.5f + i % 125;
             ys[i] = 1.5f + i % 123;
-            excludes[i] = i % 2 == 0 ? source : -1;
+            excludes[i] = i % 2 == 0 ? source : default;
         }
 
         fixed (float* xp = xs, yp = ys, gxp = gx, gyp = gy)
-        fixed (int* ep = excludes)
+        fixed (World.SourceId* ep = excludes)
         fixed (short* vp = values)
         fixed (ulong* wp = words)
         {

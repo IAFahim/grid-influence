@@ -16,7 +16,7 @@ public sealed unsafe class ReferenceFieldTests
     private sealed class Source
     {
         public required ReferenceStamp Stamp;
-        public int Handle;
+        public World.SourceId Handle;
         public int Layer = 0;
         public int Gain;
         public float X;
@@ -331,7 +331,7 @@ public sealed unsafe class ReferenceFieldTests
             var wx = grid.X + (x + 0.5f) * 256 / grid.Scale;
             var wy = grid.Y + (y + 0.5f) * 256 / grid.Scale;
             var excluded = probe == 0 ? -1 : probe % prepared.Length;
-            var source = excluded < 0 ? -1 : prepared[excluded].Source.Handle;
+            var source = excluded < 0 ? default : prepared[excluded].Source.Handle;
             var point = ReferenceCell(prepared, x, y, excluded);
             var left = x == 0 ? default : ReferenceCell(prepared, x - 1, y, excluded);
             var right = x + 1 == grid.Cells ? default : ReferenceCell(prepared, x + 1, y, excluded);

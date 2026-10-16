@@ -44,7 +44,7 @@ public static unsafe partial class World
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    public static bool TrySense(byte world, byte layer, float x, float y, int exclude, out short value)
+    public static bool TrySense(byte world, byte layer, float x, float y, SourceId exclude, out short value)
     {
         value = 0;
         var w = GetContext(world);
@@ -63,9 +63,9 @@ public static unsafe partial class World
     }
 
     public static bool TrySenseArea(byte world, byte layer, float x, float y, float reach, out long total)
-        => SenseArea(world, layer, x, y, reach, -1, out total);
+        => SenseArea(world, layer, x, y, reach, default, out total);
 
-    public static bool TrySenseArea(byte world, byte layer, float x, float y, float reach, int exclude, out long total)
+    public static bool TrySenseArea(byte world, byte layer, float x, float y, float reach, SourceId exclude, out long total)
         => SenseArea(world, layer, x, y, reach, exclude, out total);
 
     #if NET
@@ -362,7 +362,7 @@ public static unsafe partial class World
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    public static bool TrySenseGradient(byte world, byte layer, float x, float y, int exclude, out float gx, out float gy)
+    public static bool TrySenseGradient(byte world, byte layer, float x, float y, SourceId exclude, out float gx, out float gy)
     {
         gx = 0f;
         gy = 0f;
@@ -450,7 +450,7 @@ public static unsafe partial class World
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    private static bool SenseArea(byte world, byte layer, float x, float y, float reach, int exclude, out long total)
+    private static bool SenseArea(byte world, byte layer, float x, float y, float reach, SourceId exclude, out long total)
     {
         total = 0;
         var w = GetContext(world);
@@ -771,16 +771,15 @@ public static unsafe partial class World
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    private static bool Applied(WorldCtx* w, int id, byte layer, out Placed source)
+    private static bool Applied(WorldCtx* w, SourceId id, byte layer, out Placed source)
     {
         source = default;
-        if (id < 0) return false;
 
         var s = &w->Sources;
-        var slot = id & SourceIndexMask;
+        var slot = (int)id.Slot;
         if ((uint)slot >= (uint)s->Count) return false;
 
-        var generation = (byte)((uint)id >> 24);
+        var generation = id.Generation;
         var reads = w->Recipes[layer].Reads;
         var pending = w->Pending.Pointer[slot];
         if (pending != 0)
@@ -798,17 +797,17 @@ public static unsafe partial class World
             return source.Gain != 0;
         }
 
-        var sourceLayer = s->Layer.Pointer[slot];
-        if (s->Alive.Pointer[slot] == 0 || s->Gen.Pointer[slot] != generation || (reads & (1u << sourceLayer)) == 0)
+        var sourceLayer = s->Layer[slot];
+        if (s->Alive[slot] == 0 || s->Gen[slot] != generation || (reads & (1u << sourceLayer)) == 0)
             return false;
 
-        source.X = s->X.Pointer[slot];
-        source.Y = s->Y.Pointer[slot];
-        source.Stamp = s->Stamp.Pointer[slot];
+        source.X = s->X[slot];
+        source.Y = s->Y[slot];
+        source.Stamp = s->Stamp[slot];
         source.Layer = sourceLayer;
-        source.Gain = (sbyte)s->Gain.Pointer[slot];
-        source.Angle = s->Angle.Pointer[slot];
-        source.Size = s->Scale.Pointer[slot];
+        source.Gain = (sbyte)s->Gain[slot];
+        source.Angle = s->Angle[slot];
+        source.Size = s->Scale[slot];
         return source.Gain != 0;
     }
 

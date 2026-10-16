@@ -29,7 +29,7 @@ public sealed unsafe class LayerLiveTests : IDisposable
         var counts = new int[Layers];
         var s = &World.GetContext(_world)->Sources;
         for (var i = 0; i < s->Count; i++)
-            if (s->Alive.Pointer[i] != 0 && s->Gain.Pointer[i] != 0) counts[s->Layer.Pointer[i]]++;
+            if (s->Alive[i] != 0 && s->Gain[i] != 0) counts[s->Layer[i]]++;
         return counts;
     }
 
@@ -45,7 +45,7 @@ public sealed unsafe class LayerLiveTests : IDisposable
         Recount().AsSpan().SequenceEqual(Maintained()),
         $"{step}: maintained [{string.Join(",", Maintained())}] recount [{string.Join(",", Recount())}]");
 
-    private int PlaceAt(byte layer, sbyte gain, float x = 10.5f, float y = 10.5f)
+    private World.SourceId PlaceAt(byte layer, sbyte gain, float x = 10.5f, float y = 10.5f)
         => World.Place(_world, layer, x, y, _stamp, gain);
 
     [Fact]
@@ -239,7 +239,7 @@ public sealed unsafe class LayerLiveTests : IDisposable
     public void Process_DoesNotRecountWhileTimersAreScheduled()
     {
         const int count = 200;
-        var ids = new int[count];
+        var ids = new World.SourceId[count];
         for (var i = 0; i < count; i++)
         {
             ids[i] = PlaceAt((byte)(i % Layers), 2, 1f + i, 1f + i);
@@ -259,10 +259,10 @@ public sealed unsafe class LayerLiveTests : IDisposable
     public void RandomStreams_KeepTheCountEqualToABruteForceRecount(int seed)
     {
         var random = new Random(seed);
-        var ids = new List<int>();
+        var ids = new List<World.SourceId>();
         var recording = false;
         sbyte Gain() => (sbyte)random.Next(-3, 4);
-        int Target() => ids.Count == 0 ? -1 : ids[random.Next(ids.Count)];
+        World.SourceId Target() => ids.Count == 0 ? default : ids[random.Next(ids.Count)];
         float Coordinate() => 2f + random.Next(240);
 
         for (var step = 0; step < 600; step++)
@@ -303,9 +303,9 @@ public sealed unsafe class LayerLiveTests : IDisposable
         }
     }
 
-    private List<int> RandomBatch(Random random, List<int> ids)
+    private List<World.SourceId> RandomBatch(Random random, List<World.SourceId> ids)
     {
-        var created = new List<int>();
+        var created = new List<World.SourceId>();
         var count = random.Next(1, 9);
         var commands = new SourceCommand[count];
         var places = new List<int>();
@@ -314,7 +314,7 @@ public sealed unsafe class LayerLiveTests : IDisposable
             SourceTarget target;
             var useCreated = places.Count > 0 && random.Next(3) == 0;
             if (useCreated) target = SourceTarget.CreatedBy(places[random.Next(places.Count)]);
-            else target = ids.Count == 0 ? -1 : ids[random.Next(ids.Count)];
+            else target = ids.Count == 0 ? default(World.SourceId) : ids[random.Next(ids.Count)];
             var gain = (sbyte)random.Next(-3, 4);
             var x = 2f + random.Next(240);
             var y = 2f + random.Next(240);

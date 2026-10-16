@@ -4,7 +4,7 @@ public static unsafe partial class World
 {
     public struct TransformRange
     {
-        public int* Sources;
+        public SourceId* Sources;
         public float* Xs;
         public float* Ys;
         public float* Headings;
@@ -97,20 +97,20 @@ public static unsafe partial class World
             for (var i = 0; i < range.Count; i++)
             {
                 var id = sources[i];
-                var slot = id & SourceIndexMask;
+                var slot = (int)id.Slot;
                 var x = xs[i];
                 var y = ys[i];
-                if (id < 0 || slot >= source->Count || source->Alive.Pointer[slot] == 0 ||
-                    (uint)id >> 24 != source->Gen.Pointer[slot] || !float.IsFinite(x) || !float.IsFinite(y))
+                if ((uint)slot >= (uint)source->Count || source->Alive[slot] == 0 ||
+                    id.Generation != source->Gen[slot] || !float.IsFinite(x) || !float.IsFinite(y))
                 {
                     if (invalid != null) invalid[i >> 6] |= 1ul << (i & 63);
                     continue;
                 }
 
-                var oldX = source->X.Pointer[slot];
-                var oldY = source->Y.Pointer[slot];
-                var oldAngle = source->Angle.Pointer[slot];
-                var oldScale = source->Scale.Pointer[slot];
+                var oldX = source->X[slot];
+                var oldY = source->Y[slot];
+                var oldAngle = source->Angle[slot];
+                var oldScale = source->Scale[slot];
                 var angle = oldAngle;
                 if (headings != null && float.IsFinite(headings[i]))
                     angle = QuantizeSourceBatchAngle(headings[i]);
@@ -120,18 +120,18 @@ public static unsafe partial class World
                 var rawPosChanged = *(int*)&x != *(int*)&oldX || *(int*)&y != *(int*)&oldY;
                 if (!rawPosChanged && angle == oldAngle && scale == oldScale) continue;
 
-                var layer = source->Layer.Pointer[slot];
+                var layer = source->Layer[slot];
                 var posChanged = rawPosChanged && PositionChanged(context, layer, oldX, oldY, x, y);
                 var angChanged = angle != oldAngle && AngleChanged(context, layer, oldAngle, angle);
                 var scaleChanged = scale != oldScale;
-                var gain = (sbyte)source->Gain.Pointer[slot];
+                var gain = (sbyte)source->Gain[slot];
                 if (posChanged) EnqueueMutation(context, source, slot, x, y, gain, oldAngle, oldScale, true);
-                source->X.Pointer[slot] = x;
-                source->Y.Pointer[slot] = y;
+                source->X[slot] = x;
+                source->Y[slot] = y;
                 if (angChanged) EnqueueMutation(context, source, slot, x, y, gain, angle, oldScale, true);
-                source->Angle.Pointer[slot] = angle;
+                source->Angle[slot] = angle;
                 if (scaleChanged) EnqueueMutation(context, source, slot, x, y, gain, angle, scale, true);
-                source->Scale.Pointer[slot] = scale;
+                source->Scale[slot] = scale;
             }
         }
     }
@@ -161,11 +161,11 @@ public static unsafe partial class World
             {
                 var row = rowBase + i;
                 var id = sources[i];
-                var slot = id & SourceIndexMask;
+                var slot = (int)id.Slot;
                 var x = xs[i];
                 var y = ys[i];
-                if (id < 0 || slot >= source->Count || source->Alive.Pointer[slot] == 0 ||
-                    (uint)id >> 24 != source->Gen.Pointer[slot] || !float.IsFinite(x) || !float.IsFinite(y))
+                if ((uint)slot >= (uint)source->Count || source->Alive[slot] == 0 ||
+                    id.Generation != source->Gen[slot] || !float.IsFinite(x) || !float.IsFinite(y))
                 {
                     if (invalid != null) invalid[i >> 6] |= 1ul << (i & 63);
                     continue;

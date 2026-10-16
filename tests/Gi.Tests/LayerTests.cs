@@ -68,7 +68,7 @@ public sealed class LayerTests
         Grid.New(w, 6, 0f, 0f, 64f);
         var a = Layer.New(w);
         var d = Layer.Max(w, a, a);
-        Assert.Equal(-1, World.Place(w, d, 10f, 10f, Stamp.Box(2, 2, 10), 1));
+        Assert.Equal(default(World.SourceId), World.Place(w, d, 10f, 10f, Stamp.Box(2, 2, 10), 1));
         Assert.Throws<ArgumentOutOfRangeException>(() => Layer.Min(w, a, 31));
         Assert.Throws<ArgumentOutOfRangeException>(() => Layer.Sum(w, a, short.MaxValue + 1));
         Assert.Throws<ArgumentOutOfRangeException>(() => Layer.Sum(w, a, 1, -1));

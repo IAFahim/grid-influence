@@ -27,15 +27,15 @@ public sealed class SlotRingTests : IDisposable
         Assert.True(Stamp.Free(_stamp));
     }
 
-    private static int SlotOf(int id) => id & World.SourceIndexMask;
+    private static uint SlotOf(World.SourceId id) => id.Slot;
 
-    private int Place(byte world) => World.Place(world, _layer, 10f, 10f, _stamp, 1);
+    private World.SourceId Place(byte world) => World.Place(world, _layer, 10f, 10f, _stamp, 1);
 
-    private int Place() => Place(_world);
+    private World.SourceId Place() => Place(_world);
 
-    private int[] PlaceMany(int count)
+    private World.SourceId[] PlaceMany(int count)
     {
-        var ids = new int[count];
+        var ids = new World.SourceId[count];
         for (var i = 0; i < count; i++) ids[i] = Place();
         return ids;
     }
@@ -53,7 +53,7 @@ public sealed class SlotRingTests : IDisposable
         var third = SlotOf(Place());
         var fresh = SlotOf(Place());
 
-        Assert.Equal([3, 1, 5, 8], [first, second, third, fresh]);
+        Assert.Equal([3u, 1u, 5u, 8u], [first, second, third, fresh]);
     }
 
     [Fact]
@@ -66,7 +66,7 @@ public sealed class SlotRingTests : IDisposable
 
         var reused = Place();
 
-        Assert.Equal(0, SlotOf(reused));
+        Assert.Equal(0u, SlotOf(reused));
         Assert.NotEqual(ids[0], reused);
         Assert.False(World.TryGetSourceSpec(_world, ids[2], out _));
     }
@@ -79,7 +79,7 @@ public sealed class SlotRingTests : IDisposable
 
         var reused = Place();
 
-        Assert.Equal(1, SlotOf(reused));
+        Assert.Equal(1u, SlotOf(reused));
         Assert.NotEqual(ids[1], reused);
         Assert.False(World.TryGetSourceSpec(_world, ids[1], out _));
         Assert.True(World.TryGetSourceSpec(_world, reused, out _));
@@ -110,7 +110,7 @@ public sealed class SlotRingTests : IDisposable
         var third = SlotOf(Place());
         var fresh = SlotOf(Place());
 
-        Assert.Equal([SlotOf(b), SlotOf(c), SlotOf(a), 4], [first, second, third, fresh]);
+        Assert.Equal([SlotOf(b), SlotOf(c), SlotOf(a), 4u], [first, second, third, fresh]);
     }
 
     [Fact]
@@ -124,8 +124,8 @@ public sealed class SlotRingTests : IDisposable
         World.Process(_world);
 
         World.Record(_world);
-        Assert.Equal(4, SlotOf(Place()));
-        Assert.Equal(2, SlotOf(Place()));
+        Assert.Equal(4u, SlotOf(Place()));
+        Assert.Equal(2u, SlotOf(Place()));
         World.Remove(_world, ids[0]);
         World.Process(_world);
         World.Rewind(_world);
@@ -136,7 +136,7 @@ public sealed class SlotRingTests : IDisposable
         var third = SlotOf(Place());
         var fresh = SlotOf(Place());
 
-        Assert.Equal([2, 4, 5, 6], [first, second, third, fresh]);
+        Assert.Equal([2u, 4u, 5u, 6u], [first, second, third, fresh]);
         Assert.True(World.TryGetSourceSpec(_world, ids[0], out _));
     }
 
@@ -152,7 +152,7 @@ public sealed class SlotRingTests : IDisposable
         var first = Place();
         var second = Place();
         var third = Place();
-        Assert.Equal([0, 1, 2], [SlotOf(first), SlotOf(second), SlotOf(third)]);
+        Assert.Equal([0u, 1u, 2u], [SlotOf(first), SlotOf(second), SlotOf(third)]);
         foreach (var id in ids) Assert.False(World.TryGetSourceSpec(_world, id, out _));
         Assert.True(World.TryGetSourceSpec(_world, first, out _));
     }
@@ -180,7 +180,7 @@ public sealed class SlotRingTests : IDisposable
             var command = commands[i];
             var expected = command.Kind == SourceCommandKind.Place
                 ? Place(_mirror)
-                : Remove(_mirror, command.Target.Identifier);
+                : Remove(_mirror, command.Target.Source);
             Assert.Equal(expected, results[i].SourceId);
         }
 
@@ -189,18 +189,18 @@ public sealed class SlotRingTests : IDisposable
         World.Process(_mirror);
         Assert.Equal(World.Query(_mirror, 0, _layer, 0, 0, 64, 64), World.Query(_world, 0, _layer, 0, 0, 64, 64));
 
-        int[] Setup(byte world)
+        World.SourceId[] Setup(byte world)
         {
-            var all = new int[64];
+            var all = new World.SourceId[64];
             for (var i = 0; i < all.Length; i++) all[i] = Place(world);
             foreach (var id in all) World.Remove(world, id);
-            var replaced = new int[30];
+            var replaced = new World.SourceId[30];
             for (var i = 0; i < replaced.Length; i++) replaced[i] = Place(world);
             for (var i = 0; i < 20; i++) World.Remove(world, replaced[i]);
             return replaced[20..];
         }
 
-        int Remove(byte world, int id)
+        World.SourceId Remove(byte world, World.SourceId id)
         {
             World.Remove(world, id);
             return id;
@@ -210,7 +210,7 @@ public sealed class SlotRingTests : IDisposable
     [Fact]
     public void RingChurn_AllocatesNothingWhenWarm()
     {
-        var live = new Queue<int>(PlaceMany(300));
+        var live = new Queue<World.SourceId>(PlaceMany(300));
         for (var i = 0; i < 150; i++) World.Remove(_world, live.Dequeue());
         for (var i = 0; i < 400; i++)
         {
@@ -240,15 +240,15 @@ public sealed class SlotRingTests : IDisposable
         const int permanent = 1000;
         const int free = 1000;
         const int frames = 127 * free;
-        var issued = new HashSet<int>();
+        var issued = new HashSet<World.SourceId>();
         var live = SeedPermanentSources(permanent, free, issued);
-        var retired = new List<int>(frames);
-        var previous = -1;
+        var retired = new List<World.SourceId>(frames);
+        var previous = default(World.SourceId);
         for (var frame = 0; frame < frames; frame++)
         {
             var spawned = Place();
             if (!issued.Add(spawned)) Assert.Fail($"id {spawned} reissued at frame {frame}");
-            if (previous >= 0)
+            if (previous != default)
             {
                 Assert.NotEqual(SlotOf(previous), SlotOf(spawned));
                 World.Remove(_world, previous);
@@ -269,13 +269,13 @@ public sealed class SlotRingTests : IDisposable
     {
         const int permanent = 1000;
         const int lag = 256;
-        var live = SeedPermanentSources(permanent, 1000, new HashSet<int>());
-        var retired = new List<int>();
-        var previous = -1;
+        var live = SeedPermanentSources(permanent, 1000, new HashSet<World.SourceId>());
+        var retired = new List<World.SourceId>();
+        var previous = default(World.SourceId);
         for (var frame = 0; frame < 10000; frame++)
         {
             var spawned = Place();
-            if (previous >= 0)
+            if (previous != default)
             {
                 World.Remove(_world, previous);
                 retired.Add(previous);
@@ -302,7 +302,7 @@ public sealed class SlotRingTests : IDisposable
         Assert.True(World.TryGetSourceSpec(_world, previous, out _));
     }
 
-    private int[] SeedPermanentSources(int permanent, int free, HashSet<int> issued)
+    private World.SourceId[] SeedPermanentSources(int permanent, int free, HashSet<World.SourceId> issued)
     {
         var all = PlaceMany(permanent + free);
         foreach (var id in all) Assert.True(issued.Add(id));
@@ -312,9 +312,9 @@ public sealed class SlotRingTests : IDisposable
     }
 
     [Fact]
-    public void ASlotReusedOneHundredTwentyEightTimes_ReissuesItsFirstId()
+    public void ASlotReusedOneHundredTwentyEightTimes_NeverReissuesAnId()
     {
-        var ids = new List<int> { Place() };
+        var ids = new List<World.SourceId> { Place() };
         for (var reuse = 0; reuse < 128; reuse++)
         {
             World.Remove(_world, ids[^1]);
@@ -322,7 +322,6 @@ public sealed class SlotRingTests : IDisposable
         }
 
         Assert.Single(ids.Select(SlotOf).Distinct());
-        Assert.Equal(128, ids.Take(128).Distinct().Count());
-        Assert.Equal(ids[0], ids[128]);
+        Assert.Equal(129, ids.Distinct().Count());
     }
 }

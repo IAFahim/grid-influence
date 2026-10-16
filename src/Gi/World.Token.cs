@@ -37,7 +37,7 @@ public static unsafe partial class World
         return BatchStatus.Applied;
     }
 
-    public static BatchStatus Sync(Token token, int* sources, float* xs, float* ys, int count)
+    public static BatchStatus Sync(Token token, SourceId* sources, float* xs, float* ys, int count)
     {
         var status = ValidateToken(token, out var context);
         if (status != BatchStatus.Applied) return status;

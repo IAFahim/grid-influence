@@ -10,8 +10,8 @@ public sealed class ColumnSenseTests : IDisposable
     private readonly byte _box = Stamp.Box(8, 8, 100);
     private readonly byte _dome = Stamp.Dome(6, 90);
     private readonly byte _cone = Stamp.Cone(5, -80, 270);
-    private readonly int _second;
-    private readonly int _third;
+    private readonly World.SourceId _second;
+    private readonly World.SourceId _third;
 
     public ColumnSenseTests()
     {
@@ -24,7 +24,7 @@ public sealed class ColumnSenseTests : IDisposable
         World.Turn(_world, _third, 1.1f);
         World.Scale(_world, _third, 1.5f);
         World.Process(_world);
-        Assert.True(first >= 0 && _second >= 0 && _third >= 0);
+        Assert.True(first != default && _second != default && _third != default);
     }
 
     public void Dispose()
@@ -35,7 +35,7 @@ public sealed class ColumnSenseTests : IDisposable
         Assert.True(Stamp.Free(_cone));
     }
 
-    private int ExcludeAt(int index) => index % 3 == 0 ? -1 : index % 3 == 1 ? _second : _third;
+    private World.SourceId ExcludeAt(int index) => index % 3 == 0 ? default : index % 3 == 1 ? _second : _third;
 
     [Fact]
     public unsafe void SenseColumnWithExcludes_MatchesScalarSense()
@@ -44,7 +44,7 @@ public sealed class ColumnSenseTests : IDisposable
         var random = new Random(1400);
         Span<float> xs = stackalloc float[count];
         Span<float> ys = stackalloc float[count];
-        Span<int> excludes = stackalloc int[count];
+        Span<World.SourceId> excludes = stackalloc World.SourceId[count];
         Span<short> batch = stackalloc short[count];
         Span<short> scalar = stackalloc short[count];
         Span<ulong> whole = stackalloc ulong[(count + 63) >> 6];
@@ -54,7 +54,7 @@ public sealed class ColumnSenseTests : IDisposable
         var scalarComplete = true;
         fixed (float* xPointer = xs)
         fixed (float* yPointer = ys)
-        fixed (int* excludePointer = excludes)
+        fixed (World.SourceId* excludePointer = excludes)
         fixed (short* batchPointer = batch)
         fixed (short* scalarPointer = scalar)
         fixed (ulong* wholePointer = whole)
@@ -62,7 +62,7 @@ public sealed class ColumnSenseTests : IDisposable
             for (var i = 0; i < count; i++)
             {
                 bool filled;
-                if (excludes[i] >= 0)
+                if (excludes[i].Generation != 0)
                     filled = World.TrySense(_world, _layer, xs[i], ys[i], excludes[i], out scalarPointer[i]);
                 else
                     filled = World.TrySense(_world, _layer, xs[i], ys[i], out scalarPointer[i]);
@@ -84,7 +84,7 @@ public sealed class ColumnSenseTests : IDisposable
         var random = new Random(1401);
         Span<float> xs = stackalloc float[count];
         Span<float> ys = stackalloc float[count];
-        Span<int> excludes = stackalloc int[count];
+        Span<World.SourceId> excludes = stackalloc World.SourceId[count];
         Span<float> batchX = stackalloc float[count];
         Span<float> batchY = stackalloc float[count];
         Span<float> scalarX = stackalloc float[count];
@@ -96,7 +96,7 @@ public sealed class ColumnSenseTests : IDisposable
         var scalarComplete = true;
         fixed (float* xPointer = xs)
         fixed (float* yPointer = ys)
-        fixed (int* excludePointer = excludes)
+        fixed (World.SourceId* excludePointer = excludes)
         fixed (float* batchXPointer = batchX)
         fixed (float* batchYPointer = batchY)
         fixed (float* scalarXPointer = scalarX)
@@ -106,7 +106,7 @@ public sealed class ColumnSenseTests : IDisposable
             for (var i = 0; i < count; i++)
             {
                 bool filled;
-                if (excludes[i] >= 0)
+                if (excludes[i].Generation != 0)
                     filled = World.TrySenseGradient(_world, _layer, xs[i], ys[i], excludes[i], out scalarXPointer[i], out scalarYPointer[i]);
                 else
                     filled = World.TrySenseGradient(_world, _layer, xs[i], ys[i], out scalarXPointer[i], out scalarYPointer[i]);
@@ -131,7 +131,7 @@ public sealed class ColumnSenseTests : IDisposable
         Span<float> xs = stackalloc float[count];
         Span<float> ys = stackalloc float[count];
         Span<float> reaches = stackalloc float[count];
-        Span<int> excludes = stackalloc int[count];
+        Span<World.SourceId> excludes = stackalloc World.SourceId[count];
         Span<long> batch = stackalloc long[count];
         Span<long> scalar = stackalloc long[count];
         Span<ulong> whole = stackalloc ulong[(count + 63) >> 6];
@@ -146,7 +146,7 @@ public sealed class ColumnSenseTests : IDisposable
         fixed (float* xPointer = xs)
         fixed (float* yPointer = ys)
         fixed (float* reachPointer = reaches)
-        fixed (int* excludePointer = excludes)
+        fixed (World.SourceId* excludePointer = excludes)
         fixed (long* batchPointer = batch)
         fixed (long* scalarPointer = scalar)
         fixed (ulong* wholePointer = whole)
@@ -154,7 +154,7 @@ public sealed class ColumnSenseTests : IDisposable
             for (var i = 0; i < count; i++)
             {
                 bool filled;
-                if (excludes[i] >= 0)
+                if (excludes[i].Generation != 0)
                     filled = World.TrySenseArea(_world, _layer, xs[i], ys[i], reaches[i], excludes[i], out scalarPointer[i]);
                 else
                     filled = World.TrySenseArea(_world, _layer, xs[i], ys[i], reaches[i], out scalarPointer[i]);
@@ -304,7 +304,7 @@ public sealed class ColumnSenseTests : IDisposable
         Assert.Equal(_layer, spec.Layer);
         Assert.Equal(_box, spec.Stamp);
 
-        Assert.False(World.TryGetSourceSpec(_world, -1, out _));
+        Assert.False(World.TryGetSourceSpec(_world, default, out _));
         World.Remove(_world, source);
         Assert.False(World.TryGetSourceSpec(_world, source, out _));
     }
