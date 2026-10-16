@@ -14,7 +14,7 @@ internal static partial class Verification
         var g = Gi.Grid.New(w, 6, 0f, 0f, 64f);
         var l = Gi.Layer.New(w);
         var unit = Gi.Stamp.Box(1, 1, 1);
-        var cases = new List<(int Id, int Cx, int Cy, int From, int To, int Ticks)>();
+        var cases = new List<(Gi.World.SourceId Id, int Cx, int Cy, int From, int To, int Ticks)>();
         foreach (var from in new[] { -16, -3, 0, 5, 16 })
         foreach (var to in new[] { -16, 0, 7, 16 })
         foreach (var ticks in new[] { 1, 2, 3, 7, 16, 33, 100 })
@@ -81,7 +81,7 @@ internal static partial class Verification
             {
                 Gi.World.Remove(w, e);
                 var f = Gi.World.Place(w, l, 11.5f, 10.5f, unit, 6);
-                if ((f & 0xFFFFFF) != (e & 0xFFFFFF)) return false;
+                if (f.Slot != e.Slot) return false;
             }
 
             if (tick == 2) Gi.World.SetGain(w, h, 9);
@@ -98,7 +98,7 @@ internal static partial class Verification
 
     private static bool RewindResumesSchedules()
     {
-        byte Build(out List<int> placed)
+        byte Build(out List<Gi.World.SourceId> placed)
         {
             var w = Gi.World.New();
             Gi.Grid.New(w, 7, 0f, 0f, 128f);
@@ -160,7 +160,7 @@ internal static partial class Verification
         Gi.Grid.New(w, 9, 0f, 0f, 512f);
         var l = Gi.Layer.New(w);
         var tent = Gi.Stamp.Tent(12, 12, 50);
-        var ids = new int[400];
+        var ids = new Gi.World.SourceId[400];
         var until = new int[400];
         for (var i = 0; i < ids.Length; i++) ids[i] = Gi.World.Place(w, l, i * 1.3f % 500f, i * 2.9f % 500f, tent, 0);
         void Frame(int f)
@@ -204,7 +204,7 @@ internal static partial class Verification
         var last = new int[grids.Length, layers.Length, 64];
         var rng = new Random(3131);
         byte[] stamps = [Gi.Stamp.Box(6, 6, 40), Gi.Stamp.Cone(5, 60, 120), Gi.Stamp.Tent(8, 8, 30)];
-        var ids = new List<int>();
+        var ids = new List<Gi.World.SourceId>();
         var tiles = stackalloc int[64];
         for (var tick = 1; tick <= 60; tick++)
         {

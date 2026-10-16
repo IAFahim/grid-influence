@@ -57,9 +57,9 @@ public sealed class TokenTests : IDisposable
         var fresh = World.Capture(_world);
 
         var commands = new[] { World.SourceCommand.Move(source, 1.5f, 1.5f) };
-        var results = new[] { new World.SourceResult(123456, World.SourceResultStatus.Applied) };
+        var results = new[] { new World.SourceResult(new World.SourceId(123456, 9), World.SourceResultStatus.Applied) };
         Assert.Equal(World.BatchStatus.StaleRevision, World.ApplyBatch(token, commands, results));
-        Assert.Equal(123456, results[0].SourceId);
+        Assert.Equal(new World.SourceId(123456, 9), results[0].SourceId);
         Assert.Equal(World.SourceResultStatus.Applied, results[0].Status);
 
         unsafe
@@ -205,9 +205,9 @@ public sealed class TokenTests : IDisposable
                 World.SourceCommand.Move(first, 1.5f, 1.5f),
                 World.SourceCommand.Place(_layer, 8.5f, 8.5f, _stamp, 5),
             };
-            var results = new[] { new World.SourceResult(-77, World.SourceResultStatus.InvalidSource) };
+            var results = new[] { new World.SourceResult(new World.SourceId(77, 9), World.SourceResultStatus.InvalidSource) };
             Assert.Equal(World.BatchStatus.StaleRevision, World.ApplyBatch(token, stale, results));
-            Assert.Equal(-77, results[0].SourceId);
+            Assert.Equal(new World.SourceId(77, 9), results[0].SourceId);
             Assert.Equal(World.BatchStatus.StaleRevision, World.Process(token));
             unsafe
             {

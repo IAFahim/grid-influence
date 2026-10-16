@@ -20,7 +20,7 @@ public sealed unsafe class FiniteInputTests : IDisposable
     private readonly byte _layer;
     private readonly byte _derived;
     private readonly byte _box = Stamp.Box(8, 8, 100);
-    private readonly int _source;
+    private readonly World.SourceId _source;
 
     public FiniteInputTests()
     {
@@ -29,7 +29,7 @@ public sealed unsafe class FiniteInputTests : IDisposable
         _derived = Layer.Sum(_world, _layer, 1, _layer, 1);
         _source = World.Place(_world, _layer, 2f, 2f, _box, 3);
         World.Process(_world);
-        Assert.True(_source >= 0);
+        Assert.True(_source != default);
         Assert.NotEqual(0, World.Query(_world, _grid, _layer, 0, 0));
     }
 
@@ -98,7 +98,7 @@ public sealed unsafe class FiniteInputTests : IDisposable
         const int count = 3;
         var xs = stackalloc float[count] { 3f, x, 3f };
         var ys = stackalloc float[count] { 3f, y, 3f };
-        var excludes = stackalloc int[count] { -1, _source, _source };
+        var excludes = stackalloc World.SourceId[count] { default, _source, _source };
         var values = stackalloc short[count] { -1, -1, -1 };
         var fxs = stackalloc float[count];
         var fys = stackalloc float[count];
@@ -257,8 +257,8 @@ public sealed unsafe class FiniteInputTests : IDisposable
         var stamp = Stamp.Box(2, 2, 1);
         try
         {
-            var mine = new int[count];
-            var theirs = new int[count];
+            var mine = new World.SourceId[count];
+            var theirs = new World.SourceId[count];
             for (var i = 0; i < count; i++)
             {
                 var row = i / 61;
@@ -323,7 +323,7 @@ public sealed unsafe class FiniteInputTests : IDisposable
 
             var mask = new ulong[expected.Length + 1];
             mask[expected.Length] = 0xA5A5A5A5A5A5A5A5UL;
-            fixed (int* idPointer = mine)
+            fixed (World.SourceId* idPointer = mine)
             fixed (float* xPointer = xs)
             fixed (float* yPointer = ys)
             fixed (float* headingPointer = headings)
@@ -379,13 +379,13 @@ public sealed unsafe class FiniteInputTests : IDisposable
         try
         {
             var count = stamps.Length * Unreachable.Length;
-            var ids = new int[count];
+            var ids = new World.SourceId[count];
             var index = 0;
             foreach (var stamp in stamps)
             foreach (var unreachable in Unreachable)
             {
                 var id = World.Place(parked, parkedLayer, unreachable, index % 2 == 0 ? unreachable : 20f, stamp, (sbyte)(1 + index % 3));
-                Assert.True(id >= 0);
+                Assert.True(id != default);
                 World.Turn(parked, id, 0.7f + index);
                 World.Scale(parked, id, 0.5f + index % 4);
                 ids[index++] = id;
@@ -427,7 +427,7 @@ public sealed unsafe class FiniteInputTests : IDisposable
     public void RejectedRowsAndOutsideReads_AllocateNothingWhenWarm()
     {
         const int count = 8192 + 128;
-        var ids = new int[count];
+        var ids = new World.SourceId[count];
         var xs = new float[count];
         var ys = new float[count];
         var values = new short[count];
@@ -445,7 +445,7 @@ public sealed unsafe class FiniteInputTests : IDisposable
         World.Process(_world);
         var checksum = 0L;
         var before = 0L;
-        fixed (int* idPointer = ids)
+        fixed (World.SourceId* idPointer = ids)
         fixed (float* xPointer = xs)
         fixed (float* yPointer = ys)
         fixed (short* valuePointer = values)
@@ -546,19 +546,19 @@ public sealed unsafe class FiniteInputTests : IDisposable
         Assert.False(GiValidation.TryGrid(6, 3e38f, out _));
     }
 
-    private int Place(float x, float y) => World.Place(_world, _layer, x, y, _box, 2);
+    private World.SourceId Place(float x, float y) => World.Place(_world, _layer, x, y, _box, 2);
 
-    private void SyncOne(int id, float x, float y)
+    private void SyncOne(World.SourceId id, float x, float y)
     {
-        var ids = stackalloc int[1] { id };
+        var ids = stackalloc World.SourceId[1] { id };
         var xs = stackalloc float[1] { x };
         var ys = stackalloc float[1] { y };
         World.Sync(_world, ids, xs, ys, 1);
     }
 
-    private World.BatchStatus SyncOneWithToken(int id, float x, float y)
+    private World.BatchStatus SyncOneWithToken(World.SourceId id, float x, float y)
     {
-        var ids = stackalloc int[1] { id };
+        var ids = stackalloc World.SourceId[1] { id };
         var xs = stackalloc float[1] { x };
         var ys = stackalloc float[1] { y };
         return World.Sync(World.Capture(_world), ids, xs, ys, 1);

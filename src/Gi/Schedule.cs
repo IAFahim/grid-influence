@@ -30,21 +30,21 @@ public static unsafe partial class World
         return w == null ? 0 : w->Tick;
     }
 
-    public static void Fade(byte world, int source, sbyte gain, int ticks)
+    public static void Fade(byte world, SourceId source, sbyte gain, int ticks)
     {
         if (!TrySource(world, source, out var w, out var s, out var i)) return;
 
         var target = (sbyte)Math.Clamp((int)gain, -MaxGain, MaxGain);
-        var current = (sbyte)s->Gain.Pointer[i];
+        var current = (sbyte)s->Gain[i];
         JournalSchedule(w, s, i);
         if (ticks <= 0 || target == current)
         {
             s->Timed.Pointer[i] &= unchecked((byte)~Fading);
             if (target != current)
             {
-                CountGain(w, s->Layer.Pointer[i], (byte)current, (byte)target);
-                EnqueueMutation(w, s, i, s->X.Pointer[i], s->Y.Pointer[i], target, s->Angle.Pointer[i], s->Scale.Pointer[i], true);
-                s->Gain.Pointer[i] = (byte)target;
+                CountGain(w, s->Layer[i], (byte)current, (byte)target);
+                EnqueueMutation(w, s, i, s->X[i], s->Y[i], target, s->Angle[i], s->Scale[i], true);
+                s->Gain[i] = (byte)target;
             }
         }
         else
@@ -59,7 +59,7 @@ public static unsafe partial class World
         Schedule(w, s, i);
     }
 
-    public static void Expire(byte world, int source, int ticks)
+    public static void Expire(byte world, SourceId source, int ticks)
     {
         if (!TrySource(world, source, out var w, out var s, out var i)) return;
 
@@ -116,7 +116,7 @@ public static unsafe partial class World
     {
         for (var i = 0; i < s->Count; i++)
         {
-            if (s->Alive.Pointer[i] == 0 || s->Timed.Pointer[i] == 0) continue;
+            if (s->Alive[i] == 0 || s->Timed.Pointer[i] == 0) continue;
             s->FadeStart.Pointer[i] += delta;
             s->ExpireAt.Pointer[i] += delta;
         }
@@ -137,7 +137,7 @@ public static unsafe partial class World
         w->Timers.Resize(0);
         for (var i = 0; i < s->Count; i++)
         {
-            if (s->Alive.Pointer[i] == 0 || s->Timed.Pointer[i] == 0 || !NextDue(s, i, w->Tick, out var due)) continue;
+            if (s->Alive[i] == 0 || s->Timed.Pointer[i] == 0 || !NextDue(s, i, w->Tick, out var due)) continue;
             s->Due.Pointer[i] = due;
             Push(w, due, i);
         }
@@ -201,27 +201,27 @@ public static unsafe partial class World
         {
             var timer = Pop(w);
             var slot = timer.Slot;
-            if ((uint)slot >= (uint)s->Count || s->Alive.Pointer[slot] == 0 || s->Timed.Pointer[slot] == 0 ||
+            if ((uint)slot >= (uint)s->Count || s->Alive[slot] == 0 || s->Timed.Pointer[slot] == 0 ||
                 s->Due.Pointer[slot] != timer.Due) continue;
 
             var timed = s->Timed.Pointer[slot];
             if ((timed & Expiring) != 0 && s->ExpireAt.Pointer[slot] - now <= 0)
             {
-                CountGain(w, s->Layer.Pointer[slot], s->Gain.Pointer[slot], 0);
-                EnqueueMutation(w, s, slot, s->X.Pointer[slot], s->Y.Pointer[slot], 0, s->Angle.Pointer[slot], s->Scale.Pointer[slot], false);
-                s->Alive.Pointer[slot] = 0;
-                s->Free.Push(slot);
+                CountGain(w, s->Layer[slot], s->Gain[slot], 0);
+                EnqueueMutation(w, s, slot, s->X[slot], s->Y[slot], 0, s->Angle[slot], s->Scale[slot], false);
+                s->Alive[slot] = 0;
+                if (s->Gen[slot] != uint.MaxValue) s->Free.Push(slot);
                 continue;
             }
 
             if ((timed & Fading) != 0)
             {
                 var gain = FadeGain(s, slot, now);
-                if (gain != (sbyte)s->Gain.Pointer[slot])
+                if (gain != (sbyte)s->Gain[slot])
                 {
-                    CountGain(w, s->Layer.Pointer[slot], s->Gain.Pointer[slot], (byte)gain);
-                    EnqueueMutation(w, s, slot, s->X.Pointer[slot], s->Y.Pointer[slot], gain, s->Angle.Pointer[slot], s->Scale.Pointer[slot], true);
-                    s->Gain.Pointer[slot] = (byte)gain;
+                    CountGain(w, s->Layer[slot], s->Gain[slot], (byte)gain);
+                    EnqueueMutation(w, s, slot, s->X[slot], s->Y[slot], gain, s->Angle[slot], s->Scale[slot], true);
+                    s->Gain[slot] = (byte)gain;
                 }
             }
 

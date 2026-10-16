@@ -65,7 +65,7 @@ internal static unsafe class Inspection
             Grids = w->GridCount,
             Layers = w->LayerCount,
             SourceSlots = s->Count,
-            SourceCapacity = s->X.Capacity,
+            SourceCapacity = s->Slots,
             GridBytes = World.MaxGrids * sizeof(GridCtx),
             LayerBytes = World.MaxLayers * sizeof(LayerRecipe),
             ScratchBytes = TileBake.TileSize * sizeof(int) + w->Scratch.Bytes +
@@ -75,12 +75,12 @@ internal static unsafe class Inspection
                 (long)w->BatchLayerDeltas.Capacity * sizeof(int) +
                 (long)w->RebuildArena.Capacity * sizeof(RebuildChunk) +
                 (long)w->RebuildPlacements.Capacity * sizeof(Placement),
-            SourceBytes = (long)s->X.Capacity * sizeof(float) + (long)s->Y.Capacity * sizeof(float) +
-                s->Stamp.Capacity + s->Layer.Capacity + s->Gain.Capacity + s->Alive.Capacity +
-                ((long)s->Angle.Capacity + s->Scale.Capacity) * sizeof(ushort) +
+            SourceBytes = (long)s->Chunks * SourceColumns.ChunkSlots *
+                (2 * sizeof(float) + 4 * sizeof(byte) + 2 * sizeof(ushort) + sizeof(uint)) +
+                (s->Chunks != 0 ? 9L * SourceColumns.MaxChunks * sizeof(void*) : 0) +
                 s->Timed.Capacity + s->FadeFrom.Capacity + s->FadeTo.Capacity +
                 ((long)s->FadeStart.Capacity + s->FadeTicks.Capacity + s->ExpireAt.Capacity + s->Due.Capacity) * sizeof(int) +
-                (long)s->Free.Capacity * sizeof(int) + s->Gen.Capacity,
+                (long)s->Free.Capacity * sizeof(int),
             WorldArenaBytes = World.MaxWorlds * sizeof(WorldCtx),
             WorldRevisionBytes = World.MaxWorlds * sizeof(int),
             ZeroDenseBytes = World.DenseBytes,
@@ -93,7 +93,7 @@ internal static unsafe class Inspection
         };
 
         for (var i = 0; i < s->Count; i++)
-            if (s->Alive.Pointer[i] != 0) result.LiveSources++;
+            if (s->Alive[i] != 0) result.LiveSources++;
 
         for (var gi = 0; gi < w->GridCount; gi++)
         {

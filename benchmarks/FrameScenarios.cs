@@ -88,14 +88,14 @@ internal abstract unsafe class FrameScenario : IDisposable
 
     protected byte NewLayer() => Gi.Layer.New(WorldId, LayerPrecision);
 
-    protected int Place(byte layer, float x, float y, byte stamp, sbyte gain)
+    protected Gi.World.SourceId Place(byte layer, float x, float y, byte stamp, sbyte gain)
     {
         var id = Gi.World.Place(WorldId, layer, x, y, stamp, gain);
-        if (id < 0) throw new InvalidOperationException("Frame setup could not place a source.");
+        if (id == default) throw new InvalidOperationException("Frame setup could not place a source.");
         return id;
     }
 
-    protected bool SourceAt(int id, float x, float y)
+    protected bool SourceAt(Gi.World.SourceId id, float x, float y)
         => Gi.World.TryGetSourceSpec(WorldId, id, out var spec) &&
            BitConverter.SingleToInt32Bits(spec.X) == BitConverter.SingleToInt32Bits(x) &&
            BitConverter.SingleToInt32Bits(spec.Y) == BitConverter.SingleToInt32Bits(y);
@@ -106,7 +106,7 @@ internal abstract unsafe class FrameCanonical : FrameScenario
     protected const int Width = 8;
     protected byte BaseLayer;
     protected byte BoxStamp;
-    protected int* Ids;
+    protected Gi.World.SourceId* Ids;
     protected float* X;
     protected float* Y;
     protected float* NextX;
@@ -126,7 +126,7 @@ internal abstract unsafe class FrameCanonical : FrameScenario
         GridId = Gi.Grid.New(WorldId, Power, 0f, 0f, Size);
         BaseLayer = NewLayer();
         BoxStamp = Gi.Stamp.Box(Width, Width, 16);
-        Ids = Arena.Alloc<int>(Entities);
+        Ids = Arena.Alloc<Gi.World.SourceId>(Entities);
         X = Arena.Alloc<float>(Entities);
         Y = Arena.Alloc<float>(Entities);
         NextX = Arena.Alloc<float>(Entities);
@@ -242,7 +242,7 @@ internal sealed unsafe class FrameSparse(int entities, int power, ulong seed, in
     private readonly int _movers = movers;
     private FrameRandom _rng = new(seed ^ 0x5851F42D4C957F2DUL);
     private byte* _phase;
-    private int* _moverIds;
+    private Gi.World.SourceId* _moverIds;
     private float* _moverX;
     private float* _moverY;
 
@@ -263,7 +263,7 @@ internal sealed unsafe class FrameSparse(int entities, int power, ulong seed, in
     {
         base.Setup();
         _phase = Arena.Alloc<byte>(Entities);
-        _moverIds = Arena.Alloc<int>(_movers);
+        _moverIds = Arena.Alloc<Gi.World.SourceId>(_movers);
         _moverX = Arena.Alloc<float>(_movers);
         _moverY = Arena.Alloc<float>(_movers);
     }
@@ -367,8 +367,8 @@ internal sealed unsafe class FrameCrowd(int entities, int power, ulong seed, boo
     private int _resortCount;
     private byte _layer;
     private byte _stamp;
-    private int* _ids;
-    private int* _idsNext;
+    private Gi.World.SourceId* _ids;
+    private Gi.World.SourceId* _idsNext;
     private float* _x;
     private float* _xNext;
     private float* _y;
@@ -412,8 +412,8 @@ internal sealed unsafe class FrameCrowd(int entities, int power, ulong seed, boo
         GridId = Gi.Grid.New(WorldId, Power, 0f, 0f, Size);
         _layer = NewLayer();
         _stamp = Gi.Stamp.Box(Width, Width, 8);
-        _ids = Arena.Alloc<int>(Entities);
-        _idsNext = Arena.Alloc<int>(Entities);
+        _ids = Arena.Alloc<Gi.World.SourceId>(Entities);
+        _idsNext = Arena.Alloc<Gi.World.SourceId>(Entities);
         _x = Arena.Alloc<float>(Entities);
         _xNext = Arena.Alloc<float>(Entities);
         _y = Arena.Alloc<float>(Entities);
@@ -593,14 +593,14 @@ internal sealed unsafe class FrameWorld(int entities, int power, ulong seed, boo
     private int _timedPerFrame;
     private int _plainPerFrame;
     private int _cursor;
-    private int* _agentIds;
+    private Gi.World.SourceId* _agentIds;
     private float* _agentX;
     private float* _agentY;
     private float* _agentVx;
     private float* _agentVy;
-    private int* _plainIds;
+    private Gi.World.SourceId* _plainIds;
     private byte* _plainKind;
-    private int* _timedIds;
+    private Gi.World.SourceId* _timedIds;
     private float* _gradientX;
     private float* _gradientY;
     private short* _values;
@@ -642,14 +642,14 @@ internal sealed unsafe class FrameWorld(int entities, int power, ulong seed, boo
         _derived = Gi.Layer.Sum(WorldId, _boxes, 1, _tents, 1);
         _boxStamp = Gi.Stamp.Box(4, 4, 12);
         _tentStamp = Gi.Stamp.Tent(6, 6, 12);
-        _agentIds = Arena.Alloc<int>(_agents);
+        _agentIds = Arena.Alloc<Gi.World.SourceId>(_agents);
         _agentX = Arena.Alloc<float>(_agents);
         _agentY = Arena.Alloc<float>(_agents);
         _agentVx = Arena.Alloc<float>(_agents);
         _agentVy = Arena.Alloc<float>(_agents);
-        _plainIds = Arena.Alloc<int>(_plain);
+        _plainIds = Arena.Alloc<Gi.World.SourceId>(_plain);
         _plainKind = Arena.Alloc<byte>(_plain);
-        _timedIds = Arena.Alloc<int>(_timed);
+        _timedIds = Arena.Alloc<Gi.World.SourceId>(_timed);
         _gradientX = Arena.Alloc<float>(_agents);
         _gradientY = Arena.Alloc<float>(_agents);
         _values = Arena.Alloc<short>(_agents);
@@ -783,7 +783,7 @@ internal sealed unsafe class FrameWorld(int entities, int power, ulong seed, boo
         var sources = &context->Sources;
         var live = 0;
         for (var slot = 0; slot < sources->Count; slot++)
-            if (sources->Alive.Pointer[slot] != 0) live++;
+            if (sources->Alive[slot] != 0) live++;
         return live;
     }
 
@@ -807,7 +807,7 @@ internal sealed unsafe class FrameWorld(int entities, int power, ulong seed, boo
             var tent = _plainKind[victim] != 0;
             var id = Gi.World.Place(WorldId, tent ? _tents : _boxes,
                 margin + _rng.Unit() * span, margin + _rng.Unit() * span, tent ? _tentStamp : _boxStamp, 1);
-            ok &= id >= 0;
+            ok &= id != default;
             _plainIds[victim] = id;
         }
 
@@ -820,7 +820,7 @@ internal sealed unsafe class FrameWorld(int entities, int power, ulong seed, boo
             var tent = (slot & 1) == 1;
             var id = Gi.World.Place(WorldId, tent ? _tents : _boxes,
                 margin + _rng.Unit() * span, margin + _rng.Unit() * span, tent ? _tentStamp : _boxStamp, FadeGain);
-            ok &= id >= 0;
+            ok &= id != default;
             Gi.World.Fade(WorldId, id, 0, Lifetime + 1);
             Gi.World.Expire(WorldId, id, Lifetime + 1);
             _timedIds[slot] = id;

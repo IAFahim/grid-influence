@@ -10,7 +10,7 @@ public static unsafe partial class World
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
 #endif
     public static bool SenseColumn(
-        byte world, byte layer, float* xs, float* ys, int* excludes, int count, short* values, ulong* whole)
+        byte world, byte layer, float* xs, float* ys, SourceId* excludes, int count, short* values, ulong* whole)
     {
         var w = GetContext(world);
         if (w == null || layer >= w->LayerCount) return Unfilled(values, whole, count);
@@ -23,7 +23,7 @@ public static unsafe partial class World
         var complete = true;
         for (var i = 0; i < count; i++)
         {
-            var filled = excludes[i] >= 0
+            var filled = excludes[i].Generation != 0
                 ? TrySense(world, layer, xs[i], ys[i], excludes[i], out values[i])
                 : TrySense(world, layer, xs[i], ys[i], out values[i]);
             complete &= filled;
@@ -37,7 +37,7 @@ public static unsafe partial class World
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
 #endif
     public static bool SenseGradientColumn(
-        byte world, byte layer, float* xs, float* ys, int* excludes, int count,
+        byte world, byte layer, float* xs, float* ys, SourceId* excludes, int count,
         float* gradientXs, float* gradientYs, ulong* whole)
     {
         var w = GetContext(world);
@@ -53,7 +53,7 @@ public static unsafe partial class World
         for (var i = 0; i < count; i++)
         {
             bool filled;
-            if (excludes[i] >= 0)
+            if (excludes[i].Generation != 0)
                 filled = TrySenseGradient(world, layer, xs[i], ys[i], excludes[i], out gradientXs[i], out gradientYs[i]);
             else
                 filled = TrySenseGradient(world, layer, xs[i], ys[i], out gradientXs[i], out gradientYs[i]);
@@ -134,7 +134,7 @@ public static unsafe partial class World
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
 #endif
     public static bool SenseAreaColumn(
-        byte world, byte layer, float* xs, float* ys, float* reaches, int* excludes, int count, long* totals, ulong* whole)
+        byte world, byte layer, float* xs, float* ys, float* reaches, SourceId* excludes, int count, long* totals, ulong* whole)
     {
         var w = GetContext(world);
         if (w == null || layer >= w->LayerCount) return UnfilledArea(totals, whole, count);
@@ -147,7 +147,7 @@ public static unsafe partial class World
         for (var i = 0; i < count; i++)
         {
             bool filled;
-            if (excludes != null && excludes[i] >= 0)
+            if (excludes != null && excludes[i].Generation != 0)
                 filled = TrySenseArea(world, layer, xs[i], ys[i], reaches[i], excludes[i], out totals[i]);
             else
                 filled = TrySenseArea(world, layer, xs[i], ys[i], reaches[i], out totals[i]);

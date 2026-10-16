@@ -425,7 +425,7 @@ public sealed class PlaneLimitTests
 
         var box = Stamp.Box(2, 2, 127);
         var raster = Stamp.New(new sbyte[] { 127, 127, 127, 126 }, 2, 2);
-        var excluded = -1;
+        var excluded = default(World.SourceId);
         for (var i = 0; i < each; i++)
         {
             var id = World.Place(world, layers[0], px, py, box, 16);

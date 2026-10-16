@@ -288,11 +288,11 @@ internal static partial class Verification
         var other = Gi.Layer.New(w);
         var stamps = SenseStamps();
         var rng = new Random(505);
-        var ids = new List<int>();
+        var ids = new List<Gi.World.SourceId>();
         for (var i = 0; i < 260; i++)
             ids.Add(Gi.World.Place(w, i % 9 == 0 ? other : l, (float)(rng.NextDouble() * 270 - 7),
                 (float)(rng.NextDouble() * 270 - 7), stamps[rng.Next(stamps.Length)], (sbyte)rng.Next(-16, 17)));
-        var piles = new List<int>();
+        var piles = new List<Gi.World.SourceId>();
         for (var i = 0; i < 60; i++) piles.Add(Gi.World.Place(w, l, 100.3f, 77.7f, stamps[i % 2 == 0 ? 0 : 3], 16));
         for (var i = 0; i < 40; i++) piles.Add(Gi.World.Place(w, l, 180.6f, 160.2f, stamps[1], 16));
         ids.AddRange(piles);
@@ -372,7 +372,7 @@ internal static partial class Verification
         Gi.World.Process(w);
         Gi.World.TrySense(w, l, 102f, 100f, out var afterRemove);
         Gi.World.TrySense(w, l, 102f, 100f, b, out var stale);
-        Gi.World.TrySense(w, l, 102f, 100f, 12345, out var bogus);
+        Gi.World.TrySense(w, l, 102f, 100f, new Gi.World.SourceId(12345, 0), out var bogus);
 
         return settled == 400 && settledArea > 0 && pendingMove == settled && pendingMoveArea == settledArea &&
             pendingPlace == plain && stale == afterRemove && bogus == afterRemove;
@@ -398,12 +398,12 @@ internal static partial class Verification
             var x = i % 1031 * 0.997f;
             var y = i % 977 * 1.031f;
             Gi.World.TrySense(s.World, s.Layer, x, y, out var v);
-            Gi.World.TrySense(s.World, s.Layer, x, y, 5, out var e);
+            Gi.World.TrySense(s.World, s.Layer, x, y, new Gi.World.SourceId(5, 0), out var e);
             Gi.World.TrySenseArea(s.World, s.Layer, x, y, 12f, out var t);
-            Gi.World.TrySenseArea(s.World, s.Layer, x, y, 12f, 5, out var te);
+            Gi.World.TrySenseArea(s.World, s.Layer, x, y, 12f, new Gi.World.SourceId(5, 0), out var te);
             Gi.World.TrySenseMax(s.World, s.Layer, x, y, 12f, out var m, out _, out _);
             Gi.World.TrySenseGradient(s.World, s.Layer, x, y, out var gx, out _);
-            Gi.World.TrySenseGradient(s.World, s.Layer, x, y, 5, out var ex, out _);
+            Gi.World.TrySenseGradient(s.World, s.Layer, x, y, new Gi.World.SourceId(5, 0), out var ex, out _);
             acc += v + e + t + te + m + (long)gx + (long)ex;
         }
 
@@ -412,7 +412,7 @@ internal static partial class Verification
         return allocated == 0;
     }
 
-    private static void SenseTiming(byte w, byte l, int source)
+    private static void SenseTiming(byte w, byte l, Gi.World.SourceId source)
     {
         var points = new (float x, float y)[1000];
         var rng = new Random(91);

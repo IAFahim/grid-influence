@@ -22,7 +22,7 @@ internal sealed unsafe class ReferenceWorld
         public ushort Angle;
         public ushort Scale;
         public bool Alive;
-        public byte Gen;
+        public uint Gen;
         public byte Timed;
         public sbyte FadeFrom;
         public sbyte FadeTo;
@@ -165,23 +165,22 @@ internal sealed unsafe class ReferenceWorld
 
     private static short[]? Field(GridData g, int layer) => g.Layers[layer]?.Field;
 
-    private static bool TrySource(Source[] now, int count, int id, out int slot)
+    private static bool TrySource(Source[] now, int count, World.SourceId id, out int slot)
     {
-        slot = id & World.SourceIndexMask;
-        return (uint)slot < (uint)count && now[slot].Alive &&
-            (id & ~World.SourceIndexMask) == (now[slot].Gen << 24);
+        slot = (int)id.Slot;
+        return (uint)slot < (uint)count && now[slot].Alive && id.Generation == now[slot].Gen;
     }
 
-    private bool TrySource(int id, out int slot) => TrySource(_now, _count, id, out slot);
+    private bool TrySource(World.SourceId id, out int slot) => TrySource(_now, _count, id, out slot);
 
-    public int Place(byte layer, float x, float y, byte stamp, sbyte gain)
+    public World.SourceId Place(byte layer, float x, float y, byte stamp, sbyte gain)
     {
         if (layer >= _layers.Count || _layers[layer].Op != LayerOp.Base || !StampCatalog.Valid(stamp) ||
-            !float.IsFinite(x) || !float.IsFinite(y)) return -1;
+            !float.IsFinite(x) || !float.IsFinite(y)) return default;
 
         if (!_free.TryDequeue(out var slot))
         {
-            if (_count >= MaxSourceSlots) return -1;
+            if (_count >= MaxSourceSlots) return default;
             slot = _count++;
             if (_count > _now.Length)
             {
@@ -195,7 +194,7 @@ internal sealed unsafe class ReferenceWorld
         }
 
         var g = (sbyte)Math.Clamp((int)gain, -MaxGain, MaxGain);
-        var gen = (byte)((_now[slot].Gen + 1) & 127);
+        var gen = _now[slot].Gen + 1;
         if (_recording) _scheduleJournal.Add((slot, ScheduleOf(_now[slot])));
         if (!_pending[slot])
         {
@@ -209,7 +208,7 @@ internal sealed unsafe class ReferenceWorld
         {
             X = x, Y = y, Stamp = stamp, Layer = layer, Gain = g, Scale = UnitScale, Alive = true, Gen = gen,
         };
-        return (gen << 24) | slot;
+        return new World.SourceId((uint)slot, gen);
     }
 
     private static ScheduleState ScheduleOf(in Source s) => new()
@@ -257,7 +256,7 @@ internal sealed unsafe class ReferenceWorld
     private bool AngleChanged(byte layer, ushort oldAngle, ushort angle)
         => _grids.Count > 0 && ((oldAngle ^ angle) & _layers[layer].Precision.TurnMask) != 0;
 
-    public void Move(int source, float x, float y)
+    public void Move(World.SourceId source, float x, float y)
     {
         if (!float.IsFinite(x) || !float.IsFinite(y) || !TrySource(source, out var i)) return;
         ref var s = ref _now[i];
@@ -267,7 +266,7 @@ internal sealed unsafe class ReferenceWorld
         s.Y = y;
     }
 
-    public void Turn(int source, float angle)
+    public void Turn(World.SourceId source, float angle)
     {
         if (!TrySource(source, out var i) || !float.IsFinite(angle)) return;
         var turns = angle * (1.0 / (2 * Math.PI));
@@ -279,7 +278,7 @@ internal sealed unsafe class ReferenceWorld
         s.Angle = next;
     }
 
-    public void Scale(int source, float scale)
+    public void Scale(World.SourceId source, float scale)
     {
         if (!TrySource(source, out var i) || !float.IsFinite(scale)) return;
         var q8 = Math.Floor(scale * 256.0);
@@ -290,7 +289,7 @@ internal sealed unsafe class ReferenceWorld
         s.Scale = next;
     }
 
-    public void SetGain(int source, sbyte gain)
+    public void SetGain(World.SourceId source, sbyte gain)
     {
         if (!TrySource(source, out var i)) return;
         var next = (sbyte)Math.Clamp((int)gain, -MaxGain, MaxGain);
@@ -306,7 +305,7 @@ internal sealed unsafe class ReferenceWorld
         s.Gain = next;
     }
 
-    public void Remove(int source)
+    public void Remove(World.SourceId source)
     {
         if (!TrySource(source, out var i)) return;
         Mutate(i, 0);
@@ -318,10 +317,10 @@ internal sealed unsafe class ReferenceWorld
         }
 
         s.Alive = false;
-        _free.Enqueue(i);
+        if (s.Gen != uint.MaxValue) _free.Enqueue(i);
     }
 
-    public void Fade(int source, sbyte gain, int ticks)
+    public void Fade(World.SourceId source, sbyte gain, int ticks)
     {
         if (!TrySource(source, out var i)) return;
         var target = (sbyte)Math.Clamp((int)gain, -MaxGain, MaxGain);
@@ -346,7 +345,7 @@ internal sealed unsafe class ReferenceWorld
         }
     }
 
-    public void Expire(int source, int ticks)
+    public void Expire(World.SourceId source, int ticks)
     {
         if (!TrySource(source, out var i)) return;
         if (_recording) _scheduleJournal.Add((i, ScheduleOf(_now[i])));
@@ -359,7 +358,7 @@ internal sealed unsafe class ReferenceWorld
         }
     }
 
-    public void Sync(int* sources, float* xs, float* ys, int count)
+    public void Sync(World.SourceId* sources, float* xs, float* ys, int count)
     {
         for (var i = 0; i < count; i++)
         {
@@ -377,7 +376,7 @@ internal sealed unsafe class ReferenceWorld
         }
     }
 
-    public bool TryGetSource(int id, out Source source)
+    public bool TryGetSource(World.SourceId id, out Source source)
     {
         source = default;
         if (!TrySource(id, out var slot)) return false;
@@ -404,7 +403,7 @@ internal sealed unsafe class ReferenceWorld
             {
                 Mutate(i, 0);
                 s.Alive = false;
-                _free.Enqueue(i);
+                if (s.Gen != uint.MaxValue) _free.Enqueue(i);
                 continue;
             }
 
@@ -720,7 +719,7 @@ internal sealed unsafe class ReferenceWorld
         _recording = false;
         _free.Clear();
         for (var i = 0; i < _count; i++)
-            if (!_now[i].Alive) _free.Enqueue(i);
+            if (!_now[i].Alive && _now[i].Gen != uint.MaxValue) _free.Enqueue(i);
     }
 
     private static void RestoreFields(ref Source target, in Source from)
@@ -776,14 +775,13 @@ internal sealed unsafe class ReferenceWorld
         }
     }
 
-    private bool Applied(int id, byte layer, out int slot, out Source applied)
+    private bool Applied(World.SourceId id, byte layer, out int slot, out Source applied)
     {
         slot = -1;
         applied = default;
-        if (id < 0) return false;
-        var index = id & World.SourceIndexMask;
+        var index = (int)id.Slot;
         if ((uint)index >= (uint)_count) return false;
-        var generation = (byte)((uint)id >> 24);
+        var generation = id.Generation;
         var reads = _layers[layer].Reads;
         Source candidate;
         if (_pending[index])
@@ -1085,19 +1083,19 @@ internal sealed unsafe class ReferenceWorld
     }
 
     public bool TrySense(byte layer, float x, float y, out short value)
-        => SenseValue(layer, x, y, -1, out value);
+        => SenseValue(layer, x, y, default, out value);
 
-    public bool TrySense(byte layer, float x, float y, int exclude, out short value)
+    public bool TrySense(byte layer, float x, float y, World.SourceId exclude, out short value)
         => SenseValue(layer, x, y, exclude, out value);
 
-    private bool SenseValue(byte layer, float x, float y, int exclude, out short value)
+    private bool SenseValue(byte layer, float x, float y, World.SourceId exclude, out short value)
     {
         value = 0;
         if (layer >= _layers.Count || !Pick(x, y, 0f, 0, false, out var gi, out var complete)) return false;
         var g = _grids[gi];
         var cx = (int)(CellQ8(x, g.OriginX, g.ScaleQ8) >> 8);
         var cy = (int)(CellQ8(y, g.OriginY, g.ScaleQ8) >> 8);
-        if (exclude >= 0 && Applied(exclude, layer, out var slot, out var source))
+        if (exclude.Generation != 0 && Applied(exclude, layer, out var slot, out var source))
         {
             value = ExcludedCell(g, layer, slot, source, cx, cy);
             return complete;
@@ -1108,12 +1106,12 @@ internal sealed unsafe class ReferenceWorld
     }
 
     public bool TrySenseArea(byte layer, float x, float y, float reach, out long total)
-        => SenseArea(layer, x, y, reach, -1, out total);
+        => SenseArea(layer, x, y, reach, default, out total);
 
-    public bool TrySenseArea(byte layer, float x, float y, float reach, int exclude, out long total)
+    public bool TrySenseArea(byte layer, float x, float y, float reach, World.SourceId exclude, out long total)
         => SenseArea(layer, x, y, reach, exclude, out total);
 
-    private bool SenseArea(byte layer, float x, float y, float reach, int exclude, out long total)
+    private bool SenseArea(byte layer, float x, float y, float reach, World.SourceId exclude, out long total)
     {
         total = 0;
         if (layer >= _layers.Count || !Pick(x, y, reach, 0, true, out var gi, out var complete)) return false;
@@ -1210,12 +1208,12 @@ internal sealed unsafe class ReferenceWorld
     }
 
     public bool TrySenseGradient(byte layer, float x, float y, out float gx, out float gy)
-        => SenseGradient(layer, x, y, -1, out gx, out gy);
+        => SenseGradient(layer, x, y, default, out gx, out gy);
 
-    public bool TrySenseGradient(byte layer, float x, float y, int exclude, out float gx, out float gy)
+    public bool TrySenseGradient(byte layer, float x, float y, World.SourceId exclude, out float gx, out float gy)
         => SenseGradient(layer, x, y, exclude, out gx, out gy);
 
-    private bool SenseGradient(byte layer, float x, float y, int exclude, out float gx, out float gy)
+    private bool SenseGradient(byte layer, float x, float y, World.SourceId exclude, out float gx, out float gy)
     {
         gx = 0f;
         gy = 0f;
@@ -1313,7 +1311,7 @@ internal sealed unsafe class ReferenceWorld
     public bool SenseColumn(byte layer, float* xs, float* ys, int count, short* values, ulong* whole)
         => SenseColumn(layer, xs, ys, null, count, values, whole);
 
-    public bool SenseColumn(byte layer, float* xs, float* ys, int* excludes, int count, short* values, ulong* whole)
+    public bool SenseColumn(byte layer, float* xs, float* ys, World.SourceId* excludes, int count, short* values, ulong* whole)
     {
         if (layer >= _layers.Count) return Unfilled(values, whole, count);
         if (count <= 0) return true;
@@ -1322,7 +1320,7 @@ internal sealed unsafe class ReferenceWorld
         var complete = true;
         for (var i = 0; i < count; i++)
         {
-            var filled = excludes != null && excludes[i] >= 0
+            var filled = excludes != null && excludes[i].Generation != 0
                 ? TrySense(layer, xs[i], ys[i], excludes[i], out values[i])
                 : TrySense(layer, xs[i], ys[i], out values[i]);
             complete &= filled;

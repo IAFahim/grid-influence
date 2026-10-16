@@ -113,13 +113,13 @@ public sealed class ShapeTests
         World.Process(w);
         Assert.True(Stamp.Free(stamp));
         Assert.False(Stamp.Free(stamp));
-        Assert.Equal(-1, World.Place(w, l, 20f, 20f, stamp, 2));
+        Assert.Equal(default(World.SourceId), World.Place(w, l, 20f, 20f, stamp, 2));
 
         for (var i = 0; i < 600; i++)
         {
             var transient = Stamp.Dome((ushort)(1 + i % 100), 40);
             var source = World.Place(w, l, 30f, 30f, transient, 1);
-            Assert.NotEqual(-1, source);
+            Assert.NotEqual(default(World.SourceId), source);
             World.Remove(w, source);
             World.Process(w);
             Assert.True(Stamp.Free(transient));

@@ -35,7 +35,7 @@ internal static class Live
     private static Random _rng = new(42);
     private static LiveSheep[] _sheep = [];
     private static LiveWolf[] _wolves = [];
-    private static int _fearSource = -1;
+    private static Gi.World.SourceId _fearSource;
     private static float _lastPaintX = -99f;
     private static float _lastPaintY = -99f;
     private static int _eaten;
@@ -130,13 +130,13 @@ internal static class Live
         return value;
     }
 
-    internal static void Gradient(byte layer, float x, float y, int exclude, out float gx, out float gy)
+    internal static void Gradient(byte layer, float x, float y, Gi.World.SourceId exclude, out float gx, out float gy)
     {
         _queries++;
         World.TrySenseGradient(WorldId, layer, x, y, exclude, out gx, out gy);
     }
 
-    internal static long Crowd(float x, float y, int self)
+    internal static long Crowd(float x, float y, Gi.World.SourceId self)
     {
         _queries++;
         World.TrySenseArea(WorldId, Herd, x, y, CrowdReach, self, out var crowd);
@@ -214,15 +214,15 @@ internal static class Live
             var y = Math.Clamp(op.Y, 2f, WorldUnits - 2f);
             if (op.Op == 0)
             {
-                if (_fearSource < 0) _fearSource = World.Place(WorldId, Threat, x, y, FearBrush, 11);
+                if (_fearSource == default) _fearSource = World.Place(WorldId, Threat, x, y, FearBrush, 11);
                 else World.Move(WorldId, _fearSource, x, y);
             }
             else if (op.Op == 1)
             {
-                if (_fearSource >= 0)
+                if (_fearSource != default)
                 {
                     World.Remove(WorldId, _fearSource);
-                    _fearSource = -1;
+                    _fearSource = default;
                 }
             }
             else if (op.Op == 2)
@@ -286,10 +286,10 @@ internal static class Live
             _wolves[i].RetryClock = 0f;
         }
 
-        if (_fearSource >= 0)
+        if (_fearSource != default)
         {
             World.Remove(WorldId, _fearSource);
-            _fearSource = -1;
+            _fearSource = default;
         }
     }
 
@@ -457,7 +457,7 @@ internal static class Live
     private static void Reset()
     {
         World.Clear(WorldId);
-        _fearSource = -1;
+        _fearSource = default;
         _lastPaintX = -99f;
         _lastPaintY = -99f;
         _eaten = 0;
@@ -537,7 +537,7 @@ internal static class Live
 internal sealed class LiveSheep
 {
     public float X, Y, Vx, Vy, Phase;
-    public int Source;
+    public Gi.World.SourceId Source;
 
     public void Update(float t)
     {
@@ -548,7 +548,7 @@ internal sealed class LiveSheep
         var escapeY = 0f;
         if (threat > 60)
         {
-            Live.Gradient(Live.Threat, X, Y, -1, out var gx, out var gy);
+            Live.Gradient(Live.Threat, X, Y, default, out var gx, out var gy);
             escapeX = -gx * 0.28f;
             escapeY = -gy * 0.28f;
         }
@@ -557,7 +557,7 @@ internal sealed class LiveSheep
         var seekY = 0f;
         if (food > 40 && threat < 400)
         {
-            Live.Gradient(Live.Food, X, Y, -1, out var gx, out var gy);
+            Live.Gradient(Live.Food, X, Y, default, out var gx, out var gy);
             seekX = gx * 0.08f;
             seekY = gy * 0.08f;
         }
@@ -608,7 +608,7 @@ internal sealed class LiveSheep
 internal sealed class LiveWolf
 {
     public float X, Y, Vx, Vy;
-    public int Source;
+    public Gi.World.SourceId Source;
     public float HuntX, HuntY;
     public bool Hunting;
     public float RetryClock;

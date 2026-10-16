@@ -10,12 +10,12 @@ internal sealed unsafe class StreamRunner
     private readonly List<StreamCommand> _commands;
     private readonly BugInjection? _bug;
     private readonly Action<int, byte, byte, short[]>? _onPage;
-    private readonly List<int> _attemptIds = [];
+    private readonly List<World.SourceId> _attemptIds = [];
     private readonly int[] _actualTiles = new int[MaxTiles];
     private readonly int[] _expectedTiles = new int[MaxTiles];
     private readonly float[] _columnXs = new float[MaxColumn];
     private readonly float[] _columnYs = new float[MaxColumn];
-    private readonly int[] _columnExcludes = new int[MaxColumn];
+    private readonly World.SourceId[] _columnExcludes = new World.SourceId[MaxColumn];
     private readonly short[] _columnActual = new short[MaxColumn];
     private readonly short[] _columnExpected = new short[MaxColumn];
     private readonly float[] _gradientActualX = new float[MaxColumn];
@@ -247,21 +247,21 @@ internal sealed unsafe class StreamRunner
         }
     }
 
-    private int Id(int handle)
-        => (uint)handle < (uint)_attemptIds.Count ? _attemptIds[handle] : -1;
+    private World.SourceId Id(int handle)
+        => (uint)handle < (uint)_attemptIds.Count ? _attemptIds[handle] : default;
 
     private void ExecuteSync(StreamCommand command)
     {
         var count = Math.Min(command.Int0, MaxColumn);
         var rng = new SplitMix64(command.Aux ^ AuxSalt);
         var target = _setup.Grids[command.Grid];
-        var ids = new int[Math.Max(1, count)];
+        var ids = new World.SourceId[Math.Max(1, count)];
         var xs = new float[Math.Max(1, count)];
         var ys = new float[Math.Max(1, count)];
         for (var i = 0; i < count; i++) ids[i] = Id(command.Handle + i);
         StreamOperands.ColumnPositions(ref rng, target, xs, ys, count);
 
-        fixed (int* pIds = ids)
+        fixed (World.SourceId* pIds = ids)
         fixed (float* pXs = xs, pYs = ys)
         {
             World.Sync(_world, pIds, pXs, pYs, count);
@@ -561,7 +561,7 @@ internal sealed unsafe class StreamRunner
                 ExecuteChangedMask(command, reach, since);
                 break;
             case ReadKind.SenseColumn:
-                ExecuteSenseColumn(command, false, -1);
+                ExecuteSenseColumn(command, false, default);
                 break;
             case ReadKind.SenseColumnEx:
                 ExecuteSenseColumn(command, true, exclude);
@@ -630,18 +630,18 @@ internal sealed unsafe class StreamRunner
             $"changed mask count {actual} vs {expected}", _index);
     }
 
-    private void ExecuteSenseColumn(StreamCommand command, bool withExcludes, int exclude)
+    private void ExecuteSenseColumn(StreamCommand command, bool withExcludes, World.SourceId exclude)
     {
         var rng = new SplitMix64(command.Aux ^ AuxSalt ^ 0x2545F4914F6CDD1Dul);
         var count = 1 + rng.NextInt(0, MaxColumn);
         FillColumnPositions(ref rng, command.Grid, count);
         if (withExcludes)
             for (var i = 0; i < count; i++)
-                _columnExcludes[i] = i == 0 ? exclude : -1;
+                _columnExcludes[i] = i == 0 ? exclude : default;
         bool actual;
         bool expected;
         fixed (float* pXs = _columnXs, pYs = _columnYs)
-        fixed (int* pExcludes = _columnExcludes)
+        fixed (World.SourceId* pExcludes = _columnExcludes)
         fixed (short* pActual = _columnActual, pExpected = _columnExpected)
         fixed (ulong* pActualWords = _wordsActual, pExpectedWords = _wordsExpected)
         {

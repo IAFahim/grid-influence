@@ -221,8 +221,8 @@ public sealed class TransformCommandTests : IDisposable
         var twinLayer = Layer.New(twin);
         try
         {
-            var sources = new int[count];
-            var twinSources = new int[count];
+            var sources = new World.SourceId[count];
+            var twinSources = new World.SourceId[count];
             for (var index = 0; index < count; index++)
             {
                 var x = 1f + index % 60;
@@ -282,7 +282,7 @@ public sealed class TransformCommandTests : IDisposable
         World.Record(_world);
         var before = World.Query(_world, _grid, _layer, 0, 0, 64, 64);
 
-        var stale = (7 << 24) | 900;
+        var stale = new World.SourceId(900, 7);
         var commands = new[]
         {
             World.SourceCommand.Place(_layer, 12.5f, 12.5f, _stamp, 5),
