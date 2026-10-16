@@ -4,6 +4,7 @@ internal enum StreamProfile
 {
     Gate,
     Heavy,
+    Corpus,
 }
 
 internal enum PrecisionMode : byte
@@ -174,7 +175,7 @@ internal static class StreamGenerator
 
         setup.MaxLive = heavy ? rng.NextInt(16, 29) : rng.NextInt(6, 15);
 
-        var frameCount = heavy ? rng.NextInt(7, 13) : rng.NextInt(4, 7);
+        var frameCount = profile == StreamProfile.Corpus ? 60 : heavy ? rng.NextInt(7, 13) : rng.NextInt(4, 7);
         var commands = setup.Commands;
         var attempts = 0;
         var live = 0;
@@ -207,7 +208,7 @@ internal static class StreamGenerator
                 live = 0;
             }
 
-            var ops = heavy ? rng.NextInt(8, 17) : rng.NextInt(5, 11);
+            var ops = profile == StreamProfile.Corpus ? rng.NextInt(6, 13) : heavy ? rng.NextInt(8, 17) : rng.NextInt(5, 11);
             for (var op = 0; op < ops; op++)
             {
                 if (rng.Chance(heavy ? 10 : 8))

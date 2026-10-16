@@ -76,46 +76,54 @@ public sealed class DepositPrepTests
 
         var serialTiles = stackalloc int[16];
         var parallelTiles = stackalloc int[16];
-        for (var frame = 0; frame < 4; frame++)
+        var previousSerial = ResolvePool.SerialOnly;
+        try
         {
-            for (var i = 0; i < count; i++)
+            for (var frame = 0; frame < 4; frame++)
             {
-                var x = (float)(rng.NextDouble() * 124);
-                var y = (float)(rng.NextDouble() * 124);
-                var angle = (float)(rng.NextDouble() * Math.PI * 2);
-                World.Move(serial, ids[i], x, y);
-                World.Turn(serial, ids[i], angle);
-                World.Move(parallel, ids[i], x, y);
-                World.Turn(parallel, ids[i], angle);
+                for (var i = 0; i < count; i++)
+                {
+                    var x = (float)(rng.NextDouble() * 124);
+                    var y = (float)(rng.NextDouble() * 124);
+                    var angle = (float)(rng.NextDouble() * Math.PI * 2);
+                    World.Move(serial, ids[i], x, y);
+                    World.Turn(serial, ids[i], angle);
+                    World.Move(parallel, ids[i], x, y);
+                    World.Turn(parallel, ids[i], angle);
+                }
+
+                if (frame == 1)
+                    for (var i = 0; i < count; i += 7)
+                    {
+                        World.Remove(serial, ids[i]);
+                        World.Remove(parallel, ids[i]);
+                    }
+
+                if (frame == 2)
+                    for (var i = 0; i < count; i += 5)
+                    {
+                        World.SetGain(serial, ids[i], (sbyte)(i % 17 - 8));
+                        World.SetGain(parallel, ids[i], (sbyte)(i % 17 - 8));
+                    }
+
+                ResolvePool.SerialOnly = frame % 2 == 0;
+                World.Process(serial);
+                ResolvePool.SerialOnly = frame % 2 == 1;
+                World.Process(parallel);
+                AssertCellsEqual(serial, parallel);
+                Assert.Equal(
+                    World.ChangedTiles(serial, 0, 0, World.Tick(serial) - 1, serialTiles),
+                    World.ChangedTiles(parallel, 0, 0, World.Tick(parallel) - 1, parallelTiles));
+                Assert.Equal(
+                    World.QueryMax(serial, 0, 2, out var sx, out var sy),
+                    World.QueryMax(parallel, 0, 2, out var px, out var py));
+                Assert.Equal(sx, px);
+                Assert.Equal(sy, py);
             }
-
-            if (frame == 1)
-                for (var i = 0; i < count; i += 7)
-                {
-                    World.Remove(serial, ids[i]);
-                    World.Remove(parallel, ids[i]);
-                }
-
-            if (frame == 2)
-                for (var i = 0; i < count; i += 5)
-                {
-                    World.SetGain(serial, ids[i], (sbyte)(i % 17 - 8));
-                    World.SetGain(parallel, ids[i], (sbyte)(i % 17 - 8));
-                }
-
-            ResolvePool.SerialOnly = frame % 2 == 0;
-            World.Process(serial);
-            ResolvePool.SerialOnly = frame % 2 == 1;
-            World.Process(parallel);
-            AssertCellsEqual(serial, parallel);
-            Assert.Equal(
-                World.ChangedTiles(serial, 0, 0, World.Tick(serial) - 1, serialTiles),
-                World.ChangedTiles(parallel, 0, 0, World.Tick(parallel) - 1, parallelTiles));
-            Assert.Equal(
-                World.QueryMax(serial, 0, 2, out var sx, out var sy),
-                World.QueryMax(parallel, 0, 2, out var px, out var py));
-            Assert.Equal(sx, px);
-            Assert.Equal(sy, py);
+        }
+        finally
+        {
+            ResolvePool.SerialOnly = previousSerial;
         }
 
         World.Free(serial);

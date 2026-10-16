@@ -156,5 +156,9 @@ internal static class StreamMinimizer
     }
 
     private static string FloatLiteral(float value)
-        => $"BitConverter.Int32BitsToSingle(0x{BitConverter.SingleToInt32Bits(value).ToString("X8", CultureInfo.InvariantCulture)})";
+    {
+        var bits = BitConverter.SingleToInt32Bits(value);
+        var literal = bits < 0 ? $"unchecked((int)0x{bits.ToString("X8", CultureInfo.InvariantCulture)})" : $"0x{bits.ToString("X8", CultureInfo.InvariantCulture)}";
+        return $"BitConverter.Int32BitsToSingle({literal})";
+    }
 }

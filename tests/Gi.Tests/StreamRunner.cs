@@ -2,9 +2,10 @@ namespace Gi.Tests;
 
 internal sealed unsafe class StreamRunner
 {
-    private const ulong AuxSalt = 0xD1B54A32D192ED03ul;
+    private const ulong AuxSalt = StreamOperands.AuxSalt;
     private const int MaxTiles = 64;
     private const int MaxColumn = 8;
+    private static readonly bool PooledMode = Environment.GetEnvironmentVariable("GI_DIFFERENTIAL_POOLED") == "1";
 
     private readonly StreamSetup _setup;
     private readonly List<StreamCommand> _commands;
@@ -52,7 +53,22 @@ internal sealed unsafe class StreamRunner
         BugInjection? bug = null,
         Action<int, byte, byte, short[]>? onPage = null)
     {
-        new StreamRunner(setup, commands, bug, onPage).Execute();
+        if (PooledMode)
+        {
+            new StreamRunner(setup, commands, bug, onPage).Execute();
+            return;
+        }
+
+        var previous = ResolvePool.SerialOnly;
+        ResolvePool.SerialOnly = true;
+        try
+        {
+            new StreamRunner(setup, commands, bug, onPage).Execute();
+        }
+        finally
+        {
+            ResolvePool.SerialOnly = previous;
+        }
     }
 
     public static StreamMismatch? TryRun(
@@ -258,12 +274,8 @@ internal sealed unsafe class StreamRunner
         var ids = new int[Math.Max(1, count)];
         var xs = new float[Math.Max(1, count)];
         var ys = new float[Math.Max(1, count)];
-        for (var i = 0; i < count; i++)
-        {
-            ids[i] = Id(command.Handle + i);
-            xs[i] = CoordNear(ref rng, target.X, target.Size);
-            ys[i] = CoordNear(ref rng, target.Y, target.Size);
-        }
+        for (var i = 0; i < count; i++) ids[i] = Id(command.Handle + i);
+        StreamOperands.ColumnPositions(ref rng, target, xs, ys, count);
 
         fixed (int* pIds = ids)
         fixed (float* pXs = xs, pYs = ys)
@@ -350,7 +362,8 @@ internal sealed unsafe class StreamRunner
 
                     Require(
                         actualCount == expectedCount && TilePrefixEqual(actualCount),
-                        $"changed tiles since {since} g{g} l{l} f{_frames}: {actualCount} vs {expectedCount}",
+                        $"changed tiles since {since} g{g} l{l} f{_frames}: {actualCount} vs {expectedCount}" +
+                        (actualCount > expectedCount ? $" first={_actualTiles[0]}" : string.Empty),
                         _index);
                 }
 
@@ -390,10 +403,7 @@ internal sealed unsafe class StreamRunner
     {
         var size = 1 << _setup.Grids[command.Grid].Power;
         var rng = new SplitMix64(command.Aux ^ AuxSalt);
-        var rectX = rng.NextInt(-4, size + 4);
-        var rectY = rng.NextInt(-4, size + 4);
-        var rectW = Math.Max(1, command.Int0);
-        var rectH = 1 + rng.NextInt(0, size + 2);
+        StreamOperands.Rect(ref rng, size, command.Int0, out var rectX, out var rectY, out var rectW, out var rectH);
         var reach = command.Int0 < 0 ? float.NaN : command.Int0;
         var since = rng.NextInt(-2, _frames + 2);
         var exclude = Id(command.Handle);
@@ -612,22 +622,8 @@ internal sealed unsafe class StreamRunner
         }
     }
 
-    private static float CoordNear(ref SplitMix64 rng, float origin, float size)
-    {
-        if (rng.Chance(4)) return float.NaN;
-        if (rng.Chance(10)) return origin + size * (1f + rng.NextUnit());
-        return origin + rng.NextUnit() * size;
-    }
-
     private void FillColumnPositions(ref SplitMix64 rng, byte grid, int count)
-    {
-        var target = _setup.Grids[grid];
-        for (var i = 0; i < count; i++)
-        {
-            _columnXs[i] = CoordNear(ref rng, target.X, target.Size);
-            _columnYs[i] = CoordNear(ref rng, target.Y, target.Size);
-        }
-    }
+        => StreamOperands.ColumnPositions(ref rng, _setup.Grids[grid], _columnXs, _columnYs, count);
 
     private void ExecuteChangedMask(StreamCommand command, float reach, int since)
     {

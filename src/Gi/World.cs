@@ -764,7 +764,6 @@ public static unsafe partial class World
             var cy1 = Math.Min(p.Y1, g->Size);
             if (cx1 <= cx0 || cy1 <= cy0) continue;
 
-            var ld = EnsureDirty(g, layer);
             var dense = p.Plane == Plane.Dense;
             var tps = g->TilesPerSide;
             for (var ty = cy0 >> TileBake.TileBits; ty <= (cy1 - 1) >> TileBake.TileBits; ty++)
@@ -775,6 +774,7 @@ public static unsafe partial class World
                 if (!TileBake.Touches(&p, tileX0, tileY0)) continue;
 
                 var tile = ty * tps + tx;
+                var ld = EnsureDirty(g, layer);
                 var block = TileBlock(ld, tile, dense);
                 if (dense) block = EnsureDense(ld, tile, block);
                 Emit(&p, block, tileX0, tileY0, gain);
@@ -804,7 +804,6 @@ public static unsafe partial class World
             var placement = w->Placements.Length;
             w->Placements.Resize(placement + 1);
             w->Placements.Pointer[placement] = p;
-            var ld = EnsureDirty(g, layer);
             var dense = p.Plane == Plane.Dense;
             var tps = g->TilesPerSide;
             for (var ty = cy0 >> TileBake.TileBits; ty <= (cy1 - 1) >> TileBake.TileBits; ty++)
@@ -813,6 +812,7 @@ public static unsafe partial class World
                 if (!TileBake.Touches(&p, tx << TileBake.TileBits, ty << TileBake.TileBits)) continue;
 
                 var tile = ty * tps + tx;
+                var ld = EnsureDirty(g, layer);
                 var block = TileBlock(ld, tile, dense);
                 if (dense) EnsureDense(ld, tile, block);
                 MarkDirty(ld, tile);
