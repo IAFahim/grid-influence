@@ -141,7 +141,7 @@ No host API is added to Gi. Exclusive direct calls remain available between batc
 
 Small full-state batches validate and apply in one inline pass. Large unique full-state batches
 avoid hashing; repeated sources fall back to ordered grouping. General batches reserve slots
-against a virtual free chain, validate generation-tagged IDs, and retain one row per affected slot.
+against a virtual free ring, validate generation-tagged IDs, and retain one row per affected slot.
 Two worker phases prepare final states and write disjoint columns/operation ranges using the
 existing `ResolvePool`. The caller commits timer heaps and schedule journals after joining.
 Fresh placement undo records preserve the direct `Place` layer and identity semantics, including

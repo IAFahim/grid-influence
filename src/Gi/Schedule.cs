@@ -208,8 +208,7 @@ public static unsafe partial class World
             {
                 EnqueueMutation(w, s, slot, s->X.Pointer[slot], s->Y.Pointer[slot], 0, s->Angle.Pointer[slot], s->Scale.Pointer[slot], false);
                 s->Alive.Pointer[slot] = 0;
-                s->Free.Pointer[slot] = w->FreeHead;
-                w->FreeHead = slot;
+                s->Free.Push(slot);
                 continue;
             }
 
