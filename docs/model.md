@@ -222,11 +222,20 @@ before reading command payloads, writing
 - **Crowds** rebuild instead of retract-and-reapply. Before applying ops, `Process` counts
   deposits per layer straight from the op queue (every non-zero gain side of an op) and
   compares against a per-layer live count — sources alive, gain non-zero, on that layer —
-  maintained incrementally by `Place`/`Remove`/`SetGain` and recomputed in one pass whenever a
-  flag set by timers, `Rewind`, or any gain/liveness mutation says the cache is stale; `Move`
-  never sets it, so a pure-motion crowd pays nothing for the count. A layer whose deposits
-  reach its live count (with a 64-deposit floor, so tiny layers never enter) is *crowded*:
-  its ops are skipped by the apply phase entirely, and the layer is rebuilt. The rebuild
+  that is exact after every public call returns. Every site that changes a source's gain or
+  liveness adjusts the count by the difference between the counted state before and after:
+  `Place`, `Remove`, `SetGain`, an immediate or equal-target `Fade`, each fade step and each
+  expiry inside the timer run, and the batch fold (the small-update path adjusts it directly;
+  the folded path accumulates signed per-partition rows that the owning thread adds after the
+  join). `Rewind` is the one recount: it restores whole source rows from the op queue and the
+  journal, so it zeroes the counts and recomputes them in the same single pass that rebuilds
+  the free ring. `Clear` zeroes them. `Process` never recounts, so a world with scheduled
+  timers pays nothing for the count per frame, and `Move`, `Turn` and `Scale` never touch it.
+  `LayerLiveTests` holds the count equal to a brute-force pass over the source columns after
+  every operation of random place, move, gain, fade, expire, remove, batch, record, rewind and
+  clear streams. A layer whose deposits reach its live count (with a 64-deposit floor, so tiny
+  layers never enter) is *crowded*: its ops are skipped by the apply phase entirely, and the
+  layer is rebuilt. The rebuild
   scatters every live source on the layer into per-(tile, worker) chunk chains — a chunk is 16
   inline 36-byte items; a box stamp's item carries its whole footprint (cell, phase, extent,
   stamp, gain), any other plane stores one `Placement` per source per slot and the item carries
@@ -997,7 +1006,16 @@ pass behind them was `perf`-profile guided, receipts first.
   touched under its acquire flag, the same ownership rule as the task table. The per-layer
   live counts are world state mutated only by the world's owning thread (mutators, timers,
   `Rewind`, `Clear`); the rebuild reads them on that same thread inside `Process`, so the
-  cache needs no synchronization beyond the world's serial-mutation rule. The
+  cache needs no synchronization beyond the world's serial-mutation rule. The count adjustment
+  helper dereferences the `WorldCtx` pointer its caller already holds, so its lifetime is the
+  caller's (the context lives until `World.Free`, which may not overlap a call taking the
+  handle); it writes one `int` of the world's inline `LayerLive[MaxLayers]` array, at an index
+  taken from a source's layer byte, which `Place` and the batch planner validate against
+  `LayerCount <= MaxLayers` before the byte is stored and which no later write changes to an
+  out-of-range value, so the access is in bounds. The array is `int`-aligned inside the
+  context and each access is a whole aligned `int`. No pool worker touches it: batch workers
+  write only their own partition's row of `BatchLayerDeltas`, and the owning thread folds the
+  rows into `LayerLive` after joining all workers. The
   module skips local zero-initialization (`SkipLocalsInit`): every `stackalloc` buffer is
   written before it is read — band and span arrays are filled up to the count their readers
   use, cell scratch is cleared or fully emitted first, and the resolve rows are cleared when

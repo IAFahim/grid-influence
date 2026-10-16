@@ -150,7 +150,6 @@ internal unsafe struct WorldCtx
     public int* Prev;
     public uint Crowded;
     public fixed int LayerLive[MaxLayers];
-    public byte LiveStale;
     public int* Rebuilds;
     public NativeBuffer<RebuildChunk> RebuildArena;
     public NativeBuffer<int> RebuildChains;
@@ -482,8 +481,7 @@ public static unsafe partial class World
 
         if (next == s->Gain.Pointer[i]) return;
 
-        if (next == 0) w->LayerLive[s->Layer.Pointer[i]]--;
-        else if (s->Gain.Pointer[i] == 0) w->LayerLive[s->Layer.Pointer[i]]++;
+        CountGain(w, s->Layer.Pointer[i], s->Gain.Pointer[i], next);
         EnqueueMutation(w, s, i, s->X.Pointer[i], s->Y.Pointer[i], (sbyte)next, s->Angle.Pointer[i], s->Scale.Pointer[i], true);
         s->Gain.Pointer[i] = next;
     }
@@ -668,6 +666,14 @@ public static unsafe partial class World
     private const int CrowdDeposits = 64;
     internal const uint BoxItem = 1u << 31;
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void CountGain(WorldCtx* w, byte layer, byte before, byte after)
+    {
+        if (before == after) return;
+        if (after == 0) w->LayerLive[layer]--;
+        else if (before == 0) w->LayerLive[layer]++;
+    }
+
     private static uint ScanCrowding(WorldCtx* w)
     {
         var crowded = 0u;
@@ -682,15 +688,6 @@ public static unsafe partial class World
             var op = ops + i;
             if (op->FromGain != 0) deposits[op->FromLayer]++;
             if (op->ToGain != 0) deposits[op->ToLayer]++;
-        }
-
-        var s = &w->Sources;
-        if (w->LiveStale != 0)
-        {
-            new Span<int>(w->LayerLive, w->LayerCount).Clear();
-            for (var i = 0; i < s->Count; i++)
-                if (s->Alive.Pointer[i] != 0 && s->Gain.Pointer[i] != 0) w->LayerLive[s->Layer.Pointer[i]]++;
-            w->LiveStale = 0;
         }
 
         for (var l = 0; l < w->LayerCount; l++)
@@ -1089,7 +1086,6 @@ public static unsafe partial class World
         w->Timers.Resize(0);
         w->Recording = 0;
         w->Crowded = 0;
-        w->LiveStale = 0;
         new Span<int>(w->LayerLive, w->LayerCount).Clear();
         w->RebuildChains.Resize(0);
         w->RebuildDense.Resize(0);
@@ -1152,7 +1148,6 @@ public static unsafe partial class World
         if (w == null) return;
         Runtime.WorldRevisions[world]++;
         var s = &w->Sources;
-        w->LiveStale = 1;
 
         var ops = w->Ops.Pointer;
         for (var i = w->Ops.Length - 1; i >= 0; i--)
@@ -1178,8 +1173,12 @@ public static unsafe partial class World
         RebuildTimers(w);
 
         s->Free.Clear();
+        new Span<int>(w->LayerLive, w->LayerCount).Clear();
         for (var i = 0; i < s->Count; i++)
+        {
             if (s->Alive.Pointer[i] == 0) s->Free.Push(i);
+            else if (s->Gain.Pointer[i] != 0) w->LayerLive[s->Layer.Pointer[i]]++;
+        }
     }
 
     private static void RestoreSlot(SourceColumns* s, DepositOp* op)
@@ -1372,11 +1371,7 @@ public static unsafe partial class World
         if (w == null) return;
 
         w->Tick++;
-        if (w->Timers.Length != 0)
-        {
-            RunTimers(w);
-            w->LiveStale = 1;
-        }
+        if (w->Timers.Length != 0) RunTimers(w);
         w->Crowded = ScanCrowding(w);
         var stamp = ProcessStages.Mark();
         var pooled = false;
