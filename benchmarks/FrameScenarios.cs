@@ -480,7 +480,13 @@ internal sealed unsafe class FrameCrowd(int entities, int power, ulong seed, boo
         Gi.World.Process(WorldId);
         marks[2] = Stopwatch.GetTimestamp();
         bool ok;
-        if (ReadMode.Fused)
+        if (ReadMode.View)
+        {
+            ok = ViewReads();
+            marks[3] = Stopwatch.GetTimestamp();
+            marks[4] = marks[3];
+        }
+        else if (ReadMode.Fused)
         {
             ok = Gi.World.SenseGradientColumn(WorldId, _layer, _x, _y, null, Entities, _values, _gradientX, _gradientY, _whole);
             marks[3] = Stopwatch.GetTimestamp();
@@ -505,6 +511,35 @@ internal sealed unsafe class FrameCrowd(int entities, int power, ulong seed, boo
         _area = area;
         marks[5] = Stopwatch.GetTimestamp();
         return ok;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    private bool ViewReads()
+    {
+        var view = Gi.World.View(WorldId, 0, _layer);
+        var size = view.Size;
+        var complete = true;
+        new Span<ulong>(_whole, (Entities + 63) >> 6).Clear();
+        for (var i = 0; i < Entities; i++)
+        {
+            if (!view.TryCell(_x[i], _y[i], out var cx, out var cy))
+            {
+                _values[i] = 0;
+                _gradientX[i] = 0f;
+                _gradientY[i] = 0f;
+                complete = false;
+                continue;
+            }
+
+            _values[i] = view[cx, cy];
+            view.Gradient(cx, cy, out var gx, out var gy);
+            _gradientX[i] = gx * 0.5f;
+            _gradientY[i] = gy * 0.5f;
+            if (cx - 1 >= 0 && cy - 1 >= 0 && cx + 1 < size && cy + 1 < size) _whole[i >> 6] |= 1ul << (i & 63);
+            else complete = false;
+        }
+
+        return complete;
     }
 
     public override ulong Consume()

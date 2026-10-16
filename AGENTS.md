@@ -7,7 +7,9 @@ on any timeline package and must not gain one.
 
 The public surface is exactly `World`, `Grid`, `Layer`, `Stamp`. Do not add a second engine, a
 parallel field type, or an alternate query surface — this repository carried two engines once
-and the re-emitted marks engine was retired for it. Extensions go through the existing handles.
+and the re-emitted marks engine was retired for it. Extensions go through the existing handles;
+`World.FieldView` (a `ref struct` nested in `World`) and the `Grid` spatial-order helpers are the
+only nested additions.
 
 ## Code rules
 

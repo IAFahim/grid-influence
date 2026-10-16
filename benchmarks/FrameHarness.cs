@@ -6,6 +6,7 @@ using System.Runtime.Intrinsics.X86;
 internal static class ReadMode
 {
     public static bool Fused;
+    public static bool View;
 }
 
 internal sealed class FrameOptions
@@ -157,8 +158,9 @@ internal static class FrameHarness
                 case "--seed" when ulong.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var seed):
                     options.Seed = seed;
                     break;
-                case "--reads" when value is "fused" or "separate":
+                case "--reads" when value is "fused" or "separate" or "view":
                     ReadMode.Fused = value == "fused";
+                    ReadMode.View = value == "view";
                     break;
                 default:
                     error = "bad option " + args[i] + " " + value;
