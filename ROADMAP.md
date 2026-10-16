@@ -162,7 +162,7 @@ Three claims from the earlier plans that these predictions reject:
 | P0-9 | R8/R10 one-core pool, cleared outputs | B3 | P0-6, P0-3 | S | done | phase0 | pool refused on one processor; every column read writes outputs before early returns; 454 tests, receipts unchanged |
 | P0-10 | Precision on main (oracle switch + skip) | B | P0-7, P0-8, P0-9 | M | todo | | |
 | P0-11 | Measure the lever | A | P0-1, P0-10 | S | todo | | |
-| P0-12 | Salvage + close `snapshot-bucket-index` | A | P0-1 | S | todo | | |
+| P0-12 | Salvage + close `snapshot-bucket-index` | A | P0-1 | S | done | phase0 | profiler stale-handle fix + inspection accounting re-applied; 32 tests ported (958 total); branch closed at a53411d with the D14 note on #40; 3 findings carried to P0-14/P1-1 |
 | P0-13 | #40 + README interim | A | P0-11 | S | todo | | |
 | P0-14 | Clean-up: CI inspect, doc/version echoes, carry-forward findings | A | — | S | todo | | |
 | P1-1 | Reference interpreter | C | P0-10 (early) | L | todo | | |
