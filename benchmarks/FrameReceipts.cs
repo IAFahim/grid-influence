@@ -177,11 +177,11 @@ internal static unsafe class FrameReceipts
             var sources = &source->Sources;
             for (var slot = 0; slot < sources->Count; slot++)
             {
-                if (sources->Alive.Pointer[slot] == 0) continue;
-                if (sources->Angle.Pointer[slot] != 0 || sources->Scale.Pointer[slot] != 256) return false;
-                var id = Gi.World.Place(fresh, sources->Layer.Pointer[slot], sources->X.Pointer[slot], sources->Y.Pointer[slot],
-                    sources->Stamp.Pointer[slot], (sbyte)sources->Gain.Pointer[slot]);
-                if (id < 0) return false;
+                if (sources->Alive[slot] == 0) continue;
+                if (sources->Angle[slot] != 0 || sources->Scale[slot] != 256) return false;
+                var id = Gi.World.Place(fresh, sources->Layer[slot], sources->X[slot], sources->Y[slot],
+                    sources->Stamp[slot], (sbyte)sources->Gain[slot]);
+                if (id == default) return false;
             }
 
             Gi.World.Process(fresh);

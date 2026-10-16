@@ -18,14 +18,14 @@ internal static unsafe class Receipts
         var a = World.Place(world, layer, 16f, 16f, box, 2);
         var b = World.Place(world, other, 48f, 48f, raster, 2);
         var pending = Inspection.Read(world);
-        var pendingOk = a == (1 << 24) && b == ((1 << 24) | 1) && pending.LiveSources == 2 && pending.SourceSlots == 2 &&
-            pending.SourceCapacity == 64 && pending.LiveTiles == 0 && pending.DirtyTiles == 0 &&
+        var pendingOk = a == new World.SourceId(0, 1) && b == new World.SourceId(1, 1) && pending.LiveSources == 2 && pending.SourceSlots == 2 &&
+            pending.SourceCapacity == 16_384 && pending.LiveTiles == 0 && pending.DirtyTiles == 0 &&
             pending.GridBytes == World.MaxGrids * sizeof(GridCtx) &&
             pending.LayerBytes == 2 * World.MaxLayers * sizeof(LayerData) + World.MaxLayers * sizeof(LayerRecipe) &&
-            pending.SourceBytes == 64 * 40 && pending.DirectoryBytes == 0 && pending.SlabBytes == 0 &&
+            pending.SourceBytes == 778_240 && pending.DirectoryBytes == 0 && pending.SlabBytes == 0 &&
             pending.DirtyFlagBytes == 0 && pending.DirtyQueueBytes == 0 &&
             pending.DifferenceBytes == 0 && pending.DenseBytes == 0 && pending.RasterTiles == 0 &&
-            pending.DepositQueueBytes == 16 * sizeof(DepositOp) + 64 * sizeof(int) &&
+            pending.DepositQueueBytes == 16 * sizeof(DepositOp) + 16_384 * sizeof(int) &&
             pending.WorldRevisionBytes == World.MaxWorlds * sizeof(int) && pending.ZeroDenseBytes == World.DenseBytes &&
             pending.StampRasterBytes - empty.StampRasterBytes == 25 && pending.Stamps - empty.Stamps == 2;
 
@@ -44,7 +44,7 @@ internal static unsafe class Receipts
             processed.DirtyFlagBytes == 40 && processed.DirtyQueueBytes == 128 &&
             processed.RasterTiles == 1 &&
             processed.PyramidBytes == 2 * (64 * 2 + 2 * 16 * 4) &&
-            processed.DepositQueueBytes == 16 * sizeof(DepositOp) + 64 * sizeof(int) + 16 * sizeof(DepositFragment) + 16 * sizeof(Placement) &&
+            processed.DepositQueueBytes == 16 * sizeof(DepositOp) + 16_384 * sizeof(int) + 16 * sizeof(DepositFragment) + 16 * sizeof(Placement) &&
             processed.NativeBytes == pending.NativeBytes + 32 + 2 * 16 * World.BlockBytes + 16 * World.DenseBytes +
                 40 + 128 + processed.PyramidBytes +
                 16 * sizeof(DepositFragment) + 16 * sizeof(Placement);
@@ -109,14 +109,14 @@ internal static unsafe class Receipts
 
         World.Clear(world);
         var cleared = Inspection.Read(world);
-        var clearOk = cleared.LiveSources == 0 && cleared.SourceSlots == 0 && cleared.SourceCapacity == 64 &&
+        var clearOk = cleared.LiveSources == 0 && cleared.SourceSlots == 0 && cleared.SourceCapacity == 16_384 &&
             cleared.LiveTiles == 0 && cleared.DirtyTiles == 0 && cleared.SlabFreeUnits == 6 &&
             cleared.PyramidBytes == 0 && cleared.RasterTiles == 0 &&
             cleared.Directories == 2 && cleared.DirectoryBytes == 32 &&
             cleared.SlabBytes == 2 * 16 * World.BlockBytes + 16 * World.DenseBytes + 16 * World.TentBytes + 256 &&
-            cleared.DepositQueueBytes == 16 * sizeof(DepositOp) + 64 * sizeof(int) + 16 * sizeof(DepositFragment) + 16 * sizeof(Placement) &&
-            cleared.WorldBytes == empty.WorldBytes + 64 * 40 + 40 + 256 + 16 * sizeof(DepositOp) +
-                64 * sizeof(int) + 16 * sizeof(DepositFragment) + 16 * sizeof(Placement) +
+            cleared.DepositQueueBytes == 16 * sizeof(DepositOp) + 16_384 * sizeof(int) + 16 * sizeof(DepositFragment) + 16 * sizeof(Placement) &&
+            cleared.WorldBytes == empty.WorldBytes + 778_240 + 40 + 256 + 16 * sizeof(DepositOp) +
+                16_384 * sizeof(int) + 16 * sizeof(DepositFragment) + 16 * sizeof(Placement) +
                 32 + 2 * 16 * World.BlockBytes + 16 * World.DenseBytes + 16 * World.TentBytes + 256 &&
             World.Query(world, grid, other, 0, 0, 64, 64) == 0;
 
@@ -138,7 +138,7 @@ internal static unsafe class Receipts
         ];
     }
 
-    private static void MoveAndProcess(byte world, int source, int iteration)
+    private static void MoveAndProcess(byte world, World.SourceId source, int iteration)
     {
         var position = (iteration & 1) == 0 ? 48f : 16f;
         World.Move(world, source, position, position);

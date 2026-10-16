@@ -25,7 +25,7 @@ internal static partial class Verification
         var rng = new Random(9);
         var foodBell = Gi.Stamp.Bell(24, 24, 40);
         var threatBell = Gi.Stamp.Bell(48, 48, 50);
-        var foodIds = new int[3000];
+        var foodIds = new Gi.World.SourceId[3000];
         for (var i = 0; i < foodIds.Length; i++)
             foodIds[i] = Gi.World.Place(w, food, (float)rng.NextDouble() * 1024f, (float)rng.NextDouble() * 1024f, foodBell, 4);
         for (var i = 0; i < 300; i++)
@@ -70,7 +70,7 @@ internal static partial class Verification
         Gi.Grid.New(pw, 10, 0f, 0f, 1024f);
         var pf = Gi.Layer.New(pw);
         var pt = Gi.Layer.New(pw);
-        var plainIds = new int[3000];
+        var plainIds = new Gi.World.SourceId[3000];
         var prng = new Random(9);
         for (var i = 0; i < plainIds.Length; i++)
             plainIds[i] = Gi.World.Place(pw, pf, (float)prng.NextDouble() * 1024f, (float)prng.NextDouble() * 1024f, foodBell, 4);
@@ -93,9 +93,9 @@ internal static partial class Verification
         var cone = Gi.Stamp.Cone(16, 90, 90);
         var dome = Gi.Stamp.Dome(8, 60);
         var tent = Gi.Stamp.Tent(16, 16, 60);
-        var cones = new int[200];
-        var domes = new int[200];
-        var tents = new int[200];
+        var cones = new Gi.World.SourceId[200];
+        var domes = new Gi.World.SourceId[200];
+        var tents = new Gi.World.SourceId[200];
         for (var i = 0; i < 200; i++)
         {
             cones[i] = Gi.World.Place(mw, ml, (i * 41.3f) % 1000f + 12f, (i * 29.7f) % 1000f + 12f, cone, 6);
@@ -129,7 +129,7 @@ internal static partial class Verification
         Gi.Grid.New(fw, 10, 0f, 0f, 1024f);
         var fl = Gi.Layer.New(fw);
         var crumb = Gi.Stamp.Tent(6, 6, 40);
-        var trail = new int[2000];
+        var trail = new Gi.World.SourceId[2000];
         for (var i = 0; i < trail.Length; i++)
         {
             trail[i] = Gi.World.Place(fw, fl, (i * 7.3f) % 1000f + 12f, (i * 3.1f) % 1000f + 12f, crumb, 16);

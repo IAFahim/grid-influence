@@ -75,7 +75,7 @@ internal static partial class Verification
         var priors = new short[specs.Length][][];
         for (var gi = 0; gi < specs.Length; gi++) priors[gi] = new short[layerCount][];
         var rng = new Random(707);
-        var ids = new List<int>();
+        var ids = new List<Gi.World.SourceId>();
         for (var i = 0; i < 40; i++) ids.Add(Gi.World.Place(w, food, 90.5f, 70.25f, stamps[0], 16));
         for (var round = 0; round < 5; round++)
         {
@@ -226,11 +226,11 @@ internal static partial class Verification
         AddMix(w, mixes, 0, other, 3, 1);
         var stamps = MixStamps();
         var rng = new Random(909);
-        var ids = new List<int>();
+        var ids = new List<Gi.World.SourceId>();
         for (var i = 0; i < 240; i++)
             ids.Add(Gi.World.Place(w, i % 3 == 0 ? other : l, (float)(rng.NextDouble() * 270 - 7),
                 (float)(rng.NextDouble() * 270 - 7), stamps[rng.Next(stamps.Length)], (sbyte)rng.Next(-16, 17)));
-        var piles = new List<int>();
+        var piles = new List<Gi.World.SourceId>();
         for (var i = 0; i < 50; i++) piles.Add(Gi.World.Place(w, i % 2 == 0 ? l : other, 100.3f, 77.7f, stamps[i % 4], 16));
         ids.AddRange(piles);
         Gi.World.Process(w);
@@ -294,7 +294,7 @@ internal static partial class Verification
         var d = Gi.Layer.Sum(w, a, 1, b, 1);
         var box = Gi.Stamp.Box(9, 9, 50);
         var tent = Gi.Stamp.Tent(15, 15, 70);
-        if (Gi.World.Place(w, d, 40f, 40f, box, 4) != -1) return false;
+        if (Gi.World.Place(w, d, 40f, 40f, box, 4) != default) return false;
 
         var rejects = 0;
         void Expect(Action create)
@@ -309,7 +309,7 @@ internal static partial class Verification
         Expect(() => Gi.Layer.Mask(w, a, b, 10, -10));
         if (rejects != 4) return false;
 
-        var ids = new int[60];
+        var ids = new Gi.World.SourceId[60];
         for (var i = 0; i < ids.Length; i++)
             ids[i] = Gi.World.Place(w, i % 2 == 0 ? a : b, 20f + i * 3.7f, 30f + i * 2.9f, i % 3 == 0 ? tent : box, (sbyte)(3 + i % 5));
         Gi.World.Process(w);
@@ -365,7 +365,7 @@ internal static partial class Verification
         var sum = Gi.Layer.Sum(w, a, 1, b, -2);
         Gi.Layer.Max(w, sum, Gi.Layer.Mask(w, a, b, -50, 50));
         var stamps = MixStamps();
-        var ids = new int[300];
+        var ids = new Gi.World.SourceId[300];
         for (var i = 0; i < ids.Length; i++)
             ids[i] = Gi.World.Place(w, i % 2 == 0 ? a : b, i * 1.7f % 500f, i * 3.1f % 500f, stamps[i % stamps.Length], 5);
         Gi.World.Process(w);

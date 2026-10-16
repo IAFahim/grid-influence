@@ -230,7 +230,7 @@ internal static partial class Verification
         foreach (var g in grids) Gi.Grid.New(w, g.Power, g.X, g.Y, g.Size);
         var l = Gi.Layer.New(w);
         var rng = new Random(1212);
-        var live = new List<(int Id, OracleSource Source)>();
+        var live = new List<(Gi.World.SourceId Id, OracleSource Source)>();
         var palette = new List<(OracleSource Shape, byte Stamp)>();
         for (var i = 0; i < 21; i++)
         {
@@ -448,7 +448,7 @@ internal static partial class Verification
         var samples = new sbyte[9 * 7];
         for (var i = 0; i < samples.Length; i++) samples[i] = (sbyte)(i * 13 % 70 - 20);
         byte[] stamps = [Gi.Stamp.Box(14, 9, 70), Gi.Stamp.Tent(17, 11, 80), Gi.Stamp.Bell(13, 19, 60), Gi.Stamp.New(samples, 9, 7)];
-        var ids = new int[stamps.Length * 6];
+        var ids = new Gi.World.SourceId[stamps.Length * 6];
         for (var i = 0; i < ids.Length; i++)
             ids[i] = Gi.World.Place(w, l, 20f + i * 9.3f, 30f + i * 7.1f, stamps[i % stamps.Length], (sbyte)(5 + i % 4));
         Gi.World.Process(w);
@@ -532,7 +532,7 @@ internal static partial class Verification
         for (var i = 0; i < 14; i++) palette.Add(ShapeStamp(RandomShape(rng, i % 7, 256f)));
         var dome = Gi.Stamp.Dome(9, 120);
         palette.Add(dome);
-        var ids = new List<int>();
+        var ids = new List<Gi.World.SourceId>();
         for (var i = 0; i < 160; i++)
         {
             var s = RandomShape(rng, i % 7, 256f);
@@ -542,7 +542,7 @@ internal static partial class Verification
             ids.Add(id);
         }
 
-        var pile = new List<int>();
+        var pile = new List<Gi.World.SourceId>();
         for (var i = 0; i < 30; i++)
         {
             var id = Gi.World.Place(w, l, 120.3f, 90.6f, dome, 16);
@@ -600,7 +600,7 @@ internal static partial class Verification
         Gi.Grid.New(w, 9, 0f, 0f, 512f);
         var l = Gi.Layer.New(w);
         byte[] stamps = [Gi.Stamp.Box(12, 6, 50), Gi.Stamp.Tent(16, 10, 60), Gi.Stamp.Cone(10, 70, 90), Gi.Stamp.Dome(8, 60), Gi.Stamp.Disk(6, 40, 200)];
-        var ids = new int[200];
+        var ids = new Gi.World.SourceId[200];
         for (var i = 0; i < ids.Length; i++) ids[i] = Gi.World.Place(w, l, i * 2.3f % 500f, i * 4.7f % 500f, stamps[i % stamps.Length], 4);
         void Frame(int f)
         {
