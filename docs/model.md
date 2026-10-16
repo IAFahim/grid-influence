@@ -106,8 +106,8 @@ before reading command payloads, writing
   piecewise polynomial. One joint normalizer `C = round(2^40 / (peakX·peakY))` (`peak = H` for
   tents, `H²` for bells) scales the product to Q40, so a centred kernel's peak cell reads
   `value·gain` (the `Box` unit) within 0.2%; `C ≥ 2^8`, a source's largest product is below
-  `2^51`, and int64 sums stay exact up to 4,096 maximum-strength kernels stacked on one cell —
-  256× past int16 saturation.
+  `2^51`. A tile's `int64` buffer is folded into exact wide planes before a sum could pass 2^62
+  (see Plane limits), so there is no stacking limit.
   Each tile the kernel touches keeps the exact unrounded sum of every kernel of that kind in a
   lazily attached 32×32 `int64` buffer (8,192 B; one for tents, one for bells, each behind its
   own pointer slot in the block pad). A deposit adds its product `value·gain·C·Wx·Wy` to every
@@ -540,27 +540,41 @@ add one `int64` page sum per live page, so large sparse grids do not visit every
   available, with the Vector128 and scalar paths preserving the same integer sum and
   saturation semantics.
 
-## 1.x plane limits
+## Plane limits
 
-The publish total itself is exact: the scalar publish forms `I + tent + bell` in `int64` and
-saturates once, so any `int32` `I` values and any `int64` tent and bell sums combine without wrap. The planes below it still have finite width, and 1.x documents
-their limits rather than promoting (2.0 promotes by magnitude bound, V2-8):
+The 1.x engine documented finite plane widths: the `I` plane wrapped at `2^31 / 2048 =
+1,048,576` maximum-amplitude sources on one cell, and the tent and bell planes at 4,096
+maximum-strength kernels at one peak. 2.0 removes both limits by promotion (ROADMAP D9).
 
-- **The `I` plane (`int32`; box, raster and round).** The largest per-cell contribution of one source is
-  `|value·gain| = 2048` (sbyte −128 × gain −16; 2,032 for 127 × 16), so both planes are exact
-  below `2^31 / 2048 = 1,048,576` maximum-amplitude sources stacked on one cell (1,056,832 at
-  2,032). At the bound the plane itself wraps, upstream of publish: pinned by `PlaneLimitTests`,
-  1,048,575 `Stamp.Box(1,1,−128)` sources at gain −16 on one cell saturate to +32767, and
-  1,048,576 wrap to −32768.
-- **Tent and bell planes (`int64` Q40).** A maximum-strength kernel's peak product is
-  `value·gain·C·Wx·Wy = 2048·2^40`, so the exact per-cell sum wraps beyond
-  `2^63 / (2048·2^40) = 4,096` maximum-strength kernels stacked at one peak in a tile (4,128 at
-  2,032) — 256× past int16 saturation. Pinned by `PlaneLimitTests`: 4,095 read +32767 at the
-  peak cell, 4,096 wrap negative.
-- The vector publishes' exactness guard (below) covers exactly these bounds: within them every
-  cell's `|I|` is the accumulated plane value the guard measures, and the
-  `RoundQ40` terms are bounded for any `int64` sum, so an untripped guard proves the `int32`
-  fast sum equal to the exact `int64` total.
+Each tile set keeps, per plane, a **bound**: the sum of the largest absolute change any one
+cell can receive from each emission since the plane was last folded. An emission charges the
+bound before it writes: a box adds `|constant·gain|` to `I`, a cached kernel adds
+`|gain|·MaxTap` to `I` or `|gain|·MaxTapQ40` to `T` or `B`, an uncached kernel adds the
+worst case for its kind (`128·|gain|`, scaled by `2^40` for the smooth planes), and a
+histogram tile adds `max|box sum|·|value|`. When the charge would carry the bound past `2^31 − 1`
+for `I` or `2^62` for `T` and `B`, the plane is **folded** first: its cells move exactly into
+wide `int64` planes drawn from the existing 8,192 B slab and the plane restarts from zero with
+a bound of zero. `I` folds into one integer carry plane. `T` and `B` fold into a pair each: the
+whole-unit count `high` and the fraction `low ∈ [0, 2^40)` of the exact Q40 sum
+(`high·2^40 + low`), which loses nothing and cannot overflow for `2^23` folds of a
+saturating tile. The triangle inequality makes the live `int32` and `int64` planes exact at
+every point: they only ever hold a sum of at most `2^31 − 1` or `2^62` in magnitude.
+
+A tile with wide planes publishes through `PublishWide`, a scalar loop that forms
+`I + carry + RoundWide(high, low + T) + RoundWide(high, low + B)` in `int64` and saturates
+once. `RoundWide(high, low)` rounds `high·2^40 + low` half away from zero exactly as
+`RoundQ40` rounds a single `int64` (it reduces to it for `high = 0`; a test pins the identity over
+two million values and splits). Exclusion reads the same wide planes. A tile drops only when
+every plane's exact total is zero, never when its published page is zero alone (a sub-unit tent
+residue would otherwise vanish with the tile and a later removal would start from a lost
+partial sum). The histogram path charges every increment against a per-layer budget of
+`2^31 − 1`; a splat that would pass it is emitted directly instead, so no histogram cell or
+window sum overflows `int32`, and a tile's box-filter product that would pass `2^31 − 1` is
+added to the carry plane directly.
+
+The folding limits are per layer and default to those two constants; a test hook lowers them
+(down to 1) and the differential suite replays gate, transient and heavy streams against the
+interpreter with a fold on nearly every emission.
 
 ## v2 tile planes and publish
 
@@ -592,8 +606,8 @@ The scalar publish is that exact definition. The Vector128 and AVX2 publishes ro
 `[−2^23, 2^23]` for any `int64` sums, so the `int32` total cannot wrap). Publish has no
 cross-cell carry — each cell reads only its own plane cells — so the guard runs per row and a
 tripped row falls back to the exact scalar row instead of redoing the tile. Every path
-publishes identical bytes, summaries, changed bits and epochs. The plane widths and their
-documented limits are the 1.x ones above; promotion is V2-8.
+publishes identical bytes, summaries, changed bits and epochs. A tile that has folded takes the
+wide path above instead.
 
 ## Usage
 
@@ -1012,6 +1026,15 @@ digits. Concurrency: single thread.
   tail slack of the slab. The path is disabled when the page slab exceeds `int.MaxValue` bytes.
   *Alignment*: gathers take unaligned byte offsets with scale 1. *Concurrency*: none beyond the
   serial-per-world rule.
+- **Plane folds**: *Lifetime*: a fold takes up to five `int64` units from the world's `Int64s`
+  slab (`TakeWide`), records their index plus one in the tile's summary block (zero means none),
+  and returns them with the tile (`PlaneStore.Give`) or when a transient tile is retired. *Aliasing*:
+  a fold reads and zeroes the live `I`, `T` or `B` plane of one tile and adds into units that
+  belong to that tile alone; every plane pointer is recomputed from its unit index after the
+  fold, because taking a unit may double the slab and move it (`IPlane` and `QPlane` charge
+  first and fetch last). *Bounds*: all loops cover the 1,024 cells of one unit; the bound
+  counters live in the tile set, are written only by the charge, and are zero in a fresh set.
+  *Alignment*: units are 64-byte aligned. *Concurrency*: owning thread only.
 - **Field view**: *Lifetime*: a `FieldView` holds the layer and grid constants it was built from
   and one cached page pointer; both name directory and slab storage that only `Process`, `Clear`,
   `Rewind` and `World.Free` can grow, move or release, so a view must not be used across them (a

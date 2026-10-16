@@ -10,6 +10,7 @@ internal sealed unsafe class StreamRunner
     private readonly List<StreamCommand> _commands;
     private readonly BugInjection? _bug;
     private readonly Action<int, byte, byte, short[]>? _onPage;
+    private readonly (long I, long Q40)? _fold;
     private readonly List<World.SourceId> _attemptIds = [];
     private readonly int[] _actualTiles = new int[MaxTiles];
     private readonly int[] _expectedTiles = new int[MaxTiles];
@@ -38,32 +39,36 @@ internal sealed unsafe class StreamRunner
         StreamSetup setup,
         List<StreamCommand> commands,
         BugInjection? bug,
-        Action<int, byte, byte, short[]>? onPage)
+        Action<int, byte, byte, short[]>? onPage,
+        (long I, long Q40)? fold)
     {
         _setup = setup;
         _commands = commands;
         _bug = bug;
         _onPage = onPage;
+        _fold = fold;
     }
 
     public static void Run(
         StreamSetup setup,
         List<StreamCommand> commands,
         BugInjection? bug = null,
-        Action<int, byte, byte, short[]>? onPage = null)
+        Action<int, byte, byte, short[]>? onPage = null,
+        (long I, long Q40)? fold = null)
     {
-        new StreamRunner(setup, commands, bug, onPage).Execute();
+        new StreamRunner(setup, commands, bug, onPage, fold).Execute();
     }
 
     public static StreamMismatch? TryRun(
         StreamSetup setup,
         List<StreamCommand> commands,
         BugInjection? bug = null,
-        Action<int, byte, byte, short[]>? onPage = null)
+        Action<int, byte, byte, short[]>? onPage = null,
+        (long I, long Q40)? fold = null)
     {
         try
         {
-            Run(setup, commands, bug, onPage);
+            Run(setup, commands, bug, onPage, fold);
             return null;
         }
         catch (StreamMismatch mismatch)
@@ -75,6 +80,7 @@ internal sealed unsafe class StreamRunner
     private void Execute()
     {
         _world = World.New();
+        if (_fold is { } fold) World.ConfigureFoldLimits(_world, fold.I, fold.Q40);
         _rw = new ReferenceWorld();
         _stamps = new byte[_setup.Stamps.Length];
         var maxCells = 1;

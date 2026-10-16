@@ -25,7 +25,7 @@ public sealed class PlaneLimitTests
     }
 
     [Fact]
-    public void BoxPlane_WrapsAt2To20MaxAmplitudeSources_OnOneCell()
+    public void BoxPlane_SaturatesAt2To20MaxAmplitudeSources_OnOneCell()
     {
         var world = World.New();
         var grid = Grid.New(world, 8, 0f, 0f, 256f);
@@ -34,7 +34,7 @@ public sealed class PlaneLimitTests
         for (var i = 0; i < 1 << 20; i++)
             World.Place(world, layer, X, Y, stamp, -16);
         World.Process(world);
-        Assert.Equal((short)-32768, World.Query(world, grid, layer, CellX, CellY));
+        Assert.Equal((short)32767, World.Query(world, grid, layer, CellX, CellY));
         World.Free(world);
         Assert.True(Stamp.Free(stamp));
     }
@@ -55,7 +55,7 @@ public sealed class PlaneLimitTests
     }
 
     [Fact]
-    public void TentPlane_WrapsAt4096MaxAmplitudeSources_AtOnePeak()
+    public void TentPlane_SaturatesAt4096MaxAmplitudeSources_AtOnePeak()
     {
         var world = World.New();
         var grid = Grid.New(world, 8, 0f, 0f, 256f);
@@ -64,7 +64,7 @@ public sealed class PlaneLimitTests
         for (var i = 0; i < 4096; i++)
             World.Place(world, layer, X, Y, stamp, -16);
         World.Process(world);
-        Assert.True(World.Query(world, grid, layer, CellX, CellY) < 0);
+        Assert.Equal((short)32767, World.Query(world, grid, layer, CellX, CellY));
         World.Free(world);
         Assert.True(Stamp.Free(stamp));
     }
@@ -85,7 +85,7 @@ public sealed class PlaneLimitTests
     }
 
     [Fact]
-    public void BellPlane_WrapsAt4096MaxAmplitudeSources_AtOnePeak()
+    public void BellPlane_SaturatesAt4096MaxAmplitudeSources_AtOnePeak()
     {
         var world = World.New();
         var grid = Grid.New(world, 8, 0f, 0f, 256f);
@@ -94,13 +94,13 @@ public sealed class PlaneLimitTests
         for (var i = 0; i < 4096; i++)
             World.Place(world, layer, X, Y, stamp, -16);
         World.Process(world);
-        Assert.True(World.Query(world, grid, layer, CellX, CellY) < 0);
+        Assert.Equal((short)32767, World.Query(world, grid, layer, CellX, CellY));
         World.Free(world);
         Assert.True(Stamp.Free(stamp));
     }
 
     [Fact]
-    public void ExcludedSaturatedCell_MatchesTheFieldWithoutTheSource_WhenBoxesAndDenseOverflowInt32AsASum()
+    public void ExcludedSaturatedCell_MatchesTheFieldWithoutTheSource_WhenBoxesAndDenseSumPastInt32()
     {
         const int each = 550_000;
         const float px = 128f;
@@ -131,12 +131,12 @@ public sealed class PlaneLimitTests
 
         World.Process(world);
         World.Process(twin);
-        Assert.Equal((short)-32768, World.Query(world, grids[0], layers[0], CellX, CellY));
-        Assert.Equal((short)-32768, World.Query(twin, grids[1], layers[1], CellX, CellY));
+        Assert.Equal((short)32767, World.Query(world, grids[0], layers[0], CellX, CellY));
+        Assert.Equal((short)32767, World.Query(twin, grids[1], layers[1], CellX, CellY));
 
         Assert.True(World.TrySense(world, layers[0], px, py, excluded, out var excludedValue));
         Assert.True(World.TrySense(twin, layers[1], px, py, out var removedValue));
-        Assert.Equal((short)-32768, removedValue);
+        Assert.Equal((short)32767, removedValue);
         Assert.Equal(removedValue, excludedValue);
 
         Assert.True(World.TrySenseArea(world, layers[0], px, py, 4f, excluded, out var excludedArea));

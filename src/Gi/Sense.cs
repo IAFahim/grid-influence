@@ -613,20 +613,41 @@ public static unsafe partial class World
         var plane = s->P.Plane;
         var cells = ld->CellsOf((cy >> TileBake.TileBits) * g->TilesPerSide + (cx >> TileBake.TileBits));
         if (cells.Page == null)
-            return Saturate(Absent(0, 0, 0, plane, core, smooth));
+            return Saturate(Absent(0, 0, 0, 0, 0, plane, core, smooth));
 
         var cell = ly * TileBake.TileSize + lx;
         var tents = cells.T == null ? 0 : cells.T[cell];
         var bells = cells.B == null ? 0 : cells.B[cell];
+        long carry = 0;
+        long tentHigh = 0;
+        long bellHigh = 0;
+        var summary = cells.Summary;
+        if ((summary->CarryI | summary->HighT | summary->HighB) != 0)
+        {
+            var store = &ld->Store;
+            if (summary->CarryI != 0) carry = store->Wide(summary->CarryI)[cell];
+            if (summary->HighT != 0)
+            {
+                tentHigh = store->Wide(summary->HighT)[cell];
+                tents += store->Wide(summary->LowT)[cell];
+            }
+
+            if (summary->HighB != 0)
+            {
+                bellHigh = store->Wide(summary->HighB)[cell];
+                bells += store->Wide(summary->LowB)[cell];
+            }
+        }
+
         if (page > short.MinValue && page < short.MaxValue)
         {
-            if (plane == Plane.Tent) return Saturate(page - TileBake.RoundQ40(tents) + TileBake.RoundQ40(tents - smooth));
-            if (plane == Plane.Bell) return Saturate(page - TileBake.RoundQ40(bells) + TileBake.RoundQ40(bells - smooth));
+            if (plane == Plane.Tent) return Saturate(page - TileBake.RoundWide(tentHigh, tents) + TileBake.RoundWide(tentHigh, tents - smooth));
+            if (plane == Plane.Bell) return Saturate(page - TileBake.RoundWide(bellHigh, bells) + TileBake.RoundWide(bellHigh, bells - smooth));
             return Saturate(page - core);
         }
 
-        var boxes = cells.I == null ? 0 : cells.I[cell];
-        return Saturate(Absent(boxes, tents, bells, plane, core, smooth));
+        var boxes = (cells.I == null ? 0 : cells.I[cell]) + carry;
+        return Saturate(Absent(boxes, tents, bells, tentHigh, bellHigh, plane, core, smooth));
     }
 
     #if NET
@@ -653,10 +674,10 @@ public static unsafe partial class World
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static long Absent(long boxes, long tents, long bells, Plane plane, int core, long smooth)
+    private static long Absent(long boxes, long tents, long bells, long tentHigh, long bellHigh, Plane plane, int core, long smooth)
         => boxes - core +
-            TileBake.RoundQ40(tents - (plane == Plane.Tent ? smooth : 0)) +
-            TileBake.RoundQ40(bells - (plane == Plane.Bell ? smooth : 0));
+            TileBake.RoundWide(tentHigh, tents - (plane == Plane.Tent ? smooth : 0)) +
+            TileBake.RoundWide(bellHigh, bells - (plane == Plane.Bell ? smooth : 0));
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static short Saturate(long value) => (short)Math.Clamp(value, short.MinValue, short.MaxValue);
@@ -737,6 +758,28 @@ public static unsafe partial class World
             var tents = cells.T;
             var bells = cells.B;
             var boxes = cells.I;
+            long* carryP = null;
+            long* highTP = null;
+            long* lowTP = null;
+            long* highBP = null;
+            long* lowBP = null;
+            var summary = cells.Summary;
+            if (summary != null && (summary->CarryI | summary->HighT | summary->HighB) != 0)
+            {
+                var store = &ld->Store;
+                if (summary->CarryI != 0) carryP = store->Wide(summary->CarryI);
+                if (summary->HighT != 0)
+                {
+                    highTP = store->Wide(summary->HighT);
+                    lowTP = store->Wide(summary->LowT);
+                }
+
+                if (summary->HighB != 0)
+                {
+                    highBP = store->Wide(summary->HighB);
+                    lowBP = store->Wide(summary->LowB);
+                }
+            }
 
             if (!saturated && !smooth)
             {
@@ -754,14 +797,28 @@ public static unsafe partial class World
                     var cell = live ? page[i] : (short)0;
                     var tq = tents == null ? 0 : tents[i];
                     var br = bells == null ? 0 : bells[i];
+                    long th = 0;
+                    long bh = 0;
+                    if (highTP != null)
+                    {
+                        th = highTP[i];
+                        tq += lowTP[i];
+                    }
+
+                    if (highBP != null)
+                    {
+                        bh = highBP[i];
+                        br += lowBP[i];
+                    }
+
                     var own = !smooth ? 0 : separable ? dy * wx[c] : TileBake.TurnedSmoothAt(p, tileX + c, tileY + top + r) * gain;
                     long absent;
                     if (saturated && (cell == short.MinValue || cell == short.MaxValue))
-                        absent = Absent(boxes == null ? 0 : boxes[i], tq, br, plane, smooth ? 0 : core[i], own);
+                        absent = Absent((boxes == null ? 0 : boxes[i]) + (carryP == null ? 0 : carryP[i]), tq, br, th, bh, plane, smooth ? 0 : core[i], own);
                     else if (plane == Plane.Tent)
-                        absent = cell - TileBake.RoundQ40(tq) + TileBake.RoundQ40(tq - own);
+                        absent = cell - TileBake.RoundWide(th, tq) + TileBake.RoundWide(th, tq - own);
                     else if (plane == Plane.Bell)
-                        absent = cell - TileBake.RoundQ40(br) + TileBake.RoundQ40(br - own);
+                        absent = cell - TileBake.RoundWide(bh, br) + TileBake.RoundWide(bh, br - own);
                     else
                         absent = cell - core[i];
 

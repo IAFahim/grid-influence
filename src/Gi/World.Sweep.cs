@@ -193,6 +193,23 @@ public static unsafe partial class World
         EmitBoxDelta(g, ld, px, py, fx, fy, extentX, extentY, cx0, cy0, cx1, cy1, v->Constant, gain);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int* IPlane(GridCtx* g, LayerData* ld, int tile, int amount)
+    {
+        var set = EnsureSet(g, ld, tile);
+        PlaneFold.ChargeI(&ld->Store, set, amount);
+        return ld->Store.Cells(*set).I;
+    }
+
+    private static long* QPlane(LayerData* ld, TilePlanes* set, bool tent, long amount)
+    {
+        if (tent) ld->Store.EnsureT(ref *set);
+        else ld->Store.EnsureB(ref *set);
+        PlaneFold.ChargeQ40(&ld->Store, set, tent, amount);
+        var cells = ld->Store.Cells(*set);
+        return tent ? cells.T : cells.B;
+    }
+
     private static bool EmitBoxNarrow(
         GridCtx* g, LayerData* ld, int px, int py, int fx, int fy, int extentX, int extentY, int constant, int gain)
     {
@@ -252,8 +269,7 @@ public static unsafe partial class World
 
             if (plane == null)
             {
-                var set = EnsureSet(g, ld, tile);
-                plane = ld->Store.Cells(*set).I;
+                plane = IPlane(g, ld, tile, Math.Abs(constant * gain));
                 DirtyIndex(g, ld, tile);
             }
 
@@ -319,8 +335,7 @@ public static unsafe partial class World
 
                     if (plane == null)
                     {
-                        var set = EnsureSet(g, ld, tile);
-                        plane = ld->Store.Cells(*set).I;
+                        plane = IPlane(g, ld, tile, Math.Abs(constant * gain));
                         DirtyIndex(g, ld, tile);
                     }
 
@@ -343,8 +358,7 @@ public static unsafe partial class World
 
                     if (plane == null)
                     {
-                        var set = EnsureSet(g, ld, tile);
-                        plane = ld->Store.Cells(*set).I;
+                        plane = IPlane(g, ld, tile, Math.Abs(constant * gain));
                         DirtyIndex(g, ld, tile);
                     }
 
@@ -359,8 +373,7 @@ public static unsafe partial class World
 
                     if (plane == null)
                     {
-                        var set = EnsureSet(g, ld, tile);
-                        plane = ld->Store.Cells(*set).I;
+                        plane = IPlane(g, ld, tile, Math.Abs(constant * gain));
                         DirtyIndex(g, ld, tile);
                     }
 
@@ -438,7 +451,7 @@ public static unsafe partial class World
                             {
                                 var set = EnsureSet(g, ld, tile);
                                 dirty = DirtyIndex(g, ld, tile);
-                                plane = taps.Plane == Plane.Tent ? ld->Store.EnsureT(ref *set) : ld->Store.EnsureB(ref *set);
+                                plane = QPlane(ld, set, taps.Plane == Plane.Tent, Math.Abs(gain) * taps.MaxTapQ40);
                             }
 
                             var lx = kx0 + kx - tileX0;
@@ -456,9 +469,8 @@ public static unsafe partial class World
 
                             if (ints32 == null)
                             {
-                                var set = EnsureSet(g, ld, tile);
+                                ints32 = IPlane(g, ld, tile, Math.Abs(gain) * taps.MaxTap);
                                 dirty = DirtyIndex(g, ld, tile);
-                                ints32 = ld->Store.Cells(*set).I;
                             }
 
                             var lx = kx0 + kx - tileX0;
@@ -481,6 +493,8 @@ public static unsafe partial class World
         if (ly + 1 > rect->Y1) rect->Y1 = ly + 1;
     }
 
+    private const int FallbackCharge = 128;
+
     private static void EmitFallback(GridCtx* g, LayerData* ld, Placement* p, int gain)
     {
         var cx0 = Math.Max(p->X0, 0);
@@ -497,28 +511,27 @@ public static unsafe partial class World
 
             var tile = ty * tps + tx;
             var set = EnsureSet(g, ld, tile);
-            var cells = ld->Store.Cells(*set);
             switch (p->Plane)
             {
                 case Plane.Dense when p->Turned:
-                    TileBake.EmitTurnedDense(cells.I, tileX0, tileY0, p, gain);
+                    TileBake.EmitTurnedDense(IPlane(g, ld, tile, FallbackCharge * Math.Abs(gain)), tileX0, tileY0, p, gain);
                     break;
                 case Plane.Dense:
-                    TileBake.EmitRaster(cells.I, tileX0, tileY0, p->Px, p->Py, p->Fx, p->Fy,
+                    TileBake.EmitRaster(IPlane(g, ld, tile, FallbackCharge * Math.Abs(gain)), tileX0, tileY0, p->Px, p->Py, p->Fx, p->Fy,
                         p->X1, p->Y1, p->Sampling, p->V, gain);
                     break;
                 case Plane.Tent when p->Turned:
-                    TileBake.EmitTurnedSmooth(ld->Store.EnsureT(ref *set), tileX0, tileY0, p, gain);
+                    TileBake.EmitTurnedSmooth(QPlane(ld, set, true, ((long)FallbackCharge * Math.Abs(gain)) << 40), tileX0, tileY0, p, gain);
                     break;
                 case Plane.Tent:
-                    TileBake.EmitTent(ld->Store.EnsureT(ref *set), tileX0, tileY0, p->Px, p->Py, p->Fx, p->Fy,
+                    TileBake.EmitTent(QPlane(ld, set, true, ((long)FallbackCharge * Math.Abs(gain)) << 40), tileX0, tileY0, p->Px, p->Py, p->Fx, p->Fy,
                         p->ExtentX, p->ExtentY, p->V, gain);
                     break;
                 case Plane.Bell when p->Turned:
-                    TileBake.EmitTurnedSmooth(ld->Store.EnsureB(ref *set), tileX0, tileY0, p, gain);
+                    TileBake.EmitTurnedSmooth(QPlane(ld, set, false, ((long)FallbackCharge * Math.Abs(gain)) << 40), tileX0, tileY0, p, gain);
                     break;
                 default:
-                    TileBake.EmitBell(ld->Store.EnsureB(ref *set), tileX0, tileY0, p->Px, p->Py, p->Fx, p->Fy,
+                    TileBake.EmitBell(QPlane(ld, set, false, ((long)FallbackCharge * Math.Abs(gain)) << 40), tileX0, tileY0, p->Px, p->Py, p->Fx, p->Fy,
                         p->ExtentX, p->ExtentY, p->V, gain);
                     break;
             }
@@ -597,6 +610,7 @@ public static unsafe partial class World
 
     private static void RetireTransientTile(LayerData* ld, TilePlanes* set, int tile)
     {
+        ld->Store.ClearWide(set);
         var cells = ld->Store.Cells(*set);
         new Span<int>(cells.I, TileBake.TileSize * TileBake.TileSize).Clear();
         if (cells.T != null) new Span<long>(cells.T, TileBake.TileSize * TileBake.TileSize).Clear();

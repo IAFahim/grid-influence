@@ -14,6 +14,8 @@ internal static unsafe partial class TileBake
     internal static ResolveOutcome Publish(PlaneStore* store, TilePlanes* tile, int x0, int y0, int x1, int y1, int tick)
     {
         var cells = store->Cells(*tile);
+        if ((cells.Summary->CarryI | cells.Summary->HighT | cells.Summary->HighB) != 0)
+            return PublishWide(store, tile, x0, y0, x1, y1, tick);
 #if NET
         if (Avx2.IsSupported) return Publish256(cells, x0, y0, x1, y1, tick);
         if (Vector) return Publish128(cells, x0, y0, x1, y1, tick);
