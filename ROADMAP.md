@@ -3,7 +3,7 @@
 This file coordinates the work. The owner gives one task card at a time to an AI agent. When the agent finishes, the owner pastes its report back to Claude. Claude reviews the report and answers **accept**, **fix** or **re-plan**, then names the next card.
 
 - Numbers marked ≈ are predictions derived from the #40 measurements. Each card replaces its predictions with measurements.
-- Last updated: 2026-10-16. Base: `main` @ 7dbcf05.
+- Last updated: 2026-10-16. Base: `main` @ d9d4329. Phase 0 lands on `phase0` (P0-1 through P0-9 minus P0-7 merged there), then one PR into `main`.
 - Where this file and PLAN.md disagree, this file wins (§0, Appendix C).
 
 ## How the loop works
@@ -34,7 +34,7 @@ Agents can work in parallel only on cards in different lanes whose dependencies 
 | D7 | Threads | Single-threaded. `ResolvePool` and `SerialOnly` are deleted. A deterministic tile executor is optional, after 2.0. | Removes R1, R8 and the static phase machine. |
 | D8 | Memory | • A dense tile directory per (grid, layer).<br>• Fixed-size slabs with free lists for pages, `I`, `T`, `B`, histograms and summaries.<br>• Chunked SoA sources, 16,384 slots per chunk.<br>• Buffers zeroed by default; a per-world bump scratch.<br>• No per-tile malloc and no mutable statics. `StampCatalog` stays global because stamp data is immutable; the kernel cache is per world. | Fixes PageMap probes, tombstones, 26 KB fat tiles and global state. |
 | D9 | Overflow | Exact, by promotion. Each tile keeps a magnitude bound per plane. When the bound could exceed the plane's width, the tile's `I` is promoted from int32 to int64, and `T` or `B` from int64 to Int128.<br>Main (1.x) gets an int64 total and documented plane limits. The interpreter (BigInteger) owns the overflow law. | Saturating partway through a sum is not exact. Promotion is exact, and it only costs anything in crush tiles. |
-| D10 | Time | A sweep over a dense list of timed slots, costing O(timed). Deleted: the timer heap, `Due`, `LiveStale`, `LayerLive`. A timing wheel comes back only if a measured case needs it. | The sweep is the simplest correct form; 10k timed slots cost ≈ 10–20 µs. |
+| D10 | Time | A sweep over a dense list of timed slots, costing O(timed). Deleted: the timer heap, `Due`, `LayerLive`, and the per-frame `LiveStale` recount (already deleted on main by P0-8). A timing wheel comes back only if a measured case needs it. | The sweep is the simplest correct form; 10k timed slots cost ≈ 10–20 µs. |
 | D11 | Rewind | After `Record`, the first write to each slot journals that slot, deduplicated by record epoch. `Rewind` restores the journaled slots, shifts their schedules and marks them changed. | Costs O(changed slots), rather than O(chunks touched). |
 | D12 | Reads | • Directory plus int16 pages; validation hoisted to once per call.<br>• Fused value and gradient; integer two-pointer disk spans.<br>• `Pyramid<T>` for Max and Epoch.<br>• Exclusion subtracts the source's own contribution from `I`, `T` and `B`.<br>• A derived layer is materialized over dirty rectangles if it was read last frame, and on demand otherwise. | Reads were 172 of the 315 ns. |
 | D13 | Frent | Game side only; never inside `src/Gi`. An adapter sample is optional. | Frent has managed storage, virtual runners, locks and no spatial order. |
@@ -61,6 +61,7 @@ Measurement conditions for every number in this file:
 - **Runtime:** .NET 10 Release, hardware intrinsics on.
 - **Run:** single thread, 0 B allocated per frame. Warm up first, then report p50 and p99 over 300 frames. Seeds are fixed, and the output checksum is consumed so no work can be optimized away.
 - **Scalar build** (`DOTNET_EnableHWIntrinsic=0`): it must be correct and allocate 0 B. Its numbers are published, not gated.
+- **Host note (2026-10-16).** The P0-1 baselines and P0-2 floors measured so far come from an Intel i9-14900K P-core (5.7–6.0 GHz, AVX2, no AVX-512), pinned with `taskset`; its E-cores stand in for Zen 4c until re-measured. The Zen 4 / Zen 4c tables of §1 must be re-run on the Ryzen 5 8500G before any gate depends on them. B1 on this host is ≈ 0.76× the 8500G figure (239 vs 315 ns/entity).
 
 | Frame | Definition | Target |
 |---|---|---|
@@ -119,6 +120,12 @@ Each row below is what I expect a card to report. The last column is the stop li
 | T-3 | C, with `FieldView` reads | ≈ 0.9–1.8 ms | > 3 ms |
 | C-4 | C and W | ≤ target | > 15 % above target → re-plan |
 
+**Measured so far (i9-14900K P-core, pinned, single thread, p50; replaces the 8500G predictions until re-run):**
+
+- P0-1 baselines: B1 239 ns/entity (sync 5.8, process ≈ 100, reads ≈ 100); B2 1 mover 1.1–1.2 µs, 200 movers ≈ 200 µs; B4 27 ns; C ≈ 88–92 ms; W ≈ 44–47 ms; RSS ≈ 300 MB (W peak ≈ 555 MB). Cell-crossing rate: B1 62.5 %, C/W agents 12.6 %.
+- P0-2 floors (AVX2): quantize 0.24 ms; histogram coherent/random 0.39/0.91 ms; box convolve 0.14 ms, tent 0.65 ms; publish 0.38 ms; 1M reads coherent/random 2.87/5.47 ms; disks 88 ns (r=16), 192 ns (r=32); anchor sweep 0.22 ms. Frame C's coherent-order floor sum ≈ 4 ms before the ×1.15 fallback applies (reads dominate).
+- P0-8 effect: 1M-source frames with 10k timers ≈ 0.8 ms faster per frame; plain B2 unchanged.
+
 Three claims from the earlier plans that these predictions reject:
 
 - **"Reads get ≥ 3× faster from the directory alone."** I expect ≈ 1.3× from the directory. Reaching 3× needs R-1.
@@ -144,19 +151,20 @@ Three claims from the earlier plans that these predictions reject:
 
 | ID | Card | Lane | Needs | Size | Status | PR | Result |
 |---|---|---|---|---|---|---|---|
-| P0-1 | Frame harness (B1, B2, B4, C, W) | A | — | M | todo | | |
-| P0-2 | Floor probes P1–P8 | A | — | S | todo | | |
-| P0-3 | R1 column-mask race | B1 | — | S | todo | | |
-| P0-5 | R3 int64 total + limits doc | B1 | P0-3 | S | todo | | |
+| P0-1 | Frame harness (B1, B2, B4, C, W) | A | — | M | done | phase0 | i9-14900K P-core baselines: B1 239 ns/entity, C ≈ 90 ms, W ≈ 45 ms, B2 1.2 µs / ≈ 200 µs, B4 27 ns; 0 B/frame; 9 frame receipts; Zen 4 rerun pending on the 8500G |
+| P0-2 | Floor probes P1–P8 | A | — | S | done | phase0 | floors measured on the i9-14900K P-core (+ E-core stand-in, scalar): coherent reads dominate (2.87 ms), quantize 0.24, publish 0.38, disks 88/192 ns; receipts wired into `--verify`; Zen 4 pending |
+| P0-3 | R1 column-mask race | B1 | — | S | done | #41 → phase0 | chunks claimed upward on 1,024-row multiples; every mask word has one writer; race test red on old code, 30/30 green on new |
+| P0-5 | R3 int64 total + limits doc | B1 | P0-3 | S | done | phase0 | int64 sum, 2^29 guard + whole-tile scalar fallback; Process +0.97 % (gate 3 %), checksums identical, 926 tests on phase0; limits pinned: box/dense 1,048,576/cell, tent/bell 4,096/peak (card's ~2,000 corrected) |
 | P0-7 | R6 `Changed` = bytes differ | B1 | P0-5 | M | todo | | |
-| P0-4 | R2 FIFO free ring (interim) | B2 | — | S | todo | | |
-| P0-8 | R7 `LayerLive` without recounts | B2 | P0-4 | S | todo | | |
-| P0-6 | R4/R5 finite + range validation | B3 | — | M | todo | | |
-| P0-9 | R8/R10 one-core pool, cleared outputs | B3 | P0-6, P0-3 | S | todo | | |
+| P0-4 | R2 FIFO free ring (interim) | B2 | — | S | done | #42 → phase0 | FIFO free ring on every free path; receipts unchanged except slot numbers; +≈ 0.5 ns per Place; ABA after 128 reuses documented |
+| P0-8 | R7 `LayerLive` without recounts | B2 | P0-4 | S | done | phase0 | `LayerLive` exact on every change, `LiveStale` deleted; 1M-source frames with 10k timers ≈ 0.8 ms faster; 514 tests |
+| P0-6 | R4/R5 finite + range validation | B3 | — | M | done | #43 → phase0 | non-finite writes rejected, reads treat NaN/∞ as outside, casts range-checked at ±2^30, `TryGrid` shares the rules; ≈ 1 ns/row cost |
+| P0-9 | R8/R10 one-core pool, cleared outputs | B3 | P0-6, P0-3 | S | done | phase0 | pool refused on one processor; every column read writes outputs before early returns; 454 tests, receipts unchanged |
 | P0-10 | Precision on main (oracle switch + skip) | B | P0-7, P0-8, P0-9 | M | todo | | |
 | P0-11 | Measure the lever | A | P0-1, P0-10 | S | todo | | |
 | P0-12 | Salvage + close `snapshot-bucket-index` | A | P0-1 | S | todo | | |
 | P0-13 | #40 + README interim | A | P0-11 | S | todo | | |
+| P0-14 | Clean-up: CI inspect, doc/version echoes, carry-forward findings | A | — | S | todo | | |
 | P1-1 | Reference interpreter | C | P0-10 (early) | L | todo | | |
 | P1-2 | Stream generator + differential + minimizer | C | P1-1 | M | todo | | |
 | P1-3 | Golden corpus | C | P1-2 | M | todo | | |
@@ -198,7 +206,7 @@ Three claims from the earlier plans that these predictions reject:
 
 Lanes with primes (V′, V″, R′, R″, T′) can run in parallel with their unprimed lane once their "Needs" are done.
 
-**Assign first, in parallel:** P0-1, P0-2, P0-3, P0-4 and P0-6.
+**Assign first, in parallel:** ~~P0-1, P0-2, P0-3, P0-4 and P0-6~~ done (2026-10-16, merged into `phase0`). **Next:** P0-7 (unblocks P0-10), then P0-10 + P0-11, and P0-14 any time.
 
 ## 4 · Cards
 
@@ -262,7 +270,7 @@ Every card also has to meet the common "done" bar in Appendix A: the five valida
 - **Fix.** Compute the sum in int64, or an exact widening equivalent, and saturate once.
 - **Document** the 1.x plane limits in `docs/model.md`. 2.0 removes both (V2-8):
   - the int32 box/dense planes wrap beyond ≈ 1.06M max-amplitude sources stacked on one cell;
-  - the int64 Q40 tent/bell planes wrap beyond ≈ 2,000 max-amplitude sources stacked at one peak in a tile.
+  - the int64 Q40 tent/bell planes wrap beyond ≈ 4,096 max-amplitude sources stacked at one peak in a tile (2^63 / (2048 × 2^40); an earlier draft said ~2,000, which was wrong).
 - **Test.** A box term and a dense term that each fit in int32 but whose sum does not. The result must saturate with the correct sign.
 - **Done when:** receipts are unchanged, and B1 Process is at most 3 % slower.
 
@@ -341,6 +349,15 @@ owner, or an agent with `gh` · S · needs P0-11
 - **Issue #40.** Retitle it "1 ms frame at 1M entities on one core". Replace the goal in the body with §1, and keep the measurement history.
 - **README.** Replace "The 100 ns budget" with today's measured numbers, plus one line pointing to the 2.0 contract. The final text lands in C-3.
 - **PLAN.md.** Add a header line saying it is superseded by this roadmap's decisions, in particular D3, D4, D6, D10 and D11.
+
+#### P0-14 · Clean-up and carry-forward findings
+`main` · S · needs nothing
+- The CI `inspect` job has been red since 8e01d9f (before Phase 0); make it green or explicitly silenced per file.
+- `TrySenseMax` and `TrySenseNearest` echo the input x and y on rejection; the docs say outputs are zeroed (from P0-6).
+- `src/Gi.Validation/README.md` still quotes an old package version; align it and decide whether `GiValidationVersion` bumps with Gi.
+- Add one `--verify` receipt for the FIFO free ring's id-reuse guarantee (from P0-4); decide whether the `--frames verify` receipts also join `--verify` (from P0-1).
+- `Sense.cs` `ExcludeCell`/`Absent` fold the box prefix in int32 and can disagree with the now-exact page value on overflowing tiles (from P0-5); fix or document.
+- Investigate the steady ≈ 8,200 B/frame in the 1M-mover scenario that exists on phase0 both before and after P0-5 (suspect: steady-state growth in the crowded-rebuild or changed-list buffers); a warm frame must allocate 0 B.
 
 ### Phase 1: the oracle (tests on `main`)
 
