@@ -981,7 +981,10 @@ digits. Concurrency: single thread.
   over the slots already dead) and popped only by the dead-to-alive transition of a `Place`, so
   the entries from head through head plus count (modulo the ring size) are distinct slots. The
   batch planner's copy writes only the positions at or after its own tail and is committed
-  unconditionally before the call proceeds.
+  unconditionally before the call proceeds. A kernel build reads one placement and its stamp
+  variant read-only, emits through the tile-bake emitters into its own stack tile planes, and
+  folds the result into the cache-owned canvas through a local copy of the placement whose
+  tile rectangle is the unclamped footprint; nothing in a tile, page, or slab is written.
 - **Alignment**: slab regions, directories, native buffers, the bump scratch, and prefix scratch
   use 64-byte aligned allocations. A slab's stride is a multiple of 64 B — 6,528 B blocks,
   2,112 B headers, 4,096 B dense, 8,192 B tent/bell — so every unit base off the 64 B aligned
