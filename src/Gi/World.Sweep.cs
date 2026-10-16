@@ -68,56 +68,72 @@ public static unsafe partial class World
 
     private static void SweepChanged(WorldCtx* w)
     {
-        var s = &w->Sources;
-        var slots = w->Changed.Pointer;
         var count = w->Changed.Length;
-        for (var i = 0; i < count; i++)
+        if (OrderByTile(w))
         {
-            if (i + PrefetchAhead < count) PrefetchTarget(w, s, slots[i + PrefetchAhead]);
-            var slot = slots[i];
-            var layer = s->Layer[slot];
-            var stamp = s->Stamp[slot];
-            var alive = s->Alive[slot];
-            var gain = (sbyte)s->Gain[slot];
-            var scale = s->Scale[slot];
-            var x = s->X[slot];
-            var y = s->Y[slot];
-            var maskedAngle = (ushort)(s->Angle[slot] & w->Recipes[layer].TurnMask);
-
-            DepositRecord target = default;
-            if (alive != 0)
+            var entries = w->SweepEntries.Pointer;
+            for (var i = 0; i < count; i++)
             {
-                target.Layer = layer;
-                target.Stamp = stamp;
-                target.Gain = gain;
-                target.Alive = alive;
-                target.Angle = maskedAngle;
-                target.Scale = scale;
+                PrefetchRecord(w, entries, i + RecordAhead, count);
+                SweepEntryAt(w, entries + i);
             }
-
-            for (var gi = 0; gi < w->GridCount; gi++)
+        }
+        else
+        {
+            var s = &w->Sources;
+            var slots = w->Changed.Pointer;
+            for (var i = 0; i < count; i++)
             {
-                var g = w->Grids + gi;
-                if (g->ScaleQ8 == 0) continue;
-
-                var rec = RecordOf(g, slot);
-                var key = target;
-                if (key.Alive != 0)
-                {
-                    var mask = w->Recipes[layer].AnchorMask;
-                    key.Ax = TileBake.AnchorQ8(x, g->OriginX, g->ScaleQ8, mask);
-                    key.Ay = TileBake.AnchorQ8(y, g->OriginY, g->ScaleQ8, mask);
-                }
-
-                if (*(ulong*)rec == *(ulong*)&key && ((ulong*)rec)[1] == ((ulong*)&key)[1]) continue;
-
-                EmitDelta(w, gi, in *rec, -1);
-                EmitDelta(w, gi, in key, 1);
-                *rec = key;
+                if (i + PrefetchAhead < count) PrefetchTarget(w, s, slots[i + PrefetchAhead]);
+                var entry = EntryOf(s, slots[i]);
+                SweepEntryAt(w, &entry);
             }
         }
 
         w->Changed.Resize(0);
+    }
+
+    private static void SweepEntryAt(WorldCtx* w, SweepEntry* entry)
+    {
+        var slot = entry->Slot;
+        var layer = (byte)entry->Meta;
+        var stamp = (byte)(entry->Meta >> 8);
+        var gain = (sbyte)(entry->Meta >> 16);
+        var alive = (byte)(entry->Meta >> 24);
+        var scale = (ushort)(entry->Shape >> 16);
+        var maskedAngle = (ushort)(entry->Shape & w->Recipes[layer].TurnMask);
+
+        DepositRecord target = default;
+        if (alive != 0)
+        {
+            target.Layer = layer;
+            target.Stamp = stamp;
+            target.Gain = gain;
+            target.Alive = alive;
+            target.Angle = maskedAngle;
+            target.Scale = scale;
+        }
+
+        for (var gi = 0; gi < w->GridCount; gi++)
+        {
+            var g = w->Grids + gi;
+            if (g->ScaleQ8 == 0) continue;
+
+            var rec = RecordOf(g, slot);
+            var key = target;
+            if (key.Alive != 0)
+            {
+                var mask = w->Recipes[layer].AnchorMask;
+                key.Ax = TileBake.AnchorQ8(entry->X, g->OriginX, g->ScaleQ8, mask);
+                key.Ay = TileBake.AnchorQ8(entry->Y, g->OriginY, g->ScaleQ8, mask);
+            }
+
+            if (*(ulong*)rec == *(ulong*)&key && ((ulong*)rec)[1] == ((ulong*)&key)[1]) continue;
+
+            EmitDelta(w, gi, in *rec, -1);
+            EmitDelta(w, gi, in key, 1);
+            *rec = key;
+        }
     }
 
     private static void EmitDelta(WorldCtx* w, int gi, in DepositRecord record, int sign)

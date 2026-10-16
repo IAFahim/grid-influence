@@ -223,6 +223,9 @@ internal unsafe struct WorldCtx
     public int DerivedCount;
     public SourceColumns Sources;
     public NativeBuffer<int> Changed;
+    public NativeBuffer<int> SweepKeys;
+    public NativeBuffer<int> SweepCounts;
+    public NativeBuffer<SweepEntry> SweepEntries;
     public NativeBuffer<JournalEntry> Pending;
     public NativeBuffer<JournalEntry> Journal;
     public NativeBuffer<ScheduleRecord> ScheduleJournal;
@@ -294,6 +297,9 @@ public static unsafe partial class World
         NativeHeap.Free(w->Recipes);
         w->Sources.Release();
         w->Changed.Free();
+        w->SweepKeys.Free();
+        w->SweepCounts.Free();
+        w->SweepEntries.Free();
         w->Pending.Free();
         w->Journal.Free();
         w->ScheduleJournal.Free();
