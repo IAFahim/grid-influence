@@ -237,8 +237,6 @@ internal static unsafe partial class ResolvePool
         for (var t = 0; t < _taskCount; t++)
         {
             var task = tasks + t;
-            if (task->Slots == 0) continue;
-
             var dirty = task->Layer->Dirty.Pointer;
             var kept = 0;
             for (var i = 0; i < task->Count; i++)
@@ -552,11 +550,17 @@ internal static unsafe partial class ResolvePool
 
                 ld->InDirty[tile] = 0;
                 var pages = &ld->Pages;
-                if (!pages->TryGet(tile, out var block)) continue;
+                if (!pages->TryGet(tile, out var block))
+                {
+                    _outcome.Pointer[i] = 0;
+                    continue;
+                }
 
                 new Span<int>(prev, TileBake.TileSize).Clear();
-                if (!TileBake.Resolve(World.DiffOf(block), World.DenseOf(block), prev, World.TentOf(block), World.BellOf(block),
-                    (short*)(block + World.PageOffset), (long*)(block + World.SumOffset), (short*)(block + World.MaxOffset)))
+                var outcome = TileBake.Resolve(World.DiffOf(block), World.DenseOf(block), prev, World.TentOf(block), World.BellOf(block),
+                    (short*)(block + World.PageOffset), (long*)(block + World.SumOffset), (short*)(block + World.MaxOffset));
+                _outcome.Pointer[i] = (byte)((outcome & ResolveOutcome.Changed) != 0 ? 1 : 0);
+                if ((outcome & ResolveOutcome.Empty) != 0)
                     _dead.Pointer[Interlocked.Increment(ref _deadCount) - 1] = i;
             }
         }
