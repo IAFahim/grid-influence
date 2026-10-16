@@ -102,9 +102,17 @@ planes), `WarmFramesMakeNoNativeHeapCalls`, fifo-ring receipt (already `.Slot`-b
 - [x] Tests migrated (`LayerLiveTests` → `DepositRecordTests`, `ResolveTests`/`PublishTests`/stats tools).
 - [x] Validation green: build 0/0, tests 1064/1064, sample, receipts 144 PASS + 127 PASS/17 SKIP
       (HW off), all warm paths 0 B with and without intrinsics; corpus regenerated.
-- [ ] Pinned A/B on cpu0 vs pristine ad2b5be (B1 ≤ 80 ns / B1 Cell ≤ 10 ns / B2 / RSS ≤ 180 MB).
-- [ ] docs/model.md proof updates for the new unsafe surface.
-- [ ] PR + report.
+- [x] Perf pass: `EmitBoxDelta` band path (one eight-lane add per row for boxes spanning ≤ 8 cells,
+      scalar bands otherwise), prefetch of the next-but-8 slot's `I` rows, `BoxDeltaTests`
+      (exactness vs the independent reference across moves, scales, gain changes, removals).
+- [x] `PendingSnapshotTests` pin that `Pending` snapshots are taken whether or not the world records
+      (Rewind with no journal cancels pending mutations; pre-`Record` mutations enter the journal).
+- [x] Pinned A/B on cpu0 vs pristine ad2b5be — **gates not met** (see PR report): B1 Exact `Process`
+      97.1 → 318.4 ns, B1 Cell `Process`+`Sync` 76.9 → 144.3 ns, B2 200 movers 208 → 284 µs
+      (Exact), RSS 365 → 284 MB. Outputs identical (checksums match on B1/B2, Exact and Cell).
+- [x] docs/model.md, README.md, docs/batching.md rewritten for the sweep/publish pipeline and the
+      unsafe surface (changed list, deposited records, plane slabs, lane add, prefetch).
+- [ ] PR + report (stop rule fired: B1 Exact `Process` > 100 ns; re-plan).
 
 ## Semantics discovered while validating (now pinned by the suite)
 
