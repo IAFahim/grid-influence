@@ -62,6 +62,14 @@ internal static unsafe partial class TileBake
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static bool Unclipped(StampVariant* v, Placement* p)
+    {
+        var cap = v->Kind == StampKind.Tent ? MaxTentExtent : MaxExtent;
+        return p->ExtentX == (int)Math.Min((long)v->Width * p->Sampling, cap)
+            && p->ExtentY == (int)Math.Min((long)v->Height * p->Sampling, cap);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Span(float position, int anchorMask, int originQ8, int length, int sampling, int size, bool clip, long cap,
         out int cell, out int phase, out int extent, out int first, out int end)
     {

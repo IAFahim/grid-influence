@@ -171,6 +171,7 @@ internal unsafe struct WorldCtx
     public fixed int LayerLive[MaxLayers];
     public int* Rebuilds;
     public BumpScratch Scratch;
+    public KernelCache Kernels;
     public NativeBuffer<RebuildChunk> RebuildArena;
     public NativeBuffer<Placement> RebuildPlacements;
     public NativeBuffer<SourceBatchEntry> BatchSources;
@@ -260,6 +261,7 @@ public static unsafe partial class World
         w->ScheduleJournal.Free();
         w->Timers.Free();
         w->Scratch.Release();
+        w->Kernels.Release();
         w->RebuildArena.Free();
         w->RebuildPlacements.Free();
         w->BatchSources.Free();
@@ -1284,6 +1286,15 @@ public static unsafe partial class World
         }
 
         return false;
+    }
+
+    internal static void FlushKernels()
+    {
+        for (var wi = 0; wi < _worldCount; wi++)
+        {
+            var w = Runtime.Worlds + wi;
+            if (w->Grids != null) w->Kernels.Clear();
+        }
     }
 
     private static bool References(NativeBuffer<DepositOp> ops, byte stamp)
