@@ -140,12 +140,7 @@ public static unsafe partial class World
                 angle != source->Angle.Pointer[slot] || scale != source->Scale.Pointer[slot] || gain != source->Gain.Pointer[slot])
             {
                 EnqueueMutation(context, source, slot, positionX, positionY, (sbyte)gain, angle, scale, true);
-                if (gain != source->Gain.Pointer[slot])
-                {
-                    if (gain == 0) context->LayerLive[source->Layer.Pointer[slot]]--;
-                    else if (source->Gain.Pointer[slot] == 0) context->LayerLive[source->Layer.Pointer[slot]]++;
-                }
-
+                CountGain(context, source->Layer.Pointer[slot], source->Gain.Pointer[slot], gain);
                 source->X.Pointer[slot] = positionX;
                 source->Y.Pointer[slot] = positionY;
                 source->Angle.Pointer[slot] = angle;

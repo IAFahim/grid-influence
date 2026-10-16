@@ -42,6 +42,7 @@ public static unsafe partial class World
             s->Timed.Pointer[i] &= unchecked((byte)~Fading);
             if (target != current)
             {
+                CountGain(w, s->Layer.Pointer[i], (byte)current, (byte)target);
                 EnqueueMutation(w, s, i, s->X.Pointer[i], s->Y.Pointer[i], target, s->Angle.Pointer[i], s->Scale.Pointer[i], true);
                 s->Gain.Pointer[i] = (byte)target;
             }
@@ -206,6 +207,7 @@ public static unsafe partial class World
             var timed = s->Timed.Pointer[slot];
             if ((timed & Expiring) != 0 && s->ExpireAt.Pointer[slot] - now <= 0)
             {
+                CountGain(w, s->Layer.Pointer[slot], s->Gain.Pointer[slot], 0);
                 EnqueueMutation(w, s, slot, s->X.Pointer[slot], s->Y.Pointer[slot], 0, s->Angle.Pointer[slot], s->Scale.Pointer[slot], false);
                 s->Alive.Pointer[slot] = 0;
                 s->Free.Push(slot);
@@ -217,6 +219,7 @@ public static unsafe partial class World
                 var gain = FadeGain(s, slot, now);
                 if (gain != (sbyte)s->Gain.Pointer[slot])
                 {
+                    CountGain(w, s->Layer.Pointer[slot], s->Gain.Pointer[slot], (byte)gain);
                     EnqueueMutation(w, s, slot, s->X.Pointer[slot], s->Y.Pointer[slot], gain, s->Angle.Pointer[slot], s->Scale.Pointer[slot], true);
                     s->Gain.Pointer[slot] = (byte)gain;
                 }
