@@ -1,5 +1,7 @@
 # Gi: the 1 ms plan
 
+> **Superseded (2026-10-16).** This plan is kept for history. ROADMAP.md is the plan of record; where the two disagree, ROADMAP §0 wins. In particular, ROADMAP's decisions D3 (field semantics: today's exact rounding is kept; per-source smooth rounding is rejected), D4 (`Changed` = published bytes differ; "touched" is rejected), D6 (change-rate engine with I/T/B planes, not a rebuild per frame), D10 (schedule sweep; timer heap and per-frame recounts deleted) and D11 (per-slot rewind journal) replace this file's corresponding proposals.
+
 > **Sources.** This plan uses only three things: the Gi code on `main` (f33244f) as pasted, the Frent code as pasted, and the measurements posted in issue #40. Nothing was built, run or read beyond those. A number marked ≈ is an estimate derived from those measurements and from Zen 4 hardware limits. Milestone M0 replaces each estimate with a measured number.
 
 ## 0 · Verdict
