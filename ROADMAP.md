@@ -164,7 +164,7 @@ Three claims from the earlier plans that these predictions reject:
 | P0-11 | Measure the lever | A | P0-1, P0-10 | S | todo | | |
 | P0-12 | Salvage + close `snapshot-bucket-index` | A | P0-1 | S | done | phase0 | profiler stale-handle fix + inspection accounting re-applied; 32 tests ported (958 total); branch closed at a53411d with the D14 note on #40; 3 findings carried to P0-14/P1-1 |
 | P0-13 | #40 + README interim | A | P0-11 | S | todo | | |
-| P0-14 | Clean-up: CI inspect, doc/version echoes, carry-forward findings | A | — | S | todo | | |
+| P0-14 | Clean-up: CI inspect, doc/version echoes, carry-forward findings | A | — | S | doing | p0-14-cleanup | items 2+5 done on the branch (927 tests): rejection outputs zeroed, exclusion fold widened to int64, receipts updated; item 6 root-caused as a measurement artifact (P0-5 harness used the process-wide GC max, Gi's thread allocates 0 B) — pending: item 1 (.editorconfig suppressions per a3d9e77 precedent), item 3 (validation README), item 4 (ring + frame receipts into `--verify`), discriminating counts for the exclusion test, the artifact note in docs/model.md, non-finite reach rejection, stats README figure |
 | P1-1 | Reference interpreter | C | P0-10 (early) | L | todo | | |
 | P1-2 | Stream generator + differential + minimizer | C | P1-1 | M | todo | | |
 | P1-3 | Golden corpus | C | P1-2 | M | todo | | |
