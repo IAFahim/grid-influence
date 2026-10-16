@@ -104,6 +104,8 @@ internal static class Report
             writer.WriteEndObject();
             writer.WriteStartObject("shared"u8);
             writer.WriteNumber("world_arena_bytes"u8, snapshot.WorldArenaBytes);
+            writer.WriteNumber("world_revision_bytes"u8, snapshot.WorldRevisionBytes);
+            writer.WriteNumber("zero_dense_bytes"u8, snapshot.ZeroDenseBytes);
             writer.WriteNumber("stamp_arena_bytes"u8, snapshot.StampArenaBytes);
             writer.WriteNumber("raster_samples_bytes"u8, snapshot.StampRasterBytes);
             writer.WriteEndObject();
