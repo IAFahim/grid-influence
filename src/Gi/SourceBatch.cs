@@ -159,7 +159,6 @@ internal struct SourceBatchState
     public int FadeStart;
     public int FadeTicks;
     public int ExpireAt;
-    public int Due;
 }
 
 internal struct SourceBatchEntry

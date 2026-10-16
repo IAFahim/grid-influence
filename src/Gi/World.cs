@@ -43,7 +43,7 @@ internal unsafe struct SourceColumns
     public NativeBuffer<int> FadeStart;
     public NativeBuffer<int> FadeTicks;
     public NativeBuffer<int> ExpireAt;
-    public NativeBuffer<int> Due;
+    public NativeBuffer<int> TimedAt;
     public FreeRing Free;
     public int Count;
     public int Chunks;
@@ -105,7 +105,7 @@ internal unsafe struct SourceColumns
         FadeStart.Free();
         FadeTicks.Free();
         ExpireAt.Free();
-        Due.Free();
+        TimedAt.Free();
         Free.Release();
     }
 
@@ -226,7 +226,8 @@ internal unsafe struct WorldCtx
     public NativeBuffer<JournalEntry> Pending;
     public NativeBuffer<JournalEntry> Journal;
     public NativeBuffer<ScheduleRecord> ScheduleJournal;
-    public NativeBuffer<Alarm> Timers;
+    public NativeBuffer<TimedEntry> TimedList;
+    public NativeBuffer<int> TimedDue;
     public int Tick;
     public int MarkEpoch;
     public int RewindEpoch;
@@ -297,7 +298,8 @@ public static unsafe partial class World
         w->Pending.Free();
         w->Journal.Free();
         w->ScheduleJournal.Free();
-        w->Timers.Free();
+        w->TimedList.Free();
+        w->TimedDue.Free();
         w->Kernels.Release();
         w->BatchSources.Free();
         w->BatchCommands.Free();
@@ -657,14 +659,19 @@ public static unsafe partial class World
         if (w == null) return;
         Runtime.WorldRevisions[world]++;
         var s = &w->Sources;
-        for (var i = 0; i < s->Count; i++) s->Alive[i] = 0;
+        for (var i = 0; i < s->Count; i++)
+        {
+            s->Alive[i] = 0;
+            s->TimedAt.Pointer[i] = 0;
+        }
+
         s->Count = 0;
         s->Free.Clear();
         w->Changed.Resize(0);
         w->Pending.Resize(0);
         w->Journal.Resize(0);
         w->ScheduleJournal.Resize(0);
-        w->Timers.Resize(0);
+        w->TimedList.Resize(0);
         w->Recording = 0;
         w->MarkEpoch++;
 
@@ -751,7 +758,7 @@ public static unsafe partial class World
         RestoreSchedules(w, s);
         if (w->Recording != 0) ShiftSchedules(s, w->Tick - w->RecordTick);
         w->Recording = 0;
-        RebuildTimers(w);
+        RebuildTimed(w);
 
         s->Free.Clear();
         for (var i = 0; i < s->Count; i++)
@@ -891,7 +898,7 @@ public static unsafe partial class World
         if (w == null) return;
 
         w->Tick++;
-        if (w->Timers.Length != 0) RunTimers(w);
+        if (w->TimedList.Length != 0) SweepTimed(w);
 
         var stamp = ProcessStages.Mark();
         SweepChanged(w);
@@ -945,7 +952,7 @@ public static unsafe partial class World
         s->FadeStart.Resize(capacity);
         s->FadeTicks.Resize(capacity);
         s->ExpireAt.Resize(capacity);
-        s->Due.Resize(capacity);
+        s->TimedAt.Resize(capacity);
         s->Free.Reserve(capacity);
         for (var gi = 0; gi < w->GridCount; gi++)
             if (w->Grids[gi].Records.Length < capacity)

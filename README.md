@@ -318,7 +318,7 @@ World.Expire(world, crumb, ticks: 300);
 
 The classic decay pass multiplies every cell every tick — about 330 µs per tick on a 1024² map
 whether anything changed or not. Gi schedules each fade's integer steps instead: a fade from 16
-to 0 changes the field on exactly 16 ticks, a min-heap fires only those, and a tick where
+to 0 changes the field on exactly 16 ticks, a dense timed list fires only those, and a tick where
 nothing steps costs nothing. 2,000 crumbs fading over 600–900 ticks cost 31 µs per tick on
 average and 0 µs on quiet ticks. Scheduled steps are ordinary queued mutations, so they journal
 and rewind: `Rewind` restores schedules changed inside the window and resumes pending ones with
@@ -610,8 +610,8 @@ a full 512² region scan, and the 600-tick loop allocates 0 B.
 - **Derived layers recombine changed tiles.** After the publish, each derived layer, in creation
   order, marks the union of its inputs' dirty tiles and recombines them in one vectorized pass
   per tile, bit-identical to the scalar loop.
-- **Schedules are a heap of due ticks.** Fades and expiries fire only when an integer gain steps
-  or a removal is due, as ordinary marked mutations.
+- **Schedules are a dense list of due ticks.** Fades and expiries fire only when an integer gain
+  steps or a removal is due, as ordinary marked mutations applied in ascending slot order.
 - **Queries never scan.** Region sums add one `int64` per fully covered tile; `QueryMax`
   descends a per-(grid,layer) max pyramid; nearest prunes tiles by their max; `Changed` reads
   per-tile epochs.

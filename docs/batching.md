@@ -142,7 +142,7 @@ Small full-state batches validate and apply in one inline pass. Large unique ful
 avoid hashing; repeated sources fall back to ordered grouping. General batches reserve slots
 against a virtual free ring, validate generation-tagged IDs, and retain one row per affected slot.
 Two sequential phases prepare final states and write columns/operation ranges on the calling
-thread. Timer heaps and schedule journals are committed between them.
+thread. The timed list and schedule journals are committed between them.
 Fresh placement undo records preserve the direct `Place` layer and identity semantics, including
 reused slots. Cross-layer slot reuse withdraws against the deposited record's layer and deposits on the
 target's layer rather than treating the whole mutation as belonging to its target layer ([#36](https://github.com/IAFahim/grid-influence/issues/36)).

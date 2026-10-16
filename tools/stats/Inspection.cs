@@ -78,7 +78,7 @@ internal static unsafe class Inspection
                 (s->Chunks != 0 ? 10L * SourceColumns.MaxChunks * sizeof(void*) : 0) +
                 (long)(s->JStamp.Capacity + s->BatchTag.Capacity) * sizeof(int) +
                 s->Timed.Capacity + s->FadeFrom.Capacity + s->FadeTo.Capacity +
-                ((long)s->FadeStart.Capacity + s->FadeTicks.Capacity + s->ExpireAt.Capacity + s->Due.Capacity) * sizeof(int) +
+                ((long)s->FadeStart.Capacity + s->FadeTicks.Capacity + s->ExpireAt.Capacity + s->TimedAt.Capacity) * sizeof(int) +
                 (long)s->Free.Capacity * sizeof(int),
             WorldArenaBytes = World.MaxWorlds * sizeof(WorldCtx),
             WorldRevisionBytes = World.MaxWorlds * sizeof(int),
@@ -88,7 +88,7 @@ internal static unsafe class Inspection
             QueueBytes = (long)w->Changed.Capacity * sizeof(int) +
                 ((long)w->Pending.Capacity + w->Journal.Capacity) * sizeof(JournalEntry) +
                 (long)w->ScheduleJournal.Capacity * sizeof(ScheduleRecord) +
-                (long)w->Timers.Capacity * sizeof(Alarm),
+                (long)w->TimedList.Capacity * sizeof(TimedEntry) + (long)w->TimedDue.Capacity * sizeof(int),
         };
 
         for (var i = 0; i < s->Count; i++)

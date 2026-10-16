@@ -371,7 +371,7 @@ public static unsafe partial class World
         Generation = source->Gen[slot], Timed = source->Timed.Pointer[slot],
         FadeFrom = source->FadeFrom.Pointer[slot], FadeTo = source->FadeTo.Pointer[slot],
         FadeStart = source->FadeStart.Pointer[slot], FadeTicks = source->FadeTicks.Pointer[slot],
-        ExpireAt = source->ExpireAt.Pointer[slot], Due = source->Due.Pointer[slot]
+        ExpireAt = source->ExpireAt.Pointer[slot]
     };
 
     private static void FoldSourceCommand(
@@ -547,7 +547,7 @@ public static unsafe partial class World
         }
 
         if (context->Recording != 0) context->ScheduleJournal.Ensure(context->ScheduleJournal.Length + scheduleCount);
-        context->Timers.Ensure(context->Timers.Length + scheduleCount);
+        context->TimedList.Ensure(context->TimedList.Length + scheduleCount);
     }
 
     internal static void ApplySourceBatchRange(WorldCtx* context, int commandCount, int first, int last)
@@ -582,7 +582,6 @@ public static unsafe partial class World
             source->FadeStart.Pointer[slot] = state.FadeStart;
             source->FadeTicks.Pointer[slot] = state.FadeTicks;
             source->ExpireAt.Pointer[slot] = state.ExpireAt;
-            source->Due.Pointer[slot] = state.Due;
         }
 
         for (var index = 0; index < commandCount; index++)
