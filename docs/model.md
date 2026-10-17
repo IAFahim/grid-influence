@@ -507,15 +507,19 @@ add one `int64` page sum per live page, so large sparse grids do not visit every
   *applied* state is used: a pending move, gain change, or removal is ignored until `Process`
   applies it; a source placed this frame excludes nothing; stale, foreign-layer, and invalid ids
   exclude nothing. Method: a page cell strictly inside `(−32768, 32767)` is the exact
-  unsaturated total `T`; box and raster sources subtract their own integer contribution
-  (`BoxAt` reuses the emitter's band clip on a one-cell window; rasters run `EmitRaster` on a
-  one-cell clip); tent and bell sources replace the rounded sum of their kernel with the
+  unsaturated total `T`; box and raster sources subtract their own integer contribution; tent
+  and bell sources replace the rounded sum of their kernel with the
   rounded sum minus their exact product `value·gain·C·Wx·Wy`, which needs the cell's unrounded
   kernel sum — one load from the tile's tent or bell store. Saturated page cells rebuild every
   component (the `I` total, tent, bell) before subtracting, and the rebuilt fold forms the
   `I`-plus-tent-plus-bell total in `int64` and saturates once, exactly as publish does, so exclusion
   matches the page on tiles whose planes each fit `int32` but whose sum does not. Areas apply the same rule per
-  cell of the source's footprint inside the disk, reading the planes directly.
+  cell of the source's footprint inside the disk, reading the planes directly. The source's own
+  contribution at a cell is its cached kernel tap times its gain (`TryFindTaps`, then
+  `TryGetTaps` while the frame's insert budget lasts), so an excluded point read costs about
+  forty nanoseconds on a cached kernel; a kernel that is neither cached nor insertable, or larger
+  than the canvas limit, recomputes the contribution from the stamp through `BoxAt`,
+  `EmitRaster` or the smooth weights, with identical results.
   `World.Changed(world, layer, x, y, reach, since)` answers whether any tile holding a cell of
   the same disk (on the grid `TrySenseArea` would pick) has an epoch after `since` — an agent
   can skip re-deciding while its neighbourhood is unchanged. `TrySenseNearest(world, layer, x,
