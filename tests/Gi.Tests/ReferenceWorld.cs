@@ -163,7 +163,7 @@ internal sealed unsafe class ReferenceWorld
 
     private static void MarkParentTiles(GridData g, LayerData target, byte parent)
     {
-        var field = Field(g, parent);
+        var field = LayerField(g, parent);
         if (field == null) return;
         var tps = g.TilesPerSide;
         for (var t = 0; t < g.TileCount; t++)
@@ -185,7 +185,7 @@ internal sealed unsafe class ReferenceWorld
     private static LayerData Data(GridData g, int layer)
         => g.Layers[layer] ??= new LayerData();
 
-    private static short[]? Field(GridData g, int layer) => g.Layers[layer]?.Field;
+    private static short[]? LayerField(GridData g, int layer) => g.Layers[layer]?.Field;
 
     private static bool TrySource(Source[] now, int count, World.SourceId id, out int slot)
     {
@@ -282,7 +282,7 @@ internal sealed unsafe class ReferenceWorld
     {
         if (!float.IsFinite(x) || !float.IsFinite(y) || !TrySource(source, out var i)) return;
         ref var s = ref _now[i];
-        if (s.X == x && s.Y == y) return;
+        if (s.X.Equals(x) && s.Y.Equals(y)) return;
         if (PositionChanged(s.Layer, s.X, s.Y, x, y)) Mutate(i, s.Gain);
         s.X = x;
         s.Y = y;
@@ -466,7 +466,7 @@ internal sealed unsafe class ReferenceWorld
                 var ld = Data(g, l);
                 var r = _layers[l];
                 if (r.Op == LayerOp.Base) ResolveBase(g, ld, l, r.Transient || (crowded & (1u << l)) != 0);
-                else ResolveDerived(g, ld, l, in r);
+                else ResolveDerived(g, ld, in r);
             }
         }
 
@@ -617,7 +617,7 @@ internal sealed unsafe class ReferenceWorld
         }
     }
 
-    private void ResolveDerived(GridData g, LayerData ld, int layer, in Recipe r)
+    private void ResolveDerived(GridData g, LayerData ld, in Recipe r)
     {
         var touched = new HashSet<int>(ld.Marked);
         ld.Marked.Clear();
@@ -632,8 +632,8 @@ internal sealed unsafe class ReferenceWorld
 
         ld.Epochs ??= new int[g.TileCount];
         ld.MaxInit = true;
-        var a = Field(g, r.A);
-        var b = Field(g, r.B);
+        var a = LayerField(g, r.A);
+        var b = LayerField(g, r.B);
         var size = g.Size;
         var next = ld.Field ?? new short[size * size];
         var copy = (short[])next.Clone();
@@ -923,8 +923,8 @@ internal sealed unsafe class ReferenceWorld
     private static short Cell(GridData g, byte layer, int cx, int cy)
     {
         if ((uint)cx >= (uint)g.Size || (uint)cy >= (uint)g.Size) return 0;
-        var field = Field(g, layer);
-        return field?[cy * g.Size + cx] ?? (short)0;
+        var field = LayerField(g, layer);
+        return field?[cy * g.Size + cx] ?? 0;
     }
 
     public long Query(byte grid, byte layer, int x, int y, int width, int height)
@@ -935,7 +935,7 @@ internal sealed unsafe class ReferenceWorld
         var y1 = (int)Math.Min((long)y + height, g.Size);
         var x0 = Math.Max(x, 0);
         var y0 = Math.Max(y, 0);
-        var field = Field(g, layer);
+        var field = LayerField(g, layer);
         if (field == null) return 0;
         var sum = 0L;
         for (var cy = y0; cy < y1; cy++)
@@ -948,7 +948,7 @@ internal sealed unsafe class ReferenceWorld
     {
         if (grid >= _grids.Count || layer >= _layers.Count || width <= 0 || height <= 0) return;
         var g = _grids[grid];
-        var field = Field(g, layer);
+        var field = LayerField(g, layer);
         for (var row = 0; row < height; row++)
         {
             var cy = y + row;
@@ -1384,7 +1384,7 @@ internal sealed unsafe class ReferenceWorld
         foreach (var g in _grids)
         {
             if (g.ScaleQ8 == 0) continue;
-            var sampling = (long)g.ScaleQ8 * scale >> 8;
+            var sampling = g.ScaleQ8 * scale >> 8;
             if (!ValidationRules.IsFootprint(v->Width * sampling + 255 >> 8) ||
                 !ValidationRules.IsFootprint(v->Height * sampling + 255 >> 8))
                 return false;

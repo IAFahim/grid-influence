@@ -160,7 +160,7 @@ void MoveVsTrail()
 
     var stamp = Gaussian(9, 50);
     const int steps = 90;
-    var mover = default(Gi.World.SourceId);
+    var mover = default(World.SourceId);
     for (var i = 0; i < steps; i++)
     {
         var t = i / (steps - 1.0);
@@ -317,7 +317,7 @@ void RoundTurntable()
     scene.Mark(218f, 44f, shapes, "60-degree arc");
 
     var cone = Stamp.Cone(22, 100, arc: 80);
-    var spun = new Gi.World.SourceId[8];
+    var spun = new World.SourceId[8];
     for (var i = 0; i < 8; i++)
     {
         var x = 28f + i * 28.5f;
@@ -452,7 +452,7 @@ void FadingTrail()
     var scent = scene.Layer(w, "scent", "#4dd0e1");
 
     var crumb = Stamp.Dome(8, 90);
-    var crumbs = new Gi.World.SourceId[6];
+    var crumbs = new World.SourceId[6];
     for (var i = 0; i < 6; i++)
     {
         var x = 20f + i * 40f;

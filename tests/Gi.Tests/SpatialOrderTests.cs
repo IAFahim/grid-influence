@@ -27,10 +27,10 @@ public class SpatialOrderTests
         {
             var grid = Grid.New(world, power, originX, originY, size);
             var rng = new Random(power);
-            const int Count = 4000;
-            var xs = new float[Count];
-            var ys = new float[Count];
-            for (var i = 0; i < Count; i++)
+            const int count = 4000;
+            var xs = new float[count];
+            var ys = new float[count];
+            for (var i = 0; i < count; i++)
             {
                 xs[i] = originX + (float)rng.NextDouble() * size;
                 ys[i] = originY + (float)rng.NextDouble() * size;
@@ -40,10 +40,10 @@ public class SpatialOrderTests
             xs[1] = originX - 1f;
             ys[2] = originY + size + 1f;
             xs[3] = float.PositiveInfinity;
-            var keys = new uint[Count];
-            Assert.Equal(Count, Grid.SpatialKeys(world, grid, xs, ys, keys));
+            var keys = new uint[count];
+            Assert.Equal(count, Grid.SpatialKeys(world, grid, xs, ys, keys));
             var scale = (1 << power) / size;
-            for (var i = 0; i < Count; i++)
+            for (var i = 0; i < count; i++)
             {
                 if (i < 4)
                 {
@@ -51,8 +51,8 @@ public class SpatialOrderTests
                     continue;
                 }
 
-                var cx = (int)Math.Floor((double)((xs[i] - originX) * (float)scale));
-                var cy = (int)Math.Floor((double)((ys[i] - originY) * (float)scale));
+                var cx = (int)Math.Floor((xs[i] - originX) * scale);
+                var cy = (int)Math.Floor((ys[i] - originY) * scale);
                 cx = Math.Clamp(cx, 0, (1 << power) - 1);
                 cy = Math.Clamp(cy, 0, (1 << power) - 1);
                 var expected = (Interleave(cx >> 5, cy >> 5, 9) << 10) | Interleave(cx & 31, cy & 31, 5);

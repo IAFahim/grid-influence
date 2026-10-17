@@ -3,7 +3,7 @@ using Gi;
 
 internal static partial class Verification
 {
-    private readonly record struct SourceBatchInput(Gi.World.SourceId Source, float PositionX, float PositionY,
+    private readonly record struct SourceBatchInput(World.SourceId Source, float PositionX, float PositionY,
         float Heading, float Scale, sbyte Gain);
 
     private readonly record struct SourceBatchMeasurement(double SerialMicroseconds,

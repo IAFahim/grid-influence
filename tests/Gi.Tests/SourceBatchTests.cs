@@ -550,7 +550,7 @@ public sealed class SourceBatchTests : IDisposable
             var a = actual->Pending.Pointer[index];
             var e = expected->Pending.Pointer[index];
             Assert.True(
-                a.Slot == e.Slot && a.X == e.X && a.Y == e.Y && a.Stamp == e.Stamp &&
+                a.Slot == e.Slot && a.X.Equals(e.X) && a.Y.Equals(e.Y) && a.Stamp == e.Stamp &&
                 a.Layer == e.Layer && a.Gain == e.Gain && a.Alive == e.Alive &&
                 a.Angle == e.Angle && a.Scale == e.Scale && a.Gen == e.Gen,
                 $"pending {index}: slot {a.Slot}");

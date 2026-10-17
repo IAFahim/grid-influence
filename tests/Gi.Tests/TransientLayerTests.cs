@@ -18,7 +18,7 @@ public unsafe class TransientLayerTests
         var stamps = new List<byte>
         {
             Stamp.Box(3, 3, 40), Stamp.Box(6, 4, -25), Stamp.Tent(6, 6, 35), Stamp.Bell(7, 7, -30),
-            Stamp.Disk(4, 50, 360), Stamp.Cone(5, 60, 360), Stamp.Dome(6, 45, 360), Stamp.Disk(5, 55, 200),
+            Stamp.Disk(4, 50), Stamp.Cone(5, 60), Stamp.Dome(6, 45), Stamp.Disk(5, 55, 200),
         };
         ReadOnlySpan<sbyte> raster = [12, -25, 30, 45, -60, 15, 80, -10, 20, 35, -40, 50, -15, 25, -30, 60];
         stamps.Add(Stamp.New(raster, 4, 4));
@@ -189,7 +189,7 @@ public unsafe class TransientLayerTests
             var g = Grid.New(w, 6, 0f, 0f, 64f);
             var persistent = Layer.New(w);
             var transient = Layer.New(w, Layer.Residency.Transient, Layer.Precision.Cell);
-            var sum = Layer.Sum(w, persistent, 1, transient, 2, 0);
+            var sum = Layer.Sum(w, persistent, 1, transient, 2);
             World.Place(w, persistent, 20.5f, 20.5f, box, 1);
             float[] xs = [20.5f, 30.5f];
             float[] ys = [20.5f, 30.5f];

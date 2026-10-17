@@ -35,7 +35,7 @@ internal static unsafe partial class TileBake
         for (var x = x0; x < x1; x++)
         {
             var i = y * TileSize + x;
-            var total = (long)t.I[i] + (carry == null ? 0 : carry[i]);
+            var total = t.I[i] + (carry == null ? 0 : carry[i]);
             if (t.T != null) total += RoundWide(highT == null ? 0 : highT[i], (lowT == null ? 0 : lowT[i]) + t.T[i]);
             if (t.B != null) total += RoundWide(highB == null ? 0 : highB[i], (lowB == null ? 0 : lowB[i]) + t.B[i]);
             var cell = (short)Math.Clamp(total, short.MinValue, short.MaxValue);

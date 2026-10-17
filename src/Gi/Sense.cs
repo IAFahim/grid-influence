@@ -143,9 +143,9 @@ public static unsafe partial class World
         var best = short.MinValue;
         var bx = 0;
         var by = 0;
-        const int Pending = 64;
-        var pendingTiles = stackalloc int[Pending];
-        var pendingMaxima = stackalloc short[Pending];
+        const int maxPending = 64;
+        var pendingTiles = stackalloc int[maxPending];
+        var pendingMaxima = stackalloc short[maxPending];
         var pending = 0;
         var top = -1;
         for (var ty = disk.Y0 >> TileBake.TileBits; ty <= disk.Y1 >> TileBake.TileBits; ty++)
@@ -161,7 +161,7 @@ public static unsafe partial class World
 
             var summary = ld->SummaryOf(ty * tps + tx);
             var m = summary != null ? summary->Max : (short)0;
-            if (pending == Pending)
+            if (pending == maxPending)
             {
                 ScanDiskTile(g, ld, disk, tx, ty, rowMaxima, ref found, ref best, ref bx, ref by);
                 continue;
@@ -912,10 +912,10 @@ public static unsafe partial class World
             var bells = cells.B;
             var boxes = cells.I;
             long* carryP = null;
-            long* highTP = null;
-            long* lowTP = null;
-            long* highBP = null;
-            long* lowBP = null;
+            long* highT = null;
+            long* lowT = null;
+            long* highB = null;
+            long* lowB = null;
             var summary = cells.Summary;
             if (summary != null && (summary->CarryI | summary->HighT | summary->HighB) != 0)
             {
@@ -923,14 +923,14 @@ public static unsafe partial class World
                 if (summary->CarryI != 0) carryP = store->Wide(summary->CarryI);
                 if (summary->HighT != 0)
                 {
-                    highTP = store->Wide(summary->HighT);
-                    lowTP = store->Wide(summary->LowT);
+                    highT = store->Wide(summary->HighT);
+                    lowT = store->Wide(summary->LowT);
                 }
 
                 if (summary->HighB != 0)
                 {
-                    highBP = store->Wide(summary->HighB);
-                    lowBP = store->Wide(summary->LowB);
+                    highB = store->Wide(summary->HighB);
+                    lowB = store->Wide(summary->LowB);
                 }
             }
 
@@ -952,16 +952,16 @@ public static unsafe partial class World
                     var br = bells == null ? 0 : bells[i];
                     long th = 0;
                     long bh = 0;
-                    if (highTP != null)
+                    if (highT != null && lowT != null)
                     {
-                        th = highTP[i];
-                        tq += lowTP[i];
+                        th = highT[i];
+                        tq += lowT[i];
                     }
 
-                    if (highBP != null)
+                    if (highB != null && lowB != null)
                     {
-                        bh = highBP[i];
-                        br += lowBP[i];
+                        bh = highB[i];
+                        br += lowB[i];
                     }
 
                     var own = 0L;

@@ -1,9 +1,9 @@
 using Gi;
 
-const int Agents = 200_000;
-const int Frames = 200;
-const int SortEvery = 64;
-const float Speed = 0.1f;
+const int agents = 200_000;
+const int frames = 200;
+const int sortEvery = 64;
+const float speed = 0.1f;
 
 var world = World.New();
 var grid = Grid.New(world, power: 10, x: 0f, y: 0f, size: 1024f);
@@ -11,36 +11,36 @@ var crowd = Layer.New(world, Layer.Residency.Transient, Layer.Precision.Cell);
 var body = Stamp.Box(4, 4, 1);
 
 var rng = new Random(21);
-var xs = new float[Agents];
-var ys = new float[Agents];
-var vx = new float[Agents];
-var vy = new float[Agents];
-for (var i = 0; i < Agents; i++)
+var xs = new float[agents];
+var ys = new float[agents];
+var vx = new float[agents];
+var vy = new float[agents];
+for (var i = 0; i < agents; i++)
 {
     xs[i] = 8f + (float)rng.NextDouble() * 1008f;
     ys[i] = 8f + (float)rng.NextDouble() * 1008f;
     var angle = rng.NextDouble() * Math.Tau;
-    vx[i] = (float)Math.Cos(angle) * Speed;
-    vy[i] = (float)Math.Sin(angle) * Speed;
+    vx[i] = (float)Math.Cos(angle) * speed;
+    vy[i] = (float)Math.Sin(angle) * speed;
 }
 
-var keys = new uint[Agents];
-var permutation = new int[Agents];
-var scratch = new ulong[2 * Agents];
-var gatherX = new float[Agents];
-var gatherY = new float[Agents];
-var gatherVx = new float[Agents];
-var gatherVy = new float[Agents];
+var keys = new uint[agents];
+var permutation = new int[agents];
+var scratch = new ulong[2 * agents];
+var gatherX = new float[agents];
+var gatherY = new float[agents];
+var gatherVx = new float[agents];
+var gatherVy = new float[agents];
 
 long checksum = 0;
-for (var frame = 0; frame < Frames; frame++)
+for (var frame = 0; frame < frames; frame++)
 {
-    if (frame % SortEvery == 0)
+    if (frame % sortEvery == 0)
     {
         Grid.SpatialKeys(world, grid, xs, ys, keys);
         var before = Grid.Disorder(keys);
         Grid.SortByKeys(keys, permutation, scratch);
-        for (var i = 0; i < Agents; i++)
+        for (var i = 0; i < agents; i++)
         {
             var source = permutation[i];
             gatherX[i] = xs[source];
@@ -57,7 +57,7 @@ for (var frame = 0; frame < Frames; frame++)
         Console.WriteLine($"frame {frame,3}: disorder {before:F3} -> {Grid.Disorder(keys):F3}");
     }
 
-    for (var i = 0; i < Agents; i++)
+    for (var i = 0; i < agents; i++)
     {
         var nx = xs[i] + vx[i];
         var ny = ys[i] + vy[i];
@@ -72,7 +72,7 @@ for (var frame = 0; frame < Frames; frame++)
 
     var view = World.View(world, grid, crowd);
     var busiest = 0;
-    for (var i = 0; i < Agents; i += 16)
+    for (var i = 0; i < agents; i += 16)
         if (view.TryCell(xs[i], ys[i], out var cx, out var cy))
             busiest = Math.Max(busiest, view[cx, cy] - 1);
     checksum += busiest;
