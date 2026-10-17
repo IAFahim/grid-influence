@@ -33,6 +33,15 @@ internal static unsafe partial class TileBake
         int* cells, int tileX0, int tileY0, int px, int py, int fx, int fy, int extentX, int extentY, StampVariant* v, int gain)
     {
         new Span<int>(cells, TileSize * TileSize).Clear();
+        AccumulateBoxCells(cells, tileX0, tileY0, px, py, fx, fy, extentX, extentY, v, gain);
+    }
+
+    #if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    #endif
+    internal static void AccumulateBoxCells(
+        int* cells, int tileX0, int tileY0, int px, int py, int fx, int fy, int extentX, int extentY, StampVariant* v, int gain)
+    {
         var xLo = stackalloc int[3];
         var xHi = stackalloc int[3];
         var xWeight = stackalloc int[3];

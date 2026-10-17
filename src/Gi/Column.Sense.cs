@@ -99,8 +99,7 @@ public static unsafe partial class World
                     var cx = (int)(qx >> 8);
                     var cy = (int)(qy >> 8);
                     var tile = (cy >> TileBake.TileBits) * g->TilesPerSide + (cx >> TileBake.TileBits);
-                    var block = ld->PageOf(tile);
-                    var page = block == null ? null : (short*)(block + PageOffset);
+                    var page = ld->PageOf(tile);
                     gradientXs[i] = (CellNear(g, ld, tile, page, cx + 1, cy) -
                         CellNear(g, ld, tile, page, cx - 1, cy)) * perUnit;
                     gradientYs[i] = (CellNear(g, ld, tile, page, cx, cy + 1) -

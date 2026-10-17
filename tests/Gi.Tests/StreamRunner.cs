@@ -370,7 +370,7 @@ internal sealed unsafe class StreamRunner
         for (var l = 0; l < _setup.Layers.Length; l++)
         {
             var expected = _rw.LiveCount((byte)l);
-            var actual = World.GetContext(_world)->LayerLive[l];
+            var actual = LiveCount(l);
             Require(actual == expected, $"layer live {l} f{_frames}: {actual} vs {expected}", _index);
         }
     }
@@ -576,7 +576,7 @@ internal sealed unsafe class StreamRunner
                 break;
             case ReadKind.LayerLive:
             {
-                var actual = World.GetContext(_world)->LayerLive[command.Layer];
+                var actual = LiveCount(command.Layer);
                 var expected = _rw.LiveCount(command.Layer);
                 Require(actual == expected, $"layer live {command.Layer}: {actual} vs {expected}", _index);
                 break;
@@ -704,5 +704,14 @@ internal sealed unsafe class StreamRunner
             $"seed {_setup.Seed} command {index} ({op}): {detail}",
             index,
             (int)op);
+    }
+
+    private int LiveCount(int layer)
+    {
+        var s = &World.GetContext(_world)->Sources;
+        var count = 0;
+        for (var i = 0; i < s->Count; i++)
+            if (s->Alive[i] != 0 && s->Gain[i] != 0 && s->Layer[i] == layer) count++;
+        return count;
     }
 }

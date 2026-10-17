@@ -92,7 +92,6 @@ public sealed unsafe class PublishTests
         }
 
         var changed = false;
-        var any = false;
         unchecked
         {
             for (var y = y0; y < y1; y++)
@@ -102,12 +101,14 @@ public sealed unsafe class PublishTests
                 var total = (long)m.I[i]
                     + (m.T != null ? TileBake.RoundQ40(m.T[i]) : 0)
                     + (m.B != null ? TileBake.RoundQ40(m.B[i]) : 0);
-                if (total != 0) any = true;
                 var cell = (short)Math.Clamp(total, short.MinValue, short.MaxValue);
                 if (cell != m.Page[i]) changed = true;
                 m.Page[i] = cell;
             }
         }
+
+        var any = false;
+        for (var i = 0; i < Cells; i++) any |= m.Page[i] != 0;
 
         for (var y = y0; y < y1; y++)
         {
@@ -218,49 +219,6 @@ public sealed unsafe class PublishTests
         Assert.Equal(expected.Any, (outcome & ResolveOutcome.Empty) == 0);
     }
 
-    private sealed class Resolved
-    {
-        public short[] Page = new short[Cells];
-        public long Sum;
-        public short Max;
-        public bool Changed;
-        public bool Any;
-    }
-
-    private static Resolved ResolveReference(Model m, short[] published)
-    {
-        var result = new Resolved();
-        published.CopyTo(result.Page, 0);
-        var difference = new int[TileBake.DiffPitch * TileBake.DiffRows];
-        var previousRow = new int[Size];
-        long sum = long.MinValue;
-        short max = 0;
-        ResolveOutcome outcome;
-        fixed (int* diff = difference)
-        fixed (int* dense = m.I)
-        fixed (int* prev = previousRow)
-        fixed (long* tent = m.T)
-        fixed (long* bell = m.B)
-        fixed (short* page = result.Page)
-        {
-            outcome = TileBake.Resolve(diff, dense, prev, tent, bell, page, &sum, &max);
-        }
-
-        result.Sum = sum;
-        result.Max = max;
-        result.Changed = (outcome & ResolveOutcome.Changed) != 0;
-        result.Any = (outcome & ResolveOutcome.Empty) == 0;
-        return result;
-    }
-
-    private static void AssertMatchesResolve(Tile tile, Resolved resolved)
-    {
-        var cells = tile.Store.Cells(tile.Plane);
-        for (var i = 0; i < Cells; i++) Assert.Equal(resolved.Page[i], cells.Page[i]);
-        Assert.Equal(resolved.Sum, cells.Summary->Sum);
-        Assert.Equal(resolved.Max, cells.Summary->Max);
-    }
-
     private static void Seed(Random random, Regime regime, Model m, bool tent, bool bell)
     {
         if (tent) m.T = new long[Cells];
@@ -306,13 +264,11 @@ public sealed unsafe class PublishTests
         var expected = Apply(m, 0, 0, Size, Size, 1);
         var outcome = Invoke(path, tile, 0, 0, Size, Size, 1);
         AssertMatches(tile, m, outcome, expected);
-        AssertMatchesResolve(tile, ResolveReference(m, new short[Cells]));
 
         var x0 = random.Next(Size);
         var y0 = random.Next(Size);
         var x1 = Math.Min(Size, x0 + random.Next(1, Size + 1));
         var y1 = Math.Min(Size, y0 + random.Next(1, Size + 1));
-        var previous = (short[])m.Page.Clone();
         unchecked
         {
             for (var y = 0; y < Size; y++)
@@ -329,7 +285,6 @@ public sealed unsafe class PublishTests
         expected = Apply(m, x0, y0, x1, y1, 2);
         outcome = Invoke(path, tile, x0, y0, x1, y1, 2);
         AssertMatches(tile, m, outcome, expected);
-        AssertMatchesResolve(tile, ResolveReference(m, previous));
 
         tile.Release();
     }
@@ -581,17 +536,14 @@ public sealed unsafe class PublishTests
         var expected = Apply(m, 0, 0, Size, Size, 1);
         var outcome = Invoke(path, tile, 0, 0, Size, Size, 1);
         AssertMatches(tile, m, outcome, expected);
-        AssertMatchesResolve(tile, ResolveReference(m, new short[Cells]));
 
         for (var y = 17; y < 26; y++)
         for (var x = 3; x < 29; x++)
             m.I[y * Size + x] = EdgeInts[((y * Size + x) * 11 + 5) % EdgeInts.Length];
         tile.Sync(m);
-        var previous = (short[])m.Page.Clone();
         expected = Apply(m, 3, 17, 29, 26, 2);
         outcome = Invoke(path, tile, 3, 17, 29, 26, 2);
         AssertMatches(tile, m, outcome, expected);
-        AssertMatchesResolve(tile, ResolveReference(m, previous));
 
         tile.Release();
     }
@@ -634,11 +586,9 @@ public sealed unsafe class PublishTests
         m.T = new long[Cells];
         m.T[6 * Size + 6] = 2L << 40;
         tile.Sync(m);
-        var previous = (short[])m.Page.Clone();
         expected = Apply(m, 0, 0, Size, Size, 2);
         outcome = Invoke(path, tile, 0, 0, Size, Size, 2);
         AssertMatches(tile, m, outcome, expected);
-        AssertMatchesResolve(tile, ResolveReference(m, previous));
 
         m.B = new long[Cells];
         m.B[6 * Size + 6] = -(3L << 40);

@@ -414,7 +414,7 @@ internal sealed unsafe class CorpusRunner
                 hash.Mix(World.Covers(_world, command.X, command.Y));
                 break;
             case ReadKind.LayerLive:
-                hash.Mix(World.GetContext(_world)->LayerLive[command.Layer]);
+                hash.Mix(LiveCount(command.Layer));
                 break;
             case ReadKind.SourceSpec:
             {
@@ -436,5 +436,14 @@ internal sealed unsafe class CorpusRunner
         }
 
         _frameReads = hash;
+    }
+
+    private int LiveCount(int layer)
+    {
+        var s = &World.GetContext(_world)->Sources;
+        var count = 0;
+        for (var i = 0; i < s->Count; i++)
+            if (s->Alive[i] != 0 && s->Gain[i] != 0 && s->Layer[i] == layer) count++;
+        return count;
     }
 }

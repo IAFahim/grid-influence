@@ -81,6 +81,10 @@ internal unsafe struct KernelCache
     private NativeBuffer<int> _canvasRows;
     private int _cursor;
 
+    public readonly long Bytes =>
+        (long)_entries.Capacity * sizeof(KernelEntry) + (long)_taps.Capacity * sizeof(long) +
+        ((long)_rows.Capacity + _canvasRows.Capacity) * sizeof(int) + (long)_canvas.Capacity * sizeof(long);
+
     public readonly KernelEntry* Find(ulong key, ulong turn)
     {
         var entries = _entries.Pointer;

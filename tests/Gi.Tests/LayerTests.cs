@@ -141,7 +141,7 @@ public sealed class LayerTests
     }
 
     [Fact]
-    public void Inspection_CountsDerivedTilesAsHeaderOnly()
+    public unsafe void Inspection_CountsDerivedTilesAsHeaderOnly()
     {
         var w = World.New();
         Grid.New(w, 6, 0f, 0f, 64f);
@@ -152,10 +152,10 @@ public sealed class LayerTests
         var snapshot = Stats.Inspection.Read(w);
         Assert.Equal(2, snapshot.LiveTiles);
         Assert.Equal(1, snapshot.DerivedTiles);
-        Assert.Equal(World.BlockBytes - World.HeaderBytes, snapshot.DifferenceBytes);
-        Assert.Equal(2 * World.PageBytes, snapshot.PageBytes);
-        Assert.Equal(World.BlockBytes + World.HeaderBytes,
-            snapshot.DifferenceBytes + snapshot.DensePointerBytes + snapshot.PageBytes + snapshot.PageSumBytes);
+        Assert.Equal(PlaneStore.Int32Unit, snapshot.Int32Bytes);
+        Assert.Equal(2 * PlaneStore.PageUnit, snapshot.PageBytes);
+        Assert.Equal(PlaneStore.Int32Unit + 2 * (PlaneStore.PageUnit + TileSummary.Bytes + sizeof(TilePlanes)),
+            snapshot.Int32Bytes + snapshot.PageBytes + snapshot.SummaryBytes + snapshot.SetBytes);
         Assert.Equal(240, World.Query(w, 0, d, 16, 16));
     }
 }

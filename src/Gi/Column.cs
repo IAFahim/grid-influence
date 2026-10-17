@@ -75,10 +75,11 @@ public static unsafe partial class World
                     var mask = recipes[s->Layer[slot]].AnchorMask;
                     var dx = TileBake.AnchorQ8(oldX, ox, scaleQ8, mask) ^ TileBake.AnchorQ8(x, ox, scaleQ8, mask);
                     var dy = TileBake.AnchorQ8(oldY, oy, scaleQ8, mask) ^ TileBake.AnchorQ8(y, oy, scaleQ8, mask);
-                    if ((dx | dy) != 0)
-                        EnqueueMutation(w, s, slot, x, y, (sbyte)s->Gain[slot], s->Angle[slot], s->Scale[slot], true);
+                    var changed = (dx | dy) != 0;
+                    if (changed) BeforeWrite(w, s, slot);
                     s->X[slot] = x;
                     s->Y[slot] = y;
+                    if (changed) MarkChanged(w, s, slot);
                 }
 
                 return;
@@ -98,10 +99,11 @@ public static unsafe partial class World
             var oldY = s->Y[slot];
             if (*(int*)&x == *(int*)&oldX && *(int*)&y == *(int*)&oldY) continue;
             if (!float.IsFinite(x) || !float.IsFinite(y)) continue;
-            if (PositionChanged(w, s->Layer[slot], oldX, oldY, x, y))
-                EnqueueMutation(w, s, slot, x, y, (sbyte)s->Gain[slot], s->Angle[slot], s->Scale[slot], true);
+            var changed = PositionChanged(w, s->Layer[slot], oldX, oldY, x, y);
+            if (changed) BeforeWrite(w, s, slot);
             s->X[slot] = x;
             s->Y[slot] = y;
+            if (changed) MarkChanged(w, s, slot);
         }
     }
 
@@ -130,10 +132,10 @@ public static unsafe partial class World
 
                     var cx = (int)(qx >> 8);
                     var cy = (int)(qy >> 8);
-                    var block = ld->PageOf((cy >> TileBake.TileBits) * only->TilesPerSide + (cx >> TileBake.TileBits));
-                    values[i] = block == null
+                    var page = ld->PageOf((cy >> TileBake.TileBits) * only->TilesPerSide + (cx >> TileBake.TileBits));
+                    values[i] = page == null
                         ? (short)0
-                        : ((short*)(block + PageOffset))[(cy & (TileBake.TileSize - 1)) * TileBake.TileSize + (cx & (TileBake.TileSize - 1))];
+                        : page[(cy & (TileBake.TileSize - 1)) * TileBake.TileSize + (cx & (TileBake.TileSize - 1))];
                     if (whole != null) whole[i >> 6] |= 1ul << (i & 63);
                 }
 
@@ -170,10 +172,10 @@ public static unsafe partial class World
             {
                 var cx = (int)(qx >> 8);
                 var cy = (int)(qy >> 8);
-                var block = picked->Layers[layer].PageOf(
+                var page = picked->Layers[layer].PageOf(
                     (cy >> TileBake.TileBits) * picked->TilesPerSide + (cx >> TileBake.TileBits));
-                if (block != null)
-                    value = ((short*)(block + PageOffset))[(cy & (TileBake.TileSize - 1)) * TileBake.TileSize + (cx & (TileBake.TileSize - 1))];
+                if (page != null)
+                    value = page[(cy & (TileBake.TileSize - 1)) * TileBake.TileSize + (cx & (TileBake.TileSize - 1))];
             }
 
             values[i] = value;

@@ -35,13 +35,13 @@ new inputs. One coordinator owns each Gi world across all host systems and ECS w
 | `World.Place` | Spawn bursts, persistent emitters, transient effects | Existing direct API keeps its immediate integer result. Deferred recording returns a scoped ticket; creation produces a real source ID or explicit failure. Same-batch commands may target the ticket. |
 | `Move`, `Turn`, `Scale`, `SetGain` | Movement, facing, size, combat/AI systems | Preserve partial-field updates and stable command order. A full-state input is a fast path only when one producer owns all those fields. `SetGain`, including setting the existing value, cancels fading. |
 | `UpdateTransform` | Every-frame pose snapshots of existing emitters | Exactly ordered `Move`+`Turn`+`Scale` — position, heading, and scale with the direct calls' comparisons and quantization — while never assigning gain or cancelling a fade/expiry. Use it for movement while effects fade; keep `Update`/`SetGain` for real gain changes. |
-| `World.Sync` | Many existing sources changing position together | Position-only column ingestion stays as it is: stale-handle validation and bit-exact position comparison, one coalescing pending op per source. |
+| `World.Sync` | Many existing sources changing position together | Position-only column ingestion stays as it is: stale-handle validation and bit-exact position comparison, one changed-list entry per source. |
 | `World.SyncTransforms` | Every-frame pose columns owned by a native host | Borrows compact ID/X/Y (+ optional heading/scale) native columns per `World.TransformRange` in caller order; null heading/scale preserves; stale rows report one mask bit instead of per-row results; no host flattening, command records, or result arrays. |
 | `Remove` | Despawn, owner destruction, expiry cleanup | Order against updates, cancel pending creations, and retain cleanup until acknowledged. A recycled slot must not let a stale source ID affect its new occupant. |
 | `Fade`, `Expire` | Effects, gameplay scheduling | Ordered operations, not plain last-value fields. Preserve cancellation, start gain, relative tick, journal entries, and ordering against `SetGain`/`Remove`. |
 | `Process`, `ProcessAll` | Explicit simulation phase | Consume only sealed, accepted work; tick once per chosen processing step. No producer may mutate the batch being consumed. |
 | `Query`, `QueryAt`, `QueryRegion`, `QueryMax`, `QueryGradient` | Parallel gameplay readers | Read the last completed field; join before ingestion/processing and wait for publication before reading the new field. |
-| `TrySense*`, including source exclusion | AI sensing, self-exclusion | Same read fence; source columns and pending operations are part of the read set. Exclusion uses the last applied placement, not an unprocessed desired position. |
+| `TrySense*`, including source exclusion | AI sensing, self-exclusion | Same read fence; source columns and deposited records are part of the read set. Exclusion uses the deposited record (the last applied placement), not an unprocessed desired position. |
 | `SenseColumn`, `ChangedMask` | Large AI query batches | Reuse the current column APIs. Concurrent calls need disjoint output columns/masks; ingestion and processing still wait for these readers. |
 | `Covers`, `Tick`, `Changed`, `ChangedTiles` | Routing, incremental consumers | Stable read phase. Publish changed lists, epochs, and derived results together after processing finishes. |
 | `Clear`, `Record`, `StopRecording`, `Rewind` | Reset, replay, rollback | Ordered exclusive controls at a batch boundary. Define pending-input cancellation/retention explicitly; preserve timer and source generations. Reject obsolete queued epochs after clear/rewind. |
@@ -73,13 +73,13 @@ afterward. Do not lose the result just because the original entity no longer has
 3. Reserve source slots, source-column capacity, and operation ranges before writing rows.
    Validate result capacity before application. Source-slot exhaustion is a per-command
    failure; native memory growth follows Gi's existing allocation contract.
-4. Apply source assignments in order. Preserve the earliest applied state and final
-   desired state in one pending operation per slot, and fold layer counters afterward.
+4. Apply source assignments in order. Preserve the earliest applied state (the `Pending` snapshot) and the final
+   desired state per slot, and mark each slot once on the changed list.
 5. Commit ordered timer/journal work. Keep the existing
    timer-before-deposit processing semantics and rewind parity.
 6. Calculate footprints into retained ranges. Gather tile requirements by key, prepare
    sparse maps and buffers, then publish stable pointers. No pointer survives an arena resize.
-7. Reuse Gi's current adaptive deposit, crowded-rebuild, and tile resolution machinery. Each
+7. Reuse Gi's change-rate sweep and publish. Each
    `(grid, layer, tile)` has one writer; shared map
    removal/freeing and index publication stay on the calling thread; derived layers follow inputs.
 8. Publish result IDs and field availability. Reclaim input memory only after every relevant
@@ -144,18 +144,14 @@ against a virtual free ring, validate generation-tagged IDs, and retain one row 
 Two sequential phases prepare final states and write columns/operation ranges on the calling
 thread. Timer heaps and schedule journals are committed between them.
 Fresh placement undo records preserve the direct `Place` layer and identity semantics, including
-reused slots. Cross-layer slot reuse also fixes an existing crowded-processing defect: retraction
-and application now count/skip against their respective layers rather than treating the whole
-operation as belonging to its target layer ([#36](https://github.com/IAFahim/grid-influence/issues/36)).
+reused slots. Cross-layer slot reuse withdraws against the deposited record's layer and deposits on the
+target's layer rather than treating the whole mutation as belonging to its target layer ([#36](https://github.com/IAFahim/grid-influence/issues/36)).
 No public mutation replay loop or new scheduler is used.
 
-Tile footprint preparation is deferred too (#35): a heavy or large batch resolves one
-placement per (deposit, grid), appends a 16 B key-carrying fragment per touched tile,
-allocates and grows blocks, and marks dirty in ascending order — all on the calling thread —
-before the fragment apply runs. Fragments never hold block pointers, so no pointer survives
-an arena resize.
-`dotnet run --project benchmarks -c Release --no-build -- --stages` reports preparation,
-application, and resolution costs per `Process` against the forced-serial build.
+Batches never prepare tile footprints: ingestion writes columns and marks slots, and the next
+`Process` resolves one placement per (slot, grid) as it sweeps.
+`dotnet run --project benchmarks -c Release --no-build -- --stages` reports the sweep and publish
+costs per `Process`.
 
 ## Checked consumption with world tokens
 
@@ -227,7 +223,7 @@ where ordered `Move`/`UpdateTransform` compare with `==`. Heading and scale igno
 values and quantize exactly like `Turn`/`Scale`. A row whose x or y is not finite is rejected
 whole, with its heading and scale ignored. Rows
 apply in range order then row order; duplicate source IDs fold last-writer-wins into one
-merged pending op per source, with no host-side dedup. Invalid rows — dead, stale-generation,
+merged changed-list entry per source, with no host-side dedup. Invalid rows — dead, stale-generation,
 or out-of-range IDs, or non-finite x or y — set their mask bit (bit `row & 63` of word `row >> 6`;
 cleared words leave tail bits zero, words beyond `(Count + 63) / 64` untouched) and the call still returns
 `Applied`, so partial staleness stays distinguishable from whole-call rejection.
@@ -240,12 +236,11 @@ aliasing (`OverlappingBuffers` when a writable mask overlaps any column or anoth
 read-only columns may share storage). A rejected call writes nothing: masks keep their
 contents and the world stays byte-identical.
 
-Paths and scratch: under 8,192 total rows one inline pass on the caller enqueues the same
-coalescing ops `Move`/`Turn`/`Scale` would, with zero scratch. Above that, a sequential
+Paths and scratch: under 8,192 total rows one inline pass on the caller marks the same
+changed-list entries `Move`/`Turn`/`Scale` would, with zero scratch. Above that, a sequential
 caller-thread scan folds rows into one entry per unique source — seeded from the current
-columns, or from the slot's pending op so an unprocessed earlier edit merges rather than
-chains, preserving that op's original `From*` for rewind — and the batch-apply
-phase then writes source columns and ops in one sequential pass. Invalid bits are all
+columns, so an unprocessed earlier edit merges rather than chains — and the batch-apply
+phase then writes source columns and marks the changed list in one sequential pass. Invalid bits are all
 written during the planning scan. The retained O(N)
 scratch of the large path is one 136-byte batch entry plus 4 bytes of hash lookup per unique
 source — no per-row command links, no result rows, no flattened copy. The columns are borrowed
@@ -266,7 +261,7 @@ ingestion, structural tile preparation, and tile processing separately. Reuse th
 small-work inline path instead of paying large-batch setup cost for every batch.
 
 `SourceBatchTests` compares batches with ordered direct calls across every stamp shape, multiple
-grids, derived layers, pending operations, stale/reused IDs, timer cancellation, expiry, rewind,
+grids, derived layers, unprocessed mutations, stale/reused IDs, timer cancellation, expiry, rewind,
 rejection, large batches, duplicate fallback, and concurrent independent worlds.
 `dotnet run --project benchmarks -c Release -- --batch` checks parity and warm allocation before
 printing serial-versus-batch ingestion timing. It excludes host recording and tile processing

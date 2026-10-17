@@ -93,8 +93,8 @@ public static unsafe partial class World
                 if (la->Dirty.Length == 0 && lb->Dirty.Length == 0 && own->Dirty.Length == 0) continue;
 
                 var ld = EnsureDirty(g, (byte)d);
-                MarkAll(ld, la);
-                if (r->B != r->A) MarkAll(ld, lb);
+                MarkAll(g, ld, la);
+                if (r->B != r->A) MarkAll(g, ld, lb);
                 var dirty = ld->Dirty.Pointer;
                 var count = ld->Dirty.Length;
                 var kept = 0;
@@ -102,44 +102,32 @@ public static unsafe partial class World
                 {
                     var tile = dirty[i];
                     ld->InDirty[tile] = 0;
-                    var paBlock = la->PageOf(tile);
-                    var pa = paBlock == null ? null : (short*)(paBlock + PageOffset);
-                    var pbBlock = lb->PageOf(tile);
-                    var pb = pbBlock == null ? null : (short*)(pbBlock + PageOffset);
-                    var block = ld->PageOf(tile);
-                    var exists = block != null;
+                    var pa = la->PageOf(tile);
+                    var pb = lb->PageOf(tile);
+                    var set = ld->SetOf(tile);
                     ResolveOutcome outcome;
                     if (pa == null && pb == null)
                     {
-                        outcome = exists && PageAny((short*)(block + PageOffset)) ? ResolveOutcome.Changed : ResolveOutcome.None;
-                        if (exists) DropPage(ld, tile);
+                        var existed = set != null;
+                        var page = existed ? ld->Store.Cells(*set).Page : null;
+                        outcome = existed && TileBake.PageAny(page) ? ResolveOutcome.Changed : ResolveOutcome.None;
+                        if (existed) DropPage(ld, tile);
 
                         ld->Max.Update(g->TilesPerSide, tile, 0);
                     }
                     else
                     {
-                        int index;
-                        byte* target;
-                        if (exists)
-                        {
-                            target = block;
-                            index = ld->Directory[tile];
-                        }
-                        else
-                        {
-                            target = NewPage(g, ld, out index);
-                        }
-
-                        outcome = Combine(r, pa, pb, (short*)(target + PageOffset), (long*)(target + SumOffset), (short*)(target + MaxOffset));
+                        var created = set == null;
+                        if (created) set = EnsureSet(g, ld, tile);
+                        var cells = ld->Store.Cells(*set);
+                        outcome = Combine(r, pa, pb, cells.Page, &cells.Summary->Sum, &cells.Summary->Max);
                         if ((outcome & ResolveOutcome.Empty) == 0)
                         {
-                            if (!exists) AdmitPage(ld, tile, index);
-                            ld->Max.Update(g->TilesPerSide, tile, *(short*)(target + MaxOffset));
+                            ld->Max.Update(g->TilesPerSide, tile, cells.Summary->Max);
                         }
                         else
                         {
-                            if (exists) DropPage(ld, tile);
-                            else DiscardPage(ld, index);
+                            DropPage(ld, tile);
                             ld->Max.Update(g->TilesPerSide, tile, 0);
                         }
                     }
@@ -148,6 +136,7 @@ public static unsafe partial class World
                 }
 
                 ld->Dirty.Resize(kept);
+                ld->Rects.Resize(0);
             }
         }
     }
@@ -159,14 +148,14 @@ public static unsafe partial class World
         var target = EnsureDirty(g, layer);
         var directory = source->Directory;
         for (var tile = 0; tile < g->TileCount; tile++)
-            if (directory[tile] >= 0) MarkDirty(target, tile);
+            if (directory[tile] >= 0) MarkDirty(g, target, tile);
     }
 
-    private static void MarkAll(LayerData* target, LayerData* source)
+    private static void MarkAll(GridCtx* g, LayerData* target, LayerData* source)
     {
         var tiles = source->Dirty.Pointer;
         var count = source->Dirty.Length;
-        for (var i = 0; i < count; i++) MarkDirty(target, tiles[i]);
+        for (var i = 0; i < count; i++) MarkDirty(g, target, tiles[i]);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -124,14 +124,25 @@ public static unsafe partial class World
                 var posChanged = rawPosChanged && PositionChanged(context, layer, oldX, oldY, x, y);
                 var angChanged = angle != oldAngle && AngleChanged(context, layer, oldAngle, angle);
                 var scaleChanged = scale != oldScale;
-                var gain = (sbyte)source->Gain[slot];
-                if (posChanged) EnqueueMutation(context, source, slot, x, y, gain, oldAngle, oldScale, true);
+                var changed = posChanged || angChanged || scaleChanged;
+                if (changed)
+                    BeforeWriteState(context, source, slot, new SourceBatchState
+                    {
+                        PositionX = posChanged ? oldX : x,
+                        PositionY = posChanged ? oldY : y,
+                        Angle = posChanged || angChanged ? oldAngle : angle,
+                        Scale = posChanged || angChanged || scaleChanged ? oldScale : scale,
+                        Stamp = source->Stamp[slot],
+                        Layer = layer,
+                        Gain = source->Gain[slot],
+                        Alive = source->Alive[slot],
+                        Generation = source->Gen[slot]
+                    });
                 source->X[slot] = x;
                 source->Y[slot] = y;
-                if (angChanged) EnqueueMutation(context, source, slot, x, y, gain, angle, oldScale, true);
                 source->Angle[slot] = angle;
-                if (scaleChanged) EnqueueMutation(context, source, slot, x, y, gain, angle, scale, true);
                 source->Scale[slot] = scale;
+                if (changed) MarkChanged(context, source, slot);
             }
         }
     }
@@ -145,6 +156,10 @@ public static unsafe partial class World
         while (lookupSize < capacity * 2) lookupSize <<= 1;
         context->BatchLookup.ResizeUninitialized(lookupSize);
         context->BatchLookup.Span.Clear();
+
+        context->BatchCommands.ResizeUninitialized(totalRows);
+        for (var row = 0; row < totalRows; row++)
+            context->BatchCommands.Pointer[row] = new SourceBatchLink { Entry = -1, Next = -1 };
 
         var entries = 0;
         var rowBase = 0;
@@ -171,28 +186,22 @@ public static unsafe partial class World
                     continue;
                 }
 
-                var entry = context->BatchSources.Pointer + GetSourceBatchEntry(context, slot, ref entries);
+                var entryIndex = GetSourceBatchEntry(context, slot, ref entries);
+                var entry = context->BatchSources.Pointer + entryIndex;
                 if (entry->FirstCommand < 0)
                 {
-                    var state = ReadSourceBatchState(source, slot);
-                    entry->State = state;
-                    entry->InitialAlive = state.Alive;
-                    entry->InitialLayer = state.Layer;
-                    entry->InitialGain = state.Gain;
-                    entry->Operation = entry->OriginalPending != 0
-                        ? context->Ops.Pointer[entry->OriginalPending - 1]
-                        : SeedTransformOperation(slot, in state);
+                    entry->State = ReadSourceBatchState(source, slot);
                     entry->FirstCommand = row;
                 }
 
+                context->BatchCommands.Pointer[row].Entry = entryIndex;
                 var fold = &entry->State;
                 if (*(int*)&x != *(int*)&fold->PositionX || *(int*)&y != *(int*)&fold->PositionY)
                 {
-                    var posChanged = PositionChanged(context, fold->Layer, fold->PositionX, fold->PositionY, x, y);
-                    if (posChanged) BeginTransformDeposit(entry, row);
+                    if (PositionChanged(context, fold->Layer, fold->PositionX, fold->PositionY, x, y))
+                        MarkSourceBatchDeposit(entry, row, in *fold);
                     fold->PositionX = x;
                     fold->PositionY = y;
-                    if (posChanged) CommitTransformDeposit(entry);
                 }
 
                 if (headings != null && float.IsFinite(headings[i]))
@@ -200,10 +209,9 @@ public static unsafe partial class World
                     var angle = QuantizeSourceBatchAngle(headings[i]);
                     if (angle != fold->Angle)
                     {
-                        var angChanged = AngleChanged(context, fold->Layer, fold->Angle, angle);
-                        if (angChanged) BeginTransformDeposit(entry, row);
+                        if (AngleChanged(context, fold->Layer, fold->Angle, angle))
+                            MarkSourceBatchDeposit(entry, row, in *fold);
                         fold->Angle = angle;
-                        if (angChanged) CommitTransformDeposit(entry);
                     }
                 }
 
@@ -212,9 +220,8 @@ public static unsafe partial class World
                     var next = QuantizeSourceBatchScale(scales[i]);
                     if (next != fold->Scale)
                     {
-                        BeginTransformDeposit(entry, row);
+                        MarkSourceBatchDeposit(entry, row, in *fold);
                         fold->Scale = next;
-                        CommitTransformDeposit(entry);
                     }
                 }
             }
@@ -223,61 +230,6 @@ public static unsafe partial class World
         }
 
         context->BatchSources.Resize(entries);
-        var assigned = context->Ops.Length;
-        for (var index = 0; index < entries; index++)
-        {
-            var entry = context->BatchSources.Pointer + index;
-            if (entry->FirstDepositCommand < 0) continue;
-            entry->OperationIndex = entry->OriginalPending != 0 ? entry->OriginalPending - 1 : assigned++;
-        }
-
-        context->Ops.ResizeUninitialized(assigned);
-        context->BatchLayerDeltas.ResizeUninitialized(SourceBatchLayerStride);
-        context->BatchLayerDeltas.Span.Clear();
-        ApplySourceBatchRange(context, 0, entries, 0);
+        ApplySourceBatchRange(context, totalRows, 0, entries);
     }
-
-    private static void BeginTransformDeposit(SourceBatchEntry* entry, int row)
-    {
-        if (entry->FirstDepositCommand >= 0) return;
-        if (entry->OriginalPending == 0)
-        {
-            entry->Operation.FromX = entry->State.PositionX;
-            entry->Operation.FromY = entry->State.PositionY;
-            entry->Operation.FromAngle = entry->State.Angle;
-            entry->Operation.FromScale = entry->State.Scale;
-        }
-
-        entry->FirstDepositCommand = row;
-    }
-
-    private static void CommitTransformDeposit(SourceBatchEntry* entry)
-    {
-        entry->Operation.ToX = entry->State.PositionX;
-        entry->Operation.ToY = entry->State.PositionY;
-        entry->Operation.ToGain = entry->State.Alive != 0 ? (sbyte)entry->State.Gain : (sbyte)0;
-        entry->Operation.ToAngle = entry->State.Angle;
-        entry->Operation.ToScale = entry->State.Scale;
-        entry->Operation.AliveTo = entry->State.Alive;
-    }
-
-    private static DepositOp SeedTransformOperation(int slot, in SourceBatchState state) => new()
-    {
-        Slot = slot,
-        FromX = state.PositionX,
-        FromY = state.PositionY,
-        FromStamp = state.Stamp,
-        FromLayer = state.Layer,
-        FromGain = state.Alive != 0 ? (sbyte)state.Gain : (sbyte)0,
-        FromAngle = state.Angle,
-        FromScale = state.Scale,
-        AliveFrom = state.Alive,
-        FromGen = state.Generation,
-        ToStamp = state.Stamp,
-        ToLayer = state.Layer,
-        ToGain = state.Alive != 0 ? (sbyte)state.Gain : (sbyte)0,
-        ToAngle = state.Angle,
-        ToScale = state.Scale,
-        AliveTo = state.Alive
-    };
 }

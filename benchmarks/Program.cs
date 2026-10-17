@@ -6,6 +6,7 @@ if (mode == "--daily") { Verification.Daily(); return 0; }
 if (mode == "--batch") return Verification.SourceBatchTiming();
 if (mode == "--sync") return Verification.SyncTransformTiming();
 if (mode == "--stages") return Verification.StageTiming();
+if (mode == "--sweep") return Verification.SweepProfile();
 var result = Verification.Run();
 if (mode is "" or "--verify")
 {

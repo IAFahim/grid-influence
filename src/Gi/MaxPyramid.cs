@@ -134,10 +134,9 @@ internal unsafe struct MaxPyramid
             {
                 x = childX << TileBake.TileBits;
                 y = childY << TileBake.TileBits;
-                var block = ld->PageOf(childY * tilesPerSide + childX);
-                if (block == null) return target;
+                var page = ld->PageOf(childY * tilesPerSide + childX);
+                if (page == null) return target;
 
-                var page = (short*)(block + World.PageOffset);
                 var count = TileBake.TileSize * TileBake.TileSize;
                 var index = FirstEqualFlat(page, target, count);
                 if (index == count)
@@ -218,8 +217,8 @@ internal unsafe struct MaxPyramid
             var oy0 = Math.Max(cellY0, tileY0);
             var ox1 = Math.Min(cellX1 - 1, tileX0 + TileBake.TileSize - 1);
             var oy1 = Math.Min(cellY1 - 1, tileY0 + TileBake.TileSize - 1);
-            var block = ld->PageOf(childY * tilesPerSide + childX);
-            if (block == null)
+            var page = ld->PageOf(childY * tilesPerSide + childX);
+            if (page == null)
             {
                 if (0 > best)
                 {
@@ -231,7 +230,6 @@ internal unsafe struct MaxPyramid
                 continue;
             }
 
-            var page = (short*)(block + World.PageOffset);
             for (var row = oy0; row <= oy1; row++)
             {
                 var line = page + (row - tileY0) * TileBake.TileSize;
