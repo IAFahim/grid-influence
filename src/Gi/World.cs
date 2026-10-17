@@ -587,7 +587,7 @@ public static unsafe partial class World
         var w = GetContext(world);
         if (w == null || layer >= w->LayerCount || IsDerived(w, layer)) status = WriteStatus.InvalidLayer;
         else if (IsTransient(w, layer)) status = WriteStatus.WrongResidency;
-        else if (!StampCatalog.Valid(stamp)) status = WriteStatus.InvalidStamp;
+        else if (!StampCatalog.Valid(stamp) || !FootprintFits(w, stamp, UnitScale)) status = WriteStatus.InvalidStamp;
         else if (!float.IsFinite(x) || !float.IsFinite(y)) status = WriteStatus.NonFinite;
         else status = PlaceSlot(w, layer, x, y, stamp, gain, out id) == SourceResultStatus.Applied
             ? WriteStatus.Applied
@@ -626,7 +626,10 @@ public static unsafe partial class World
         if (!float.IsFinite(scale)) return WriteStatus.NonFinite;
         if (!TrySource(world, source, out var w, out var s, out var i)) return WriteStatus.StaleSource;
 
-        WriteScale(w, s, i, QuantizeScale(scale));
+        var next = QuantizeScale(scale);
+        if (!FootprintFits(w, s->Stamp[i], next)) return WriteStatus.CapacityReached;
+
+        WriteScale(w, s, i, next);
         return WriteStatus.Applied;
     }
 

@@ -21,6 +21,8 @@ internal static class ValidationRules
     internal const int MaxScaleQ8 = 1 << 20;
     internal const int MaxPhaseBits = 8;
     internal const int MaxTurnBits = 16;
+    internal const int MaxFootprint = 512;
+    internal const int MaxReachCells = 4096;
 
     internal static bool IsAxis(int axis) => axis >= 1 && axis <= MaxAxis;
     internal static bool IsRadius(int radius) => radius >= 1 && radius <= MaxRadius;
@@ -34,6 +36,8 @@ internal static class ValidationRules
     internal static bool IsShift(int shift) => shift >= 0 && shift <= MaxShift;
     internal static bool IsPhaseBits(int phaseBits) => phaseBits >= 0 && phaseBits <= MaxPhaseBits;
     internal static bool IsTurnBits(int turnBits) => turnBits >= 0 && turnBits <= MaxTurnBits;
+    internal static bool IsFootprint(long cells) => cells >= 0 && cells <= MaxFootprint;
+    internal static bool IsReachCells(float cells) => cells >= 0f && cells <= MaxReachCells;
     internal static bool IsGridSize(float size) => float.IsFinite(size) && size > 0f;
     internal static bool IsGridOrigin(float origin) => float.IsFinite(origin);
 

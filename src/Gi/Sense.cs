@@ -1036,6 +1036,8 @@ public static unsafe partial class World
             bool whole;
             if (disk)
             {
+                if (ReachQ8(reach, g->ScaleQ8) > (long)ValidationRules.MaxReachCells << 8) continue;
+
                 var c = Disk(g, x, y, reach);
                 whole = c.X0 >= 0 && c.Y0 >= 0 && c.X1 < g->Size && c.Y1 < g->Size && !c.Clipped;
             }
@@ -1179,7 +1181,7 @@ public static unsafe partial class World
     private static bool Contains(GridCtx* g, long qx, long qy)
         => qx >= 0 && qy >= 0 && (qx >> 8) < g->Size && (qy >> 8) < g->Size;
 
-    private static long ReachQ8(float reach, int scaleQ8)
+    internal static long ReachQ8(float reach, int scaleQ8)
     {
         if (!(reach > 0f)) return 0;
 

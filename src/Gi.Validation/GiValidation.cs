@@ -85,6 +85,20 @@ public static class GiValidation
         return Accept(out error);
     }
 
+    public static bool TryFootprint(int widthCells, int heightCells, out string? error)
+    {
+        if (!ValidationRules.IsFootprint(widthCells) || !ValidationRules.IsFootprint(heightCells))
+            return Reject("A stamp footprint after scaling must be 0 through 512 cells on each axis.", out error);
+        return Accept(out error);
+    }
+
+    public static bool TryReach(float reachCells, out string? error)
+    {
+        if (!ValidationRules.IsReachCells(reachCells))
+            return Reject("A sensing reach must be 0 through 4096 cells.", out error);
+        return Accept(out error);
+    }
+
     private static bool Accept(out string? error)
     {
         error = null;

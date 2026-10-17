@@ -11,6 +11,23 @@ public static unsafe partial class World
         return (ushort)((int)(turns * 65536.0) & 0xFFFF);
     }
 
+    internal static bool FootprintFits(WorldCtx* w, byte stamp, long scale)
+    {
+        var v = StampCatalog.Get(stamp);
+        for (var gi = 0; gi < w->GridCount; gi++)
+        {
+            var scaleQ8 = w->Grids[gi].ScaleQ8;
+            if (scaleQ8 == 0) continue;
+
+            var sampling = (long)scaleQ8 * scale >> 8;
+            if (!ValidationRules.IsFootprint(v->Width * sampling + 255 >> 8) ||
+                !ValidationRules.IsFootprint(v->Height * sampling + 255 >> 8))
+                return false;
+        }
+
+        return true;
+    }
+
     internal static ushort QuantizeScale(float scale)
     {
         var quantized = Math.Floor(scale * 256.0);
@@ -22,7 +39,7 @@ public static unsafe partial class World
     {
         id = default;
         if (layer >= w->LayerCount || IsDerived(w, layer) || IsTransient(w, layer)) return SourceResultStatus.InvalidLayer;
-        if (!StampCatalog.Valid(stamp)) return SourceResultStatus.InvalidStamp;
+        if (!StampCatalog.Valid(stamp) || !FootprintFits(w, stamp, UnitScale)) return SourceResultStatus.InvalidStamp;
         if (!float.IsFinite(x) || !float.IsFinite(y)) return SourceResultStatus.InvalidSource;
 
         var s = &w->Sources;
@@ -96,7 +113,7 @@ public static unsafe partial class World
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void WriteScale(WorldCtx* w, SourceColumns* s, int i, ushort next)
     {
-        if (next == s->Scale[i]) return;
+        if (next == s->Scale[i] || !FootprintFits(w, s->Stamp[i], next)) return;
 
         BeforeWrite(w, s, i);
         s->Scale[i] = next;
