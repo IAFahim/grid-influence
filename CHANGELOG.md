@@ -41,6 +41,10 @@ surface is still `World`, `Grid`, `Layer` and `Stamp`; the additions are nested.
 * `World.Memory(world, out storeBytes, out liveTiles, out pages, out kernelEntries, out liveSources)`:
   the tooling read-out. Summed plane-store bytes, live tiles, live slab units, occupied kernel-cache
   entries and live sources, allocation-free, zeros for a dead handle.
+* `World.Teardown()`: runtime teardown for domain/code reload. Once no world is live, frees the
+  stamp payloads and every process-wide pool so the next creation call starts pristine; returns
+  `false` and changes nothing while a world is live, and keeps slot revisions increasing across
+  teardowns so pre-teardown tokens stay refused.
 * `benchmarks --frames|--gate|--floor|--area|--region|--splat|--kinds|--order|--changed|--view`,
   `tools/fuzz`, a reference interpreter and a committed golden corpus under `tests/Gi.Tests`, and a
   determinism matrix in CI.

@@ -35,7 +35,10 @@ The rest of this file derives from seven statements.
   releases the world's memory and its handle: `World.New` reuses the lowest free handle, and a freed
   handle reads as absent to every call. `World.CopyWorldIds(ids)` copies the allocated ids,
   ascending, into a span and returns the live count; `World.ProcessAll()` processes every
-  allocated world in id order on the calling thread. `World.Memory(world, out storeBytes,
+  allocated world in id order on the calling thread. `World.Teardown()` returns the process-wide
+  pools to the OS once no world is live: it returns `false` and changes nothing while any world
+  is live, and `true` once it has freed everything (the pools paragraph states the full contract).
+  `World.Memory(world, out storeBytes,
   out liveTiles, out pages, out kernelEntries, out liveSources)` is the tooling read-out: it
   sums, over every (grid, layer) of the world, the retained capacity of the four plane slabs
   (`PlaneStore.Bytes`, free lists included), the engine's live-tile counter (`LivePages`, one per
@@ -57,7 +60,11 @@ before reading command payloads, writing
   slot returns `BatchStatus.InvalidWorld`, and rejection leaves the world byte-identical. The
   revision is an `int` in both the token and the runtime store — never a widened copy — and
   comparisons are equality, so the only wrap hazard is a stale token falsely matching after
-  exactly 2³² lifecycle transitions on one slot. Capture is legal whenever reading the world is
+  exactly 2³² lifecycle transitions on one slot. A `World.Teardown` does not reopen that hazard:
+  before the revision array is freed, its maximum is folded into a process-lifetime floor with
+  which the next `Ensure` seeds the reallocated array, so a slot's revisions stay increasing
+  across teardowns and a token captured before a teardown is refused with `StaleRevision` after
+  the restart, exactly as a token from before a `World.Free` is. Capture is legal whenever reading the world is
   (between lifecycle controls, under the host's producer/reader fences); consumption runs in the
   existing exclusive mutation phase — a token check is not a lock, and concurrent same-world
   mutation or a `Free`/`Clear`/`Rewind` racing a consumer remains forbidden. A grid
@@ -696,6 +703,7 @@ short m = World.QueryMax(world, grid, layer, out var mx, out var my); // best ce
 World.QueryGradient(world, grid, layer, 128f, 64f, out var gx, out var gy); // ±1-cell slope
 World.Remove(world, source);
 World.Free(world);                         // releases the world's memory and its handle
+World.Teardown();                          // returns the process pools to the OS once no world is live
 ```
 
 A world can mix resolutions freely — `Grid 256x / 1024x / 32x` — each grid covering its own
@@ -969,7 +977,20 @@ digits. Concurrency: single thread.
   process-lifetime pools allocated by the first creation call (`World.New`, `Stamp.New`,
   `Stamp.Box`) — never by static construction, so no static constructor on the assembly performs
   calls. This does not make mutable Gi statics callable from Burst through a precompiled DLL;
-  Unity records with Burst and invokes Gi from non-Burst code. World contents are
+  Unity records with Burst and invokes Gi from non-Burst code. `World.Teardown` is the pools'
+  release: it is refused — it returns `false` and touches nothing — while any world is live
+  (the same `Grids != null` slot scan `CopyWorldIds` reads), and otherwise frees every stamp's
+  raster and mips, both pools, the shared zero page, and the revision array, and returns the
+  world count, the catalog count (id 0 stays reserved), and `NativeHeap.Calls` to their pristine
+  values, so the next creation call performs the same `Ensure` a fresh process would. The
+  precondition is exactly the absence of live worlds: stamps outlive worlds by design and are
+  torn down with the catalog, not refused; every world-scoped block, kernel cache, and taps
+  handle dies with its world before teardown can run, and no pointer into freed storage is
+  handed out in between because pools, payloads, and counters are reset in the same call. The
+  one counter that never resets is the revision floor: `Release` folds the freed array's maximum
+  into it and the next `Ensure` seeds every slot with it, so revisions stay increasing across
+  teardowns and a token captured before a teardown never validates after the restart. Calling
+  `World.Teardown` before any creation call returns `true` without allocating. World contents are
   `NativeHeap` blocks owned by the context: the grid array, the layer recipe table, the changed-slot
   list (`Changed`, `int` slots), the `Pending` and `Journal` buffers of 24 B snapshots — `Pending`
   takes one snapshot of a slot's columns at its first mark of a window and is cleared by
@@ -1225,9 +1246,13 @@ digits. Concurrency: single thread.
   the allocated ids, ascending, on the calling thread — it adds no parallelism claim, it only
   packages the loop, and freed slots read as absent to it exactly as they do to `Process`.
   World creation, `World.Free`, `World.CopyWorldIds` (which reads the world count and each
-  slot's `Grids` pointer), `World.ProcessAll`, and stamp catalog mutation (`Stamp` creation
+  slot's `Grids` pointer), `World.ProcessAll`, `World.Teardown`, and stamp catalog mutation (`Stamp` creation
   and `Stamp.Free`, which scans every world for references) are process-wide scans:
-  serialize them with one another. `Grid.Count`, `Grid.CopyIds`, `Grid.TryGetSpec`,
+  serialize them with one another; `World.Teardown` frees the arenas every one of those scans
+  walks, so it must not overlap any other Gi call at all — its precondition, no live world,
+  already excludes the per-world calls, and what remains to exclude is creation, stamp
+  mutation, process-wide scans, and reads through handles that predate the teardown.
+  `Grid.Count`, `Grid.CopyIds`, `Grid.TryGetSpec`,
   `Layer.Count`, and `Layer.CopyIds` read the owning world's counts and grid records —
   per-world reads under the same serial-per-world rule as that world's other calls.
   `World.Memory` is a per-world read of the same kind: it walks the world's grid records,
