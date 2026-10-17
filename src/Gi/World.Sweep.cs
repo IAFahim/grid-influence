@@ -25,6 +25,8 @@ public static unsafe partial class World
             Scale = s->Scale[slot],
             Gen = s->Gen[slot],
         };
+        var mark = s->Mark[slot];
+        if ((int)mark != w->MarkEpoch) s->Mark[slot] = (mark & 0xFFFFFFFFL) | ((long)n << 32);
         if (w->Recording == 0 || s->HotStamp.Pointer[slot] == w->RecordEpoch) return;
 
         s->HotStamp.Pointer[slot] = w->RecordEpoch;
@@ -36,15 +38,15 @@ public static unsafe partial class World
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void BeforeWrite(WorldCtx* w, SourceColumns* s, int slot)
     {
-        if (s->Mark[slot] != w->MarkEpoch) SnapshotPending(w, s, slot);
+        if ((int)s->Mark[slot] != w->MarkEpoch) SnapshotPending(w, s, slot);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void MarkChanged(WorldCtx* w, SourceColumns* s, int slot)
     {
-        if (s->Mark[slot] == w->MarkEpoch) return;
+        if ((int)s->Mark[slot] == w->MarkEpoch) return;
 
-        s->Mark[slot] = w->MarkEpoch;
+        s->Mark[slot] = (s->Mark[slot] & ~0xFFFFFFFFL) | (uint)w->MarkEpoch;
         var n = w->Changed.Length;
         w->Changed.Resize(n + 1);
         w->Changed.Pointer[n] = slot;
@@ -123,6 +125,7 @@ public static unsafe partial class World
             EmitDelta(w, gi, in key, 1);
             *rec = key;
         }
+
     }
 
     private static void EmitDelta(WorldCtx* w, int gi, in DepositRecord record, int sign)

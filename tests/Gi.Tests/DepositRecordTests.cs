@@ -73,13 +73,13 @@ public sealed unsafe class DepositRecordTests : IDisposable
         for (var i = 0; i < w->Changed.Length; i++)
         {
             var slot = w->Changed.Pointer[i];
-            Assert.True(s->Mark[slot] == w->MarkEpoch, $"{step}: changed slot {slot} unmarked");
+            Assert.True((int)s->Mark[slot] == w->MarkEpoch, $"{step}: changed slot {slot} unmarked");
             Assert.True(marked.Add(slot), $"{step}: changed slot {slot} duplicated");
         }
 
         if (records == null) return;
         for (var i = 0; i < s->Count; i++)
-            if (s->Mark[i] != w->MarkEpoch)
+            if ((int)s->Mark[i] != w->MarkEpoch)
                 Assert.True(TargetEquals(s, w, records + i, i), $"{step}: unswept slot {i} record diverged");
     }
 
