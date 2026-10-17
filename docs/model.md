@@ -906,9 +906,15 @@ digits. Concurrency: single thread.
   reads "nothing deposited" (`Clear` zeroes it); and per (grid, layer) the layer's directory, its
   `PlaneStore` slabs, its tile-set slab, the dirty flags and tile epochs (allocated together by
   the layer's first marked tile on that grid and kept until `World.Free`), the dirty list with
-  its parallel rectangle list, the changed list, and the max pyramid: a flat `int16` slot array
-  plus per-level offset and side tables, allocated zeroed by the layer's first published tile and
-  freed by `World.Clear` and `World.Free`. The directory is one dense `int` per tile of the
+  its parallel rectangle list, the changed list, and two pyramids built on one generic layout
+  (`Pyramid<T, TOp>`: a flat slot array plus per-level offset and side tables, each node an 8×8
+  block of its children's maxima, with the combiner a `struct` type argument so the library still
+  targets netstandard): the max pyramid (`int16`, allocated zeroed by the layer's first
+  published tile and freed by `World.Clear` and `World.Free`) and the epoch pyramid (`int32`,
+  allocated with the tile epochs and freed by `World.Free`). Epoch stamps update the pyramid
+  along their path and stop at the first ancestor that already holds the tick; `Changed` and
+  `ChangedTiles(since)` visit only nodes whose maximum is after `since`, every node access
+  clamped to the valid children of its parent. The directory is one dense `int` per tile of the
   grid, −1 meaning absent, allocated zeroed-to-−1 with the layer's first set on that grid and
   kept until `World.Free` (`World.Clear` empties it but retains it). Each live tile owns one
   `TilePlanes` set — five `int` unit indices, a unit of the layer's set slab, addressed only by

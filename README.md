@@ -613,8 +613,9 @@ a full 512² region scan, and the 600-tick loop allocates 0 B.
 - **Schedules are a dense list of due ticks.** Fades and expiries fire only when an integer gain
   steps or a removal is due, as ordinary marked mutations applied in ascending slot order.
 - **Queries never scan.** Region sums add one `int64` per fully covered tile; `QueryMax`
-  descends a per-(grid,layer) max pyramid; nearest prunes tiles by their max; `Changed` reads
-  per-tile epochs.
+  descends a per-(grid,layer) max pyramid; nearest prunes tiles by their max; `Changed` and
+  `ChangedTiles(since)` descend a per-(grid,layer) epoch pyramid, so a poll that finds nothing
+  new costs one root read.
 - **Handles, not objects.** Everything public returns `byte` ids into unmanaged arenas; source
   ids pack a generation over the slot index, so stale handles are inert no-ops and slots
   recycle. No managed allocation on the data path.

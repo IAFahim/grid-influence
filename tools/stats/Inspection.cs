@@ -33,6 +33,7 @@ internal struct Snapshot
     public long SummaryBytes;
     public long SetBytes;
     public long PyramidBytes;
+    public long EpochTreeBytes;
     public long QueueBytes;
     public long RecordBytes;
     public long KernelBytes;
@@ -43,7 +44,7 @@ internal struct Snapshot
     public long StampRasterBytes;
 
     public readonly long WorldBytes => GridBytes + LayerBytes + SourceBytes + ScratchBytes +
-        DirtyFlagBytes + DirtyQueueBytes + DirectoryBytes + SlabBytes + PyramidBytes + QueueBytes +
+        DirtyFlagBytes + DirtyQueueBytes + DirectoryBytes + SlabBytes + PyramidBytes + EpochTreeBytes + QueueBytes +
         RecordBytes + KernelBytes;
 
     public readonly long SharedBytes => WorldArenaBytes + WorldRevisionBytes + ZeroDenseBytes +
@@ -116,6 +117,7 @@ internal static unsafe class Inspection
                 result.DirtyQueueBytes += (long)(ld->Dirty.Capacity + ld->Changed.Capacity + ld->Stale.Capacity) * sizeof(int) +
                     (long)ld->Rects.Capacity * sizeof(TileRect);
                 result.PyramidBytes += ld->Max.Bytes;
+                result.EpochTreeBytes += ld->EpochTree.Bytes;
                 if (ld->InDirty != null) result.DirtyFlagBytes += 2L * g->TileCount * sizeof(int);
 
                 var directory = ld->Directory;

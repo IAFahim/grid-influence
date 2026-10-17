@@ -104,6 +104,7 @@ internal static class Report
             writer.WriteNumber("deposit_records_bytes"u8, snapshot.RecordBytes);
             writer.WriteNumber("kernel_cache_bytes"u8, snapshot.KernelBytes);
             writer.WriteNumber("max_pyramids_bytes"u8, snapshot.PyramidBytes);
+            writer.WriteNumber("epoch_trees_bytes"u8, snapshot.EpochTreeBytes);
             writer.WriteEndObject();
             writer.WriteStartObject("shared"u8);
             writer.WriteNumber("world_arena_bytes"u8, snapshot.WorldArenaBytes);

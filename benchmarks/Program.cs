@@ -11,6 +11,7 @@ if (mode == "--view") return ViewTiming.Run();
 if (mode == "--splat") return SplatTiming.Run();
 if (mode == "--area") return AreaTiming.Run();
 if (mode == "--kinds") return KindTiming.Run();
+if (mode == "--changed") return ChangedTiming.Run();
 var result = Verification.Run();
 if (mode is "" or "--verify")
 {
