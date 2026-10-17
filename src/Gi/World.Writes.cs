@@ -21,7 +21,7 @@ public static unsafe partial class World
         WorldCtx* w, byte layer, float x, float y, byte stamp, sbyte gain, out SourceId id)
     {
         id = default;
-        if (layer >= w->LayerCount || IsDerived(w, layer)) return SourceResultStatus.InvalidLayer;
+        if (layer >= w->LayerCount || IsDerived(w, layer) || IsTransient(w, layer)) return SourceResultStatus.InvalidLayer;
         if (!StampCatalog.Valid(stamp)) return SourceResultStatus.InvalidStamp;
         if (!float.IsFinite(x) || !float.IsFinite(y)) return SourceResultStatus.InvalidSource;
 

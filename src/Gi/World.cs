@@ -130,6 +130,7 @@ internal unsafe struct LayerData
     public int* Epochs;
     public NativeBuffer<int> Dirty;
     public NativeBuffer<int> Changed;
+    public NativeBuffer<int> Stale;
     public NativeBuffer<TileRect> Rects;
     public MaxPyramid Max;
 
@@ -454,6 +455,7 @@ public static unsafe partial class World
         NativeHeap.Free(ld->Epochs);
         ld->Dirty.Free();
         ld->Changed.Free();
+        ld->Stale.Free();
         ld->Rects.Free();
         ld->Max.Reset();
     }
@@ -488,7 +490,7 @@ public static unsafe partial class World
         return id;
     }
 
-    internal static byte AddLayer(byte world, Layer.Precision precision)
+    internal static byte AddLayer(byte world, Layer.Precision precision, bool transient = false)
     {
         if (!ValidationRules.IsPhaseBits(precision.PhaseBits) || !ValidationRules.IsTurnBits(precision.TurnBits))
             throw new ArgumentOutOfRangeException(nameof(precision));
@@ -503,6 +505,7 @@ public static unsafe partial class World
             TurnMask = precision.TurnMask,
             AnchorMask = precision.AnchorMask,
             Reads = 1u << id,
+            Transient = (byte)(transient ? 1 : 0),
         };
         return (byte)id;
     }
@@ -612,6 +615,7 @@ public static unsafe partial class World
                 foreach (var tile in span) ld->InDirty[tile] = 0;
                 ld->Dirty.Resize(0);
                 ld->Changed.Resize(0);
+                ld->Stale.Resize(0);
                 ld->Rects.Resize(0);
 
                 if (ld->Directory != null)

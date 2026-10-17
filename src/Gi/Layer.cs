@@ -11,6 +11,12 @@ public static class Layer
         Mask,
     }
 
+    public enum Residency : byte
+    {
+        Persistent,
+        Transient,
+    }
+
     public readonly struct Precision
     {
         public readonly byte PhaseBits;
@@ -71,6 +77,9 @@ public static class Layer
     public static byte New(byte world) => World.AddLayer(world, Precision.Exact);
 
     public static byte New(byte world, Precision precision) => World.AddLayer(world, precision);
+
+    public static byte New(byte world, Residency residency, Precision precision)
+        => World.AddLayer(world, precision, residency == Residency.Transient);
 
     public static int Count(byte world) => World.LayerCount(world);
 
