@@ -309,6 +309,19 @@ public static unsafe partial class World
 
     public static int Revision(byte world) => world < _worldCount ? Runtime.WorldRevisions[world] : 0;
 
+    public static bool Teardown()
+    {
+        if (Runtime.Worlds == null) return true;
+
+        for (var i = 0; i < _worldCount; i++)
+            if (Runtime.Worlds[i].Grids != null) return false;
+
+        StampCatalog.Release();
+        Runtime.Release();
+        _worldCount = 0;
+        return true;
+    }
+
     public readonly struct SourceId : IEquatable<SourceId>
     {
         public readonly uint Slot;

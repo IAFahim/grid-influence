@@ -41,6 +41,11 @@ surface is still `World`, `Grid`, `Layer` and `Stamp`; the additions are nested.
 * `World.Memory(world, out storeBytes, out liveTiles, out pages, out kernelEntries, out liveSources)`:
   the tooling read-out. Summed plane-store bytes, live tiles, live slab units, occupied kernel-cache
   entries and live sources, allocation-free, zeros for a dead handle.
+
+* `World.Teardown()`: runtime teardown for domain/code reload. Once no world is live, frees the
+  stamp payloads and every process-wide pool so the next creation call starts pristine; returns
+  `false` and changes nothing while a world is live, and keeps slot revisions increasing across
+  teardowns so pre-teardown tokens stay refused.
 * `World.TryGetSchedule(world, source, out gain, out fadeFrom, out fadeTo, out fadeTicks,
   out fadeTicksLeft, out expireTicksLeft)`: the schedule read-back for exact saves. False for dead
   or unscheduled sources; reports the current gain, a stepping fade's ends, duration and ticks left,
