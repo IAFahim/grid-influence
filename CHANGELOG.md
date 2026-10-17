@@ -50,3 +50,6 @@ surface is still `World`, `Grid`, `Layer` and `Stamp`; the additions are nested.
   residue, so later deposits started from a lost partial sum.
 * An exclusion by the id of a source whose removal was pending, after another source reused its slot in
   the same frame, excluded nothing (or the old deposit for the new id).
+* A raster stamp placed at a scale other than 1 could sample taps outside its one-sample border and add
+  whatever bytes lay next to the stamp's buffer to a few edge cells. Such taps are zero by definition and are
+  now skipped; seven golden-corpus streams (23 frames) had recorded the stale bytes and were regenerated.

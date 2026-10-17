@@ -382,6 +382,7 @@ internal static unsafe partial class TileBake
         {
             var vq = (v0 + (gy - py) * step) >> level;
             var iy = (int)(vq >> 16);
+            if (iy < -1 || iy >= h) continue;
             var fy2 = (int)((vq >> 8) & 255);
             var row0 = data + iy * pitch;
             var row1 = row0 + pitch;
@@ -390,6 +391,7 @@ internal static unsafe partial class TileBake
             {
                 var uq = (u0 + (gx - px) * step) >> level;
                 var ix = (int)(uq >> 16);
+                if (ix < -1 || ix >= w) continue;
                 var fx2 = (int)((uq >> 8) & 255);
                 var top = row0[ix] * (256 - fx2) + row0[ix + 1] * fx2;
                 var bottom = row1[ix] * (256 - fx2) + row1[ix + 1] * fx2;
