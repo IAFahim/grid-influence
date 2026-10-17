@@ -458,6 +458,7 @@ public static unsafe partial class World
         var disk = Disk(g, x, y, reach);
         var ld = g->Layers + layer;
         var tps = g->TilesPerSide;
+        var derived = IsDerived(w, layer);
         var lo = stackalloc int[TileBake.TileSize];
         var hi = stackalloc int[TileBake.TileSize];
         var sum = 0L;
@@ -487,15 +488,16 @@ public static unsafe partial class World
                     spans = true;
                 }
 
-                sum += RaggedSum(ld->Store.Cells(*set).Page + (rowLo - tileY) * TileBake.TileSize,
-                    tx << TileBake.TileBits, rows, lo, hi);
+                var cells = ld->Store.Cells(*set);
+                sum += RaggedSum(cells.Page + (rowLo - tileY) * TileBake.TileSize,
+                    derived ? null : cells.Summary->RowSums + (rowLo - tileY), tx << TileBake.TileBits, rows, lo, hi);
             }
         }
 
         if (Applied(w, g, exclude, layer, out var source))
         {
             var shape = ShapeOf(w, g, source);
-            sum += IsDerived(w, layer) ? ExcludedMix(w, g, layer, source.Layer, disk, &shape) : ExcludedArea(g, layer, disk, &shape);
+            sum += derived ? ExcludedMix(w, g, layer, source.Layer, disk, &shape) : ExcludedArea(g, layer, disk, &shape);
         }
 
         total = WorldArea(sum, g->ScaleQ8);
@@ -505,16 +507,24 @@ public static unsafe partial class World
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    private static long RaggedSum(short* rows0, int tileX, int rows, int* lo, int* hi)
+    private static long RaggedSum(short* rows0, int* rowSums, int tileX, int rows, int* lo, int* hi)
     {
 #if NET
-        if (Vector128.IsHardwareAccelerated || Vector256.IsHardwareAccelerated) return SimdOps.RaggedSum(rows0, tileX, rows, lo, hi);
+        if (Vector128.IsHardwareAccelerated || Vector256.IsHardwareAccelerated) return SimdOps.RaggedSum(rows0, rowSums, tileX, rows, lo, hi);
 #endif
         var sum = 0L;
         for (var r = 0; r < rows; r++)
         {
             var a = Math.Max(lo[r], tileX) - tileX;
             var b = Math.Min(hi[r], tileX + TileBake.TileSize) - tileX;
+            if (b <= a) continue;
+
+            if (rowSums != null && b - a == TileBake.TileSize)
+            {
+                sum += rowSums[r];
+                continue;
+            }
+
             var row = rows0 + r * TileBake.TileSize;
             for (var i = a; i < b; i++) sum += row[i];
         }
