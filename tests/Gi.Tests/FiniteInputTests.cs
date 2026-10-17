@@ -110,33 +110,33 @@ public sealed unsafe class FiniteInputTests : IDisposable
         var whole = stackalloc ulong[1] { ulong.MaxValue };
         var words = stackalloc ulong[1] { ulong.MaxValue };
 
-        Assert.False(World.SenseColumn(_world, _layer, xs, ys, count, values, whole));
+        Assert.False((World.SenseColumn(_world, _layer, xs, ys, count, values, whole) == World.ReadStatus.Complete));
         Assert.Equal(5ul, whole[0]);
         Assert.Equal(0, values[1]);
 
         values[1] = -1;
         whole[0] = ulong.MaxValue;
-        Assert.False(World.SenseColumn(_world, _layer, xs, ys, excludes, count, values, whole));
+        Assert.False((World.SenseColumn(_world, _layer, xs, ys, excludes, count, values, whole) == World.ReadStatus.Complete));
         Assert.Equal(5ul, whole[0]);
         Assert.Equal(0, values[1]);
 
         whole[0] = ulong.MaxValue;
-        Assert.False(World.SenseGradientColumn(_world, _layer, xs, ys, excludes, count, fxs, fys, whole));
+        Assert.False((World.SenseGradientColumn(_world, _layer, xs, ys, excludes, count, fxs, fys, whole) == World.ReadStatus.Complete));
         Assert.Equal(5ul, whole[0]);
         Assert.Equal((0f, 0f), (fxs[1], fys[1]));
 
         whole[0] = ulong.MaxValue;
-        Assert.False(World.SenseAreaColumn(_world, _layer, xs, ys, reaches, excludes, count, totals, whole));
+        Assert.False((World.SenseAreaColumn(_world, _layer, xs, ys, reaches, excludes, count, totals, whole) == World.ReadStatus.Complete));
         Assert.Equal(5ul, whole[0]);
         Assert.Equal(0, totals[1]);
 
         whole[0] = ulong.MaxValue;
-        Assert.False(World.SenseMaxColumn(_world, _layer, xs, ys, reaches, count, values, bestXs, bestYs, whole));
+        Assert.False((World.SenseMaxColumn(_world, _layer, xs, ys, reaches, count, values, bestXs, bestYs, whole) == World.ReadStatus.Complete));
         Assert.Equal(5ul, whole[0]);
 
         whole[0] = ulong.MaxValue;
-        Assert.False(World.SenseNearestColumn(
-            _world, _layer, xs, ys, reaches, thresholds, count, values, bestXs, bestYs, whole));
+        Assert.False((World.SenseNearestColumn(
+            _world, _layer, xs, ys, reaches, thresholds, count, values, bestXs, bestYs, whole) == World.ReadStatus.Complete));
         Assert.Equal(5ul, whole[0]);
         Assert.Equal(short.MinValue, values[1]);
 

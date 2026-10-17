@@ -67,9 +67,9 @@ public unsafe class FusedColumnTests
                 fixed (ulong* prwg = refWholeGradient)
                 {
                     var ex = useExcludes ? pe : null;
-                    complete = World.SenseGradientColumn(w, layer, px, py, ex, Count, pv, pgx, pgy, pw);
-                    var valuesComplete = World.SenseColumn(w, layer, px, py, ex, Count, prv, prwv);
-                    var gradientComplete = World.SenseGradientColumn(w, layer, px, py, ex, Count, prgx, prgy, prwg);
+                    complete = (World.SenseGradientColumn(w, layer, px, py, ex, Count, pv, pgx, pgy, pw) == World.ReadStatus.Complete);
+                    var valuesComplete = (World.SenseColumn(w, layer, px, py, ex, Count, prv, prwv) == World.ReadStatus.Complete);
+                    var gradientComplete = (World.SenseGradientColumn(w, layer, px, py, ex, Count, prgx, prgy, prwg) == World.ReadStatus.Complete);
                     refComplete = valuesComplete && gradientComplete;
                 }
 

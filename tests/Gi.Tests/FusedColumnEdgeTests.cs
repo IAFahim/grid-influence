@@ -64,7 +64,7 @@ public unsafe class FusedColumnEdgeTests
             fixed (float* pgx = gx)
             fixed (float* pgy = gy)
             fixed (ulong* pw = whole)
-                complete = World.SenseGradientColumn(w, layer, px, py, null, Count, pv, pgx, pgy, pw);
+                complete = (World.SenseGradientColumn(w, layer, px, py, null, Count, pv, pgx, pgy, pw) == World.ReadStatus.Complete);
 
             var expectedComplete = true;
             for (var i = 0; i < Count; i++)

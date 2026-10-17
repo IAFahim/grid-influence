@@ -115,7 +115,7 @@ internal static partial class Verification
         fixed (short* vp = values)
         fixed (ulong* hp = whole)
         {
-            allWhole = Gi.World.SenseColumn(w, l, xp, yp, count, vp, hp);
+            allWhole = (Gi.World.SenseColumn(w, l, xp, yp, count, vp, hp) == Gi.World.ReadStatus.Complete);
         }
 
         var complete = 0;
@@ -172,11 +172,11 @@ internal static partial class Verification
         fixed (long* avp = areaBatch)
         fixed (ulong* pwp = pointWhole, gwp = gradWhole, awp = areaWhole, mwp = maxWhole, nfp = nearFound)
         {
-            pointOk = Gi.World.SenseColumn(s.World, s.Layer, xp, yp, ep, count, pvp, pwp);
-            gradOk = Gi.World.SenseGradientColumn(s.World, s.Layer, xp, yp, ep, count, gxp, gyp, gwp);
-            areaOk = Gi.World.SenseAreaColumn(s.World, s.Layer, xp, yp, rp, ep, count, avp, awp);
-            maxOk = Gi.World.SenseMaxColumn(s.World, s.Layer, xp, yp, rp, count, mvp, mbx, mby, mwp);
-            nearOk = Gi.World.SenseNearestColumn(s.World, s.Layer, xp, yp, rp, tp, count, nvp, nnx, nny, nfp);
+            pointOk = (Gi.World.SenseColumn(s.World, s.Layer, xp, yp, ep, count, pvp, pwp) == Gi.World.ReadStatus.Complete);
+            gradOk = (Gi.World.SenseGradientColumn(s.World, s.Layer, xp, yp, ep, count, gxp, gyp, gwp) == Gi.World.ReadStatus.Complete);
+            areaOk = (Gi.World.SenseAreaColumn(s.World, s.Layer, xp, yp, rp, ep, count, avp, awp) == Gi.World.ReadStatus.Complete);
+            maxOk = (Gi.World.SenseMaxColumn(s.World, s.Layer, xp, yp, rp, count, mvp, mbx, mby, mwp) == Gi.World.ReadStatus.Complete);
+            nearOk = (Gi.World.SenseNearestColumn(s.World, s.Layer, xp, yp, rp, tp, count, nvp, nnx, nny, nfp) == Gi.World.ReadStatus.Complete);
         }
 
         var expectedPointAll = true;

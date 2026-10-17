@@ -6,7 +6,7 @@ namespace Gi;
 
 public static unsafe partial class World
 {
-    public static bool SenseColumn(byte world, byte layer, float* xs, float* ys, int count, short* values, ulong* whole)
+    internal static bool SenseColumnCore(byte world, byte layer, float* xs, float* ys, int count, short* values, ulong* whole)
     {
         var w = GetContext(world);
         if (w == null || layer >= w->LayerCount) return Unfilled(values, whole, count);

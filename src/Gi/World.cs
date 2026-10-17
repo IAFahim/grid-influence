@@ -579,48 +579,63 @@ public static unsafe partial class World
         => w->GridCount > 0 && ((oldAngle ^ newAngle) & w->Recipes[layer].TurnMask) != 0;
 
     public static SourceId Place(byte world, byte layer, float x, float y, byte stamp, sbyte gain)
-    {
-        var w = GetContext(world);
-        if (w == null) return default;
+        => Place(world, layer, x, y, stamp, gain, out _);
 
-        PlaceSlot(w, layer, x, y, stamp, gain, out var id);
+    public static SourceId Place(byte world, byte layer, float x, float y, byte stamp, sbyte gain, out WriteStatus status)
+    {
+        var id = default(SourceId);
+        var w = GetContext(world);
+        if (w == null || layer >= w->LayerCount || IsDerived(w, layer)) status = WriteStatus.InvalidLayer;
+        else if (IsTransient(w, layer)) status = WriteStatus.WrongResidency;
+        else if (!StampCatalog.Valid(stamp)) status = WriteStatus.InvalidStamp;
+        else if (!float.IsFinite(x) || !float.IsFinite(y)) status = WriteStatus.NonFinite;
+        else status = PlaceSlot(w, layer, x, y, stamp, gain, out id) == SourceResultStatus.Applied
+            ? WriteStatus.Applied
+            : WriteStatus.CapacityReached;
         return id;
     }
 
-    public static void Move(byte world, SourceId source, float x, float y)
+    public static WriteStatus Move(byte world, SourceId source, float x, float y)
     {
-        if (!float.IsFinite(x) || !float.IsFinite(y)) return;
-        if (!TrySource(world, source, out var w, out var s, out var i)) return;
+        if (!float.IsFinite(x) || !float.IsFinite(y)) return WriteStatus.NonFinite;
+        if (!TrySource(world, source, out var w, out var s, out var i)) return WriteStatus.StaleSource;
 
         WriteMove(w, s, i, x, y);
+        return WriteStatus.Applied;
     }
 
-    public static void SetGain(byte world, SourceId source, sbyte gain)
+    public static WriteStatus SetGain(byte world, SourceId source, sbyte gain)
     {
-        if (!TrySource(world, source, out var w, out var s, out var i)) return;
+        if (!TrySource(world, source, out var w, out var s, out var i)) return WriteStatus.StaleSource;
 
         WriteGain(w, s, i, gain);
+        return WriteStatus.Applied;
     }
 
-    public static void Turn(byte world, SourceId source, float angle)
+    public static WriteStatus Turn(byte world, SourceId source, float angle)
     {
-        if (!TrySource(world, source, out var w, out var s, out var i) || !float.IsFinite(angle)) return;
+        if (!float.IsFinite(angle)) return WriteStatus.NonFinite;
+        if (!TrySource(world, source, out var w, out var s, out var i)) return WriteStatus.StaleSource;
 
         WriteTurn(w, s, i, QuantizeAngle(angle));
+        return WriteStatus.Applied;
     }
 
-    public static void Scale(byte world, SourceId source, float scale)
+    public static WriteStatus Scale(byte world, SourceId source, float scale)
     {
-        if (!TrySource(world, source, out var w, out var s, out var i) || !float.IsFinite(scale)) return;
+        if (!float.IsFinite(scale)) return WriteStatus.NonFinite;
+        if (!TrySource(world, source, out var w, out var s, out var i)) return WriteStatus.StaleSource;
 
         WriteScale(w, s, i, QuantizeScale(scale));
+        return WriteStatus.Applied;
     }
 
-    public static void Remove(byte world, SourceId source)
+    public static WriteStatus Remove(byte world, SourceId source)
     {
-        if (!TrySource(world, source, out var w, out var s, out var i)) return;
+        if (!TrySource(world, source, out var w, out var s, out var i)) return WriteStatus.StaleSource;
 
         WriteRemove(w, s, i);
+        return WriteStatus.Applied;
     }
 
     public static void Clear(byte world)

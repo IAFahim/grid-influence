@@ -383,8 +383,8 @@ internal sealed unsafe class CorpusRunner
                 fixed (ulong* pWords = _words)
                 {
                     complete = command.Read == ReadKind.SenseColumnEx
-                        ? World.SenseColumn(_world, command.Layer, pXs, pYs, pExcludes, count, pValues, pWords)
-                        : World.SenseColumn(_world, command.Layer, pXs, pYs, count, pValues, pWords);
+                        ? (World.SenseColumn(_world, command.Layer, pXs, pYs, pExcludes, count, pValues, pWords) == World.ReadStatus.Complete)
+                        : (World.SenseColumn(_world, command.Layer, pXs, pYs, count, pValues, pWords) == World.ReadStatus.Complete);
                 }
 
                 hash.Mix(complete);
@@ -403,8 +403,8 @@ internal sealed unsafe class CorpusRunner
                 fixed (float* pGx = _gradientXs, pGy = _gradientYs)
                 fixed (ulong* pWords = _words)
                 {
-                    complete = World.SenseGradientColumn(
-                        _world, command.Layer, pXs, pYs, null, count, pGx, pGy, pWords);
+                    complete = (World.SenseGradientColumn(
+                        _world, command.Layer, pXs, pYs, null, count, pGx, pGy, pWords) == World.ReadStatus.Complete);
                 }
 
                 hash.Mix(complete);

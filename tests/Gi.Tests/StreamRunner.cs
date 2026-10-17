@@ -687,8 +687,8 @@ internal sealed unsafe class StreamRunner
             Array.Clear(_wordsActual);
             Array.Clear(_wordsExpected);
             actual = withExcludes
-                ? World.SenseColumn(_world, command.Layer, pXs, pYs, pExcludes, count, pActual, pActualWords)
-                : World.SenseColumn(_world, command.Layer, pXs, pYs, count, pActual, pActualWords);
+                ? (World.SenseColumn(_world, command.Layer, pXs, pYs, pExcludes, count, pActual, pActualWords) == World.ReadStatus.Complete)
+                : (World.SenseColumn(_world, command.Layer, pXs, pYs, count, pActual, pActualWords) == World.ReadStatus.Complete);
             expected = withExcludes
                 ? _rw.SenseColumn(command.Layer, pXs, pYs, pExcludes, count, pExpected, pExpectedWords)
                 : _rw.SenseColumn(command.Layer, pXs, pYs, count, pExpected, pExpectedWords);
@@ -712,8 +712,8 @@ internal sealed unsafe class StreamRunner
         fixed (ulong* pActualWords = _wordsActual)
         {
             Array.Clear(_wordsActual);
-            actual = World.SenseGradientColumn(
-                _world, command.Layer, pXs, pYs, null, count, pActualX, pActualY, pActualWords);
+            actual = (World.SenseGradientColumn(
+                _world, command.Layer, pXs, pYs, null, count, pActualX, pActualY, pActualWords) == World.ReadStatus.Complete);
         }
 
         var expected = true;

@@ -10,14 +10,14 @@ public static unsafe partial class World
 #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
 #endif
-    public static bool SenseColumn(
+    internal static bool SenseColumnCore(
         byte world, byte layer, float* xs, float* ys, SourceId* excludes, int count, short* values, ulong* whole)
     {
         var w = GetContext(world);
         if (w == null || layer >= w->LayerCount) return Unfilled(values, whole, count);
         if (count <= 0) return true;
         if (xs == null || ys == null || values == null) return Unfilled(values, whole, count);
-        if (excludes == null) return SenseColumn(world, layer, xs, ys, count, values, whole);
+        if (excludes == null) return SenseColumnCore(world, layer, xs, ys, count, values, whole);
 
         ClearBits(whole, count);
 
@@ -37,7 +37,7 @@ public static unsafe partial class World
 #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
 #endif
-    public static bool SenseGradientColumn(
+    internal static bool SenseGradientColumnCore(
         byte world, byte layer, float* xs, float* ys, SourceId* excludes, int count,
         float* gradientXs, float* gradientYs, ulong* whole)
     {
@@ -68,7 +68,7 @@ public static unsafe partial class World
 #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
 #endif
-    public static bool SenseGradientColumn(
+    internal static bool SenseGradientColumnCore(
         byte world, byte layer, float* xs, float* ys, SourceId* excludes, int count,
         short* values, float* gradientXs, float* gradientYs, ulong* whole)
     {
@@ -198,7 +198,7 @@ public static unsafe partial class World
 #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
 #endif
-    public static bool SenseAreaColumn(
+    internal static bool SenseAreaColumnCore(
         byte world, byte layer, float* xs, float* ys, float* reaches, SourceId* excludes, int count, long* totals, ulong* whole)
     {
         var w = GetContext(world);
@@ -226,7 +226,7 @@ public static unsafe partial class World
 #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
 #endif
-    public static bool SenseMaxColumn(
+    internal static bool SenseMaxColumnCore(
         byte world, byte layer, float* xs, float* ys, float* reaches, int count,
         short* values, float* bestXs, float* bestYs, ulong* whole)
     {
@@ -252,7 +252,7 @@ public static unsafe partial class World
 #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
 #endif
-    public static bool SenseNearestColumn(
+    internal static bool SenseNearestColumnCore(
         byte world, byte layer, float* xs, float* ys, float* reaches, short* thresholds, int count,
         short* values, float* nearestXs, float* nearestYs, ulong* found)
     {

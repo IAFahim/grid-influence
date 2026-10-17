@@ -416,7 +416,7 @@ public sealed unsafe class CrowdTests
         fixed (short* vp = values)
         fixed (ulong* hp = whole)
         {
-            allWhole = World.SenseColumn(w, l, xp, yp, count, vp, hp);
+            allWhole = (World.SenseColumn(w, l, xp, yp, count, vp, hp) == World.ReadStatus.Complete);
         }
 
         var anyIncomplete = false;

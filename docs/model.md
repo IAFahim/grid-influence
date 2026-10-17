@@ -249,6 +249,14 @@ before reading command payloads, writing
   `I` rows slot `i + 8` will touch (x86 `Sse` only; it reads no cell and writes nothing). There
   is no crowd heuristic and no rebuild: a frame costs in proportion to the slots whose target
   differs from their record, never to the field.
+- **Statuses.** `Place` (with `out WriteStatus`), `Move`, `Turn`, `Scale`, `SetGain`, `Remove`, `Fade`
+  and `Expire` return `World.WriteStatus`; an unknown world counts as `InvalidLayer` for `Place` and as
+  `StaleSource` for the id mutators, and non-finite values are rejected before the id is looked up.
+  Column reads classify their result as `World.ReadStatus` after the read: `InvalidLayer` for an unknown
+  world or layer, `LengthMismatch` for a null required column while `count > 0`, `Complete` for a
+  complete answer (and for `count ≤ 0`), otherwise `Partial` or `Outside` according to whether any bit
+  of the `whole` mask is set (`Partial` when no mask was passed, and always for `SenseNearestColumn`,
+  whose mask means "found").
 - **Columns** batch the per-agent API. `World.SenseColumn(world, layer, xs, ys, count, values,
   whole)` walks the pointer arrays the way a kernel walks a column: it senses each agent's
   position (the same grid-picking, exclusion-free path as `TrySense`) and writes the `short`
