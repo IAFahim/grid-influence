@@ -1,4 +1,3 @@
-using Gi;
 using Xunit;
 
 namespace Gi.Tests;

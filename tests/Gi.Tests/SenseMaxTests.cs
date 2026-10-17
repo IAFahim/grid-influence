@@ -52,7 +52,7 @@ public class SenseMaxTests
 
                 World.TrySenseMax(world, layer, kx + 0.5f, ky + 0.5f, reach, out var got, out var gotX, out var gotY);
                 Assert.True(
-                    got == bestValue && gotX == bestX + 0.5f && gotY == bestY + 0.5f,
+                    got == bestValue && gotX.Equals(bestX + 0.5f) && gotY.Equals(bestY + 0.5f),
                     $"centre ({kx},{ky}) reach {reach}: expected {bestValue} at ({bestX},{bestY}) got {got} at ({gotX - 0.5f},{gotY - 0.5f})");
             }
         }

@@ -70,16 +70,16 @@ internal unsafe struct SourceColumns
         for (var i = 0; i < chunks; i++)
         {
             var chunk = Chunks;
-            X.Chunks[chunk] = (float*)NativeHeap.AllocZeroed((nuint)(ChunkSlots * sizeof(float)));
-            Y.Chunks[chunk] = (float*)NativeHeap.AllocZeroed((nuint)(ChunkSlots * sizeof(float)));
+            X.Chunks[chunk] = (float*)NativeHeap.AllocZeroed(ChunkSlots * sizeof(float));
+            Y.Chunks[chunk] = (float*)NativeHeap.AllocZeroed(ChunkSlots * sizeof(float));
             Stamp.Chunks[chunk] = (byte*)NativeHeap.AllocZeroed(ChunkSlots);
             Layer.Chunks[chunk] = (byte*)NativeHeap.AllocZeroed(ChunkSlots);
             Gain.Chunks[chunk] = (byte*)NativeHeap.AllocZeroed(ChunkSlots);
-            Angle.Chunks[chunk] = (ushort*)NativeHeap.AllocZeroed((nuint)(ChunkSlots * sizeof(ushort)));
-            Scale.Chunks[chunk] = (ushort*)NativeHeap.AllocZeroed((nuint)(ChunkSlots * sizeof(ushort)));
+            Angle.Chunks[chunk] = (ushort*)NativeHeap.AllocZeroed(ChunkSlots * sizeof(ushort));
+            Scale.Chunks[chunk] = (ushort*)NativeHeap.AllocZeroed(ChunkSlots * sizeof(ushort));
             Alive.Chunks[chunk] = (byte*)NativeHeap.AllocZeroed(ChunkSlots);
-            Gen.Chunks[chunk] = (uint*)NativeHeap.AllocZeroed((nuint)(ChunkSlots * sizeof(uint)));
-            Mark.Chunks[chunk] = (long*)NativeHeap.AllocZeroed((nuint)(ChunkSlots * sizeof(long)));
+            Gen.Chunks[chunk] = (uint*)NativeHeap.AllocZeroed(ChunkSlots * sizeof(uint));
+            Mark.Chunks[chunk] = (long*)NativeHeap.AllocZeroed(ChunkSlots * sizeof(long));
             Chunks++;
         }
     }
@@ -675,7 +675,7 @@ public static unsafe partial class World
                 ld->Dirty.Resize(0);
                 ld->Changed.Resize(0);
                 ld->Stale.Resize(0);
-                ResetHistogram(g, ld);
+                ResetHistogram(ld);
                 ld->Rects.Resize(0);
 
                 if (ld->Directory != null)

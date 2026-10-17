@@ -19,7 +19,7 @@ internal static partial class Verification
         };
         var rng = new Random(35);
         const int count = 4000;
-        var ids = new Gi.World.SourceId[count];
+        var ids = new World.SourceId[count];
         for (var i = 0; i < count; i++)
         {
             var layer = (byte)(i % 2);
@@ -74,7 +74,7 @@ internal static partial class Verification
         var world = World.New();
         Grid.New(world, 10, 0f, 0f, 1024f);
         Layer.New(world);
-        var ids = new Gi.World.SourceId[count];
+        var ids = new World.SourceId[count];
         var rng = new Random(77);
         for (var i = 0; i < count; i++)
             ids[i] = World.Place(world, 0, (float)(rng.NextDouble() * 1000), (float)(rng.NextDouble() * 1000), stamp, 4);

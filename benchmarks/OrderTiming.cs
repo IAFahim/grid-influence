@@ -5,21 +5,21 @@ internal static class OrderTiming
 {
     public static int Run()
     {
-        const int Count = 1_000_000;
+        const int count = 1_000_000;
         var world = World.New();
         var grid = Grid.New(world, 10, 0f, 0f, 1024f);
         var rng = new Random(13);
-        var xs = new float[Count];
-        var ys = new float[Count];
-        for (var i = 0; i < Count; i++)
+        var xs = new float[count];
+        var ys = new float[count];
+        for (var i = 0; i < count; i++)
         {
             xs[i] = (float)rng.NextDouble() * 1023f;
             ys[i] = (float)rng.NextDouble() * 1023f;
         }
 
-        var keys = new uint[Count];
-        var permutation = new int[Count];
-        var scratch = new ulong[2 * Count];
+        var keys = new uint[count];
+        var permutation = new int[count];
+        var scratch = new ulong[2 * count];
         var bestKeys = double.MaxValue;
         var bestSort = double.MaxValue;
         var disorder = 0f;

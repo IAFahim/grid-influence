@@ -2,7 +2,7 @@ using Xunit;
 
 namespace Gi.Tests;
 
-public unsafe class StreamDifferentialTests
+public class StreamDifferentialTests
 {
     private const int GateStreams = 10_500;
     private const int GateSeedBase = 900_000;
@@ -112,8 +112,8 @@ public unsafe class StreamDifferentialTests
     [InlineData(70_000L, 1L << 47, 2)]
     public void FoldedPlanesStayExactAgainstTheInterpreter(long limitI, long limitQ40, int variant)
     {
-        const int Streams = 250;
-        for (var i = 0; i < Streams; i++)
+        const int streams = 250;
+        for (var i = 0; i < streams; i++)
         {
             var seed = FoldSeedBase + variant * 10_000 + i;
             var setup = StreamGenerator.Generate(seed, (PrecisionMode)(i % 3), StreamProfile.Gate);

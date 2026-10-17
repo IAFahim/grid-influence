@@ -198,7 +198,7 @@ public static unsafe partial class World
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int* IPlane(GridCtx* g, LayerData* ld, int tile, int amount)
+    private static int* IntPlane(GridCtx* g, LayerData* ld, int tile, int amount)
     {
         var set = EnsureSet(g, ld, tile);
         PrepareTransientSet(ld, set);
@@ -275,7 +275,7 @@ public static unsafe partial class World
 
             if (plane == null)
             {
-                plane = IPlane(g, ld, tile, Math.Abs(constant * gain));
+                plane = IntPlane(g, ld, tile, Math.Abs(constant * gain));
                 DirtyIndex(g, ld, tile);
             }
 
@@ -341,7 +341,7 @@ public static unsafe partial class World
 
                     if (plane == null)
                     {
-                        plane = IPlane(g, ld, tile, Math.Abs(constant * gain));
+                        plane = IntPlane(g, ld, tile, Math.Abs(constant * gain));
                         DirtyIndex(g, ld, tile);
                     }
 
@@ -364,7 +364,7 @@ public static unsafe partial class World
 
                     if (plane == null)
                     {
-                        plane = IPlane(g, ld, tile, Math.Abs(constant * gain));
+                        plane = IntPlane(g, ld, tile, Math.Abs(constant * gain));
                         DirtyIndex(g, ld, tile);
                     }
 
@@ -379,7 +379,7 @@ public static unsafe partial class World
 
                     if (plane == null)
                     {
-                        plane = IPlane(g, ld, tile, Math.Abs(constant * gain));
+                        plane = IntPlane(g, ld, tile, Math.Abs(constant * gain));
                         DirtyIndex(g, ld, tile);
                     }
 
@@ -468,7 +468,7 @@ public static unsafe partial class World
 
                         if (ints32 == null)
                         {
-                            ints32 = IPlane(g, ld, tile, Math.Abs(gain) * taps.MaxTap);
+                            ints32 = IntPlane(g, ld, tile, Math.Abs(gain) * taps.MaxTap);
                             dirty = DirtyIndex(g, ld, tile);
                         }
 
@@ -492,16 +492,6 @@ public static unsafe partial class World
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void GrowRect(LayerData* ld, int dirty, int lx, int ly)
-    {
-        var rect = &ld->Rects.Pointer[dirty];
-        if (lx < rect->X0) rect->X0 = lx;
-        if (ly < rect->Y0) rect->Y0 = ly;
-        if (lx + 1 > rect->X1) rect->X1 = lx + 1;
-        if (ly + 1 > rect->Y1) rect->Y1 = ly + 1;
-    }
-
     private const int FallbackCharge = 128;
 
     private static void EmitFallback(GridCtx* g, LayerData* ld, Placement* p, int gain)
@@ -523,10 +513,10 @@ public static unsafe partial class World
             switch (p->Plane)
             {
                 case Plane.Dense when p->Turned:
-                    TileBake.EmitTurnedDense(IPlane(g, ld, tile, FallbackCharge * Math.Abs(gain)), tileX0, tileY0, p, gain);
+                    TileBake.EmitTurnedDense(IntPlane(g, ld, tile, FallbackCharge * Math.Abs(gain)), tileX0, tileY0, p, gain);
                     break;
                 case Plane.Dense:
-                    TileBake.EmitRaster(IPlane(g, ld, tile, FallbackCharge * Math.Abs(gain)), tileX0, tileY0, p->Px, p->Py, p->Fx, p->Fy,
+                    TileBake.EmitRaster(IntPlane(g, ld, tile, FallbackCharge * Math.Abs(gain)), tileX0, tileY0, p->Px, p->Py, p->Fx, p->Fy,
                         p->X1, p->Y1, p->Sampling, p->V, gain);
                     break;
                 case Plane.Tent when p->Turned:

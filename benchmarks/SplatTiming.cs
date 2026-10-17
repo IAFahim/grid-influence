@@ -5,7 +5,7 @@ internal static unsafe class SplatTiming
 {
     public static int Run()
     {
-        var Count = int.Parse(Environment.GetEnvironmentVariable("GI_SPLATS") ?? "1000000");
+        var count = int.Parse(Environment.GetEnvironmentVariable("GI_SPLATS") ?? "1000000");
         var world = World.New();
         Grid.New(world, 10, 0f, 0f, 1024f);
         var phase = int.Parse(Environment.GetEnvironmentVariable("GI_PHASE") ?? "0", System.Globalization.CultureInfo.InvariantCulture);
@@ -13,11 +13,11 @@ internal static unsafe class SplatTiming
         var box = Stamp.Box(4, 4, 8);
         var cost = Environment.GetEnvironmentVariable("GI_COST");
         if (cost != null) World.ConfigureConvolveCost(world, layer, long.Parse(cost, System.Globalization.CultureInfo.InvariantCulture));
-        var xs = new float[Count];
-        var ys = new float[Count];
+        var xs = new float[count];
+        var ys = new float[count];
         var rng = new Random(3);
-        var keys = new ulong[Count];
-        for (var i = 0; i < Count; i++)
+        var keys = new ulong[count];
+        for (var i = 0; i < count; i++)
         {
             var x = (float)(rng.NextDouble() * 1000.0 + 12.0);
             var y = (float)(rng.NextDouble() * 1000.0 + 12.0);
@@ -27,9 +27,9 @@ internal static unsafe class SplatTiming
         }
 
         Array.Sort(keys);
-        var sx = new float[Count];
-        var sy = new float[Count];
-        for (var i = 0; i < Count; i++)
+        var sx = new float[count];
+        var sy = new float[count];
+        for (var i = 0; i < count; i++)
         {
             var source = (int)(keys[i] & 0xFFFFFFFF);
             sx[i] = xs[source];
@@ -40,7 +40,7 @@ internal static unsafe class SplatTiming
         if (drift != 0f)
         {
             var wobble = new Random(11);
-            for (var i = 0; i < Count; i++)
+            for (var i = 0; i < count; i++)
             {
                 sx[i] = Math.Clamp(sx[i] + (float)(wobble.NextDouble() * 2.0 - 1.0) * drift, 12f, 1010f);
                 sy[i] = Math.Clamp(sy[i] + (float)(wobble.NextDouble() * 2.0 - 1.0) * drift, 12f, 1010f);
@@ -56,16 +56,16 @@ internal static unsafe class SplatTiming
             var middle = Stopwatch.GetTimestamp();
             World.Process(world);
             var finished = Stopwatch.GetTimestamp();
-            if (applied != Count) return 1;
+            if (applied != count) return 1;
             if (pass < 3) continue;
             bestSplat = Math.Min(bestSplat, Stopwatch.GetElapsedTime(started, middle).TotalMilliseconds);
             bestProcess = Math.Min(bestProcess, Stopwatch.GetElapsedTime(middle, finished).TotalMilliseconds);
         }
 
-        var values = new short[Count];
-        var gx = new float[Count];
-        var gy = new float[Count];
-        var whole = new ulong[(Count + 63) >> 6];
+        var values = new short[count];
+        var gx = new float[count];
+        var gy = new float[count];
+        var whole = new ulong[(count + 63) >> 6];
         var bestRead = double.MaxValue;
         var bestShuffled = double.MaxValue;
         var shuffledX = (float[])xs.Clone();
@@ -77,9 +77,9 @@ internal static unsafe class SplatTiming
             for (var pass = 0; pass < 14; pass++)
             {
                 var started = Stopwatch.GetTimestamp();
-                World.SenseGradientColumn(world, layer, px, py, null, Count, v, rx, ry, wh);
+                World.SenseGradientColumn(world, layer, px, py, null, count, v, rx, ry, wh);
                 var middle = Stopwatch.GetTimestamp();
-                World.SenseGradientColumn(world, layer, qx, qy, null, Count, v, rx, ry, wh);
+                World.SenseGradientColumn(world, layer, qx, qy, null, count, v, rx, ry, wh);
                 var finished = Stopwatch.GetTimestamp();
                 if (pass < 3) continue;
                 bestRead = Math.Min(bestRead, Stopwatch.GetElapsedTime(started, middle).TotalMilliseconds);
@@ -87,8 +87,8 @@ internal static unsafe class SplatTiming
             }
         }
 
-        Console.WriteLine($"1M fused reads: morton {bestRead:F2} ms ({bestRead * 1e6 / Count:F2} ns each), random {bestShuffled:F2} ms ({bestShuffled * 1e6 / Count:F2} ns each)");
-        Console.WriteLine($"1M Morton splats: splat {bestSplat:F2} ms ({bestSplat * 1e6 / Count:F2} ns each), process {bestProcess:F2} ms ({bestProcess * 1e6 / Count:F2} ns/agent)");
+        Console.WriteLine($"1M fused reads: morton {bestRead:F2} ms ({bestRead * 1e6 / count:F2} ns each), random {bestShuffled:F2} ms ({bestShuffled * 1e6 / count:F2} ns each)");
+        Console.WriteLine($"1M Morton splats: splat {bestSplat:F2} ms ({bestSplat * 1e6 / count:F2} ns each), process {bestProcess:F2} ms ({bestProcess * 1e6 / count:F2} ns/agent)");
         World.Free(world);
         Stamp.Free(box);
         return 0;

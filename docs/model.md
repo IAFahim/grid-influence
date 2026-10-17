@@ -568,11 +568,12 @@ add one `int64` page sum per live page, so large sparse grids do not visit every
   exclude a splat of that stamp and gain made at the query point this frame, by the same rule, from
   the planes the last publish kept; any other layer, gain 0 or an unknown stamp excludes nothing. Areas apply the same rule per
   cell of the source's footprint inside the disk, reading the planes directly. The source's own
-  contribution at a cell is its cached kernel tap times its gain (`TryFindTaps`, then
-  `TryGetTaps` while the frame's insert budget lasts), so an excluded point read costs about
-  forty nanoseconds on a cached kernel; a kernel that is neither cached nor insertable, or larger
-  than the canvas limit, recomputes the contribution from the stamp through `BoxAt`,
-  `EmitRaster` or the smooth weights, with identical results.
+  contribution at a cell is its cached kernel tap times its gain on a `TryFindTaps` hit — the
+  read never builds a kernel or spends insert budget, so a miss (a kernel the write paths have
+  not cached, a clipped placement, or a shape past the canvas limit) recomputes the
+  contribution from the stamp through `BoxAt`, `EmitRaster` or the smooth weights, with
+  identical results; only the sweep and publish write paths insert kernels, so a read mutates
+  nothing outside its own stack and stays bit-identical whatever the cache holds.
   `World.Changed(world, layer, x, y, reach, since)` answers whether any tile holding a cell of
   the same disk (on the grid `TrySenseArea` would pick) has an epoch after `since` — an agent
   can skip re-deciding while its neighbourhood is unchanged. `TrySenseNearest(world, layer, x,
@@ -1235,12 +1236,14 @@ digits. Concurrency: single thread.
   thread alone, to fold each tile's page max into its max pyramid. Warm `Process` and warm reads
   make no `NativeHeap` calls at all: slabs, directories, and every list are sized by grow-to-max
   before steady state, and the hook counter (`NativeHeap.Calls`) is asserted flat by a test
-  across warm frames that move and read. Kernel-cache lookups and builds run on the owning
-  world's thread under that same serial rule, reading the placement and the stamp variant
-  read-only and writing only cache-owned buffers and their own stack; the `Stamp.Free` flush
-  rides the process-wide catalog scan already serialized above. The builder runs inside
-  `Process` on a cache miss, and its entries and canvas are allocated by the first insert, so
-  warm frames after the first miss make no cache-driven heap calls either.
+  across warm frames that move and read. Kernel-cache builds run on the owning world's thread
+  inside `Process` — the sweep and publish write paths on a cache miss — reading the placement
+  and the stamp variant read-only and writing only cache-owned buffers and their own stack; the
+  `Stamp.Free` flush rides the process-wide catalog scan already serialized above. Entries and
+  canvas are allocated by the first insert, so warm frames after the first miss make no
+  cache-driven heap calls either. Sensing never builds: its cache use is a read-only
+  `TryFindTaps`, and a miss recomputes from the stamp into stack scratch, so reads add no
+  inserts and no canvas traffic.
   Determinism is unaffected: tiles are
   independent, arithmetic is integer-exact, the dead set is a pure function of page content, and
   the order of removals has no observable effect on map contents. Warm `Process`
@@ -1258,7 +1261,11 @@ digits. Concurrency: single thread.
   may run concurrently with each other,
   never with mutation or process. Sensing writes nothing outside its own stack frame: each call
   stackallocs its scratch (span rows, under 9 KB of per-tile arrays for an excluded area,
-  a single cell for an excluded point), so concurrent sensing threads never share scratch.
+  a single cell for an excluded point), so concurrent sensing threads never share scratch. An
+  excluded read's kernel use is a read-only `TryFindTaps`; a miss recomputes the excluded
+  contribution from the stamp through `BoxAt`, `EmitRaster` or the smooth weights into that
+  same stack scratch, so no read reaches the cache's entries, taps, canvas, or insert budget,
+  and any number of concurrent exclusion readers observe only resolved pages.
   Column rounds run one serial loop per call: the world is read-only under the
   serial-per-world rule, inputs are read-only, and the value and mask outputs are written at
   disjoint indices with natural alignment for `float`, `short`, and `ulong` elements, each

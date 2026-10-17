@@ -13,7 +13,7 @@ public unsafe class FusedColumnTests
     {
         var rng = new Random(seed);
         var w = World.New();
-        var stamps = new List<byte> { Stamp.Box(5, 5, 40), Stamp.Tent(7, 7, -35), Stamp.Disk(5, 50, 360) };
+        var stamps = new List<byte> { Stamp.Box(5, 5, 40), Stamp.Tent(7, 7, -35), Stamp.Disk(5, 50) };
         try
         {
             Grid.New(w, 7, 0f, 0f, 128f);
@@ -25,30 +25,30 @@ public unsafe class FusedColumnTests
                     stamps[rng.Next(stamps.Count)], (sbyte)rng.Next(-5, 6));
             World.Process(w);
 
-            const int Count = 5000;
-            var xs = new float[Count];
-            var ys = new float[Count];
-            var excludes = new World.SourceId[Count];
-            for (var i = 0; i < Count; i++)
+            const int count = 5000;
+            var xs = new float[count];
+            var ys = new float[count];
+            var excludes = new World.SourceId[count];
+            for (var i = 0; i < count; i++)
             {
                 xs[i] = (float)(rng.NextDouble() * 150.0 - 11.0);
                 ys[i] = (float)(rng.NextDouble() * 150.0 - 11.0);
-                if (i % 7 == 0) xs[i] = (float)rng.Next(-2, 130);
-                if (i % 11 == 0) ys[i] = rng.Next(0, 4) == 0 ? 0f : (float)rng.Next(0, 129);
+                if (i % 7 == 0) xs[i] = rng.Next(-2, 130);
+                if (i % 11 == 0) ys[i] = rng.Next(0, 4) == 0 ? 0f : rng.Next(0, 129);
                 excludes[i] = i % 5 == 0 ? ids[rng.Next(ids.Length)] : default;
             }
 
-            var words = (Count + 63) >> 6;
+            var words = (count + 63) >> 6;
             foreach (var useExcludes in new[] { false, true })
             {
-                var values = new short[Count];
-                var gx = new float[Count];
-                var gy = new float[Count];
+                var values = new short[count];
+                var gx = new float[count];
+                var gy = new float[count];
                 var whole = new ulong[words];
                 Array.Fill(whole, ulong.MaxValue);
-                var refValues = new short[Count];
-                var refGx = new float[Count];
-                var refGy = new float[Count];
+                var refValues = new short[count];
+                var refGx = new float[count];
+                var refGy = new float[count];
                 var refWholeValues = new ulong[words];
                 var refWholeGradient = new ulong[words];
                 bool complete;
@@ -67,9 +67,9 @@ public unsafe class FusedColumnTests
                 fixed (ulong* prwg = refWholeGradient)
                 {
                     var ex = useExcludes ? pe : null;
-                    complete = (World.SenseGradientColumn(w, layer, px, py, ex, Count, pv, pgx, pgy, pw) == World.ReadStatus.Complete);
-                    var valuesComplete = (World.SenseColumn(w, layer, px, py, ex, Count, prv, prwv) == World.ReadStatus.Complete);
-                    var gradientComplete = (World.SenseGradientColumn(w, layer, px, py, ex, Count, prgx, prgy, prwg) == World.ReadStatus.Complete);
+                    complete = (World.SenseGradientColumn(w, layer, px, py, ex, count, pv, pgx, pgy, pw) == World.ReadStatus.Complete);
+                    var valuesComplete = (World.SenseColumn(w, layer, px, py, ex, count, prv, prwv) == World.ReadStatus.Complete);
+                    var gradientComplete = (World.SenseGradientColumn(w, layer, px, py, ex, count, prgx, prgy, prwg) == World.ReadStatus.Complete);
                     refComplete = valuesComplete && gradientComplete;
                 }
 
@@ -77,7 +77,7 @@ public unsafe class FusedColumnTests
                 Assert.Equal(refValues, values);
                 Assert.Equal(refGx, gx);
                 Assert.Equal(refGy, gy);
-                for (var i = 0; i < Count; i++)
+                for (var i = 0; i < count; i++)
                 {
                     var bit = (whole[i >> 6] >> (i & 63)) & 1;
                     var expected = ((refWholeValues[i >> 6] & refWholeGradient[i >> 6]) >> (i & 63)) & 1;
