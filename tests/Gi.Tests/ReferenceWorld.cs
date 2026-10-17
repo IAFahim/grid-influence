@@ -86,6 +86,8 @@ internal sealed unsafe class ReferenceWorld
     private readonly Queue<int> _free = new();
     private readonly List<(int Slot, Source From)> _journal = new();
     private readonly List<(int Slot, ScheduleState State)> _scheduleJournal = new();
+    private readonly HashSet<int> _journaled = new();
+    private readonly HashSet<int> _scheduleJournaled = new();
     private int _count;
     private int _tick;
     private int _recordTick;
@@ -195,7 +197,7 @@ internal sealed unsafe class ReferenceWorld
 
         var g = (sbyte)Math.Clamp((int)gain, -MaxGain, MaxGain);
         var gen = _now[slot].Gen + 1;
-        if (_recording) _scheduleJournal.Add((slot, ScheduleOf(_now[slot])));
+        if (_recording && _scheduleJournaled.Add(slot)) _scheduleJournal.Add((slot, ScheduleOf(_now[slot])));
         if (!_pending[slot])
         {
             _pending[slot] = true;
@@ -296,7 +298,7 @@ internal sealed unsafe class ReferenceWorld
         ref var s = ref _now[i];
         if ((s.Timed & Fading) != 0)
         {
-            if (_recording) _scheduleJournal.Add((i, ScheduleOf(s)));
+            if (_recording && _scheduleJournaled.Add(i)) _scheduleJournal.Add((i, ScheduleOf(s)));
             s.Timed &= unchecked((byte)~Fading);
         }
 
@@ -312,7 +314,7 @@ internal sealed unsafe class ReferenceWorld
         ref var s = ref _now[i];
         if (s.Timed != 0)
         {
-            if (_recording) _scheduleJournal.Add((i, ScheduleOf(s)));
+            if (_recording && _scheduleJournaled.Add(i)) _scheduleJournal.Add((i, ScheduleOf(s)));
             s.Timed = 0;
         }
 
@@ -325,7 +327,7 @@ internal sealed unsafe class ReferenceWorld
         if (!TrySource(source, out var i)) return;
         var target = (sbyte)Math.Clamp((int)gain, -MaxGain, MaxGain);
         ref var s = ref _now[i];
-        if (_recording) _scheduleJournal.Add((i, ScheduleOf(s)));
+        if (_recording && _scheduleJournaled.Add(i)) _scheduleJournal.Add((i, ScheduleOf(s)));
         if (ticks <= 0 || target == s.Gain)
         {
             s.Timed &= unchecked((byte)~Fading);
@@ -348,7 +350,7 @@ internal sealed unsafe class ReferenceWorld
     public void Expire(World.SourceId source, int ticks)
     {
         if (!TrySource(source, out var i)) return;
-        if (_recording) _scheduleJournal.Add((i, ScheduleOf(_now[i])));
+        if (_recording && _scheduleJournaled.Add(i)) _scheduleJournal.Add((i, ScheduleOf(_now[i])));
         ref var s = ref _now[i];
         if (ticks <= 0) s.Timed &= unchecked((byte)~Expiring);
         else
@@ -434,7 +436,8 @@ internal sealed unsafe class ReferenceWorld
 
         if (_recording)
             foreach (var slot in _pendingOrder)
-                _journal.Add((slot, _pendingFrom[slot]));
+                if (_journaled.Add(slot))
+                    _journal.Add((slot, _pendingFrom[slot]));
 
         foreach (var g in _grids)
         {
@@ -661,6 +664,8 @@ internal sealed unsafe class ReferenceWorld
     {
         _journal.Clear();
         _scheduleJournal.Clear();
+        _journaled.Clear();
+        _scheduleJournaled.Clear();
         _recordTick = _tick;
         _recording = true;
     }
@@ -669,6 +674,8 @@ internal sealed unsafe class ReferenceWorld
     {
         _journal.Clear();
         _scheduleJournal.Clear();
+        _journaled.Clear();
+        _scheduleJournaled.Clear();
         _recording = false;
     }
 
@@ -697,6 +704,8 @@ internal sealed unsafe class ReferenceWorld
         }
 
         _journal.Clear();
+        _journaled.Clear();
+        _scheduleJournaled.Clear();
         for (var j = _scheduleJournal.Count - 1; j >= 0; j--)
         {
             var (slot, state) = _scheduleJournal[j];
@@ -749,6 +758,8 @@ internal sealed unsafe class ReferenceWorld
         Array.Clear(_pending, 0, _pending.Length);
         _journal.Clear();
         _scheduleJournal.Clear();
+        _journaled.Clear();
+        _scheduleJournaled.Clear();
         _recording = false;
         foreach (var g in _grids)
         {

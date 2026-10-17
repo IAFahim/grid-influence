@@ -268,7 +268,7 @@ before reading command payloads, writing
   a pending target resolves to the id its creating command returned — so a batch is exactly the
   ordered scalar calls, with no planning pass, grouping or scratch.
 - **Process** runs due timers, sweeps the changed list as above, advances the mark epoch,
-  appends the window's `Pending` snapshots to the journal when recording and clears them, and
+  clears the window's `Pending` snapshots, and
   publishes: each dirty tile's rectangle is recomputed by `TileBake.Publish` from `I`, `T` and
   `B` (v2 tile planes and publish, below). A rectangle covering at least half the tile publishes
   the whole tile; each new cell is compared with the published `int16` before it is stored; the
@@ -335,19 +335,20 @@ before reading command payloads, writing
   gain change or removal — marked, snapshotted, and merged exactly like the API calls — so
   scheduled and manual mutations are indistinguishable downstream, and determinism follows from
   the ascending-slot order (expired slots return to the free ring in that order). Ticks count `Process` calls, not time: Gi has no clock.
-- **Rewind**: `Record` drops any prior journal and starts appending, at the end of every
-  `Process` that follows, the window's `Pending` snapshots. A snapshot is the slot's 24 B column
-  state (position, stamp, layer, gain, angle, scale, liveness, and the 32-bit generation) at its
-  first mark of the window, which is exactly the state that window's `Process` deposits against,
-  so the journal is an undo log costing one unmanaged append per marked slot. Snapshots taken
-  before `Record` but not yet processed are appended by the next `Process`, so a mutation made
-  between a `Process` and the `Record` that follows it is undone too. `Rewind` first restores
-  every unprocessed `Pending` snapshot, newest first, then consumes the journal in reverse: each
-  entry restores its slot's columns to the recorded state (position, stamp, layer, gain, angle,
-  scale, liveness, and — only when the source was alive before the window — the generation, so a
-  removed source revives with its exact pre-window id while a rolled-back place's id stays
-  stale), and marks the slot once on the changed list with a fresh `Pending` snapshot (`JStamp`
-  deduplicates across windows). The next `Process` sweeps each restored slot against its
+- **Rewind**: `Record` drops any prior journal, bumps a per-world record epoch in O(1), and
+  moves the pending snapshots (mutations made since the last `Process`) into the journal. From
+  then on the first marked write to each slot journals that slot's 24 B column state (position,
+  stamp, layer, gain, angle, scale, liveness, and the 32-bit generation) as it was before the
+  write, and a per-slot epoch stamp keeps it to one entry per slot per recording, so the journal
+  is bounded by the slot count however many windows run; schedule state is journaled the same
+  way on the first schedule change. A mutation made between a `Process` and the `Record` that
+  follows it is undone too. `Rewind` first restores every unprocessed `Pending` snapshot, newest
+  first, then consumes the journal: each entry restores its slot's columns to the recorded state
+  (position, stamp, layer, gain, angle, scale, liveness, and — only when the source was alive at
+  the checkpoint — the generation, so a removed source revives with its exact checkpoint id while
+  a rolled-back place's id stays stale and, because a dead slot keeps the highest generation
+  issued, is never reissued), and marks the slot once on the changed list with a fresh
+  `Pending` snapshot. The next `Process` sweeps each restored slot against its
   deposited record and emits the net withdraw-and-deposit pair for the whole rewound span,
   exactly like ordinary mutations. The free-slot ring cannot be replayed positionally (journal
   order is first-mutation order, not free-event order), so `Rewind` rebuilds it canonically —
@@ -835,11 +836,13 @@ digits. Concurrency: single thread.
   `NativeHeap` blocks owned by the context: the grid array, the layer recipe table, the changed-slot
   list (`Changed`, `int` slots), the `Pending` and `Journal` buffers of 24 B snapshots — `Pending`
   takes one snapshot of a slot's columns at its first mark of a window and is cleared by
-  `Process`, `Journal` receives those snapshots from `Process` while recording and is consumed
-  by `Rewind` and cleared by `Record`, `StopRecording`, and `Clear` — the schedule journal and
+  `Process`, `Journal` receives each slot's first snapshot after `Record` (and the pending ones at
+  `Record`), is consumed by `Rewind` and cleared by `Record`, `StopRecording`, and `Clear` — the
+  schedule journal, written on the first schedule change of a slot after `Record`, and
   the timed-slot list and its due scratch (reset by `Clear`, capacity retained), and `SourceColumns` — hot columns in
   16,384-slot chunks (positions, stamp, layer, gain, angle, scale, liveness, and the 32-bit
-  generation and mark), the schedule columns (timed, fade bookkeeping, expiry, timed-list index) kept
+  generation and mark), the two record-epoch stamp columns (hot state and schedule state), the
+  schedule columns (timed, fade bookkeeping, expiry, timed-list index) kept
   separately as plain buffers, and the free-slot ring. Per grid there is one `DepositRecord`
   buffer of 16 B per source slot, grown with the source columns and zero-filled, so a fresh slot
   reads "nothing deposited" (`Clear` zeroes it); and per (grid, layer) the layer's directory, its

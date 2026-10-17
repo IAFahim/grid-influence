@@ -89,8 +89,9 @@ public static unsafe partial class World
 
     private static void JournalSchedule(WorldCtx* w, SourceColumns* s, int slot)
     {
-        if (w->Recording == 0) return;
+        if (w->Recording == 0 || s->SchedStamp.Pointer[slot] == w->RecordEpoch) return;
 
+        s->SchedStamp.Pointer[slot] = w->RecordEpoch;
         var n = w->ScheduleJournal.Length;
         w->ScheduleJournal.Resize(n + 1);
         w->ScheduleJournal.Pointer[n] = new ScheduleRecord
