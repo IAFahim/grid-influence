@@ -422,107 +422,119 @@ one mask bit instead.
 
 ## Speed
 
-i9-14900K, .NET 10, Release, min over reps. The workload is 4,000 box sources on a 1024² grid
-unless noted; `process` rows include the mutations.
+i9-14900K, .NET 10, Release, one pinned core (`taskset -c 0`), `DOTNET_TieredCompilation=0`, best of
+several passes. Every row below is reproduced by a `benchmarks` mode (`--timing`, `--crowd`, `--batch`,
+`--sync`, `--area`, `--region`, `--splat`, `--kinds`, `--order`, `--changed`, `--view`), and
+`benchmarks --gate` checks them against `benchmarks/gate-baseline.json`. The workload is 4,000 box
+sources on a 1024² grid unless noted; `process` rows include the mutations.
 
 | operation | cost | note |
 | --- | ---: | --- |
 | idle `Process` | 0 µs | empty dirty list, no due timers |
-| `Query` per cell | 3.5 ns | one page lookup |
+| `Query` per cell | 4.2 ns | one page lookup; 1.0 ns through a coherent `FieldView` |
 | `TrySense` point | 11 ns | grid picked for you |
-| `TrySenseGradient` | 20 ns | central difference, per world unit |
-| `TrySenseArea` r=8 / r=64 | 0.11 / 1.1 µs | disk sum, world-area units |
-| `TrySenseMax` r=32 | 0.61 µs | strongest cell + position |
-| `TrySenseNearest` r=32 | 0.86 µs | closest cell at a threshold |
-| `Changed` r=16 | 58 ns | tile epochs since a tick |
-| `exclude: self` point / area r=24 bell | 0.03–0.04 / 2.7 µs | exact aura removal, no rebuild |
-| place/move 200 boxes + `Process` | ~80–95 µs | deferred ops, serial resolve |
-| 4,000 bells 16×16 + 200 moves, `Process` stages | 818 µs total | prep/apply/resolve split via `--stages`; the 280 µs figure predates removing the worker pool |
-| 65,536 transform updates via `ApplyBatch` | 2,061 µs | 31.8M rows/s — `UpdateTransform` snapshots preserve fades, 0 B warm (`--batch`) |
-| 65,536 borrowed transform rows via `SyncTransforms` | 2,183 µs | 30.0M rows/s — host-native columns, 20 B/row pose, 1 bit/row mask, 0 B warm (`--sync`) |
-| 100,000 borrowed transform rows | 3,389 µs | 29.5M rows/s — serial loop 1,854 µs, `ApplyBatch` 2,971 µs at this size (`--sync`) |
-| place 200 tents 16×16 + `Process` | ~110 µs | exact sums per cell |
-| place 200 bells 16×16 + `Process` | ~150–195 µs | exact sums per cell |
-| turn 200 vision cones (r=16, 90°) + `Process` | ~320 µs | per-cell round kernel |
-| move 200 domes (r=8) / scale 200 tents | ~135 / ~165 µs | |
-| place+remove 200 in one window | 3.9 µs | ops collapse, no deposits at all |
-| `Rewind` a 200-place window + `Process` | ~85–95 µs | inverse ops, O(changes) |
-| `Query` region sum 1022² of 1024² | 11.6 µs | per-tile sums + edge strips |
-| `Query` full-grid sum 1024² | 0.8 µs | one `int64` per live tile |
-| `QueryMax` over 1024² | 0.5 µs | max-pyramid descent |
-| same via 1M `Query` calls | 6,100 µs | ~12,000× slower |
-| best cell of `food − 2·threat`, derived | 0.18 µs | vs 860 µs `QueryRegion` ×2 + scan |
-| 2,000 fading sources, per tick | 31 µs mean, 0 µs idle | vs ~330 µs dense decay pass |
-| move 400 across 16 layers + `Process` | 74 µs | serial dirty-tile drain |
-| `QueryRegion` fill 256² | 6.8 µs | straight into your pixel buffer |
-| `SenseColumn` per agent | 9.7 ns | 100k agents |
-| `ChangedMask` per agent | 15 ns | reach 24, 100k agents |
-| `Sync` per position | 13.8 ns | 100k, excludes `Process` |
+| `TrySenseGradient` | 17 ns | central difference, per world unit |
+| `TrySenseArea` r=8 / r=64 | 0.15 / 1.2 µs | disk sum, world-area units |
+| `TrySenseMax` r=32 | 0.39 µs | strongest cell + position |
+| `TrySenseNearest` r=32 | 0.30 µs | closest cell at a threshold |
+| `Changed` r=16 | 38 ns | epoch pyramid; `ChangedTiles(since)` on 65,536 tiles 1.1 µs |
+| exclude self, point / gradient / area r=64 (cached kernel) | 45 / 70 ns / +0.1 µs | exact, no rebuild |
+| exclude self at a 24×24 bell, point / area r=24 | 62 ns / 3.8 µs | tent and bell planes |
+| move 200 boxes + `Process` | 215 µs | |
+| place 200 boxes + `Process` | 123 µs | |
+| place 200 tents / bells 16×16 + `Process` | 218 / 290 µs | exact sums per cell |
+| turn 200 vision cones (r=16, 90°) + `Process` | 991 µs | per-cell round kernel |
+| move 200 domes (r=8) / scale 200 tents | 270 / 482 µs | |
+| place+remove 200 in one window | 7.5 µs | ops collapse, no deposits at all |
+| `Rewind` a 200-place window + `Process` | 131 µs | O(changes) |
+| move 400 across 16 layers + `Process` | 143 µs | |
+| `Query` region sum 1022² of 1024² | 10.5 µs | per-tile sums + edge strips |
+| `Query` full-grid sum 1024² | 1.0 µs | one `int64` per live tile |
+| `QueryMax` over 1024² | 0.03 µs | max-pyramid descent; 1M `Query` calls take 2,469 µs |
+| best cell of `food − 2·threat`, derived | 25 ns | vs 743 µs `QueryRegion` ×2 + scan |
+| 2,000 fading sources, per tick | 18 µs mean, 0.6 µs best | vs ~330 µs dense decay pass |
+| `QueryRegion` fill 256² | 4.8 µs | 0.07 ns per cell, straight into your pixel buffer |
+| `SenseColumn` per agent | 5.8 ns | 100k agents |
+| fused value + gradient column read, per agent | 2.1 / 3.6 ns | coherent / random order, 1M agents |
+| `ChangedMask` per agent | 46 ns | reach 24, 100k agents |
+| `Sync` per position | 17 ns | 100k, excludes `Process` |
+| 65,536 transform updates via `ApplyBatch` | 1.4 ms | 48M rows/s, 0 B warm |
+| 65,536 borrowed transform rows via `SyncTransforms` | 0.88 ms | 74M rows/s, 0 B warm |
+| 1M `Splat`s of a 4×4 box (`PhaseBits` 0) + `Process` | 1.2 + 1.0 ms | histogram and box filter; 41 ns per splat at `PhaseBits` ≥ 1 |
+| `Grid.SpatialKeys` / `SortByKeys`, 1M positions | 1.1 / 4.8 ms | Morton keys and a stable radix sort |
 
-And the crowd sweep — every source on one layer moving, `Process` alone timed (best of 10, pinned
-core of an i9-14900K; `--crowd` reproduces it):
+What a moved source costs by stamp kind (50,000 sources, −old +new emission, per source):
+
+| kind (footprint cells) | cached kernel, `Cell` | one-shot kernel, `Exact` |
+| --- | ---: | ---: |
+| box 8×8 (64) | 121 ns | 228 ns |
+| tent / bell 8×8 (64) | 236 / 235 ns | 244 / 254 ns |
+| disk / cone / dome r=4 (81) | 206 / 178 / 207 ns | 825 / 692 / 541 ns |
+| 120° arc r=4 (81) | 214 ns | 853 ns |
+| raster 8×8 (64) | 200 ns | 2,226 ns |
+
+And the crowd sweep — every source on one layer moving, `Process` alone timed (`--crowd`):
 
 | workload | 25% moving | 100% moving | naive redraw |
 | --- | ---: | ---: | ---: |
-| 20,000 boxes 8×8, 1024² | 3,038 µs | 7,174 µs | 982 µs |
-| 100,000 boxes 4×4, 1024² | 6,023 µs | 19,063 µs | 1,651 µs |
-| 4,000 boxes 16×16, 1024² | 1,318 µs | 2,947 µs | 724 µs |
+| 100,000 boxes 4×4, 1024² | — (75%: 8,200 µs) | 10,735 µs | 1,529 µs |
+| 4,000 boxes 16×16, 1024² | 783 µs | 2,122 µs | 603 µs |
 
 `Process` cost is linear in the sources that moved — there is no crowd rebuild — so a layer where
-most sources jump every frame is the one shape where a full redraw is cheaper. The previous engine's
-rebuild held 2,184 µs (20,000 boxes, 100% moving) flat; the change-rate engine pays 359 ns per
-random-jump mover there, and issue #40 tracks closing that gap.
+most sources jump every frame is the one shape where a full redraw is cheaper. That is the case a
+transient layer (`Layer.Residency.Transient`, `World.Splat`) is for: it forgets the frame and
+convolves a per-tile histogram instead.
 
 Against the naive implementation every field library starts with — a dense `int[]` per layer,
 cleared and redrawn from every source each frame (4,000 sources, 200 moves, same machine):
 
 | frame work | naive grid | Gi |
 | --- | ---: | ---: |
-| nothing moved | 625 µs | 0 µs |
-| 200 moves + process | 646 µs | 108 µs |
-| full-grid sum | 373 µs | 0.8 µs |
+| nothing moved | 559 µs | 0 µs |
+| 200 moves + process | 567 µs | 222 µs |
+| full-grid sum | 276 µs | 0.9 µs |
 
 The gap is structural: naive pays O(grid + sources×stamp-area) every frame, Gi pays O(what
 changed) and reads maintained state. Memory flips too — the naive grid allocates N² ints per
 layer up front (1 GB at 16384²); Gi allocates ~6.5 KB per live tile (2.1 KB for a derived
 tile), so an empty world of any size costs zero.
 
-## Reference frames (1M entities, one core)
+## The 1 ms frame
 
-Deployments are measured against reference frames (`--frames all --precision exact|cell`) on
-one pinned core (0 B allocated per frame). Each base layer
-chooses its snapping precision (`Layer.New(world, Layer.Precision.Cell)` for cell-snapped
-deposits, `Layer.Precision.Exact` for 1/256-cell sub-cell motion); a source only enqueues work
-when its snapped key changes.
+Issue #40 asks for a frame of 1,000,000 entities on one core in about a millisecond. The contract
+that replaced "100 ns per entity, worst case, any call pattern" (which is 100 ms per frame, and
+unsatisfiable: a region copy is bounded by its output, an exact disk costs Θ(r), and cost grows with
+call count) is two reference frames, each measured at ≤ max(1 ms, 1.15 × the floor of its stages), plus
+the price list above:
 
-What each user-issued call costs today (same machine and mode as the tables above):
+* **C, the crowd** — a 1024² transient layer at `PhaseBits` 0, 4×4 boxes, 1M agents submitted in
+  spatial order (re-sorted every 128 frames, `Grid.SortByKeys`), each reading its value and gradient,
+  plus 1,000 disk sums at r = 16.
+* **W, the world** — 1M persistent sources on a 2048² grid (250k agents moving 0.1 cell/frame, 750k
+  static), two base layers and a derived `Sum`, 4×4 boxes and 6×6 tents, 250k point + gradient senses on
+  the derived layer, 1,000 disk sums, and 1,000 spawns, 1,000 despawns and 10,000 timed sources per
+  frame.
 
-| user-issued call | cost | note |
-| --- | ---: | --- |
-| `World.Place` | 18 ns | deferred — journals the deposit, no tile work |
-| `World.Move` / `Turn` / `Scale` / `SetGain` | 2.5–3.5 ns | deferred |
-| place + remove pair | 16 ns | both commands, collapse when co-scheduled |
-| `ApplyBatch` source update | 22 ns | 4,096-command batches, 44.6M updates/s |
-| `SyncTransforms` row | 14 ns | 4,096 borrowed rows, 71.6M rows/s |
-| `Stamp.Box`/`Tent`/`Disk`/`Cone`/`Dome` | 10–13 ns | once per stamp, not per frame |
-| `Stamp.Bell` 16×16 / raster `New` 16×16 | 0.71 / 0.25 µs | kernel and mip bake, once per stamp |
-| `TryGetSourceSpec`/`TryGetRecipe`/`TryGetSpec`/`TryGetPrecision` | 1.6–3.2 ns | introspection |
-| `Count` / `CopyIds` / `Tick` / `Revision` / `Covers` | 0.5–2.9 ns | |
-| world lifecycle `New`+`Grid`+`Layer`+`Free` | 0.42 µs | once |
-| `Clear` + re-place 2,000 sources | 35 µs | retained-capacity clear, no realloc |
+Measured on one pinned core of the i9-14900K (`--frames`, 0 B per frame in every row; the Ryzen 5 8500G
+baseline needs its own `--gate --update`):
 
-Measured on one pinned Zen 4 core of the Ryzen 5 8500G (`--frames all --precision exact|cell`,
-single thread, 0 B/frame):
-
-| reference frame (1M entities, 1 Zen 4 core) | `Exact` (1/256 cell) | `Cell` (`PhaseBits` 0) | stages at `Cell` (`Sync` / `Process` / reads) |
+| reference frame | `Exact` (1/256 cell) | `Cell` (`PhaseBits` 0) | where `Cell` goes |
 | --- | ---: | ---: | --- |
-| **B4** idle (1M placed, no changes, no reads) | 50 ns | 40 ns | `Process` 40 ns |
-| **B2** sparse (1 mover / 200 movers, no reads) | 1.84 µs / 280 µs | 1.41 µs / 158 µs | 62.5% crossing rate |
-| **W** world (2048², 250k movers @ 0.1 cell/f, 740k static, 10k timed, 2k churn, derived reads + 1k disks) | 63.1 ms | **25.2 ms** | 2.0 ms / 12.6 ms / 10.3 ms (12.6% crossing) |
-| **C** crowd (1024², 1M movers @ 0.1 cell/f in Morton order, 1M value+gradient + 1k disks) | 120.5 ms | **52.7 ms** | 7.4 ms / 13.5 ms / 31.9 ms (12.6% crossing) |
-| **B1** legacy (4096², 1M 8×8 boxes moving 0.5×0.25 cell/f, random order, all columns) | 320.1 ms | 282.7 ms | 13.9 ms / 95.0 ms / 177.8 ms (62.5% crossing) |
+| **B4** idle (1M placed, nothing changes, nothing read) | — | 35 ns | `Process` only |
+| **B2** sparse (1 mover / 200 movers, no reads) | — | 2.6 µs / 382 µs | |
+| **W** world | 30.1 ms | **12.4 ms** | sync 2.0 / process 7.7 / reads 2.5 ms |
+| **C** crowd, transient layer | — | **6.7 ms** | splat 1.8 / process 1.3 / value + gradient 3.0 / disks 0.34 ms |
+| **C** crowd, persistent sources (`--layer persistent`) | ≈105 ms | 27 ms | sync 8.5 / process 11 / reads 7.5 ms |
+| **B1** legacy (4096², 1M 8×8 boxes moving 0.5×0.25 cell/frame, random order) | 331 ms | 173 ms | 62.5 % of the sources cross a cell every frame |
 
-See [`ROADMAP.md`](ROADMAP.md) §1 for the 2.0 1 ms single-core contract and published price list.
+The 1 ms frame is **not** reached on this host. The floors of C's stages (`--floor`: histogram of 1M
+0.37 ms, box convolution 0.14 ms, publish of 1,024 tiles 0.37 ms, 1M value + gradient reads 1.4–2.9 ms,
+1,000 disks 0.08 ms) add up to 2.4–4 ms, so C's target is about 2.8–4.6 ms and the transient frame sits
+1.5–2.4× above it; W is further out because its 250k movers cross cells at 12.6 % and its derived layer is
+recombined over almost every tile each frame (1 ms of the 12 ms). What a crowd gets for choosing the
+right residency is the 4× between the persistent and transient C rows; what it gets from `Cell`
+precision is the 2–5× between the columns. The remaining gap is reads (gather-bound) and the splat,
+not the engine's bookkeeping.
 
 ## A day in the life
 
