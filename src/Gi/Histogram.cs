@@ -17,6 +17,9 @@ internal unsafe struct HistState
 {
     public const int PageBytes = TileBake.TileSize * TileBake.TileSize * sizeof(int);
     public const int PageShift = 10;
+    public const long DefaultConvolveCost = 400_000;
+    public const long DirectBaseCost = 400;
+    public const long DirectCellCost = 12;
     public const int WindowStride = WindowSide + 8;
     public const int WindowSide = 2 * TileBake.TileSize - 1;
 
@@ -27,6 +30,7 @@ internal unsafe struct HistState
     public int* OutMark;
     public int MarkStamp;
     public long Total;
+    public long ConvolveCost;
     public int* Window;
     public int* Strip;
     public int* Out;
@@ -215,9 +219,14 @@ public static unsafe partial class World
             var stamp = (byte)hist->Active.Pointer[a];
             var cls = hist->Classes + stamp;
             if (BoxKernel(w, gi, g, layer, stamp, out var value, out var ox, out var oy, out var width, out var height))
-                BoxFilterClass(g, ld, hist, cls, value, ox, oy, width, height);
+            {
+                ReplaySparse(w, gi, g, hist, cls, layer, stamp, width * height);
+                if (cls->Tiles.Length != 0) BoxFilterClass(g, ld, hist, cls, value, ox, oy, width, height);
+            }
             else
+            {
                 ReplayClass(w, gi, g, hist, cls, layer, stamp);
+            }
 
             for (var t = 0; t < cls->Tiles.Length; t++)
             {
@@ -292,29 +301,78 @@ public static unsafe partial class World
     private static void ReplayClass(WorldCtx* w, int gi, GridCtx* g, HistState* hist, HistClass* cls, byte layer, byte stamp)
     {
         var key = new DepositRecord { Layer = layer, Stamp = stamp, Alive = 1, Scale = UnitScale };
-        var tps = g->TilesPerSide;
         for (var t = 0; t < cls->Tiles.Length; t++)
         {
             var tile = cls->Tiles.Pointer[t];
-            var page = (int*)hist->Pages.Unit(cls->Directory[tile] - 1);
-            var baseX = (tile % tps) << TileBake.TileBits;
-            var baseY = (tile / tps) << TileBake.TileBits;
-            for (var cell = 0; cell < TileBake.TileSize * TileBake.TileSize; cell++)
-            {
-                var remaining = page[cell];
-                if (remaining == 0) continue;
+            ReplayTile(w, gi, g, ref key, tile, (int*)hist->Pages.Unit(cls->Directory[tile] - 1));
+        }
+    }
 
-                key.Ax = (baseX + (cell & (TileBake.TileSize - 1))) << 8;
-                key.Ay = (baseY + (cell >> TileBake.TileBits)) << 8;
-                while (remaining != 0)
-                {
-                    var step = Math.Clamp(remaining, -127, 127);
-                    key.Gain = (sbyte)step;
-                    EmitDelta(w, gi, in key, 1);
-                    remaining -= step;
-                }
+    private static void ReplaySparse(
+        WorldCtx* w, int gi, GridCtx* g, HistState* hist, HistClass* cls, byte layer, byte stamp, int footprint)
+    {
+        var convolve = hist->ConvolveCost == 0 ? HistState.DefaultConvolveCost : hist->ConvolveCost;
+        var direct = HistState.DirectBaseCost + HistState.DirectCellCost * footprint;
+        var budget = convolve / direct;
+        var active = 0L;
+        for (var t = 0; t < cls->Tiles.Length; t++)
+        {
+            active += CountNonZero((int*)hist->Pages.Unit(cls->Directory[cls->Tiles.Pointer[t]] - 1));
+            if (active > budget) return;
+        }
+
+        var key = new DepositRecord { Layer = layer, Stamp = stamp, Alive = 1, Scale = UnitScale };
+        for (var t = 0; t < cls->Tiles.Length; t++)
+        {
+            var tile = cls->Tiles.Pointer[t];
+            ReplayTile(w, gi, g, ref key, tile, (int*)hist->Pages.Unit(cls->Directory[tile] - 1));
+            hist->Pages.Give(cls->Directory[tile] - 1);
+            cls->Directory[tile] = 0;
+        }
+
+        cls->Tiles.Resize(0);
+    }
+
+    private static void ReplayTile(WorldCtx* w, int gi, GridCtx* g, ref DepositRecord key, int tile, int* page)
+    {
+        var tps = g->TilesPerSide;
+        var baseX = (tile % tps) << TileBake.TileBits;
+        var baseY = (tile / tps) << TileBake.TileBits;
+        for (var cell = 0; cell < TileBake.TileSize * TileBake.TileSize; cell++)
+        {
+            var remaining = page[cell];
+            if (remaining == 0) continue;
+
+            key.Ax = (baseX + (cell & (TileBake.TileSize - 1))) << 8;
+            key.Ay = (baseY + (cell >> TileBake.TileBits)) << 8;
+            while (remaining != 0)
+            {
+                var step = Math.Clamp(remaining, -127, 127);
+                key.Gain = (sbyte)step;
+                EmitDelta(w, gi, in key, 1);
+                remaining -= step;
             }
         }
+    }
+
+    private static int CountNonZero(int* page)
+    {
+        var count = 0;
+        var i = 0;
+#if NET
+        if (Vector256.IsHardwareAccelerated)
+        {
+            for (; i + 8 <= TileBake.TileSize * TileBake.TileSize; i += 8)
+            {
+                var zero = Vector256.Equals(Vector256.Load(page + i), Vector256<int>.Zero).ExtractMostSignificantBits();
+                count += 8 - BitOperations.PopCount(zero);
+            }
+        }
+#endif
+        for (; i < TileBake.TileSize * TileBake.TileSize; i++)
+            if (page[i] != 0) count++;
+
+        return count;
     }
 
     private static void BoxFilterClass(

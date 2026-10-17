@@ -44,6 +44,23 @@ public unsafe class StreamDifferentialTests
         }
     }
 
+    [Theory]
+    [InlineData(1L)]
+    [InlineData(long.MaxValue)]
+    public void SplatCostModelExtremesMatchTheInterpreter(long convolveCost)
+    {
+        for (var i = 0; i < 200; i++)
+        {
+            var setup = StreamGenerator.Generate(TransientSeedBase + 70_000 + i, (PrecisionMode)(i % 3), StreamProfile.Transient);
+            var mismatch = StreamRunner.TryRun(setup, setup.Commands, convolveCost: convolveCost);
+            if (mismatch == null) continue;
+
+            var minimized = StreamMinimizer.Minimize(setup, setup.Commands, null);
+            throw new Xunit.Sdk.XunitException(
+                $"cost {convolveCost} seed {TransientSeedBase + 70_000 + i}: {mismatch.Message}\nminimized to {minimized.Count} commands");
+        }
+    }
+
     [Fact]
     public void DirectEmissionWithoutKernelInsertsMatchesTheInterpreter()
     {

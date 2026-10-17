@@ -5,11 +5,13 @@ internal static unsafe class SplatTiming
 {
     public static int Run()
     {
-        const int Count = 1_000_000;
+        var Count = int.Parse(Environment.GetEnvironmentVariable("GI_SPLATS") ?? "1000000");
         var world = World.New();
         Grid.New(world, 10, 0f, 0f, 1024f);
         var layer = Layer.New(world, Layer.Residency.Transient, Layer.Precision.Cell);
         var box = Stamp.Box(4, 4, 8);
+        var cost = Environment.GetEnvironmentVariable("GI_COST");
+        if (cost != null) World.ConfigureConvolveCost(world, layer, long.Parse(cost, System.Globalization.CultureInfo.InvariantCulture));
         var xs = new float[Count];
         var ys = new float[Count];
         var rng = new Random(3);
