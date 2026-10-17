@@ -332,13 +332,14 @@ before reading command payloads, writing
   now (`ticks ≤ 0` cancels a pending expiry); a source both fading and expiring on one tick is
   removed. `SetGain` cancels a fade, `Remove` cancels both, `Move`/`Turn`/`Scale` keep them, and
   a fresh `Place` on a recycled slot starts unscheduled. Schedules live in per-slot source
-  columns; a per-world binary min-heap keyed by (due tick, slot) holds each scheduled slot's next
-  event, entries made stale by later calls are skipped when popped (the slot's recorded due tick
-  no longer matches), and the heap is rebuilt from the columns once it outgrows twice the slot
-  count. At the start of `Process`, after the tick advances, every due event becomes an ordinary
-  gain change or removal — marked, snapshotted, and merged exactly like the API calls —
-  so scheduled and manual mutations are indistinguishable downstream, and determinism follows
-  from the (due, slot) order. Ticks count `Process` calls, not time: Gi has no clock.
+  columns; a per-world dense list of timed slots, each entry carrying the next tick at which its
+  fade steps or its expiry falls due, holds every scheduled slot once (a per-slot index column
+  gives the entry back for swap-removal, and entries for slots that died or lost their schedule
+  are dropped when they come due). At the start of `Process`, after the tick advances, one scan
+  of the list collects the due slots, sorts them ascending, and applies each as an ordinary
+  gain change or removal — marked, snapshotted, and merged exactly like the API calls — so
+  scheduled and manual mutations are indistinguishable downstream, and determinism follows from
+  the ascending-slot order (expired slots return to the free ring in that order). Ticks count `Process` calls, not time: Gi has no clock.
 - **Rewind**: `Record` drops any prior journal and starts appending, at the end of every
   `Process` that follows, the window's `Pending` snapshots. A snapshot is the slot's 24 B column
   state (position, stamp, layer, gain, angle, scale, liveness, and the 32-bit generation) at its
@@ -366,7 +367,7 @@ before reading command payloads, writing
   a schedule journal, and scheduled events are ordinary marked mutations already in the journal. `Rewind`
   restores the schedule journal in reverse, then shifts every live schedule by the ticks elapsed
   since `Record` — the tick itself never runs backwards, so change epochs stay monotonic — and
-  rebuilds the heap: pending fades and expiries resume with exactly the remaining time they had
+  rebuilds the timed list: pending fades and expiries resume with exactly the remaining time they had
   at the checkpoint, and a rewound world re-simulates tick for tick like a twin that never left
   it.
 - **Query**: `World.Query(world, grid, layer, x, y)` is one hash lookup + page read;
@@ -841,9 +842,9 @@ digits. Concurrency: single thread.
   takes one snapshot of a slot's columns at its first mark of a window and is cleared by
   `Process`, `Journal` receives those snapshots from `Process` while recording and is consumed
   by `Rewind` and cleared by `Record`, `StopRecording`, and `Clear` — the schedule journal and
-  the timer heap (reset by `Clear`, capacity retained), and `SourceColumns` — hot columns in
+  the timed-slot list and its due scratch (reset by `Clear`, capacity retained), and `SourceColumns` — hot columns in
   16,384-slot chunks (positions, stamp, layer, gain, angle, scale, liveness, and the 32-bit
-  generation and mark), the schedule columns (timed, fade bookkeeping, expiry, due) kept
+  generation and mark), the schedule columns (timed, fade bookkeeping, expiry, timed-list index) kept
   separately as plain buffers, and the free-slot ring. Per grid there is one `DepositRecord`
   buffer of 16 B per source slot, grown with the source columns and zero-filled, so a fresh slot
   reads "nothing deposited" (`Clear` zeroes it); and per (grid, layer) the layer's directory, its
