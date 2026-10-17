@@ -54,6 +54,19 @@ internal static unsafe class StampCatalog
         return true;
     }
 
+    internal static void Release()
+    {
+        for (var id = 1; id < _count; id++)
+        {
+            var v = Runtime.Stamps + id;
+            if (v->Data != null) NativeHeap.Free(v->Data - v->Pitch - 1);
+            if (v->Mips != null) NativeHeap.Free(v->Mips);
+            *v = default;
+        }
+
+        _count = 1;
+    }
+
     public static byte Bake(sbyte* data, int width, int height)
     {
         Validate(width, height);
