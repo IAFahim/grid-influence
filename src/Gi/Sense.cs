@@ -85,38 +85,56 @@ public static unsafe partial class World
         var disk = Disk(g, x, y, reach);
         var ld = g->Layers + layer;
         var tps = g->TilesPerSide;
-        var lo = stackalloc int[TileBake.TileSize];
-        var hi = stackalloc int[TileBake.TileSize];
+        var rowMaxima = !IsDerived(w, layer);
+        var found = false;
+        var best = short.MinValue;
+        var bx = 0;
+        var by = 0;
+        const int Pending = 64;
+        var pendingTiles = stackalloc int[Pending];
+        var pendingMaxima = stackalloc short[Pending];
+        var pending = 0;
         var top = -1;
-        var topMax = short.MinValue;
         for (var ty = disk.Y0 >> TileBake.TileBits; ty <= disk.Y1 >> TileBake.TileBits; ty++)
         for (var tx = disk.X0 >> TileBake.TileBits; tx <= disk.X1 >> TileBake.TileBits; tx++)
         {
             if (Outside(disk, tx, ty)) continue;
 
-            var topSummary = ld->SummaryOf(ty * tps + tx);
-            var m = topSummary != null ? topSummary->Max : (short)0;
-            if (top >= 0 && m <= topMax) continue;
-            top = ty * tps + tx;
-            topMax = m;
+            if (rowMaxima && Inside(disk, tx, ty))
+            {
+                ConsiderTile(g, ld, disk, tx, ty, true, ref found, ref best, ref bx, ref by);
+                continue;
+            }
+
+            var summary = ld->SummaryOf(ty * tps + tx);
+            var m = summary != null ? summary->Max : (short)0;
+            if (pending == Pending)
+            {
+                ScanDiskTile(g, ld, disk, tx, ty, rowMaxima, ref found, ref best, ref bx, ref by);
+                continue;
+            }
+
+            pendingTiles[pending] = ty * tps + tx;
+            pendingMaxima[pending] = m;
+            if (top < 0 || m > pendingMaxima[top]) top = pending;
+            pending++;
         }
 
-        var found = false;
-        var best = short.MinValue;
-        var bx = 0;
-        var by = 0;
-        ScanDiskTile(g, ld, disk, top % tps, top / tps, lo, hi, ref found, ref best, ref bx, ref by);
-        for (var ty = disk.Y0 >> TileBake.TileBits; ty <= disk.Y1 >> TileBake.TileBits; ty++)
-        for (var tx = disk.X0 >> TileBake.TileBits; tx <= disk.X1 >> TileBake.TileBits; tx++)
+        if (top >= 0 && (!found || pendingMaxima[top] >= best))
         {
-            var tile = ty * tps + tx;
-            if (tile == top || Outside(disk, tx, ty)) continue;
+            ScanDiskTile(g, ld, disk, pendingTiles[top] % tps, pendingTiles[top] / tps, rowMaxima, ref found, ref best, ref bx, ref by);
+            pendingMaxima[top] = short.MinValue;
+        }
 
-            var ringSummary = ld->SummaryOf(tile);
-            var m = ringSummary != null ? ringSummary->Max : (short)0;
-            if (m < best) continue;
-            if (m == best && (ty << TileBake.TileBits) > by) continue;
-            ScanDiskTile(g, ld, disk, tx, ty, lo, hi, ref found, ref best, ref bx, ref by);
+        for (var i = 0; i < pending; i++)
+        {
+            if (i == top) continue;
+
+            var m = pendingMaxima[i];
+            var ty = pendingTiles[i] / tps;
+            if (found && m < best) continue;
+            if (found && m == best && (ty << TileBake.TileBits) > by) continue;
+            ScanDiskTile(g, ld, disk, pendingTiles[i] % tps, ty, rowMaxima, ref found, ref best, ref bx, ref by);
         }
 
         value = best;
@@ -265,27 +283,59 @@ public static unsafe partial class World
         return true;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void ConsiderTile(GridCtx* g, LayerData* ld, in Circle disk, int tx, int ty, bool summaries,
+        ref bool found, ref short best, ref int bx, ref int by)
+    {
+        if (!summaries || !Inside(disk, tx, ty))
+        {
+            ScanDiskTile(g, ld, disk, tx, ty, summaries, ref found, ref best, ref bx, ref by);
+            return;
+        }
+
+        var tileX = tx << TileBake.TileBits;
+        var tileY = ty << TileBake.TileBits;
+        var summary = ld->SummaryOf(ty * g->TilesPerSide + tx);
+        var m = summary == null ? (short)0 : summary->Max;
+        var ax = summary == null ? tileX : tileX + summary->ArgMaxX;
+        var ay = summary == null ? tileY : tileY + summary->ArgMaxY;
+        if (found && (m < best || (m == best && (ay > by || (ay == by && ax >= bx))))) return;
+
+        found = true;
+        best = m;
+        bx = ax;
+        by = ay;
+    }
+
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    private static void ScanDiskTile(GridCtx* g, LayerData* ld, in Circle disk, int tx, int ty, int* lo, int* hi,
+    private static void ScanDiskTile(GridCtx* g, LayerData* ld, in Circle disk, int tx, int ty, bool rowMaxima,
         ref bool found, ref short best, ref int bx, ref int by)
     {
         var tileX = tx << TileBake.TileBits;
         var tileY = ty << TileBake.TileBits;
         var rowLo = Math.Max(tileY, disk.Y0);
-        var rows = Math.Min(tileY + TileBake.TileSize - 1, disk.Y1) - rowLo + 1;
-        Spans(disk, rowLo, rows, lo, hi);
-        var page = ld->PageOf(ty * g->TilesPerSide + tx);
-        for (var r = 0; r < rows; r++)
+        var rowHi = Math.Min(tileY + TileBake.TileSize - 1, disk.Y1);
+        var cells = ld->CellsOf(ty * g->TilesPerSide + tx);
+        var page = cells.Page;
+        var maxima = rowMaxima && page != null ? cells.Summary->RowMaxima : null;
+        for (var cy = rowLo; cy <= rowHi; cy++)
         {
-            var a = Math.Max(lo[r], tileX);
-            var b = Math.Min(hi[r], tileX + TileBake.TileSize);
+            if (found && maxima != null)
+            {
+                var bound = maxima[cy - tileY];
+                if (bound < best || (bound == best && cy > by)) continue;
+            }
+
+            if (!Span(disk, cy, out var lo, out var hi)) continue;
+
+            var a = Math.Max(lo, tileX);
+            var b = Math.Min(hi, tileX + TileBake.TileSize);
             if (b <= a) continue;
 
-            var cy = rowLo + r;
             var row = page == null ? null : page + (cy - tileY) * TileBake.TileSize - tileX;
-            var m = row == null ? (short)0 : SegmentMax(row + tileX, a - tileX, b - tileX);
+            var m = row == null ? (short)0 : maxima != null && b - a == TileBake.TileSize ? maxima[cy - tileY] : SegmentMax(row + tileX, a - tileX, b - tileX);
             if (found && (m < best || (m == best && (cy > by || (cy == by && a > bx))))) continue;
 
             var cx = row == null ? a : tileX + FirstEqual(row + tileX, a - tileX, b - tileX, m);
