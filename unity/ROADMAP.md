@@ -211,14 +211,14 @@ Plan §12's S1–S5 apply, plus:
 | Card | Title | Lane | Pri | Needs | Tier | Wave | State | PR |
 |---|---|---|---|---|---|---|---|---|
 | F-1 | Contract pins and dotnet harness | foundation | P0 | — | D | 1 | done | #78 |
-| U-0 | Package skeleton, plugins, host project | runtime | P0 | — | D, U | 1 | todo | |
+| U-0 | Package skeleton, plugins, host project | runtime | P0 | — | D, U | 1 | blocked | D receipts green, merged via #79. Tier U editmode blocked externally: com.bovinelabs.core 2.0.0-pre.1 needs internal collections types on every editor installable today (walls proven on 7000.0.0a8 and 6000.7.0b4/b5 — see A.15 and Appendix F). Exits: 6000.7.0f1+ with a published BovineLabs build, or the owner revisits O-U6 |
 | G-0a | TFM dry run | core | P0 | — | G | 1 | done | scratch, not merged |
 | G-1 | Pure exclusion reads | core | P1 | — | G | 1 | done | #81. Exclusion-row gate deltas (+8–16%) are the accepted price of pure reads; baseline untouched, quiet-host re-run pending |
 | F-2 | Scenarios, reference executor, lint, CI | foundation | P0 | F-1, U-0 | D | 2 | todo | |
 | U-1 | Frame, bootstrap, group, process | runtime | P0 | U-0, F-1 | D, U | 2 | todo | |
 | A-1 | Assets and inspectors | authoring | P0 | U-0 | U | 2 | todo | |
 | V-1 | Gi parity on Unity backends | verification | P0 | U-0, F-1 | D, U | 2 | todo | |
-| G-3 | Tooling read-outs | core | P1 | — | G | 2 | todo | |
+| G-3 | Tooling read-outs | core | P1 | — | G | 2 | done | #82. `World.Memory(world, out storeBytes, out liveTiles, out pages, out kernelEntries, out liveSources)`; E-1/E-4/E-6 consume it |
 | U-2 | Reconcile, emitters, pulses | runtime | P0 | U-1, F-2 | D, U | 3 | todo | |
 | U-4 | Fences, guard, cross-world writers | runtime | P0 | U-1 | U | 3 | todo | |
 | U-6 | Splat | runtime | P0 | U-1, F-2 | D, U | 3 | todo | |
@@ -227,7 +227,7 @@ Plan §12's S1–S5 apply, plus:
 | E-3 | Stamp Studio | editor | P1 | A-1, U-1 | U | 3 | todo | |
 | E-4 | Profile editor | editor | P1 | A-1 | U | 3 | todo | |
 | E-6 | Profiler module and ConfigVars | editor | P1 | U-1 | U | 3 | todo | |
-| G-2 | Runtime teardown | core | P1 | — | G | 3 | todo | |
+| G-2 | Runtime teardown | core | P1 | — | G | 3 | done | #84. `World.Teardown()`; revision floor keeps pre-teardown tokens refused; RSS-flat over 1000 cycles |
 | G-7 | Incremental layer hash | core | P1 | — | G | 3 | todo | |
 | U-3 | Sync | runtime | P0 | U-2 | D, U | 4 | todo | |
 | U-5 | Read bindings: value and gradient | runtime | P0 | U-2 | D, U | 4 | todo | |
@@ -242,7 +242,7 @@ Plan §12's S1–S5 apply, plus:
 | N-1 | Server-authoritative fields | netcode | P2 | V-2 | U | 6 | todo | |
 | S-1 | Save | save | P2 | V-2 | U | 6 | todo | |
 | G-4 | Cross-world `Process` | core | P2 | — | G | 6 | todo | |
-| G-5 | Schedule read-back | core | P2 | — | G | 6 | todo | |
+| G-5 | Schedule read-back | core | P2 | — | G | 6 | done | #83. `World.TryGetSchedule` (gain, fade ends/duration/ticks-left, expiry ticks-left); save/continue equals uninterrupted, proven |
 | G-6 | Allocator hook | core | P2 | — | G | 6 | todo | |
 | N-2 | Lockstep checks | netcode | P2 | N-1 | U | 7 | todo | |
 | G-8 | Parallel splat | core | P3 | V-3 | G | 7 | todo | |
@@ -954,7 +954,7 @@ Owns: `Runtime/Save/**`; tests in `Tests/Runtime/Save/`.
 Done when:
 - [U] For emitters and splats, save, load and continue gives the same result as an uninterrupted run.
 - [U] Pulses come back with their remaining ticks.
-- [U] Once G-5 lands, a restore taken in the middle of a fade is also exact.
+- [U] Once G-5 lands, a restore taken in the middle of a fade is also exact. G-5 landed (#83): the rounding phase is provably not derivable from (gain, target, ticksLeft), so the restore re-drives the staircase per tick with `Fade(target, 0)` from the read-back's from/ticks/ticksLeft.
 
 #### D-1 · Docs and samples
 
@@ -1023,7 +1023,7 @@ This roadmap changes the plan in the ways listed here. The coordinator folds the
 12. **ConfigVars are split by area** into `GiRuntimeConfig`, `GiSenseConfig`, `GiMirrorConfig` and `GiDebugConfig`, so no two cards share a file.
 13. **Performance results** go to `unity/perf.md`, not to the package README.
 14. **Card ids.** This file's cards replace plan §10 and §11. Plan §12's ledger continues here as §2.
-15. **The editor baseline follows O-U2** (minimum Unity = whatever the supplied BovineLabs.Core targets), not the alpha pin. The host project moves to the Unity 6000.x line that com.bovinelabs.core 2.0.0-pre.1 targets (newest published; the Unity 7 alpha's builtin Collections 6.7.0 overrides manifest pins and cannot compile it). The Unity 7 alphas stay installed and remain the target of the day-0 cards (V-0, G-0); the pin moves back when BovineLabs ships Unity 7 support or CoreCLR day 0 arrives, whichever is first.
+15. **The editor baseline follows O-U2** (minimum Unity = whatever the supplied BovineLabs.Core targets) — **attempted and refuted on 2026-10-18**: the 6000.7 repin hits the same wall as the Unity 7 alphas, because on 6000.7 the builtin Collections is a type-forwarding shim into the engine's `UnityEngine.ManagedKernelModule.dll`, where `HashMapHelper`, `Pair`, `UnsafeParallelHashMapData` and `UntypedUnsafeList` are internal with a Unity-only friend list, and the public registry serves no standalone 6.x Collections to pin instead. BovineLabs 2.0.0-pre.1 is the newest published build (its main branch is an unpublished pre.2 evidently built against a 6000.7 newer than b5). **The host project keeps the 7000.0.0a8 pin.** U-0 is `blocked` (Tier D accepted); the exits are a published BovineLabs build against a 6000.7.0f1+/Unity 7 installable editor, or the owner revisiting O-U6. Editors 6000.7.0b4 and b5 stay installed for the retry.
 
 New open decisions:
 
@@ -1096,7 +1096,7 @@ Recorded 2026-10-18 so later sessions start from verified facts, not assumptions
 
 - `unity` CLI 1.0.0-beta.13 at `~/.local/bin/unity`. Official documentation: github.com/Unity-Technologies/skills, skill `unity-cli` (with references for editors-install, build-run-test, auth-license-cloud, integration-advanced). Clone it fresh if `/tmp/unity-skills` is gone.
 - License: Unity Personal (Assigned), active via OAuth; batchmode entitlement resolved on every launch (~10 verified runs). Personal licenses are machine-and-account bound: a service account **cannot** activate one, so a CI lane (O-U3) needs serial or floating licensing.
-- Editors installed under `~/Unity/Hub/Editor`: 7000.0.0a8 and 7000.0.0a9 (Unity 7 alphas; the day-0 cards' target), and the 6000.x editor the host project repins to per Appendix A.15. The alpha stream needs no special entitlement. The `linux-il2cpp` module for a8 is a 236 MB install (`unity install-modules -e 7000.0.0a8 -m linux-il2cpp --yes`, about a minute) — installed.
+- Editors installed under `~/Unity/Hub/Editor`: 7000.0.0a8 (the pin) and 7000.0.0a9, plus 6000.7.0b4 and b5 (the refuted repin attempt, A.15; keep for the retry when a f-stream or a BovineLabs pre.2 lands). The alpha stream needs no special entitlement. The `linux-il2cpp` module for a8 is a 236 MB install (`unity install-modules -e 7000.0.0a8 -m linux-il2cpp --yes`, about a minute) — installed.
 - Tier U EditMode is proven end to end on this host by a control project: 1/1 passed, exit 0. Receipt command shape:
   `unity test <project> --editor-version 7000.0.0a8 --mode EditMode --report-format junit --output <xml> --timeout 600`
   Exit contract: `0` pass, `8` tests ran and failed (terminal — never retry), anything else (with `errors[0].code` `TEST_RUN_ERROR`/`TEST_TIMED_OUT`) infrastructure, safe to retry once. `validate.sh` is written against this contract.
@@ -1113,3 +1113,15 @@ Recorded 2026-10-18 so later sessions start from verified facts, not assumptions
 7. `registry.openupm.com` was NXDOMAIN worldwide on 2026-10-18 (confirmed through two DoH resolvers and OpenUPM's own nameservers). The registry is served live at `package.openupm.com`, which the manifests use; a consumer-side scoped registry is therefore an install requirement, recorded in the README.
 8. On the a8 alpha, a precompiled DLL whose `.meta` carries a PluginImporter block (defineConstraints, platformData) is silently excluded from the precompiled set; bare `.meta` files (same GUIDs) register fine. Keep plugin `.metas` bare until the coreclr variant needs real per-platform settings.
 9. The gate harness mis-spawns children under `dotnet run` (Environment.ProcessPath is the apphost, so children fall through to the verify suite and the host string parses empty). Run gates against the built DLL — `taskset -c 0 dotnet benchmarks/bin/Release/net10.0/GiBenchmarks.dll --gate` — which is how the baseline was recorded. A harness fix (spawn via the dotnet host explicitly) is a queued chore.
+10. The 6000.7 registry line has the same builtin wall as the Unity 7 alphas (A.15): builtin Collections is a shim into engine internals with a Unity-only InternalsVisibleTo list, and no standalone 6.x Collections exists on the public registry. Verify a dependency's internals usage against the *builtin* modules of the exact editor before pinning anything to a beta line.
+11. Coordinator merge discipline: after resolving a conflicted merge locally, `git add` every file the fix touched before committing — an unstaged fix rides the working tree while the push goes out without it (caught by CI on #83; cost one extra CI cycle).
+
+### Session state (stop at 25%, 2026-10-18)
+
+Merged into `main`: #78 (F-1), #80 (inspection hygiene), #81 (G-1), #82 (G-3), #83 (G-5), #84 (G-2). Into `unity/main`: the main syncs plus the ROADMAP commits through this one. PR #79 (U-0) is merged with D accepted; Tier U is `blocked` per the board.
+
+Next session, in order:
+1. Check the BovineLabs exits: a published build for 6000.7.0f1+ or a Unity 7 installable (`unity releases`); if one exists, redo the U-0 repin against it and take the editmode receipt. If not, the Unity track stays parked and the dotnet-side cards are the work.
+2. Launch wave 2 (F-2, U-1, V-1) — their Needs (F-1, U-0) are met (#79 merged), with the U-0 Tier U items staying `blocked`, not `U-pending` (R-13 does not count `blocked`).
+3. Run the gate-harness chore, then G-7 and G-4 (both need their own pinned gate; serialize the gates).
+4. G-5's S-1 note and G-2's `malloc_trim` note are recorded on their cards/PRs.
