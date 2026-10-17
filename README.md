@@ -536,6 +536,26 @@ right residency is the 4.5× between the persistent and transient C rows; what i
 precision is the 2–5× between the columns. The remaining gap is reads (gather-bound) and the splat,
 not the engine's bookkeeping.
 
+**`netstandard2.1` (Unity).** The `netstandard2.1` build compiles only the scalar paths (`#if NET` guards
+every hardware-intrinsic path), so it runs the same engine with the same answers — the test suite
+(1,153 tests, golden corpus included) and `benchmarks --verify` (144 PASS, 0 FAIL) pass against the
+`netstandard2.1` `Gi.dll`, and all eight frame checksums of the gate equal the `net10.0` ones — but slower. Rows
+are the `--gate` baselines of both builds, same host, same pinning, run through the `net10.0` runtime
+(`-p:GiNetStandard=true`); this measures the scalar code, not Unity's Mono or IL2CPP back ends, which need
+their own run:
+
+| reference frame | `net10.0` | `netstandard2.1` | ratio |
+| --- | ---: | ---: | ---: |
+| **W** world, `Cell` / `Exact` | 13.3 / 34.8 ms | 30.2 / 68.3 ms | 2.3× / 2.0× |
+| **C** crowd, transient layer | 6.4 ms | 21.0 ms | 3.3× |
+| **B1** legacy, `Cell` / `Exact` | 180 / 350 ms | 324 / 458 ms | 1.8× / 1.3× |
+| **B2** 200 movers, no reads | 104 µs | 236 µs | 2.3× |
+| disk sum r=16 / r=64 | 286 ns / 1.3 µs | 586 ns / 2.8 µs | 2.1× / 2.2× |
+| 1M splats / 1M random-order reads | 1.1 / 4.0 ms | 4.8 / 10.5 ms | 4.4× / 2.7× |
+
+The vector paths carry the splat, the gather reads and the disk sums, and the scalar build pays 2–4× for
+them; `Exact` frames, which spend their time in the emit loops, pay least.
+
 ## A day in the life
 
 The tables above time one operation at a time. Real use is a whole tick: agents move and aim,

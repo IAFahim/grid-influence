@@ -190,8 +190,10 @@ public sealed unsafe class PublishTests
         {
             return path switch
             {
+#if !GI_NETSTANDARD
                 PublishPath.Vector256 => TileBake.Publish256(store->Cells(*planes), x0, y0, x1, y1, tick),
                 PublishPath.Vector128 => TileBake.Publish128(store->Cells(*planes), x0, y0, x1, y1, tick),
+#endif
                 PublishPath.Scalar => TileBake.PublishScalar(store->Cells(*planes), x0, y0, x1, y1, tick),
                 _ => TileBake.Publish(store, planes, x0, y0, x1, y1, tick),
             };
