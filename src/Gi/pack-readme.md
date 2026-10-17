@@ -17,7 +17,7 @@ byte grid   = Grid.New(world, power: 8, x: 0f, y: 0f, size: 256f);
 byte food   = Layer.New(world);
 byte threat = Layer.New(world);
 byte safety = Layer.Sum(world, food, 1, threat, -2);      // derived, kept current by Process
-int eye = World.Place(world, threat, x, y, Stamp.Cone(16, 90, arc: 90), gain: 8);
+var eye = World.Place(world, threat, x, y, Stamp.Cone(16, 90, arc: 90), gain: 8);
 World.Turn(world, eye, MathF.PI / 2f);                     // vision cone faces +y
 World.Fade(world, eye, 0, ticks: 60);                      // fades over 60 Process calls
 World.Process(world);
@@ -37,7 +37,7 @@ World.TrySenseNearest(world, food, x, y, reach: 40f, threshold: 50, out var v, o
 ```
 
 `World.ApplyBatch` borrows sealed source-command and result spans, supports ordered creation,
-updates, removal, fades, and expiry, and parallelizes large batches over disjoint source slots.
+updates, removal, fades, and expiry, and applies large batches in one sequential pass over the source columns.
 It does not advance time or touch tiles: call `Process` afterward. Complete producer writes and
 Gi readers before ingestion; direct calls and batch calls remain exclusive per world.
 See the [batch contract](https://github.com/IAFahim/grid-influence/blob/main/docs/batching.md).

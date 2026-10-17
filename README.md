@@ -521,18 +521,18 @@ baseline needs its own `--gate --update`):
 | reference frame | `Exact` (1/256 cell) | `Cell` (`PhaseBits` 0) | where `Cell` goes |
 | --- | ---: | ---: | --- |
 | **B4** idle (1M placed, nothing changes, nothing read) | — | 35 ns | `Process` only |
-| **B2** sparse (1 mover / 200 movers, no reads) | — | 2.6 µs / 382 µs | |
-| **W** world | 30.1 ms | **12.4 ms** | sync 2.0 / process 7.7 / reads 2.5 ms |
-| **C** crowd, transient layer | — | **6.7 ms** | splat 1.8 / process 1.3 / value + gradient 3.0 / disks 0.34 ms |
-| **C** crowd, persistent sources (`--layer persistent`) | ≈105 ms | 27 ms | sync 8.5 / process 11 / reads 7.5 ms |
-| **B1** legacy (4096², 1M 8×8 boxes moving 0.5×0.25 cell/frame, random order) | 331 ms | 173 ms | 62.5 % of the sources cross a cell every frame |
+| **B2** sparse (1 mover / 200 movers, no reads) | — | 0.8 µs / 104 µs | |
+| **W** world | 34.8 ms | **13.3 ms** | sync 2.2 / process 8.3 / reads 2.8 ms |
+| **C** crowd, transient layer | — | **6.7 ms** | splat 1.9 / process 1.3 / value + gradient 3.3 / disks 0.34 ms |
+| **C** crowd, persistent sources (`--layer persistent`) | ≈120 ms | 30 ms | sync 9.0 / process 14 / reads 7.6 ms |
+| **B1** legacy (4096², 1M 8×8 boxes moving 0.5×0.25 cell/frame, random order) | 350 ms | 180 ms | 62.5 % of the sources cross a cell every frame |
 
 The 1 ms frame is **not** reached on this host. The floors of C's stages (`--floor`: histogram of 1M
 0.37 ms, box convolution 0.14 ms, publish of 1,024 tiles 0.37 ms, 1M value + gradient reads 1.4–2.9 ms,
 1,000 disks 0.08 ms) add up to 2.4–4 ms, so C's target is about 2.8–4.6 ms and the transient frame sits
 1.5–2.4× above it; W is further out because its 250k movers cross cells at 12.6 % and its derived layer is
-recombined over almost every tile each frame (1 ms of the 12 ms). What a crowd gets for choosing the
-right residency is the 4× between the persistent and transient C rows; what it gets from `Cell`
+recombined over almost every tile each frame (1 ms of the 13 ms). What a crowd gets for choosing the
+right residency is the 4.5× between the persistent and transient C rows; what it gets from `Cell`
 precision is the 2–5× between the columns. The remaining gap is reads (gather-bound) and the splat,
 not the engine's bookkeeping.
 
