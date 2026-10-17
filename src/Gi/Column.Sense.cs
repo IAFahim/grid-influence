@@ -67,7 +67,52 @@ public static unsafe partial class World
 #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
 #endif
+    public static bool SenseGradientColumn(
+        byte world, byte layer, float* xs, float* ys, SourceId* excludes, int count,
+        short* values, float* gradientXs, float* gradientYs, ulong* whole)
+    {
+        var w = GetContext(world);
+        if (w == null || layer >= w->LayerCount) return UnfilledValueGradient(values, gradientXs, gradientYs, whole, count);
+        if (count <= 0) return true;
+        if (xs == null || ys == null || values == null || gradientXs == null || gradientYs == null)
+            return UnfilledValueGradient(values, gradientXs, gradientYs, whole, count);
+
+        ClearBits(whole, count);
+        if (excludes == null) return GradientRange(w, layer, xs, ys, values, gradientXs, gradientYs, whole, 0, count);
+
+        var complete = true;
+        for (var i = 0; i < count; i++)
+        {
+            bool filled;
+            if (excludes[i].Generation != 0)
+            {
+                filled = TrySense(world, layer, xs[i], ys[i], excludes[i], out values[i]);
+                filled &= TrySenseGradient(world, layer, xs[i], ys[i], excludes[i], out gradientXs[i], out gradientYs[i]);
+            }
+            else
+            {
+                filled = TrySense(world, layer, xs[i], ys[i], out values[i]);
+                filled &= TrySenseGradient(world, layer, xs[i], ys[i], out gradientXs[i], out gradientYs[i]);
+            }
+
+            complete &= filled;
+            if (filled && whole != null) whole[i >> 6] |= 1ul << (i & 63);
+        }
+
+        return complete;
+    }
+
+#if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+#endif
     internal static bool GradientRange(WorldCtx* w, byte layer, float* xs, float* ys,
+        float* gradientXs, float* gradientYs, ulong* whole, int from, int to)
+        => GradientRange(w, layer, xs, ys, null, gradientXs, gradientYs, whole, from, to);
+
+#if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+#endif
+    internal static bool GradientRange(WorldCtx* w, byte layer, float* xs, float* ys, short* values,
         float* gradientXs, float* gradientYs, ulong* whole, int from, int to)
     {
         var complete = true;
@@ -90,6 +135,7 @@ public static unsafe partial class World
                     var qy = CellQ8(y, oy, scaleQ8);
                     if (!Contains(g, qx, qy))
                     {
+                        if (values != null) values[i] = 0;
                         gradientXs[i] = 0f;
                         gradientYs[i] = 0f;
                         complete = false;
@@ -100,10 +146,24 @@ public static unsafe partial class World
                     var cy = (int)(qy >> 8);
                     var tile = (cy >> TileBake.TileBits) * g->TilesPerSide + (cx >> TileBake.TileBits);
                     var page = ld->PageOf(tile);
-                    gradientXs[i] = (CellNear(g, ld, tile, page, cx + 1, cy) -
-                        CellNear(g, ld, tile, page, cx - 1, cy)) * perUnit;
-                    gradientYs[i] = (CellNear(g, ld, tile, page, cx, cy + 1) -
-                        CellNear(g, ld, tile, page, cx, cy - 1)) * perUnit;
+                    var lx = cx & (TileBake.TileSize - 1);
+                    var ly = cy & (TileBake.TileSize - 1);
+                    if (page != null && (uint)(lx - 1) < TileBake.TileSize - 2 && (uint)(ly - 1) < TileBake.TileSize - 2)
+                    {
+                        var at = page + ly * TileBake.TileSize + lx;
+                        if (values != null) values[i] = *at;
+                        gradientXs[i] = (at[1] - at[-1]) * perUnit;
+                        gradientYs[i] = (at[TileBake.TileSize] - at[-TileBake.TileSize]) * perUnit;
+                    }
+                    else
+                    {
+                        if (values != null) values[i] = page == null ? (short)0 : page[ly * TileBake.TileSize + lx];
+                        gradientXs[i] = (CellNear(g, ld, tile, page, cx + 1, cy) -
+                            CellNear(g, ld, tile, page, cx - 1, cy)) * perUnit;
+                        gradientYs[i] = (CellNear(g, ld, tile, page, cx, cy + 1) -
+                            CellNear(g, ld, tile, page, cx, cy - 1)) * perUnit;
+                    }
+
                     if (cx - 1 >= 0 && cy - 1 >= 0 && cx + 1 < size && cy + 1 < size)
                     {
                         if (whole != null) whole[i >> 6] |= 1ul << (i & 63);
@@ -122,6 +182,7 @@ public static unsafe partial class World
         for (var i = from; i < to; i++)
         {
             var filled = TrySenseGradient(world, layer, xs[i], ys[i], out gradientXs[i], out gradientYs[i]);
+            if (values != null) filled &= TrySense(world, layer, xs[i], ys[i], out values[i]);
             complete &= filled;
             if (filled && whole != null) whole[i >> 6] |= 1ul << (i & 63);
         }

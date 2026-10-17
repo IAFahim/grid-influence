@@ -479,10 +479,21 @@ internal sealed unsafe class FrameCrowd(int entities, int power, ulong seed, boo
         marks[1] = Stopwatch.GetTimestamp();
         Gi.World.Process(WorldId);
         marks[2] = Stopwatch.GetTimestamp();
-        var ok = Gi.World.SenseColumn(WorldId, _layer, _x, _y, Entities, _values, _whole);
-        marks[3] = Stopwatch.GetTimestamp();
-        ok &= Gi.World.SenseGradientColumn(WorldId, _layer, _x, _y, null, Entities, _gradientX, _gradientY, _gradientWhole);
-        marks[4] = Stopwatch.GetTimestamp();
+        bool ok;
+        if (ReadMode.Fused)
+        {
+            ok = Gi.World.SenseGradientColumn(WorldId, _layer, _x, _y, null, Entities, _values, _gradientX, _gradientY, _whole);
+            marks[3] = Stopwatch.GetTimestamp();
+            marks[4] = marks[3];
+        }
+        else
+        {
+            ok = Gi.World.SenseColumn(WorldId, _layer, _x, _y, Entities, _values, _whole);
+            marks[3] = Stopwatch.GetTimestamp();
+            ok &= Gi.World.SenseGradientColumn(WorldId, _layer, _x, _y, null, Entities, _gradientX, _gradientY, _gradientWhole);
+            marks[4] = Stopwatch.GetTimestamp();
+        }
+
         var area = 0L;
         for (var i = 0; i < Disks; i++)
         {
