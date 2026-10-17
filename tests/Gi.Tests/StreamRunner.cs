@@ -11,6 +11,7 @@ internal sealed unsafe class StreamRunner
     private readonly BugInjection? _bug;
     private readonly Action<int, byte, byte, short[]>? _onPage;
     private readonly (long I, long Q40)? _fold;
+    private readonly bool _uncached;
     private readonly List<World.SourceId> _attemptIds = [];
     private readonly int[] _actualTiles = new int[MaxTiles];
     private readonly int[] _expectedTiles = new int[MaxTiles];
@@ -40,13 +41,15 @@ internal sealed unsafe class StreamRunner
         List<StreamCommand> commands,
         BugInjection? bug,
         Action<int, byte, byte, short[]>? onPage,
-        (long I, long Q40)? fold)
+        (long I, long Q40)? fold,
+        bool uncached)
     {
         _setup = setup;
         _commands = commands;
         _bug = bug;
         _onPage = onPage;
         _fold = fold;
+        _uncached = uncached;
     }
 
     public static void Run(
@@ -54,9 +57,10 @@ internal sealed unsafe class StreamRunner
         List<StreamCommand> commands,
         BugInjection? bug = null,
         Action<int, byte, byte, short[]>? onPage = null,
-        (long I, long Q40)? fold = null)
+        (long I, long Q40)? fold = null,
+        bool uncached = false)
     {
-        new StreamRunner(setup, commands, bug, onPage, fold).Execute();
+        new StreamRunner(setup, commands, bug, onPage, fold, uncached).Execute();
     }
 
     public static StreamMismatch? TryRun(
@@ -64,11 +68,12 @@ internal sealed unsafe class StreamRunner
         List<StreamCommand> commands,
         BugInjection? bug = null,
         Action<int, byte, byte, short[]>? onPage = null,
-        (long I, long Q40)? fold = null)
+        (long I, long Q40)? fold = null,
+        bool uncached = false)
     {
         try
         {
-            Run(setup, commands, bug, onPage, fold);
+            Run(setup, commands, bug, onPage, fold, uncached);
             return null;
         }
         catch (StreamMismatch mismatch)
@@ -81,6 +86,7 @@ internal sealed unsafe class StreamRunner
     {
         _world = World.New();
         if (_fold is { } fold) World.ConfigureFoldLimits(_world, fold.I, fold.Q40);
+        if (_uncached) World.DisableKernelInserts(_world);
         _rw = new ReferenceWorld();
         _stamps = new byte[_setup.Stamps.Length];
         var maxCells = 1;

@@ -160,7 +160,8 @@ public static unsafe partial class World
                     break;
                 }
         }
-        if (KernelFactory.TryGetTaps(w, gi, record.Stamp, record.Angle, precision, &p, out var taps))
+        if (KernelFactory.TryFindTaps(w, gi, record.Stamp, record.Angle, precision, &p, out var taps) ||
+            (w->Kernels.CanInsert && KernelFactory.TryGetTaps(w, gi, record.Stamp, record.Angle, precision, &p, out taps)))
         {
             EmitKernelTaps(g, ld, in taps, p.Px, p.Py, gain);
             return;
@@ -428,57 +429,60 @@ public static unsafe partial class World
                 var dirty = -1;
                 long* plane = null;
                 int* ints32 = null;
+                var minX = size;
+                var maxX = 0;
+                var minY = size;
+                var maxY = 0;
 
                 for (var ry = ry0; ry < ry1; ry++)
                 {
-                    var first = extents[2 * ry];
-                    var last = extents[2 * ry + 1];
-                    var kxA = Math.Max(first, tileX0 - kx0);
-                    var kxB = Math.Min(last, tileX0 + size - kx0);
+                    var kxA = Math.Max(extents[2 * ry], tileX0 - kx0);
+                    var kxB = Math.Min(extents[2 * ry + 1], tileX0 + size - kx0);
                     if (kxB <= kxA) continue;
 
-                    var cy = ky0 + ry;
-                    var ly = cy - tileY0;
+                    var ly = ky0 + ry - tileY0;
+                    var shift = kx0 - tileX0;
                     if (longPlane)
                     {
-                        var row = q40 + ry * taps.Width;
-                        for (var kx = kxA; kx < kxB; kx++)
+                        if (plane == null && !TileBake.AnyNonZero(q40 + ry * taps.Width + kxA, kxB - kxA)) continue;
+
+                        if (plane == null)
                         {
-                            var value = row[kx];
-                            if (value == 0) continue;
-
-                            if (plane == null)
-                            {
-                                var set = EnsureSet(g, ld, tile);
-                                dirty = DirtyIndex(g, ld, tile);
-                                plane = QPlane(ld, set, taps.Plane == Plane.Tent, Math.Abs(gain) * taps.MaxTapQ40);
-                            }
-
-                            var lx = kx0 + kx - tileX0;
-                            plane[ly * size + lx] += value * gain;
-                            GrowRect(ld, dirty, lx, ly);
+                            var set = EnsureSet(g, ld, tile);
+                            dirty = DirtyIndex(g, ld, tile);
+                            plane = QPlane(ld, set, taps.Plane == Plane.Tent, Math.Abs(gain) * taps.MaxTapQ40);
                         }
+
+                        var row = q40 + ry * taps.Width;
+                        var target = plane + ly * size + shift;
+                        for (var kx = kxA; kx < kxB; kx++) target[kx] += row[kx] * gain;
                     }
                     else
                     {
-                        var row = ints + ry * taps.Width;
-                        for (var kx = kxA; kx < kxB; kx++)
+                        if (ints32 == null && !TileBake.AnyNonZero(ints + ry * taps.Width + kxA, kxB - kxA)) continue;
+
+                        if (ints32 == null)
                         {
-                            var value = row[kx];
-                            if (value == 0) continue;
-
-                            if (ints32 == null)
-                            {
-                                ints32 = IPlane(g, ld, tile, Math.Abs(gain) * taps.MaxTap);
-                                dirty = DirtyIndex(g, ld, tile);
-                            }
-
-                            var lx = kx0 + kx - tileX0;
-                            ints32[ly * size + lx] += value * gain;
-                            GrowRect(ld, dirty, lx, ly);
+                            ints32 = IPlane(g, ld, tile, Math.Abs(gain) * taps.MaxTap);
+                            dirty = DirtyIndex(g, ld, tile);
                         }
+
+                        TileBake.AddScaledRow(ints32 + ly * size + shift + kxA, ints + ry * taps.Width + kxA, kxB - kxA, gain);
                     }
+
+                    if (shift + kxA < minX) minX = shift + kxA;
+                    if (shift + kxB > maxX) maxX = shift + kxB;
+                    if (ly < minY) minY = ly;
+                    if (ly + 1 > maxY) maxY = ly + 1;
                 }
+
+                if (dirty < 0) continue;
+
+                var rect = &ld->Rects.Pointer[dirty];
+                if (minX < rect->X0) rect->X0 = minX;
+                if (minY < rect->Y0) rect->Y0 = minY;
+                if (maxX > rect->X1) rect->X1 = maxX;
+                if (maxY > rect->Y1) rect->Y1 = maxY;
             }
         }
     }

@@ -6,6 +6,7 @@ internal enum StreamProfile
     Heavy,
     Corpus,
     Transient,
+    Kinds,
 }
 
 internal enum PrecisionMode : byte
@@ -51,7 +52,8 @@ internal static class StreamGenerator
         var setup = new StreamSetup { Seed = seed };
         var augment = profile == StreamProfile.Transient;
         if (augment) profile = StreamProfile.Corpus;
-        var heavy = profile == StreamProfile.Heavy;
+        var kinds = profile == StreamProfile.Kinds;
+        var heavy = profile == StreamProfile.Heavy || kinds;
 
         var gridCount = heavy ? rng.NextInt(1, 4) : rng.NextInt(1, 3);
         setup.Grids = new GridSpec[gridCount];
@@ -121,7 +123,7 @@ internal static class StreamGenerator
         {
             StampSpec stamp;
             var axisLimit = heavy ? 8 : 6;
-            switch (rng.NextInt(0, 7))
+            switch (kinds ? rng.NextInt(3, 7) : rng.NextInt(0, 7))
             {
                 case 0:
                     stamp = new StampSpec
@@ -220,7 +222,7 @@ internal static class StreamGenerator
                     continue;
                 }
 
-                MutationCommand(ref rng, setup, ref attempts, ref live, commands);
+                MutationCommand(ref rng, setup, ref attempts, ref live, commands, kinds);
             }
 
             commands.Add(new StreamCommand { Op = StreamOp.Process, Aux = rng.Next() });
@@ -365,10 +367,12 @@ internal static class StreamGenerator
         StreamSetup setup,
         ref int attempts,
         ref int live,
-        List<StreamCommand> commands)
+        List<StreamCommand> commands,
+        bool kinds)
     {
         var command = new StreamCommand { Aux = rng.Next() };
         var pick = live >= setup.MaxLive ? rng.NextInt(74, 88) : rng.NextInt(0, 100);
+        if (kinds && live < setup.MaxLive && rng.Chance(30)) pick = rng.Chance(70) ? 47 : 55;
 
         switch (pick)
         {

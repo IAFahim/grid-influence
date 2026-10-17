@@ -506,6 +506,12 @@ public static unsafe partial class World
         return id;
     }
 
+    internal static void DisableKernelInserts(byte world)
+    {
+        var w = GetContext(world);
+        if (w != null) w->Kernels.InsertsDisabled = true;
+    }
+
     internal static void ConfigureFoldLimits(byte world, long limitI, long limitQ40)
     {
         var w = GetContext(world);
@@ -861,6 +867,7 @@ public static unsafe partial class World
         if (w == null) return;
 
         w->Tick++;
+        w->Kernels.BeginFrame();
         if (w->TimedList.Length != 0) SweepTimed(w);
 
         var stamp = ProcessStages.Mark();
@@ -881,6 +888,7 @@ public static unsafe partial class World
             {
                 var ld = g->Layers + l;
                 var dirty = ld->Dirty.Pointer;
+                SortSlots(dirty, ld->Dirty.Length);
                 for (var i = 0; i < ld->Dirty.Length; i++) ld->Epochs[dirty[i]] = w->Tick;
                 var changed = ld->Dirty;
                 ld->Dirty = ld->Changed;

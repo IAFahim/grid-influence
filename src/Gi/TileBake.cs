@@ -130,6 +130,36 @@ internal static unsafe partial class TileBake
 #endif
     }
 
+    internal static bool AnyNonZero(int* values, int count)
+    {
+        for (var i = 0; i < count; i++)
+            if (values[i] != 0) return true;
+
+        return false;
+    }
+
+    internal static bool AnyNonZero(long* values, int count)
+    {
+        for (var i = 0; i < count; i++)
+            if (values[i] != 0) return true;
+
+        return false;
+    }
+
+    internal static void AddScaledRow(int* destination, int* source, int count, int gain)
+    {
+        var i = 0;
+#if NET
+        if (Vector256.IsHardwareAccelerated)
+        {
+            var scale = Vector256.Create(gain);
+            for (; i + 8 <= count; i += 8)
+                Vector256.Store(Vector256.Load(destination + i) + Vector256.Load(source + i) * scale, destination + i);
+        }
+#endif
+        for (; i < count; i++) destination[i] += source[i] * gain;
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static void AddConstant(int* cells, int first, int end, int value)
     {

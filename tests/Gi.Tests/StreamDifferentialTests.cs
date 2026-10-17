@@ -11,6 +11,8 @@ public unsafe class StreamDifferentialTests
     private const int HeavyStreams = 48;
     private const int HeavySeedBase = 500_000;
     private const int FoldSeedBase = 1_200_000;
+    private const int KindStreams = 300;
+    private const int KindSeedBase = 1_500_000;
 
     [Fact]
     public void GateStreamsPassAtExactCellAndQuarter()
@@ -24,6 +26,35 @@ public unsafe class StreamDifferentialTests
             var minimized = StreamMinimizer.Minimize(setup, setup.Commands, null);
             throw new Xunit.Sdk.XunitException(
                 $"{mismatch.Message}\nminimized to {minimized.Count} commands\n{StreamMinimizer.PrintAsCSharpTest(setup, minimized)}");
+        }
+    }
+
+    [Fact]
+    public void RoundArcRasterAndTurnedStreamsPassAtEveryPrecision()
+    {
+        for (var i = 0; i < KindStreams; i++)
+        {
+            var setup = StreamGenerator.Generate(KindSeedBase + i, (PrecisionMode)(i % 5), StreamProfile.Kinds);
+            var mismatch = StreamRunner.TryRun(setup, setup.Commands);
+            if (mismatch == null) continue;
+
+            var minimized = StreamMinimizer.Minimize(setup, setup.Commands, null);
+            throw new Xunit.Sdk.XunitException(
+                $"{mismatch.Message}\nminimized to {minimized.Count} commands\n{StreamMinimizer.PrintAsCSharpTest(setup, minimized)}");
+        }
+    }
+
+    [Fact]
+    public void DirectEmissionWithoutKernelInsertsMatchesTheInterpreter()
+    {
+        for (var i = 0; i < 200; i++)
+        {
+            var profile = i % 4 == 3 ? StreamProfile.Heavy : StreamProfile.Kinds;
+            var setup = StreamGenerator.Generate(KindSeedBase + 50_000 + i, (PrecisionMode)(i % 5), profile);
+            var mismatch = StreamRunner.TryRun(setup, setup.Commands, uncached: true);
+            if (mismatch == null) continue;
+
+            throw new Xunit.Sdk.XunitException($"seed {KindSeedBase + 50_000 + i}: {mismatch.Message}");
         }
     }
 
