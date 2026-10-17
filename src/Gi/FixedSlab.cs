@@ -16,6 +16,8 @@ internal unsafe struct FixedSlab
 
     public readonly int FreeCount => _free.Length;
 
+    public readonly int LiveCount => _taken - _free.Length;
+
     public readonly byte* Region => _region;
 
     public readonly long ByteCapacity => (long)_capacity * _stride;

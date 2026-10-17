@@ -87,6 +87,21 @@ internal unsafe struct KernelCache
         (long)_entries.Capacity * sizeof(KernelEntry) + (long)_taps.Capacity * sizeof(long) +
         ((long)_rows.Capacity + _canvasRows.Capacity) * sizeof(int) + (long)_canvas.Capacity * sizeof(long);
 
+    public readonly int LiveEntries
+    {
+        get
+        {
+            var entries = _entries.Pointer;
+            if (entries == null) return 0;
+
+            var count = 0;
+            for (var i = 0; i < EntryCount; i++)
+                if (entries[i].Key != 0 || entries[i].Turn != 0) count++;
+
+            return count;
+        }
+    }
+
     public readonly KernelEntry* Find(ulong key, ulong turn)
     {
         var entries = _entries.Pointer;
