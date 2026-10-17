@@ -38,6 +38,18 @@ surface is still `World`, `Grid`, `Layer` and `Stamp`; the additions are nested.
 * `World.Splat`, `World.BeginSplat`/`SplatWriter`, `World.View` and `World.FieldView`, the fused
   `SenseGradientColumn` overload with values, `TrySense`/`TrySenseGradient`/`TrySenseArea` overloads
   that exclude a splat made at the query point, `Grid.SpatialKeys`, `Grid.SortByKeys`, `Grid.Disorder`.
+* `World.Memory(world, out storeBytes, out liveTiles, out pages, out kernelEntries, out liveSources)`:
+  the tooling read-out. Summed plane-store bytes, live tiles, live slab units, occupied kernel-cache
+  entries and live sources, allocation-free, zeros for a dead handle.
+
+* `World.Teardown()`: runtime teardown for domain/code reload. Once no world is live, frees the
+  stamp payloads and every process-wide pool so the next creation call starts pristine; returns
+  `false` and changes nothing while a world is live, and keeps slot revisions increasing across
+  teardowns so pre-teardown tokens stay refused.
+* `World.TryGetSchedule(world, source, out gain, out fadeFrom, out fadeTo, out fadeTicks,
+  out fadeTicksLeft, out expireTicksLeft)`: the schedule read-back for exact saves. False for dead
+  or unscheduled sources; reports the current gain, a stepping fade's ends, duration and ticks left,
+  and an expiry's remaining ticks, allocation-free.
 * `benchmarks --frames|--gate|--floor|--area|--region|--splat|--kinds|--order|--changed|--view`,
   `tools/fuzz`, a reference interpreter and a committed golden corpus under `tests/Gi.Tests`, and a
   determinism matrix in CI.

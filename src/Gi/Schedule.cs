@@ -46,6 +46,43 @@ public static unsafe partial class World
         return WriteStatus.Applied;
     }
 
+    public static bool TryGetSchedule(
+        byte world,
+        SourceId source,
+        out sbyte gain,
+        out sbyte fadeFrom,
+        out sbyte fadeTo,
+        out int fadeTicks,
+        out int fadeTicksLeft,
+        out int expireTicksLeft)
+    {
+        gain = 0;
+        fadeFrom = 0;
+        fadeTo = 0;
+        fadeTicks = 0;
+        fadeTicksLeft = 0;
+        expireTicksLeft = 0;
+        if (!TrySource(world, source, out var w, out var s, out var i)) return false;
+
+        var now = w->Tick;
+        var timed = s->Timed.Pointer[i];
+        var expiring = (timed & Expiring) != 0;
+        var fading = (timed & Fading) != 0 && NextStep(s, i, now, out _);
+        if (!fading && !expiring) return false;
+
+        gain = (sbyte)s->Gain[i];
+        if (fading)
+        {
+            fadeFrom = s->FadeFrom.Pointer[i];
+            fadeTo = s->FadeTo.Pointer[i];
+            fadeTicks = s->FadeTicks.Pointer[i];
+            fadeTicksLeft = s->FadeStart.Pointer[i] + fadeTicks - now;
+        }
+
+        if (expiring) expireTicksLeft = s->ExpireAt.Pointer[i] - now;
+        return true;
+    }
+
     private static void WriteFade(WorldCtx* w, SourceColumns* s, int i, sbyte gain, int ticks)
     {
         var target = (sbyte)Math.Clamp((int)gain, -MaxGain, MaxGain);

@@ -35,7 +35,19 @@ The rest of this file derives from seven statements.
   releases the world's memory and its handle: `World.New` reuses the lowest free handle, and a freed
   handle reads as absent to every call. `World.CopyWorldIds(ids)` copies the allocated ids,
   ascending, into a span and returns the live count; `World.ProcessAll()` processes every
-  allocated world in id order on the calling thread. `World.Revision(world)` returns an `int`
+  allocated world in id order on the calling thread. `World.Teardown()` returns the process-wide
+  pools to the OS once no world is live: it returns `false` and changes nothing while any world
+  is live, and `true` once it has freed everything (the pools paragraph states the full contract).
+  `World.Memory(world, out storeBytes,
+  out liveTiles, out pages, out kernelEntries, out liveSources)` is the tooling read-out: it
+  sums, over every (grid, layer) of the world, the retained capacity of the four plane slabs
+  (`PlaneStore.Bytes`, free lists included), the engine's live-tile counter (`LivePages`, one per
+  directory entry), and the live plane units those slabs hold — every live tile's page, `I`,
+  `T`/`B` and summary unit, folded tiles' wide temporaries included — then counts the kernel
+  cache's occupied entries out of 32 and the sources whose alive bit is set. It reads only
+  existing counters, allocates nothing, throws nothing, and returns all zeros for a dead or
+  never-allocated handle; `Clear` empties the live counts while the slab bytes stay (regions are
+  retained, free lists grow), and `Free` returns everything to zero. `World.Revision(world)` returns an `int`
   that changes whenever queued work could be stale — `World.New` assigns it a fresh value,
   and `Clear`, `Rewind`, `Free`, and slot reuse bump it; mutations, `Process`, and `ProcessAll`
   leave it alone. `World.Capture(world)` seals the id and that revision into a `World.Token`
@@ -48,7 +60,11 @@ before reading command payloads, writing
   slot returns `BatchStatus.InvalidWorld`, and rejection leaves the world byte-identical. The
   revision is an `int` in both the token and the runtime store — never a widened copy — and
   comparisons are equality, so the only wrap hazard is a stale token falsely matching after
-  exactly 2³² lifecycle transitions on one slot. Capture is legal whenever reading the world is
+  exactly 2³² lifecycle transitions on one slot. A `World.Teardown` does not reopen that hazard:
+  before the revision array is freed, its maximum is folded into a process-lifetime floor with
+  which the next `Ensure` seeds the reallocated array, so a slot's revisions stay increasing
+  across teardowns and a token captured before a teardown is refused with `StaleRevision` after
+  the restart, exactly as a token from before a `World.Free` is. Capture is legal whenever reading the world is
   (between lifecycle controls, under the host's producer/reader fences); consumption runs in the
   existing exclusive mutation phase — a token check is not a lock, and concurrent same-world
   mutation or a `Free`/`Clear`/`Rewind` racing a consumer remains forbidden. A grid
@@ -417,6 +433,26 @@ before reading command payloads, writing
   gain change or removal — marked, snapshotted, and merged exactly like the API calls — so
   scheduled and manual mutations are indistinguishable downstream, and determinism follows from
   the ascending-slot order (expired slots return to the free ring in that order). Ticks count `Process` calls, not time: Gi has no clock.
+- **Schedule read-back**: `World.TryGetSchedule(world, source, out gain, out fadeFrom, out fadeTo,
+  out fadeTicks, out fadeTicksLeft, out expireTicksLeft)` reads one live source's schedule. It
+  returns false — every out zeroed — for a dead world, a stale or dead id, or a source with
+  nothing left scheduled, and true otherwise. `gain` is the current effective gain, the column
+  the sweep steps and deposits read. `fadeTicks > 0` marks a fade that still has a gain step to
+  apply — a fade whose rounded gain has already reached `fadeTo` no longer counts, even before
+  its nominal end — and carries `fadeFrom`/`fadeTo` (the ramp ends), `fadeTicks` (the requested
+  duration) and `fadeTicksLeft` (ticks to the nominal end, at least 1 while stepping);
+  `fadeTicks − fadeTicksLeft` is the elapsed tick, so the whole staircase `from +
+  sign(Δ)·⌊(|Δ|·k + ⌊ticks/2⌋) / ticks⌋` is recomputable and an interrupted run can be re-driven
+  tick for tick (a single fresh `Fade(world, source, fadeTo, fadeTicksLeft)` restarts rounding
+  from the current gain and is not bit-exact in general). `expireTicksLeft` is the ticks before
+  the pending removal, so `Expire(world, source, expireTicksLeft)` reproduces the removal tick;
+  a source both fading and expiring reports both. *Lifetime*: the call borrows the world's
+  source columns for its duration only and no pointer escapes it. *Aliasing*: the out
+  parameters are caller-owned slots, never aliasing Gi memory. *Alignment*: outs sit at their
+  natural alignment (sbyte 1 B, int 4 B). *Concurrency*: a per-world read under the same
+  serial-per-world rule as `TryGetSourceSpec` — safe on any thread that already respects that
+  rule, torn rather than protected against a concurrent writer or `Process` on the same world;
+  it writes nothing, allocates nothing, and throws nothing.
 - **Rewind**: `Record` drops any prior journal, bumps a per-world record epoch in O(1), and
   moves the pending snapshots (mutations made since the last `Process`) into the journal. From
   then on the first marked write to each slot journals that slot's 24 B column state (position,
@@ -687,6 +723,7 @@ short m = World.QueryMax(world, grid, layer, out var mx, out var my); // best ce
 World.QueryGradient(world, grid, layer, 128f, 64f, out var gx, out var gy); // ±1-cell slope
 World.Remove(world, source);
 World.Free(world);                         // releases the world's memory and its handle
+World.Teardown();                          // returns the process pools to the OS once no world is live
 ```
 
 A world can mix resolutions freely — `Grid 256x / 1024x / 32x` — each grid covering its own
@@ -960,7 +997,20 @@ digits. Concurrency: single thread.
   process-lifetime pools allocated by the first creation call (`World.New`, `Stamp.New`,
   `Stamp.Box`) — never by static construction, so no static constructor on the assembly performs
   calls. This does not make mutable Gi statics callable from Burst through a precompiled DLL;
-  Unity records with Burst and invokes Gi from non-Burst code. World contents are
+  Unity records with Burst and invokes Gi from non-Burst code. `World.Teardown` is the pools'
+  release: it is refused — it returns `false` and touches nothing — while any world is live
+  (the same `Grids != null` slot scan `CopyWorldIds` reads), and otherwise frees every stamp's
+  raster and mips, both pools, the shared zero page, and the revision array, and returns the
+  world count, the catalog count (id 0 stays reserved), and `NativeHeap.Calls` to their pristine
+  values, so the next creation call performs the same `Ensure` a fresh process would. The
+  precondition is exactly the absence of live worlds: stamps outlive worlds by design and are
+  torn down with the catalog, not refused; every world-scoped block, kernel cache, and taps
+  handle dies with its world before teardown can run, and no pointer into freed storage is
+  handed out in between because pools, payloads, and counters are reset in the same call. The
+  one counter that never resets is the revision floor: `Release` folds the freed array's maximum
+  into it and the next `Ensure` seeds every slot with it, so revisions stay increasing across
+  teardowns and a token captured before a teardown never validates after the restart. Calling
+  `World.Teardown` before any creation call returns `true` without allocating. World contents are
   `NativeHeap` blocks owned by the context: the grid array, the layer recipe table, the changed-slot
   list (`Changed`, `int` slots), the `Pending` and `Journal` buffers of 24 B snapshots — `Pending`
   takes one snapshot of a slot's columns at its first mark of a window and is cleared by
@@ -1216,11 +1266,21 @@ digits. Concurrency: single thread.
   the allocated ids, ascending, on the calling thread — it adds no parallelism claim, it only
   packages the loop, and freed slots read as absent to it exactly as they do to `Process`.
   World creation, `World.Free`, `World.CopyWorldIds` (which reads the world count and each
-  slot's `Grids` pointer), `World.ProcessAll`, and stamp catalog mutation (`Stamp` creation
+  slot's `Grids` pointer), `World.ProcessAll`, `World.Teardown`, and stamp catalog mutation (`Stamp` creation
   and `Stamp.Free`, which scans every world for references) are process-wide scans:
-  serialize them with one another. `Grid.Count`, `Grid.CopyIds`, `Grid.TryGetSpec`,
+  serialize them with one another; `World.Teardown` frees the arenas every one of those scans
+  walks, so it must not overlap any other Gi call at all — its precondition, no live world,
+  already excludes the per-world calls, and what remains to exclude is creation, stamp
+  mutation, process-wide scans, and reads through handles that predate the teardown.
+  `Grid.Count`, `Grid.CopyIds`, `Grid.TryGetSpec`,
   `Layer.Count`, and `Layer.CopyIds` read the owning world's counts and grid records —
   per-world reads under the same serial-per-world rule as that world's other calls.
+  `World.Memory` is a per-world read of the same kind: it walks the world's grid records,
+  store slabs, kernel cache and source columns without writing anything, so it is safe on any
+  thread that already respects that world's serial rule, and a value read while a writer or
+  `Process` runs on that world is torn, not protected — no lock is taken by design.
+  `World.TryGetSchedule` is a one-slot read of the same kind: it probes the source columns'
+  gain and schedule fields without writing anything, under the same serial-per-world rule.
   Mutations only write the owning world's source columns, mark its changed list, and snapshot into
   its `Pending` buffer; the mark column is the one writer-side dedup. `Rewind` runs entirely on
   the owning thread: it writes source columns, marks restored slots on the same changed list, and
@@ -1464,7 +1524,9 @@ scratch capacity, and shared
 world/stamp arenas plus padded rasters. The selected world and
 process-wide shared allocations are reported separately; allocator metadata, alignment slack,
 other worlds, and the runtime are excluded from native totals. GC heap and process memory are
-separate runtime observations.
+separate runtime observations. `World.Memory` is the public surface of the same accounting: a
+subset of these numbers as `out` parameters, taken from the same counters `Inspection` reads,
+under the same lifetime and thread rules as the rest of this paragraph.
 
 Inspection shares the owner's lifetime and thread rules: capture it on the world-owning thread
 between mutations/process calls, and serialize stamp creation with the capture. It neither
