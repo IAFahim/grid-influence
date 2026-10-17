@@ -35,7 +35,16 @@ The rest of this file derives from seven statements.
   releases the world's memory and its handle: `World.New` reuses the lowest free handle, and a freed
   handle reads as absent to every call. `World.CopyWorldIds(ids)` copies the allocated ids,
   ascending, into a span and returns the live count; `World.ProcessAll()` processes every
-  allocated world in id order on the calling thread. `World.Revision(world)` returns an `int`
+  allocated world in id order on the calling thread. `World.Memory(world, out storeBytes,
+  out liveTiles, out pages, out kernelEntries, out liveSources)` is the tooling read-out: it
+  sums, over every (grid, layer) of the world, the retained capacity of the four plane slabs
+  (`PlaneStore.Bytes`, free lists included), the engine's live-tile counter (`LivePages`, one per
+  directory entry), and the live plane units those slabs hold — every live tile's page, `I`,
+  `T`/`B` and summary unit, folded tiles' wide temporaries included — then counts the kernel
+  cache's occupied entries out of 32 and the sources whose alive bit is set. It reads only
+  existing counters, allocates nothing, throws nothing, and returns all zeros for a dead or
+  never-allocated handle; `Clear` empties the live counts while the slab bytes stay (regions are
+  retained, free lists grow), and `Free` returns everything to zero. `World.Revision(world)` returns an `int`
   that changes whenever queued work could be stale — `World.New` assigns it a fresh value,
   and `Clear`, `Rewind`, `Free`, and slot reuse bump it; mutations, `Process`, and `ProcessAll`
   leave it alone. `World.Capture(world)` seals the id and that revision into a `World.Token`
@@ -1221,6 +1230,10 @@ digits. Concurrency: single thread.
   serialize them with one another. `Grid.Count`, `Grid.CopyIds`, `Grid.TryGetSpec`,
   `Layer.Count`, and `Layer.CopyIds` read the owning world's counts and grid records —
   per-world reads under the same serial-per-world rule as that world's other calls.
+  `World.Memory` is a per-world read of the same kind: it walks the world's grid records,
+  store slabs, kernel cache and source columns without writing anything, so it is safe on any
+  thread that already respects that world's serial rule, and a value read while a writer or
+  `Process` runs on that world is torn, not protected — no lock is taken by design.
   Mutations only write the owning world's source columns, mark its changed list, and snapshot into
   its `Pending` buffer; the mark column is the one writer-side dedup. `Rewind` runs entirely on
   the owning thread: it writes source columns, marks restored slots on the same changed list, and
@@ -1464,7 +1477,9 @@ scratch capacity, and shared
 world/stamp arenas plus padded rasters. The selected world and
 process-wide shared allocations are reported separately; allocator metadata, alignment slack,
 other worlds, and the runtime are excluded from native totals. GC heap and process memory are
-separate runtime observations.
+separate runtime observations. `World.Memory` is the public surface of the same accounting: a
+subset of these numbers as `out` parameters, taken from the same counters `Inspection` reads,
+under the same lifetime and thread rules as the rest of this paragraph.
 
 Inspection shares the owner's lifetime and thread rules: capture it on the world-owning thread
 between mutations/process calls, and serialize stamp creation with the capture. It neither
