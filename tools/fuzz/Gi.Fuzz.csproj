@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RootNamespace>Gi.Tests</RootNamespace>
+    <NoWarn>$(NoWarn);CS0649</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Gi/Gi.csproj" />
+    <Compile Include="../../tests/Gi.Tests/ReferenceWorld.cs" Link="Oracle/ReferenceWorld.cs" />
+    <Compile Include="../../tests/Gi.Tests/StreamGenerator.cs" Link="Oracle/StreamGenerator.cs" />
+    <Compile Include="../../tests/Gi.Tests/StreamMinimizer.cs" Link="Oracle/StreamMinimizer.cs" />
+    <Compile Include="../../tests/Gi.Tests/StreamModel.cs" Link="Oracle/StreamModel.cs" />
+    <Compile Include="../../tests/Gi.Tests/StreamOperands.cs" Link="Oracle/StreamOperands.cs" />
+    <Compile Include="../../tests/Gi.Tests/StreamRunner.cs" Link="Oracle/StreamRunner.cs" />
+  </ItemGroup>
+</Project>

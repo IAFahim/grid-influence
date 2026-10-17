@@ -747,7 +747,7 @@ public sealed class EngineTests
         Assert.Equal(1, pending.LiveSources);
         Assert.Equal(0, pending.LiveTiles);
         Assert.Equal(0, pending.DirtyTiles);
-        Assert.Equal(983_040, pending.SourceBytes);
+        Assert.Equal(1_048_576, pending.SourceBytes);
         Assert.Equal(0, pending.DirectoryBytes + pending.SlabBytes + pending.Int32Bytes + pending.PageBytes);
         World.Process(w);
         var processed = Stats.Inspection.Read(w);
@@ -766,7 +766,7 @@ public sealed class EngineTests
         Assert.Equal(1, cleared.Directories);
         Assert.Equal(16, cleared.DirectoryBytes);
         Assert.Equal(16 * unitBytes + 4 * 64, cleared.SlabBytes);
-        Assert.Equal(empty.WorldBytes + 983_040 + 32 + 16 * sizeof(int) + 16 * sizeof(TileRect) +
+        Assert.Equal(empty.WorldBytes + 1_048_576 + 32 + 16 * sizeof(int) + 16 * sizeof(TileRect) +
             16 * sizeof(int) + 16 * sizeof(JournalEntry) + 16_384L * sizeof(DepositRecord) +
             16 + 16 * unitBytes + 4 * 64 + processed.KernelBytes + cleared.EpochTreeBytes, cleared.WorldBytes);
     }

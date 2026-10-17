@@ -34,7 +34,7 @@ internal unsafe struct SourceColumns
     public SourceColumn<ushort> Scale;
     public SourceColumn<byte> Alive;
     public SourceColumn<uint> Gen;
-    public SourceColumn<int> Mark;
+    public SourceColumn<long> Mark;
     public NativeBuffer<int> HotStamp;
     public NativeBuffer<int> SchedStamp;
     public NativeBuffer<byte> Timed;
@@ -64,7 +64,7 @@ internal unsafe struct SourceColumns
             Scale.Chunks = (ushort**)NativeHeap.AllocZeroed(pointers);
             Alive.Chunks = (byte**)NativeHeap.AllocZeroed(pointers);
             Gen.Chunks = (uint**)NativeHeap.AllocZeroed(pointers);
-            Mark.Chunks = (int**)NativeHeap.AllocZeroed(pointers);
+            Mark.Chunks = (long**)NativeHeap.AllocZeroed(pointers);
         }
 
         for (var i = 0; i < chunks; i++)
@@ -79,7 +79,7 @@ internal unsafe struct SourceColumns
             Scale.Chunks[chunk] = (ushort*)NativeHeap.AllocZeroed((nuint)(ChunkSlots * sizeof(ushort)));
             Alive.Chunks[chunk] = (byte*)NativeHeap.AllocZeroed(ChunkSlots);
             Gen.Chunks[chunk] = (uint*)NativeHeap.AllocZeroed((nuint)(ChunkSlots * sizeof(uint)));
-            Mark.Chunks[chunk] = (int*)NativeHeap.AllocZeroed((nuint)(ChunkSlots * sizeof(int)));
+            Mark.Chunks[chunk] = (long*)NativeHeap.AllocZeroed((nuint)(ChunkSlots * sizeof(long)));
             Chunks++;
         }
     }
@@ -741,9 +741,9 @@ public static unsafe partial class World
             var entry = journal + j;
             var slot = entry->Slot;
             SnapshotPending(w, s, slot);
-            if (s->Mark[slot] != w->MarkEpoch)
+            if ((int)s->Mark[slot] != w->MarkEpoch)
             {
-                s->Mark[slot] = w->MarkEpoch;
+                s->Mark[slot] = (s->Mark[slot] & ~0xFFFFFFFFL) | (uint)w->MarkEpoch;
                 var n = w->Changed.Length;
                 w->Changed.Resize(n + 1);
                 w->Changed.Pointer[n] = slot;

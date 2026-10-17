@@ -998,7 +998,11 @@ public static unsafe partial class World
 
         var s = &w->Sources;
         var slot = (int)id.Slot;
-        if ((uint)slot >= (uint)s->Count || s->Gen[slot] != id.Generation) return false;
+        if ((uint)slot >= (uint)s->Count) return false;
+
+        var mark = s->Mark[slot];
+        var deposited = (int)mark == w->MarkEpoch ? w->Pending.Pointer[(int)(mark >> 32)].Gen : s->Gen[slot];
+        if (deposited != id.Generation) return false;
 
         var r = RecordOf(g, slot);
         if (r->Alive == 0 || r->Gain == 0) return false;

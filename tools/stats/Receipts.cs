@@ -4,7 +4,7 @@ internal readonly record struct Receipt(string Name, bool Passed, long Value);
 
 internal static unsafe class Receipts
 {
-    private const long SourceChunkBytes = 778_240 + 196_608 + 8_192;
+    private const long SourceChunkBytes = 778_240 + 196_608 + 8_192 + 65_536;
 
     public static Receipt[] Run()
     {

@@ -73,7 +73,7 @@ internal static unsafe class Inspection
             ScratchBytes = 0,
             KernelBytes = w->Kernels.Bytes,
             SourceBytes = (long)s->Chunks * SourceColumns.ChunkSlots *
-                (2 * sizeof(float) + 4 * sizeof(byte) + 2 * sizeof(ushort) + sizeof(uint) + sizeof(int)) +
+                (2 * sizeof(float) + 4 * sizeof(byte) + 2 * sizeof(ushort) + sizeof(uint) + sizeof(long)) +
                 (s->Chunks != 0 ? 10L * SourceColumns.MaxChunks * sizeof(void*) : 0) +
                 ((long)s->HotStamp.Capacity + s->SchedStamp.Capacity) * sizeof(int) +
                 s->Timed.Capacity + s->FadeFrom.Capacity + s->FadeTo.Capacity +

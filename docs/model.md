@@ -825,6 +825,18 @@ fading sources per tick, `TrySenseNearest`, and `Changed`. Timing receipts live 
 the README (deposit vs re-emitted marks, i9-14900K; perf-pass deltas, Ryzen 5 8500G); the perf
 pass behind them was `perf`-profile guided, receipts first.
 
+### Fuzzing
+
+`dotnet run --project tools/fuzz -c Release -- --fuzz <minutes> [--seed N] [--out directory]` runs
+generated command streams (gate, heavy, kind-biased and transient profiles over every precision
+mode) against the interpreter until the time is up. A mismatch is minimized with the ddmin
+minimizer and written as a ready-to-paste `[Fact]` under `--out`; the exit code is 1 when any
+stream failed. The tool compiles the interpreter, generator, runner and minimizer straight from
+`tests/Gi.Tests`, so it cannot drift from the differential tests. Its first four-minute run found a
+real divergence (an exclusion by the id of a source whose removal was pending, after another source
+reused its slot in the same frame, excluded nothing or the wrong deposit); the engine now resolves
+the deposited generation through the pending snapshot, and `FuzzRegressionTests` keeps the stream.
+
 ### Measurement hazards
 
 - dotnet-trace leaf attribution is unreliable on this runtime (two profiles contradicted ground
