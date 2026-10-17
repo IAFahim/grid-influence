@@ -8,6 +8,7 @@ if (mode == "--sync") return Verification.SyncTransformTiming();
 if (mode == "--stages") return Verification.StageTiming();
 if (mode == "--sweep") return Verification.SweepProfile();
 if (mode == "--view") return ViewTiming.Run();
+if (mode == "--splat") return SplatTiming.Run();
 var result = Verification.Run();
 if (mode is "" or "--verify")
 {

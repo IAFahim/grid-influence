@@ -1,5 +1,6 @@
 #if NET
 using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics;
 #endif
 
 namespace Gi;
@@ -127,7 +128,11 @@ public static unsafe partial class World
                 var size = g->Size;
                 var ld = g->Layers + layer;
                 var perUnit = scaleQ8 / 512f;
-                for (var i = from; i < to; i++)
+                var done = from;
+#if NET
+                if (Vector256.IsHardwareAccelerated) done = GradientBlocks(g, ld, xs, ys, values, gradientXs, gradientYs, whole, from, to, ref complete);
+#endif
+                for (var i = done; i < to; i++)
                 {
                     var x = xs[i];
                     var y = ys[i];

@@ -4,6 +4,8 @@ namespace Gi;
 
 internal unsafe struct FixedSlab
 {
+    private const int GatherSlack = 64;
+
     private byte* _region;
     private NativeBuffer<int> _free;
     private int _stride;
@@ -16,13 +18,15 @@ internal unsafe struct FixedSlab
 
     public readonly byte* Region => _region;
 
+    public readonly long ByteCapacity => (long)_capacity * _stride;
+
     public int Take(int stride)
     {
         if (_region == null)
         {
             _stride = stride;
             _capacity = 16;
-            _region = (byte*)NativeHeap.AlignedAlloc((nuint)_capacity * (nuint)stride);
+            _region = (byte*)NativeHeap.AlignedAlloc((nuint)_capacity * (nuint)stride + GatherSlack);
         }
 
         var freeCount = _free.Length;
@@ -61,7 +65,7 @@ internal unsafe struct FixedSlab
     private void Grow()
     {
         var capacity = _capacity * 2;
-        var region = (byte*)NativeHeap.AlignedAlloc((nuint)capacity * (nuint)_stride);
+        var region = (byte*)NativeHeap.AlignedAlloc((nuint)capacity * (nuint)_stride + GatherSlack);
         Buffer.MemoryCopy(_region, region, (long)capacity * _stride, (long)_capacity * _stride);
         NativeHeap.AlignedFree(_region);
         _region = region;

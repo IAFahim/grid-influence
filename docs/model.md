@@ -978,18 +978,40 @@ digits. Concurrency: single thread.
   bounds, alignment and single-thread rules). A tile that is dropped (its page publishes to
   zero) takes its planes with it and never enters the stale list.
 - **Histogram path**: *Lifetime*: the per-(grid, layer) `HistState` (class table, 4,096 B page slab,
-  active-class list, output-tile list, per-tile mark array, the 63×63 window and the 63×32 strip
-  scratch) is allocated on the first cell-precision splat, owned by the layer, emptied by every
-  `Process` (each page returns to the slab free list and each class directory entry is zeroed
-  through the class's tile list) and by `Clear`, and released with the layer. *Aliasing*: a splat
-  writes one `int` of one page it owns; the flush reads pages through directory entries it has not
-  yet cleared and writes `I` planes only through the tile's own set, after `EnsureSet`, so no plane
-  pointer survives a slab growth. *Bounds*: a splat is routed here only when `0 ≤ cx, cy < Size`,
-  the page index is `(cy & 31)·32 + (cx & 31)`; the box filter requires kernel `Width, Height ≤ 32`
-  and offsets that keep the window within one neighbouring tile on each side, so `GatherWindow`
-  writes at most 63 `int`s per window row of a 63-wide buffer and copies at most one page row
-  segment at a time; the strip is `windowHeight × 32 ≤ 63 × 32`. *Alignment*: natural `int`, with
-  unaligned-safe `MemoryCopy`. *Concurrency*: owning thread only.
+  active-class list, output-tile list, per-tile mark array, the 63-row window with a 71-`int`
+  row stride and the 63×32 strip scratch) is allocated on the first cell-precision splat, owned by
+  the layer, emptied by every `Process` (each page returns to the slab free list and each class
+  directory entry is zeroed through the class's tile list) and by `Clear`, and released with the
+  layer. *Aliasing*: a splat writes one `int` of one page it owns; the flush reads pages through
+  directory entries it has not yet cleared and writes `I` planes only through the tile's own set,
+  after `EnsureSet`, so no plane pointer survives a slab growth. `SplatBlocks` takes the page
+  region pointer only after every missing page of the block has been taken, so a slab doubling
+  cannot leave it stale. *Bounds*: a splat lane is applied only when `0 ≤ cx, cy < Size`; the
+  directory gather indexes with coordinates clamped into the grid, so it never leaves the
+  `TilesPerSide²` directory; the page offset is `(slot − 1)·1,024 + (cy & 31)·32 + (cx & 31)`
+  with `slot` read from an entry that was non-zero when the offset was formed. The box filter
+  requires kernel `Width, Height ≤ 32` and offsets that keep the window within one neighbouring
+  tile on each side, so `GatherWindow` copies row segments that each lie in one page row and
+  write at most 63 `int`s per window row; `CopyBlock` and `ClearBlock` move whole 8-`int` vectors,
+  so a segment store ends at most 7 `int`s past its span: inside the 8-`int` row padding or in the
+  next segment of the same row, which is written later (segments go left to right), and a
+  segment load ends at most 7 `int`s past its span in the page, which is the next page row, the
+  next slab unit, or the 64-byte tail slack every `FixedSlab` allocates. The strip is
+  `windowHeight × 32 ≤ 63 × 32`. *Alignment*: natural `int`, with unaligned vector loads and
+  stores. *Concurrency*: owning thread only.
+- **Vector column reads**: *Lifetime*: `GradientBlocks` reads the layer's tile directory, set slab
+  and page slab and allocates nothing; the three base pointers are loaded once per call, and
+  nothing in the call can grow or move a slab. *Aliasing*: reads only. *Bounds*: a block takes the
+  gathered path only when all eight lanes are inside the grid. The tile index of every lane, and
+  of every neighbour tap that crosses a tile edge (`±1`, `±TilesPerSide`, taken only for lanes
+  whose tap cell is inside the grid), is below the directory length. The set index is clamped to
+  zero before it addresses the set slab, the page index is multiplied by 2,048 into a byte
+  offset, and an absent tile (directory entry `< 0`) addresses byte 0 with its lane zeroed by
+  mask. The in-page cell is `0..1,023`, so a tap's offset is at most 2,046 bytes into its page
+  and the four-byte gather reads at most two bytes past the page: the next unit or the 64-byte
+  tail slack of the slab. The path is disabled when the page slab exceeds `int.MaxValue` bytes.
+  *Alignment*: gathers take unaligned byte offsets with scale 1. *Concurrency*: none beyond the
+  serial-per-world rule.
 - **Field view**: *Lifetime*: a `FieldView` holds the layer and grid constants it was built from
   and one cached page pointer; both name directory and slab storage that only `Process`, `Clear`,
   `Rewind` and `World.Free` can grow, move or release, so a view must not be used across them (a
