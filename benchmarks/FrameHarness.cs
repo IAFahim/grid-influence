@@ -98,7 +98,7 @@ internal static class FrameHarness
             .BeginObject("header")
             .Text("tool", "gi-frames")
             .Integer("version", 1)
-            .Text("engine", "main 1.x: one engine, no transient layers; frame C runs as persistent sources synced every frame")
+            .Text("engine", "engine-v2: change-rate Process, transient layers with Splat; frame C runs as a transient layer unless --layer persistent")
             .Text("cpu_model", FrameHost.CpuModel())
             .Integer("cpu_id", Thread.GetCurrentProcessorId())
             .Integer("affinity_cpus", Environment.ProcessorCount)

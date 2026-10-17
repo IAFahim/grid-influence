@@ -11,4 +11,8 @@
   <ItemGroup>
     <ProjectReference Include="../src/Gi/Gi.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <None Include="gate-baseline.json" CopyToOutputDirectory="PreserveNewest" Condition="Exists('gate-baseline.json')" />
+  </ItemGroup>
 </Project>

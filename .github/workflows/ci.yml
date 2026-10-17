@@ -35,6 +35,32 @@ jobs:
       - run: dotnet pack src/Gi -c Release --no-build -o artifacts/packages
       - run: dotnet pack src/Gi.Validation -c Release --no-build -o artifacts/packages
 
+  determinism:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: avx512, os: ubuntu-latest, avx512: "1", avx2: "1", intrinsics: "1" }
+          - { name: avx2, os: ubuntu-latest, avx512: "0", avx2: "1", intrinsics: "1" }
+          - { name: sse, os: ubuntu-latest, avx512: "0", avx2: "0", intrinsics: "1" }
+          - { name: scalar, os: ubuntu-latest, avx512: "1", avx2: "1", intrinsics: "0" }
+          - { name: arm64, os: ubuntu-24.04-arm, avx512: "1", avx2: "1", intrinsics: "1" }
+    name: determinism (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    env:
+      DOTNET_EnableAVX512F: ${{ matrix.avx512 }}
+      DOTNET_EnableAVX2: ${{ matrix.avx2 }}
+      DOTNET_EnableHWIntrinsic: ${{ matrix.intrinsics }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet build Gi.slnx -c Release -m:1
+      - run: dotnet test tests/Gi.Tests -c Release --no-build --filter "FullyQualifiedName~GoldenCorpus|FullyQualifiedName~StreamDifferential"
+
   inspect:
     runs-on: ubuntu-latest
     steps:
