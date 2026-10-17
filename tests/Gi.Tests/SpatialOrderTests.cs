@@ -99,7 +99,7 @@ public class SpatialOrderTests
     public void DisorderCountsAdjacentPairsWhoseTileDescends()
     {
         var sorted = Enumerable.Range(0, 100).Select(i => (uint)(i / 2) << 10 | (uint)(i % 7)).ToArray();
-        var reversed = sorted.Reverse().ToArray();
+        var reversed = Enumerable.Reverse(sorted).ToArray();
         Assert.Equal(0f, Grid.Disorder(sorted));
         Assert.Equal(0f, Grid.Disorder(Array.Empty<uint>()));
         Assert.True(Grid.Disorder(reversed) > 0.45f);
