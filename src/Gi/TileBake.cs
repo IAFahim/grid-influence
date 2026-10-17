@@ -46,6 +46,74 @@ internal static unsafe partial class TileBake
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static void LaneWeights(int* lo, int* hi, int* weight, int live, int column, int* output)
+    {
+#if NET
+        var iota = Vector256.Create(0, 1, 2, 3, 4, 5, 6, 7);
+        var lanes = Vector256<int>.Zero;
+        for (var band = 0; band < live; band++)
+        {
+            var inside = Vector256.GreaterThanOrEqual(iota, Vector256.Create(lo[band] - column))
+                & Vector256.LessThan(iota, Vector256.Create(hi[band] - column));
+            lanes = Vector256.ConditionalSelect(inside, Vector256.Create(weight[band]), lanes);
+        }
+
+        Vector256.Store(lanes, output);
+#else
+        for (var lane = 0; lane < LaneCount; lane++) output[lane] = 0;
+        for (var band = 0; band < live; band++)
+            for (var lane = lo[band] - column; lane < hi[band] - column; lane++)
+                output[lane] = weight[band];
+#endif
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static void LaneWeights3(
+        int column, int lo0, int hi0, int w0, int lo1, int hi1, int w1, int lo2, int hi2, int w2, int* output)
+    {
+#if NET
+        var iota = Vector256.Create(0, 1, 2, 3, 4, 5, 6, 7);
+        var lanes = Vector256.ConditionalSelect(
+            Vector256.GreaterThanOrEqual(iota, Vector256.Create(lo0 - column)) & Vector256.LessThan(iota, Vector256.Create(hi0 - column)),
+            Vector256.Create(w0), Vector256<int>.Zero);
+        lanes = Vector256.ConditionalSelect(
+            Vector256.GreaterThanOrEqual(iota, Vector256.Create(lo1 - column)) & Vector256.LessThan(iota, Vector256.Create(hi1 - column)),
+            Vector256.Create(w1), lanes);
+        lanes = Vector256.ConditionalSelect(
+            Vector256.GreaterThanOrEqual(iota, Vector256.Create(lo2 - column)) & Vector256.LessThan(iota, Vector256.Create(hi2 - column)),
+            Vector256.Create(w2), lanes);
+        Vector256.Store(lanes, output);
+#else
+        for (var lane = 0; lane < LaneCount; lane++)
+        {
+            var at = column + lane;
+            output[lane] = at >= lo2 && at < hi2 ? w2 : at >= lo1 && at < hi1 ? w1 : at >= lo0 && at < hi0 ? w0 : 0;
+        }
+#endif
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static bool BandLanes(int* weights, int scaled, int gain, int* lanes)
+    {
+#if NET
+        var product = Vector256.Load(weights) * Vector256.Create(scaled);
+        var rounded = Vector256.ShiftRightArithmetic(
+            product + Vector256.Create(32768) + Vector256.ShiftRightArithmetic(product, 31), 16) * Vector256.Create(gain);
+        Vector256.Store(rounded, lanes);
+        return !Vector256.EqualsAll(rounded, Vector256<int>.Zero);
+#else
+        var any = 0;
+        for (var lane = 0; lane < LaneCount; lane++)
+        {
+            lanes[lane] = RoundQ16(weights[lane] * scaled) * gain;
+            any |= lanes[lane];
+        }
+
+        return any != 0;
+#endif
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static void AddRows(int* plane, int rowFirst, int rowEnd, int column, int* lanes)
     {
 #if NET
@@ -88,7 +156,7 @@ internal static unsafe partial class TileBake
     internal static int RoundQ40(long value)
         => (int)((value + 549755813888L + (value >> 63)) >> 40);
 
-    private const long MaxExtent = 1L << 30;
+    internal const long MaxExtent = 1L << 30;
     private const float MaxPositionQ8 = 1073741824f;
     private const long MaxTentExtent = (1L << 23) - 2;
 
@@ -115,7 +183,7 @@ internal static unsafe partial class TileBake
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void SpanAnchored(
+    internal static void SpanAnchored(
         int anchor, int originQ8, int length, int sampling, int size, bool clip, long cap,
         out int cell, out int phase, out int extent, out int first, out int end)
     {

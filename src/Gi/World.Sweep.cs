@@ -74,52 +74,71 @@ public static unsafe partial class World
         for (var i = 0; i < count; i++)
         {
 #if NET
-            if (i + PrefetchAhead < count) PrefetchTarget(w, s, slots[i + PrefetchAhead]);
+            if (i + PrefetchAhead < count) PrefetchRecordTarget(w, slots[i + PrefetchAhead]);
 #endif
-            var slot = slots[i];
-            var layer = s->Layer[slot];
-            var stamp = s->Stamp[slot];
-            var alive = s->Alive[slot];
-            var gain = (sbyte)s->Gain[slot];
-            var scale = s->Scale[slot];
-            var x = s->X[slot];
-            var y = s->Y[slot];
-            var maskedAngle = (ushort)(s->Angle[slot] & w->Recipes[layer].TurnMask);
-
-            DepositRecord target = default;
-            if (alive != 0)
-            {
-                target.Layer = layer;
-                target.Stamp = stamp;
-                target.Gain = gain;
-                target.Alive = alive;
-                target.Angle = maskedAngle;
-                target.Scale = scale;
-            }
-
-            for (var gi = 0; gi < w->GridCount; gi++)
-            {
-                var g = w->Grids + gi;
-                if (g->ScaleQ8 == 0) continue;
-
-                var rec = RecordOf(g, slot);
-                var key = target;
-                if (key.Alive != 0)
-                {
-                    var mask = w->Recipes[layer].AnchorMask;
-                    key.Ax = TileBake.AnchorQ8(x, g->OriginX, g->ScaleQ8, mask);
-                    key.Ay = TileBake.AnchorQ8(y, g->OriginY, g->ScaleQ8, mask);
-                }
-
-                if (*(ulong*)rec == *(ulong*)&key && ((ulong*)rec)[1] == ((ulong*)&key)[1]) continue;
-
-                EmitDelta(w, gi, in *rec, -1);
-                EmitDelta(w, gi, in key, 1);
-                *rec = key;
-            }
+            var entry = EntryOf(s, slots[i]);
+            SweepEntryAt(w, &entry);
         }
 
         w->Changed.Resize(0);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static DepositRecord TargetOf(WorldCtx* w, SweepEntry* entry)
+    {
+        var layer = (byte)entry->Meta;
+        var alive = (byte)(entry->Meta >> 24);
+        DepositRecord target = default;
+        if (alive != 0)
+        {
+            target.Layer = layer;
+            target.Stamp = (byte)(entry->Meta >> 8);
+            target.Gain = (sbyte)(entry->Meta >> 16);
+            target.Alive = alive;
+            target.Angle = (ushort)(entry->Shape & w->Recipes[layer].TurnMask);
+            target.Scale = (ushort)(entry->Shape >> 16);
+        }
+
+        return target;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static DepositRecord KeyOf(WorldCtx* w, GridCtx* g, SweepEntry* entry, in DepositRecord target)
+    {
+        var key = target;
+        if (key.Alive != 0)
+        {
+            var mask = w->Recipes[key.Layer].AnchorMask;
+            key.Ax = TileBake.AnchorQ8(entry->X, g->OriginX, g->ScaleQ8, mask);
+            key.Ay = TileBake.AnchorQ8(entry->Y, g->OriginY, g->ScaleQ8, mask);
+        }
+
+        return key;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool Same(DepositRecord* rec, in DepositRecord key)
+    {
+        fixed (DepositRecord* k = &key)
+            return *(ulong*)rec == *(ulong*)k && ((ulong*)rec)[1] == ((ulong*)k)[1];
+    }
+
+    private static void SweepEntryAt(WorldCtx* w, SweepEntry* entry)
+    {
+        var target = TargetOf(w, entry);
+        for (var gi = 0; gi < w->GridCount; gi++)
+        {
+            var g = w->Grids + gi;
+            if (g->ScaleQ8 == 0) continue;
+
+            var rec = RecordOf(g, entry->Slot);
+            var key = KeyOf(w, g, entry, in target);
+            if (Same(rec, in key)) continue;
+
+            EmitDelta(w, gi, in *rec, -1);
+            EmitDelta(w, gi, in key, 1);
+            *rec = key;
+        }
     }
 
     private static void EmitDelta(WorldCtx* w, int gi, in DepositRecord record, int sign)
@@ -129,6 +148,12 @@ public static unsafe partial class World
 
         var g = w->Grids + gi;
         var v = StampCatalog.Get(record.Stamp);
+        if (v->Kind == StampKind.ConstantRectangle && record.Angle == 0)
+        {
+            EmitBoxFast(g, in record, v, gain);
+            return;
+        }
+
         var precision = LayerPrecision(w, record.Layer);
         if (!TileBake.PlaceAnchored(record.Ax, record.Ay, g->ScaleQ8, g->Size, v, record.Angle, record.Scale, precision, out var p))
             return;
@@ -151,12 +176,6 @@ public static unsafe partial class World
                     break;
                 }
         }
-        if (p.Plane == Plane.Difference)
-        {
-            EmitBoxDelta(g, ld, &p, gain);
-            return;
-        }
-
         if (KernelFactory.TryGetTaps(w, gi, record.Stamp, record.Angle, precision, &p, out var taps))
         {
             EmitKernelTaps(g, ld, in taps, p.Px, p.Py, gain);
@@ -166,10 +185,115 @@ public static unsafe partial class World
         EmitFallback(g, ld, &p, gain);
     }
 
+    private static void EmitBoxFast(GridCtx* g, in DepositRecord record, StampVariant* v, int gain)
+    {
+        var sampling = (int)Math.Min((long)g->ScaleQ8 * record.Scale >> 8, int.MaxValue);
+        if (sampling == 0) return;
+
+        TileBake.SpanAnchored(record.Ax, v->OriginQ8X, v->Width, sampling, g->Size, true, TileBake.MaxExtent,
+            out var px, out var fx, out var extentX, out var x0, out var x1);
+        TileBake.SpanAnchored(record.Ay, v->OriginQ8Y, v->Height, sampling, g->Size, true, TileBake.MaxExtent,
+            out var py, out var fy, out var extentY, out var y0, out var y1);
+        var cx0 = Math.Max(x0, 0);
+        var cy0 = Math.Max(y0, 0);
+        var cx1 = Math.Min(x1, g->Size);
+        var cy1 = Math.Min(y1, g->Size);
+        if (cx1 <= cx0 || cy1 <= cy0) return;
+
+        var ld = EnsureDirty(g, record.Layer);
+        if (ld->Epochs == null) EnsureEpochs(g, ld);
+        if (cx0 == x0 && cy0 == y0 && cx1 == x1 && cy1 == y1 && TileBake.LanesSupported &&
+            EmitBoxNarrow(g, ld, px, py, fx, fy, extentX, extentY, v->Constant, gain))
+            return;
+
+        EmitBoxDelta(g, ld, px, py, fx, fy, extentX, extentY, cx0, cy0, cx1, cy1, v->Constant, gain);
+    }
+
+    private static bool EmitBoxNarrow(
+        GridCtx* g, LayerData* ld, int px, int py, int fx, int fy, int extentX, int extentY, int constant, int gain)
+    {
+        var endX = fx + extentX;
+        var endY = fy + extentY;
+        var fullX = endX >> 8;
+        var fullY = endY >> 8;
+        var tailX = endX & 255;
+        var tailY = endY & 255;
+        var cellsX = fullX + (tailX != 0 ? 1 : 0);
+        var cellsY = fullY + (tailY != 0 ? 1 : 0);
+        if ((fx != 0 && fullX == 0) || (fy != 0 && fullY == 0) || cellsX > TileBake.LaneCount) return false;
+
+        var localX = px & (TileBake.TileSize - 1);
+        var localY = py & (TileBake.TileSize - 1);
+        if (localX + cellsX > TileBake.TileSize || localY + cellsY > TileBake.TileSize) return false;
+
+        var column = Math.Min(localX, TileBake.TileSize - TileBake.LaneCount);
+        var weights = stackalloc int[TileBake.LaneCount];
+        var lanes = stackalloc int[TileBake.LaneCount];
+        var leadX = fx != 0 ? 1 : 0;
+        var leadWeightX = 256 - fx;
+        TileBake.LaneWeights3(
+            column,
+            localX, localX + leadX, leadWeightX,
+            localX + leadX, localX + fullX, 256,
+            localX + fullX, localX + fullX + (tailX != 0 ? 1 : 0), tailX,
+            weights);
+        var tile = (py >> TileBake.TileBits) * g->TilesPerSide + (px >> TileBake.TileBits);
+        var leadY = fy != 0 ? 1 : 0;
+        int* plane = null;
+        for (var band = 0; band < 3; band++)
+        {
+            int rowLo;
+            int rowHi;
+            int weightY;
+            if (band == 0)
+            {
+                rowLo = localY;
+                rowHi = localY + leadY;
+                weightY = 256 - fy;
+            }
+            else if (band == 1)
+            {
+                rowLo = localY + leadY;
+                rowHi = localY + fullY;
+                weightY = 256;
+            }
+            else
+            {
+                rowLo = localY + fullY;
+                rowHi = rowLo + (tailY != 0 ? 1 : 0);
+                weightY = tailY;
+            }
+
+            if (rowHi <= rowLo || !TileBake.BandLanes(weights, constant * weightY, gain, lanes)) continue;
+
+            if (plane == null)
+            {
+                var set = EnsureSet(g, ld, tile);
+                plane = ld->Store.Cells(*set).I;
+                DirtyIndex(g, ld, tile);
+            }
+
+            TileBake.AddRows(plane, rowLo, rowHi, column, lanes);
+        }
+
+        if (plane != null)
+        {
+            var rect = &ld->Rects.Pointer[ld->InDirty[tile] - 1];
+            if (localX < rect->X0) rect->X0 = localX;
+            if (localY < rect->Y0) rect->Y0 = localY;
+            if (localX + cellsX > rect->X1) rect->X1 = localX + cellsX;
+            if (localY + cellsY > rect->Y1) rect->Y1 = localY + cellsY;
+        }
+
+        return true;
+    }
+
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    private static void EmitBoxDelta(GridCtx* g, LayerData* ld, Placement* p, int gain)
+    private static void EmitBoxDelta(
+        GridCtx* g, LayerData* ld, int px, int py, int fx, int fy, int extentX, int extentY,
+        int cx0, int cy0, int cx1, int cy1, int constant, int gain)
     {
         var xLo = stackalloc int[3];
         var xHi = stackalloc int[3];
@@ -177,30 +301,49 @@ public static unsafe partial class World
         var yLo = stackalloc int[3];
         var yHi = stackalloc int[3];
         var yWeight = stackalloc int[3];
-        var cx0 = Math.Max(p->X0, 0);
-        var cy0 = Math.Max(p->Y0, 0);
-        var cx1 = Math.Min(p->X1, g->Size);
-        var cy1 = Math.Min(p->Y1, g->Size);
         var tps = g->TilesPerSide;
-        var constant = p->V->Constant;
         var lanes = stackalloc int[TileBake.LaneCount];
+        var laneWeights = stackalloc int[TileBake.LaneCount];
         for (var ty = cy0 >> TileBake.TileBits; ty <= (cy1 - 1) >> TileBake.TileBits; ty++)
         for (var tx = cx0 >> TileBake.TileBits; tx <= (cx1 - 1) >> TileBake.TileBits; tx++)
         {
             var tileX0 = tx << TileBake.TileBits;
             var tileY0 = ty << TileBake.TileBits;
-            var liveX = TileBake.ClipBands(p->Px, p->Fx, p->ExtentX, tileX0, tileX0 + TileBake.TileSize, xLo, xHi, xWeight);
-            var liveY = TileBake.ClipBands(p->Py, p->Fy, p->ExtentY, tileY0, tileY0 + TileBake.TileSize, yLo, yHi, yWeight);
+            var liveX = TileBake.ClipBands(px, fx, extentX, tileX0, tileX0 + TileBake.TileSize, xLo, xHi, xWeight);
+            var liveY = TileBake.ClipBands(py, fy, extentY, tileY0, tileY0 + TileBake.TileSize, yLo, yHi, yWeight);
             if (liveX == 0 || liveY == 0) continue;
 
             var tile = ty * tps + tx;
             var narrow = TileBake.LanesSupported && xHi[liveX - 1] - xLo[0] <= TileBake.LaneCount;
             var column = Math.Min(xLo[0], TileBake.TileSize - TileBake.LaneCount);
             var lead = xLo[0] - column;
+            var disjoint = narrow;
+            if (narrow)
+            {
+                for (var x = 1; x < liveX; x++)
+                    if (xLo[x] < xHi[x - 1]) disjoint = false;
+                if (disjoint) TileBake.LaneWeights(xLo, xHi, xWeight, liveX, column, laneWeights);
+            }
+
             int* plane = null;
             for (var y = 0; y < liveY; y++)
             {
                 var weightY = yWeight[y];
+                if (disjoint)
+                {
+                    if (!TileBake.BandLanes(laneWeights, constant * weightY, gain, lanes)) continue;
+
+                    if (plane == null)
+                    {
+                        var set = EnsureSet(g, ld, tile);
+                        plane = ld->Store.Cells(*set).I;
+                        DirtyIndex(g, ld, tile);
+                    }
+
+                    TileBake.AddRows(plane, yLo[y], yHi[y], column, lanes);
+                    continue;
+                }
+
                 if (narrow)
                 {
                     new Span<int>(lanes, TileBake.LaneCount).Clear();
