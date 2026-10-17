@@ -513,7 +513,10 @@ add one `int64` page sum per live page, so large sparse grids do not visit every
   kernel sum — one load from the tile's tent or bell store. Saturated page cells rebuild every
   component (the `I` total, tent, bell) before subtracting, and the rebuilt fold forms the
   `I`-plus-tent-plus-bell total in `int64` and saturates once, exactly as publish does, so exclusion
-  matches the page on tiles whose planes each fit `int32` but whose sum does not. Areas apply the same rule per
+  matches the page on tiles whose planes each fit `int32` but whose sum does not. On a transient layer
+  `TrySense`, `TrySenseGradient` and `TrySenseArea` also take `(stamp, gain)` in place of a source id and
+  exclude a splat of that stamp and gain made at the query point this frame, by the same rule, from
+  the planes the last publish kept; any other layer, gain 0 or an unknown stamp excludes nothing. Areas apply the same rule per
   cell of the source's footprint inside the disk, reading the planes directly. The source's own
   contribution at a cell is its cached kernel tap times its gain (`TryFindTaps`, then
   `TryGetTaps` while the frame's insert budget lasts), so an excluded point read costs about
@@ -996,11 +999,13 @@ digits. Concurrency: single thread.
   result pointer after returning.
 - **Transient layers**: the stale list is a context-owned `NativeBuffer<int>` per (grid, layer),
   appended to by publish on the owning thread, consumed and cleared by the next publish, reset by
-  `Clear` and freed with the layer. Publish zeroes a tile's planes only after it has computed the
-  tile's page from them, through pointers materialized from the tile's own set, and the next
-  frame's splats write the zeroed planes through the same emitters as persistent deposits (same
-  bounds, alignment and single-thread rules). A tile that is dropped (its page publishes to
-  zero) takes its planes with it and never enters the stale list.
+  `Clear` and freed with the layer. Publish marks a tile's set stale after computing the tile's
+  page and leaves its planes intact, so a self-excluding read sees the exact totals; the planes
+  are zeroed through pointers materialized from the tile's own set at the first write of the next
+  frame (`PrepareTransientSet`, called before every plane fetch and before a restarted stale tile
+  publishes), and the next frame's splats write the zeroed planes through the same emitters as
+  persistent deposits (same bounds, alignment and single-thread rules). A tile that is dropped
+  (its page publishes to zero) takes its planes with it and never enters the stale list.
 - **Histogram path**: *Lifetime*: the per-(grid, layer) `HistState` (class table, 4,096 B page slab,
   active-class list, output-tile list, per-tile mark array, the 63-row window with a 71-`int`
   row stride and the 63×32 strip scratch) is allocated on the first cell-precision splat, owned by

@@ -26,6 +26,7 @@ internal unsafe struct TilePlanes
     public int B;
     public int Summary;
     public int BoundI;
+    public byte Stale;
     public long BoundT;
     public long BoundB;
 }

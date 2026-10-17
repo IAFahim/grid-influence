@@ -337,6 +337,7 @@ if (World.TrySense(world, threat, x, y, exclude: myAura, out short danger))
     Flee(danger);
 
 World.TrySenseArea(world, threat, x, y, reach: 20f, out long nearby);        // world-area total
+World.TrySense(world, crowd, x, y, stamp, gain, out short others);            // transient layer minus my own splat
 World.TrySenseMax(world, food, x, y, reach: 40f,
                    out short best, out float fx, out float fy);              // hunt target
 World.TrySenseGradient(world, food, x, y, out float gx, out float gy);       // per-world-unit
