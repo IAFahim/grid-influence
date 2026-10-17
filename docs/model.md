@@ -249,6 +249,13 @@ before reading command payloads, writing
   `I` rows slot `i + 8` will touch (x86 `Sse` only; it reads no cell and writes nothing). There
   is no crowd heuristic and no rebuild: a frame costs in proportion to the slots whose target
   differs from their record, never to the field.
+- **Caps.** A source's stamp footprint after scaling, `ceil(extent · ScaleQ8 · scale / 2^16)` cells on
+  every grid, may not exceed 512 cells per axis: `Place` returns `InvalidStamp` (batch placements report
+  `InvalidStamp`), `Scale` returns `CapacityReached`, and batch and transform scale writes leave the
+  scale unchanged. A disk read's reach may not exceed 4,096 cells on the grid it would use; a grid whose
+  scale puts the reach past that is skipped, so a read nothing else covers returns `false` with zeroed
+  outputs. Both caps are in `ValidationRules`, mirrored by `GiValidation.TryFootprint` and `TryReach`,
+  and by the interpreter. `ScaleQ8` is still held to `[1, 2^20]` at `AddGrid`.
 - **Statuses.** `Place` (with `out WriteStatus`), `Move`, `Turn`, `Scale`, `SetGain`, `Remove`, `Fade`
   and `Expire` return `World.WriteStatus`; an unknown world counts as `InvalidLayer` for `Place` and as
   `StaleSource` for the id mutators, and non-finite values are rejected before the id is looked up.

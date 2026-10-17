@@ -198,7 +198,7 @@ internal sealed unsafe class ReferenceWorld
     public World.SourceId Place(byte layer, float x, float y, byte stamp, sbyte gain)
     {
         if (layer >= _layers.Count || _layers[layer].Op != LayerOp.Base || !StampCatalog.Valid(stamp) ||
-            !float.IsFinite(x) || !float.IsFinite(y)) return default;
+            !FootprintFits(stamp, 256) || !float.IsFinite(x) || !float.IsFinite(y)) return default;
 
         if (!_free.TryDequeue(out var slot))
         {
@@ -306,7 +306,7 @@ internal sealed unsafe class ReferenceWorld
         var q8 = Math.Floor(scale * 256.0);
         var next = (ushort)(q8 < 1 ? 1 : q8 > ushort.MaxValue ? ushort.MaxValue : q8);
         ref var s = ref _now[i];
-        if (next == s.Scale) return;
+        if (next == s.Scale || !FootprintFits(s.Stamp, next)) return;
         Mutate(i, s.Gain);
         s.Scale = next;
     }
@@ -1378,6 +1378,21 @@ internal sealed unsafe class ReferenceWorld
         return false;
     }
 
+    private bool FootprintFits(byte stamp, long scale)
+    {
+        var v = StampCatalog.Get(stamp);
+        foreach (var g in _grids)
+        {
+            if (g.ScaleQ8 == 0) continue;
+            var sampling = (long)g.ScaleQ8 * scale >> 8;
+            if (!ValidationRules.IsFootprint(v->Width * sampling + 255 >> 8) ||
+                !ValidationRules.IsFootprint(v->Height * sampling + 255 >> 8))
+                return false;
+        }
+
+        return true;
+    }
+
     private bool Pick(float x, float y, float reach, int margin, bool disk, out int grid, out bool complete)
     {
         grid = -1;
@@ -1394,6 +1409,8 @@ internal sealed unsafe class ReferenceWorld
             bool whole;
             if (disk)
             {
+                if (World.ReachQ8(reach, g.ScaleQ8) > (long)ValidationRules.MaxReachCells << 8) continue;
+
                 var c = Disk(g, x, y, reach);
                 whole = c.X0 >= 0 && c.Y0 >= 0 && c.X1 < g.Size && c.Y1 < g.Size && !c.Clipped;
             }
