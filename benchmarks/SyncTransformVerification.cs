@@ -24,11 +24,8 @@ internal static unsafe partial class Verification
         Console.WriteLine("PASS sync-transforms-match-ordered-calls");
         Console.WriteLine(
             $"payload: 12 B/row position-only, 20 B/row full pose, {sizeof(World.TransformRange)} B descriptor; " +
-            "0 full input copies; 1 planning scan; 1 bit/row invalid mask");
-        Console.WriteLine(
-            $"scratch: 0 B under 8192 rows; large path " +
-            $"{sizeof(SourceBatchEntry)} B per unique source + 4 B/entry lookup + ops reuse; " +
-            "no command links, no per-row results");
+            "0 full input copies; 1 pass; 1 bit/row invalid mask");
+        Console.WriteLine("scratch: 0 B; rows apply in order through the scalar write helpers; no per-row results");
         foreach (var count in new[] { 64, 4096, 65536, 100000 })
         {
             var (warmFrames, measuredFrames) = count >= 65536 ? (8, 16) : (32, 80);

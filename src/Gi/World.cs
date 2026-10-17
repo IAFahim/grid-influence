@@ -36,7 +36,6 @@ internal unsafe struct SourceColumns
     public SourceColumn<uint> Gen;
     public SourceColumn<int> Mark;
     public NativeBuffer<int> JStamp;
-    public NativeBuffer<int> BatchTag;
     public NativeBuffer<byte> Timed;
     public NativeBuffer<sbyte> FadeFrom;
     public NativeBuffer<sbyte> FadeTo;
@@ -98,7 +97,6 @@ internal unsafe struct SourceColumns
         ReleaseColumn(ref Mark);
         Chunks = 0;
         JStamp.Free();
-        BatchTag.Free();
         Timed.Free();
         FadeFrom.Free();
         FadeTo.Free();
@@ -234,9 +232,6 @@ internal unsafe struct WorldCtx
     public int RecordTick;
     public byte Recording;
     public KernelCache Kernels;
-    public NativeBuffer<SourceBatchEntry> BatchSources;
-    public NativeBuffer<SourceBatchLink> BatchCommands;
-    public NativeBuffer<int> BatchLookup;
 }
 
 public static unsafe partial class World
@@ -249,7 +244,6 @@ public static unsafe partial class World
     internal const int MaxSourceSlots = 1 << 24;
     internal const int Cells = TileBake.TileSize * TileBake.TileSize;
     internal const int PageBytes = Cells * sizeof(short);
-    internal const int LargeBatchThreshold = 8192;
 
     private static int _worldCount;
 
@@ -301,9 +295,6 @@ public static unsafe partial class World
         w->TimedList.Free();
         w->TimedDue.Free();
         w->Kernels.Release();
-        w->BatchSources.Free();
-        w->BatchCommands.Free();
-        w->BatchLookup.Free();
         *w = default;
         Runtime.WorldRevisions[world]++;
         return true;
@@ -544,34 +535,10 @@ public static unsafe partial class World
     public static SourceId Place(byte world, byte layer, float x, float y, byte stamp, sbyte gain)
     {
         var w = GetContext(world);
-        if (w == null || layer >= w->LayerCount || !StampCatalog.Valid(stamp) || IsDerived(w, layer) ||
-            !float.IsFinite(x) || !float.IsFinite(y)) return default;
+        if (w == null) return default;
 
-        var s = &w->Sources;
-        int i;
-        if (!s->Free.TryPop(out i))
-        {
-            if (s->Count >= MaxSourceSlots) return default;
-            if (s->Count == s->Slots) EnsureSourceCapacity(s, w, s->Count + 1);
-            i = s->Count++;
-        }
-
-        var g = (byte)Math.Clamp((int)gain, -MaxGain, MaxGain);
-        BeforeWrite(w, s, i);
-        var gen = s->Gen[i] + 1;
-        s->Gen[i] = gen;
-        s->X[i] = x;
-        s->Y[i] = y;
-        s->Stamp[i] = stamp;
-        s->Layer[i] = layer;
-        s->Gain[i] = g;
-        s->Angle[i] = 0;
-        s->Scale[i] = UnitScale;
-        JournalSchedule(w, s, i);
-        s->Timed.Pointer[i] = 0;
-        s->Alive[i] = 1;
-        MarkChanged(w, s, i);
-        return new SourceId((uint)i, gen);
+        PlaceSlot(w, layer, x, y, stamp, gain, out var id);
+        return id;
     }
 
     public static void Move(byte world, SourceId source, float x, float y)
@@ -579,79 +546,36 @@ public static unsafe partial class World
         if (!float.IsFinite(x) || !float.IsFinite(y)) return;
         if (!TrySource(world, source, out var w, out var s, out var i)) return;
 
-        var oldX = s->X[i];
-        var oldY = s->Y[i];
-        if (oldX == x && oldY == y) return;
-        var changed = PositionChanged(w, s->Layer[i], oldX, oldY, x, y);
-        if (changed) BeforeWrite(w, s, i);
-        s->X[i] = x;
-        s->Y[i] = y;
-        if (changed) MarkChanged(w, s, i);
+        WriteMove(w, s, i, x, y);
     }
 
     public static void SetGain(byte world, SourceId source, sbyte gain)
     {
         if (!TrySource(world, source, out var w, out var s, out var i)) return;
 
-        var next = (byte)Math.Clamp((int)gain, -MaxGain, MaxGain);
-        if ((s->Timed.Pointer[i] & Fading) != 0)
-        {
-            JournalSchedule(w, s, i);
-            s->Timed.Pointer[i] &= unchecked((byte)~Fading);
-        }
-
-        if (next == s->Gain[i]) return;
-
-        BeforeWrite(w, s, i);
-        s->Gain[i] = next;
-        MarkChanged(w, s, i);
+        WriteGain(w, s, i, gain);
     }
 
     public static void Turn(byte world, SourceId source, float angle)
     {
         if (!TrySource(world, source, out var w, out var s, out var i) || !float.IsFinite(angle)) return;
 
-        var turns = angle * (1.0 / (2 * Math.PI));
-        turns -= Math.Floor(turns);
-        var next = (ushort)((int)(turns * 65536.0) & 0xFFFF);
-        var old = s->Angle[i];
-        if (next == old) return;
-
-        var changed = AngleChanged(w, s->Layer[i], old, next);
-        if (changed) BeforeWrite(w, s, i);
-        s->Angle[i] = next;
-        if (changed) MarkChanged(w, s, i);
+        WriteTurn(w, s, i, QuantizeAngle(angle));
     }
 
     public static void Scale(byte world, SourceId source, float scale)
     {
         if (!TrySource(world, source, out var w, out var s, out var i) || !float.IsFinite(scale)) return;
 
-        var q8 = Math.Floor(scale * 256.0);
-        var next = (ushort)(q8 < 1 ? 1 : q8 > ushort.MaxValue ? ushort.MaxValue : q8);
-        if (next == s->Scale[i]) return;
-
-        BeforeWrite(w, s, i);
-        s->Scale[i] = next;
-        MarkChanged(w, s, i);
+        WriteScale(w, s, i, QuantizeScale(scale));
     }
 
     public static void Remove(byte world, SourceId source)
     {
         if (!TrySource(world, source, out var w, out var s, out var i)) return;
 
-        BeforeWrite(w, s, i);
-        if (s->Timed.Pointer[i] != 0)
-        {
-            JournalSchedule(w, s, i);
-            s->Timed.Pointer[i] = 0;
-        }
-
-        s->Alive[i] = 0;
-        if (s->Gen[i] != uint.MaxValue) s->Free.Push(i);
-        MarkChanged(w, s, i);
+        WriteRemove(w, s, i);
     }
-
 
     public static void Clear(byte world)
     {
@@ -945,7 +869,6 @@ public static unsafe partial class World
         var capacity = Math.Min(MaxSourceSlots, (required + SourceColumns.ChunkMask) & ~SourceColumns.ChunkMask);
         s->AddChunks((capacity - initialized) >> SourceColumns.ChunkBits);
         s->JStamp.Resize(capacity);
-        s->BatchTag.Resize(capacity);
         s->Timed.Resize(capacity);
         s->FadeFrom.Resize(capacity);
         s->FadeTo.Resize(capacity);

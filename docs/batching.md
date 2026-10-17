@@ -138,14 +138,14 @@ No host API is added to Gi. Exclusive direct calls remain available between batc
 
 ## Ingestion implementation
 
-Small full-state batches validate and apply in one inline pass. Large unique full-state batches
-avoid hashing; repeated sources fall back to ordered grouping. General batches reserve slots
-against a virtual free ring, validate generation-tagged IDs, and retain one row per affected slot.
-Two sequential phases prepare final states and write columns/operation ranges on the calling
-thread. The timed list and schedule journals are committed between them.
-Fresh placement undo records preserve the direct `Place` layer and identity semantics, including
-reused slots. Cross-layer slot reuse withdraws against the deposited record's layer and deposits on the
-target's layer rather than treating the whole mutation as belonging to its target layer ([#36](https://github.com/IAFahim/grid-influence/issues/36)).
+After structural validation a batch is one inline pass: each command applies, in order, through
+the same write helpers the scalar mutators use. `Place` pops the real free ring and a `Remove`
+pushes it, generation-tagged IDs are validated against the live columns as each command runs, and a
+pending target resolves to the id its creating command returned. A batch therefore equals the same
+scalar calls in order by construction, with no planning pass, grouping, or scratch. Placement and
+schedule snapshots are the ones the direct calls take, including reused slots. Cross-layer slot reuse
+withdraws against the deposited record's layer and deposits on the target's layer rather than treating
+the whole mutation as belonging to its target layer ([#36](https://github.com/IAFahim/grid-influence/issues/36)).
 No public mutation replay loop or new scheduler is used.
 
 Batches never prepare tile footprints: ingestion writes columns and marks slots, and the next
@@ -198,7 +198,7 @@ Each `World.TransformRange` (56 bytes) borrows an ID column (`int*`), X and Y co
 (`float*`), optional heading and scale columns (`float*`; null preserves the current value),
 a row count, and an optional invalid mask (`ulong*` with `InvalidWords` words). A
 position-only row is 12 bytes of column payload; a full pose row is 20. There are zero full
-input copies — one planning scan reads the borrowed columns directly:
+input copies — one pass reads the borrowed columns directly:
 
 ```csharp
 var token = World.Capture(world);
@@ -222,8 +222,8 @@ positions compare bit-exactly as in `World.Sync`, so `-0.0` and `+0.0` are diffe
 where ordered `Move`/`UpdateTransform` compare with `==`. Heading and scale ignore non-finite
 values and quantize exactly like `Turn`/`Scale`. A row whose x or y is not finite is rejected
 whole, with its heading and scale ignored. Rows
-apply in range order then row order; duplicate source IDs fold last-writer-wins into one
-merged changed-list entry per source, with no host-side dedup. Invalid rows — dead, stale-generation,
+apply in range order then row order; a duplicate source ID applies again, so the last row wins and the
+slot is marked once, with no host-side dedup. Invalid rows — dead, stale-generation,
 or out-of-range IDs, or non-finite x or y — set their mask bit (bit `row & 63` of word `row >> 6`;
 cleared words leave tail bits zero, words beyond `(Count + 63) / 64` untouched) and the call still returns
 `Applied`, so partial staleness stays distinguishable from whole-call rejection.
@@ -236,14 +236,9 @@ aliasing (`OverlappingBuffers` when a writable mask overlaps any column or anoth
 read-only columns may share storage). A rejected call writes nothing: masks keep their
 contents and the world stays byte-identical.
 
-Paths and scratch: under 8,192 total rows one inline pass on the caller marks the same
-changed-list entries `Move`/`Turn`/`Scale` would, with zero scratch. Above that, a sequential
-caller-thread scan folds rows into one entry per unique source — seeded from the current
-columns, so an unprocessed earlier edit merges rather than chains — and the batch-apply
-phase then writes source columns and marks the changed list in one sequential pass. Invalid bits are all
-written during the planning scan. The retained O(N)
-scratch of the large path is one 136-byte batch entry plus 4 bytes of hash lookup per unique
-source — no per-row command links, no result rows, no flattened copy. The columns are borrowed
+Paths and scratch: one inline pass on the caller applies each row through the same write helpers
+`Move`/`Turn`/`Scale` use, with zero scratch at any row count; invalid bits are written as the pass
+meets each row. There are no per-row command links, no result rows, and no flattened copy. The columns are borrowed
 only for the synchronous call and no caller pointer survives the return; the host retains the
 storage through the consumer handle and a producer must never write a consumed range.
 
