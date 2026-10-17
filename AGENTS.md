@@ -32,5 +32,9 @@ dotnet run --project benchmarks -c Release --no-build -- --verify
 DOTNET_EnableHWIntrinsic=0 dotnet run --project benchmarks -c Release --no-build -- --verify
 ```
 
+Changes that can move a timing also run `dotnet run --project benchmarks -c Release --no-build -- --gate` on one
+pinned core (`taskset -c 0`), and refresh `benchmarks/gate-baseline.json` with `--gate --update` only
+on the host that recorded it.
+
 Package changes also require `dotnet pack src/Gi` plus a version review. Never move a published
 tag.

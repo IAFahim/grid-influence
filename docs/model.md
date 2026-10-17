@@ -2,6 +2,33 @@
 
 Sparse tiled integer influence fields for .NET. One library, no dependencies.
 
+## Axioms
+
+The rest of this file derives from seven statements.
+
+1. **Field semantics.** Box, raster, dense and round stamps are rounded per source into the `int32`
+   plane `I`. Tent and bell stamps accumulate exactly in Q40 into `int64` planes and are rounded once
+   per cell, half away from zero. A cell's total forms in `int64` and saturates once to `int16`.
+   Overflow is exact: a plane folds into wide planes before a sum could pass its width.
+2. **Precision.** A layer snaps source positions to `PhaseBits` (0–8) bits of sub-cell phase and
+   headings to `TurnBits` (0–16) bits of angle. Every kernel depends only on `cell − anchor`, is linear
+   in gain, and clipping to the grid drops only cells outside it, so the engine at precision `p` equals
+   the exact engine run with the same masks, bit for bit. A source costs work only when its snapped key
+   changes.
+3. **Residency.** A persistent layer keeps one deposited record per (source, grid); `Process`
+   sweeps the changed sources and emits −old and +new kernel taps into the tile planes. A transient
+   layer forgets the frame: `Splat` accumulates, `Process` publishes, and the next frame starts empty
+   (at `PhaseBits` 0 through a per-tile histogram that is convolved with the stamp).
+4. **Time.** `Process` advances one tick. Fades step only when the integer gain changes, expiries free
+   slots in ascending slot order, and a sweep over the dense list of timed slots costs O(timed).
+5. **Recipes.** A derived layer (`Sum`, `Min`, `Max`, `Mask`) is a per-cell function of two other layers,
+   recombined over the tiles its inputs changed; an exclusion recurses through the recipes.
+6. **Change.** A tile has changed when its published `int16` bytes differ from those of the previous
+   `Process`, whichever path produced them, and its epoch is written only then.
+7. **Determinism.** Published pages, summaries, epochs and read results are identical across runs,
+   machines and instruction sets (AVX-512, AVX2, SSE, scalar, ARM64); the golden corpus pins page and
+   read hashes for 1,200 generated streams, and every stream also agrees with the interpreter.
+
 ## Model
 
 - A **world** (`World.New`, up to 255 live at once) owns **grids** and **layers**. `World.Free(world)`
