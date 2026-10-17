@@ -45,7 +45,7 @@ public sealed unsafe class ExclusionPurityTests
             Stamps.Add(Raster(5, 4, 3));
             Stamps.Add(Stamp.Tent(7, 7, 100));
             Stamps.Add(Stamp.Bell(9, 9, -128));
-            Stamps.Add(Stamp.Disk(4, 60, 360));
+            Stamps.Add(Stamp.Disk(4, 60));
             Stamps.Add(Stamp.Cone(5, 45, 90));
             Stamps.Add(Stamp.Dome(6, -50, 270));
             Stamps.Add(Stamp.Tent(8, 5, 127));
@@ -66,8 +66,9 @@ public sealed unsafe class ExclusionPurityTests
                 }
                 else if (scenario == 7)
                 {
+                    var row = i / 3;
                     x = 1.5f + (i % 3) * 0.75f;
-                    y = 0.5f + (i / 3) * 0.75f;
+                    y = 0.5f + row * 0.75f;
                 }
                 else if (scenario == 9)
                 {
@@ -103,13 +104,13 @@ public sealed unsafe class ExclusionPurityTests
             if (secondGrid) Grid.New(world, GridPower - 1, 0f, 0f, WorldSize);
             Layer1 = Layer.New(world, Layer.Residency.Persistent, precision);
             Layer2 = Layer.New(world, Layer.Residency.Persistent, precision);
-            Derived = Layer.Sum(world, Layer1, 3, Layer2, -2, 0);
+            Derived = Layer.Sum(world, Layer1, 3, Layer2, -2);
             Transient = Layer.New(world, Layer.Residency.Transient, precision);
             for (var i = 0; i < plan.Count; i++)
             {
                 var id = World.Place(world, (byte)(i % 2), plan.Xs[i], plan.Ys[i], plan.StampOf[i], plan.Gains[i]);
-                if (plan.Turns[i] != 0f) World.Turn(world, id, plan.Turns[i]);
-                if (plan.Scales[i] != 1f) World.Scale(world, id, plan.Scales[i]);
+                if (!plan.Turns[i].Equals(0f)) World.Turn(world, id, plan.Turns[i]);
+                if (!plan.Scales[i].Equals(1f)) World.Scale(world, id, plan.Scales[i]);
                 Ids.Add(id);
                 if (i % 2 == 0)
                     World.Splat(world, Transient, new[] { plan.Xs[i] }, new[] { plan.Ys[i] }, plan.StampOf[i], plan.Gains[i]);
@@ -317,7 +318,7 @@ public sealed unsafe class ExclusionPurityTests
             var precision = Layer.Precision.Quarter;
             Layer1 = Layer.New(world, Layer.Residency.Persistent, precision);
             Layer2 = Layer.New(world, Layer.Residency.Persistent, precision);
-            Derived = Layer.Sum(world, Layer1, 1, Layer2, 1, 0);
+            Derived = Layer.Sum(world, Layer1, 1, Layer2, 1);
             Transient = Layer.New(world, Layer.Residency.Transient, precision);
             Stamps.Add(Stamp.Box(5, 5, 90));
             Stamps.Add(Stamp.Tent(8, 8, 110));
@@ -376,11 +377,11 @@ public sealed unsafe class ExclusionPurityTests
 
     private static void RunEightThreads(Action<int> read)
     {
-        const int Threads = 8;
+        const int threads = 8;
         var ready = new ManualResetEventSlim(false);
         var go = new ManualResetEventSlim(false);
-        var workers = new Thread[Threads];
-        for (var t = 0; t < Threads; t++)
+        var workers = new Thread[threads];
+        for (var t = 0; t < threads; t++)
         {
             var index = t;
             workers[index] = new Thread(() =>
@@ -395,9 +396,9 @@ public sealed unsafe class ExclusionPurityTests
             workers[index].Start();
         }
 
-        for (var t = 0; t < Threads; t++) ready.Wait();
+        for (var t = 0; t < threads; t++) ready.Wait();
         go.Set();
-        for (var t = 0; t < Threads; t++) workers[t].Join();
+        for (var t = 0; t < threads; t++) workers[t].Join();
     }
 
     [Fact]
@@ -451,15 +452,15 @@ public sealed unsafe class ExclusionPurityTests
     [Fact]
     public void ExcludedColumnReads_OnEightThreads_MatchSerialReads()
     {
-        const int Count = 24;
+        const int count = 24;
         var world = NewWorld();
         var field = new ThreadField(world, new SplitMix64(71_000));
         World.Process(world);
 
-        var xs = new float[Count];
-        var ys = new float[Count];
-        var excludes = new World.SourceId[Count];
-        for (var i = 0; i < Count; i++)
+        var xs = new float[count];
+        var ys = new float[count];
+        var excludes = new World.SourceId[count];
+        for (var i = 0; i < count; i++)
         {
             xs[i] = field.Xs[i % field.Ids.Count];
             ys[i] = field.Ys[i % field.Ids.Count];
@@ -468,15 +469,15 @@ public sealed unsafe class ExclusionPurityTests
 
         try
         {
-            var serialValues = new short[Count];
-            var serialGradients = new int[2 * Count];
-            var serialWords = new ulong[(Count + 63) >> 6];
-            ReadColumns(world, field, xs, ys, excludes, Count, serialValues, serialGradients, serialWords);
+            var serialValues = new short[count];
+            var serialGradients = new int[2 * count];
+            var serialWords = new ulong[(count + 63) >> 6];
+            ReadColumns(world, field, xs, ys, excludes, count, serialValues, serialGradients, serialWords);
 
             var parallel = new (short[] Values, int[] Gradients, ulong[] Words)[8];
             for (var t = 0; t < 8; t++)
-                parallel[t] = (new short[Count], new int[2 * Count], new ulong[(Count + 63) >> 6]);
-            RunEightThreads(t => ReadColumns(world, field, xs, ys, excludes, Count, parallel[t].Values, parallel[t].Gradients, parallel[t].Words));
+                parallel[t] = (new short[count], new int[2 * count], new ulong[(count + 63) >> 6]);
+            RunEightThreads(t => ReadColumns(world, field, xs, ys, excludes, count, parallel[t].Values, parallel[t].Gradients, parallel[t].Words));
 
             for (var t = 0; t < 8; t++)
             {
@@ -517,13 +518,13 @@ public sealed unsafe class ExclusionPurityTests
     [Fact]
     public void ExcludedFuzzStreamReads_AgreeBetweenTheInsertableAndTheDisabledCache()
     {
-        const int Streams = 150;
-        const int SeedBase = 2_600_000;
+        const int streams = 150;
+        const int seedBase = 2_600_000;
         var excludedReads = 0;
-        for (var i = 0; i < Streams; i++)
+        for (var i = 0; i < streams; i++)
         {
             var profile = i % 3 == 0 ? StreamProfile.Kinds : i % 3 == 1 ? StreamProfile.Gate : StreamProfile.Transient;
-            var setup = StreamGenerator.Generate(SeedBase + i, (PrecisionMode)(i % 5), profile);
+            var setup = StreamGenerator.Generate(seedBase + i, (PrecisionMode)(i % 5), profile);
             foreach (var command in setup.Commands)
             {
                 if (command.Op != StreamOp.Read) continue;
@@ -532,12 +533,12 @@ public sealed unsafe class ExclusionPurityTests
             }
 
             var insertable = StreamRunner.TryRun(setup, setup.Commands);
-            if (insertable != null) throw new Xunit.Sdk.XunitException($"seed {SeedBase + i} insertable: {insertable.Message}");
+            if (insertable != null) throw new Xunit.Sdk.XunitException($"seed {seedBase + i} insertable: {insertable.Message}");
 
             var disabled = StreamRunner.TryRun(setup, setup.Commands, uncached: true);
-            if (disabled != null) throw new Xunit.Sdk.XunitException($"seed {SeedBase + i} disabled: {disabled.Message}");
+            if (disabled != null) throw new Xunit.Sdk.XunitException($"seed {seedBase + i} disabled: {disabled.Message}");
         }
 
-        Assert.True(excludedReads >= Streams, $"only {excludedReads} excluded reads across {Streams} streams");
+        Assert.True(excludedReads >= streams, $"only {excludedReads} excluded reads across {streams} streams");
     }
 }
