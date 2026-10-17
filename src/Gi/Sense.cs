@@ -582,6 +582,8 @@ public static unsafe partial class World
     {
         public Placement P;
         public int Gain;
+        public KernelTaps Taps;
+        public byte HasTaps;
     }
 
     private struct Placed
@@ -601,8 +603,15 @@ public static unsafe partial class World
     private static Shape ShapeOf(WorldCtx* w, GridCtx* g, in Placed source)
     {
         var shape = new Shape { Gain = source.Gain };
-        TileBake.PlaceAnchored(source.Ax, source.Ay, g->ScaleQ8, g->Size, StampCatalog.Get(source.Stamp),
-            source.Angle, source.Size, LayerPrecision(w, source.Layer), out shape.P);
+        var precision = LayerPrecision(w, source.Layer);
+        if (!TileBake.PlaceAnchored(source.Ax, source.Ay, g->ScaleQ8, g->Size, StampCatalog.Get(source.Stamp),
+            source.Angle, source.Size, precision, out shape.P))
+            return shape;
+
+        var grid = (int)(g - w->Grids);
+        if (KernelFactory.TryFindTaps(w, grid, source.Stamp, source.Angle, precision, &shape.P, out shape.Taps) ||
+            (w->Kernels.CanInsert && KernelFactory.TryGetTaps(w, grid, source.Stamp, source.Angle, precision, &shape.P, out shape.Taps)))
+            shape.HasTaps = 1;
         return shape;
     }
 
@@ -614,6 +623,17 @@ public static unsafe partial class World
         core = 0;
         smooth = 0;
         var p = &s->P;
+        if (s->HasTaps != 0)
+        {
+            var i = cx - p->Px - s->Taps.OriginX;
+            var j = cy - p->Py - s->Taps.OriginY;
+            if ((uint)i >= (uint)s->Taps.Width || (uint)j >= (uint)s->Taps.Height) return;
+
+            if (s->Taps.Cells != null) core = s->Taps.Cells[j * s->Taps.Width + i] * s->Gain;
+            else smooth = s->Taps.Q40[j * s->Taps.Width + i] * s->Gain;
+            return;
+        }
+
         switch (p->Plane)
         {
             case Plane.Difference:
@@ -728,6 +748,30 @@ public static unsafe partial class World
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static short Saturate(long value) => (short)Math.Clamp(value, short.MinValue, short.MaxValue);
 
+    private static void FillCore(Shape* s, int* core, int tileX, int tileY, int top, int rows, int* lo, int* hi)
+    {
+        const int n = TileBake.TileSize;
+        var taps = &s->Taps;
+        var gain = s->Gain;
+        for (var r = 0; r < rows; r++)
+        {
+            var j = tileY + top + r - s->P.Py - taps->OriginY;
+            var row = (top + r) * n;
+            if ((uint)j >= (uint)taps->Height)
+            {
+                for (var c = lo[r]; c < hi[r]; c++) core[row + c] = 0;
+                continue;
+            }
+
+            var tap = taps->Cells + j * taps->Width;
+            for (var c = lo[r]; c < hi[r]; c++)
+            {
+                var i = tileX + c - s->P.Px - taps->OriginX;
+                core[row + c] = (uint)i < (uint)taps->Width ? tap[i] * gain : 0;
+            }
+        }
+    }
+
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
@@ -785,7 +829,11 @@ public static unsafe partial class World
                 saturated |= cell == short.MinValue || cell == short.MaxValue;
             }
 
-            if (plane == Plane.Difference)
+            if (s->HasTaps != 0)
+            {
+                if (!smooth) FillCore(s, core, tileX, tileY, top, rows, lo, hi);
+            }
+            else if (plane == Plane.Difference)
             {
                 TileBake.BoxCells(core, tileX, tileY, p->Px, p->Py, p->Fx, p->Fy, p->ExtentX, p->ExtentY, p->V, gain);
             }
@@ -857,7 +905,13 @@ public static unsafe partial class World
                         br += lowBP[i];
                     }
 
-                    var own = !smooth ? 0 : separable ? dy * wx[c] : TileBake.TurnedSmoothAt(p, tileX + c, tileY + top + r) * gain;
+                    var own = 0L;
+                    if (smooth)
+                    {
+                        if (s->HasTaps != 0) SourceAt(s, tileX + c, tileY + top + r, out _, out own);
+                        else own = separable ? dy * wx[c] : TileBake.TurnedSmoothAt(p, tileX + c, tileY + top + r) * gain;
+                    }
+
                     long absent;
                     if (saturated && (cell == short.MinValue || cell == short.MaxValue))
                         absent = Absent((boxes == null ? 0 : boxes[i]) + (carryP == null ? 0 : carryP[i]), tq, br, th, bh, plane, smooth ? 0 : core[i], own);
