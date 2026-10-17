@@ -768,7 +768,7 @@ public sealed class EngineTests
         Assert.Equal(16 * unitBytes + 4 * 64, cleared.SlabBytes);
         Assert.Equal(empty.WorldBytes + 983_040 + 32 + 16 * sizeof(int) + 16 * sizeof(TileRect) +
             16 * sizeof(int) + 16 * sizeof(JournalEntry) + 16_384L * sizeof(DepositRecord) +
-            16 + 16 * unitBytes + 4 * 64 + processed.KernelBytes, cleared.WorldBytes);
+            16 + 16 * unitBytes + 4 * 64 + processed.KernelBytes + cleared.EpochTreeBytes, cleared.WorldBytes);
     }
 
     [Fact]

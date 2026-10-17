@@ -133,7 +133,8 @@ internal unsafe struct LayerData
     public NativeBuffer<int> Stale;
     public HistState* Hist;
     public NativeBuffer<TileRect> Rects;
-    public MaxPyramid Max;
+    public Pyramid<short, ShortMaxOp> Max;
+    public Pyramid<int, EpochMaxOp> EpochTree;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public readonly TilePlanes* SetOf(int tile)
@@ -468,6 +469,7 @@ public static unsafe partial class World
         ld->Stale.Free();
         ld->Rects.Free();
         ld->Max.Reset();
+        ld->EpochTree.Reset();
     }
 
     internal static byte AddGrid(byte world, int power, float x, float y, float size)
@@ -657,7 +659,7 @@ public static unsafe partial class World
 
                         var published = TileBake.PageAny(ld->PageOf(tile));
                         DropPage(ld, tile);
-                        if (published && ld->Epochs != null) ld->Epochs[tile] = w->Tick + 1;
+                        if (published && ld->Epochs != null) StampEpoch(g, ld, tile, w->Tick + 1);
                     }
 
                 ld->Max.Reset();
@@ -797,8 +799,10 @@ public static unsafe partial class World
 
     private static void EnsureEpochs(GridCtx* g, LayerData* ld)
     {
-        if (ld->Epochs == null)
-            ld->Epochs = (int*)NativeHeap.AllocZeroed((nuint)g->TileCount * sizeof(int));
+        if (ld->Epochs != null) return;
+
+        ld->Epochs = (int*)NativeHeap.AllocZeroed((nuint)g->TileCount * sizeof(int));
+        ld->EpochTree.Ensure(g->TilesPerSide);
     }
 
     private static void EnsureDirectory(GridCtx* g, LayerData* ld)
@@ -889,7 +893,7 @@ public static unsafe partial class World
                 var ld = g->Layers + l;
                 var dirty = ld->Dirty.Pointer;
                 SortSlots(dirty, ld->Dirty.Length);
-                for (var i = 0; i < ld->Dirty.Length; i++) ld->Epochs[dirty[i]] = w->Tick;
+                for (var i = 0; i < ld->Dirty.Length; i++) StampEpoch(g, ld, dirty[i], w->Tick);
                 var changed = ld->Dirty;
                 ld->Dirty = ld->Changed;
                 ld->Dirty.Resize(0);
@@ -1181,7 +1185,7 @@ public static unsafe partial class World
 
         var g = w->Grids + grid;
         var ld = g->Layers + layer;
-        return ld->Max.Best(g->TilesPerSide, ld, out x, out y);
+        return MaxQueries.Best(ld->Max, g->TilesPerSide, ld, out x, out y);
     }
 
     public static short QueryMax(byte world, byte grid, byte layer,
@@ -1200,7 +1204,7 @@ public static unsafe partial class World
         if (x1 <= x0 || y1 <= y0) return 0;
 
         var ld = g->Layers + layer;
-        return ld->Max.Best(g->TilesPerSide, ld, x0, y0, (int)x1, (int)y1, out bestX, out bestY);
+        return MaxQueries.Best(ld->Max, g->TilesPerSide, ld, x0, y0, (int)x1, (int)y1, out bestX, out bestY);
     }
 
     public static void QueryGradient(byte world, byte grid, byte layer, float x, float y, out int gx, out int gy)
@@ -1226,15 +1230,7 @@ public static unsafe partial class World
         var epochs = g->Layers[layer].Epochs;
         if (epochs == null) return 0;
 
-        var count = 0;
-        for (var tile = 0; tile < g->TileCount; tile++)
-        {
-            if (epochs[tile] - since <= 0) continue;
-            if (destination != null) destination[count] = tile;
-            count++;
-        }
-
-        return count;
+        return CollectNewer(g, g->Layers + layer, since, destination);
     }
 
     public static int ChangedTiles(byte world, byte grid, byte layer, int* destination)
