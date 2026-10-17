@@ -8,7 +8,8 @@ internal static unsafe class SplatTiming
         var Count = int.Parse(Environment.GetEnvironmentVariable("GI_SPLATS") ?? "1000000");
         var world = World.New();
         Grid.New(world, 10, 0f, 0f, 1024f);
-        var layer = Layer.New(world, Layer.Residency.Transient, Layer.Precision.Cell);
+        var phase = int.Parse(Environment.GetEnvironmentVariable("GI_PHASE") ?? "0", System.Globalization.CultureInfo.InvariantCulture);
+        var layer = Layer.New(world, Layer.Residency.Transient, new Layer.Precision((byte)phase, 0));
         var box = Stamp.Box(4, 4, 8);
         var cost = Environment.GetEnvironmentVariable("GI_COST");
         if (cost != null) World.ConfigureConvolveCost(world, layer, long.Parse(cost, System.Globalization.CultureInfo.InvariantCulture));
