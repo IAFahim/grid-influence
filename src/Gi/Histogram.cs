@@ -419,6 +419,7 @@ public static unsafe partial class World
 
             var sums = hist->Out;
             var set = EnsureSet(g, ld, outTile);
+            PrepareTransientSet(ld, set);
             var dirty = DirtyIndex(g, ld, outTile);
             ld->Rects.Pointer[dirty] = new TileRect { X0 = 0, Y0 = 0, X1 = TileBake.TileSize, Y1 = TileBake.TileSize };
             var amount = peak * Math.Abs((long)value);

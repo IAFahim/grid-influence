@@ -198,12 +198,14 @@ public static unsafe partial class World
     private static int* IPlane(GridCtx* g, LayerData* ld, int tile, int amount)
     {
         var set = EnsureSet(g, ld, tile);
+        PrepareTransientSet(ld, set);
         PlaneFold.ChargeI(&ld->Store, set, amount);
         return ld->Store.Cells(*set).I;
     }
 
     private static long* QPlane(LayerData* ld, TilePlanes* set, bool tent, long amount)
     {
+        PrepareTransientSet(ld, set);
         if (tent) ld->Store.EnsureT(ref *set);
         else ld->Store.EnsureB(ref *set);
         PlaneFold.ChargeQ40(&ld->Store, set, tent, amount);
@@ -580,6 +582,7 @@ public static unsafe partial class World
                     if (set == null) continue;
 
                     var rect = rects + i;
+                    if (transient) PrepareTransientSet(ld, set);
                     var outcome = TileBake.Publish(&ld->Store, set, rect->X0, rect->Y0, rect->X1, rect->Y1, w->Tick);
                     if ((outcome & ResolveOutcome.Empty) != 0 && (transient || ld->Store.PlanesZero(*set)))
                     {
@@ -612,13 +615,21 @@ public static unsafe partial class World
         ld->Stale.Resize(0);
     }
 
-    private static void RetireTransientTile(LayerData* ld, TilePlanes* set, int tile)
+    private static void PrepareTransientSet(LayerData* ld, TilePlanes* set)
     {
+        if (set->Stale == 0) return;
+
         ld->Store.ClearWide(set);
         var cells = ld->Store.Cells(*set);
         new Span<int>(cells.I, TileBake.TileSize * TileBake.TileSize).Clear();
         if (cells.T != null) new Span<long>(cells.T, TileBake.TileSize * TileBake.TileSize).Clear();
         if (cells.B != null) new Span<long>(cells.B, TileBake.TileSize * TileBake.TileSize).Clear();
+        set->Stale = 0;
+    }
+
+    private static void RetireTransientTile(LayerData* ld, TilePlanes* set, int tile)
+    {
+        set->Stale = 1;
         var n = ld->Stale.Length;
         ld->Stale.Resize(n + 1);
         ld->Stale.Pointer[n] = tile;

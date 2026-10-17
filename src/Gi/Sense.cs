@@ -41,10 +41,63 @@ public static unsafe partial class World
         return complete;
     }
 
+    private readonly struct SplatOwn
+    {
+        public readonly bool Active;
+        public readonly byte Stamp;
+        public readonly sbyte Gain;
+        public readonly float X;
+        public readonly float Y;
+
+        public SplatOwn(byte stamp, sbyte gain, float x, float y)
+        {
+            Active = true;
+            Stamp = stamp;
+            Gain = gain;
+            X = x;
+            Y = y;
+        }
+    }
+
+    private static bool Own(WorldCtx* w, GridCtx* g, SourceId id, in SplatOwn own, byte layer, out Placed source)
+    {
+        if (!own.Active) return Applied(w, g, id, layer, out source);
+
+        source = default;
+        var gain = Math.Clamp((int)own.Gain, -MaxGain, MaxGain);
+        if (gain == 0 || !IsTransient(w, layer) || !StampCatalog.Valid(own.Stamp)) return false;
+        if (!float.IsFinite(own.X) || !float.IsFinite(own.Y) || g->ScaleQ8 == 0) return false;
+
+        var mask = w->Recipes[layer].AnchorMask;
+        source.Ax = TileBake.AnchorQ8(own.X, g->OriginX, g->ScaleQ8, mask);
+        source.Ay = TileBake.AnchorQ8(own.Y, g->OriginY, g->ScaleQ8, mask);
+        source.Stamp = own.Stamp;
+        source.Layer = layer;
+        source.Gain = (sbyte)gain;
+        source.Angle = 0;
+        source.Size = UnitScale;
+        return true;
+    }
+
+    public static bool TrySense(byte world, byte layer, float x, float y, byte stamp, sbyte gain, out short value)
+        => SenseOwn(world, layer, x, y, default, new SplatOwn(stamp, gain, x, y), out value);
+
+    public static bool TrySenseGradient(byte world, byte layer, float x, float y, byte stamp, sbyte gain, out float gx, out float gy)
+        => SenseGradientOwn(world, layer, x, y, default, new SplatOwn(stamp, gain, x, y), out gx, out gy);
+
+    public static bool TrySenseArea(byte world, byte layer, float x, float y, float reach, byte stamp, sbyte gain, out long total)
+        => SenseArea(world, layer, x, y, reach, default, new SplatOwn(stamp, gain, x, y), out total);
+
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
     public static bool TrySense(byte world, byte layer, float x, float y, SourceId exclude, out short value)
+        => SenseOwn(world, layer, x, y, exclude, default, out value);
+
+    #if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    #endif
+    private static bool SenseOwn(byte world, byte layer, float x, float y, SourceId exclude, in SplatOwn own, out short value)
     {
         value = 0;
         var w = GetContext(world);
@@ -55,7 +108,7 @@ public static unsafe partial class World
         var cx = (int)(CellQ8(x, g->OriginX, g->ScaleQ8) >> 8);
         var cy = (int)(CellQ8(y, g->OriginY, g->ScaleQ8) >> 8);
         value = Query(world, (byte)gi, layer, cx, cy);
-        if (!Applied(w, g, exclude, layer, out var source)) return complete;
+        if (!Own(w, g, exclude, own, layer, out var source)) return complete;
 
         var shape = ShapeOf(w, g, source);
         if (shape.P.Reaches(cx, cy)) value = ExcludedValue(w, g, layer, source.Layer, &shape, cx, cy, value);
@@ -63,10 +116,10 @@ public static unsafe partial class World
     }
 
     public static bool TrySenseArea(byte world, byte layer, float x, float y, float reach, out long total)
-        => SenseArea(world, layer, x, y, reach, default, out total);
+        => SenseArea(world, layer, x, y, reach, default, default, out total);
 
     public static bool TrySenseArea(byte world, byte layer, float x, float y, float reach, SourceId exclude, out long total)
-        => SenseArea(world, layer, x, y, reach, exclude, out total);
+        => SenseArea(world, layer, x, y, reach, exclude, default, out total);
 
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
@@ -406,6 +459,12 @@ public static unsafe partial class World
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
     public static bool TrySenseGradient(byte world, byte layer, float x, float y, SourceId exclude, out float gx, out float gy)
+        => SenseGradientOwn(world, layer, x, y, exclude, default, out gx, out gy);
+
+    #if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    #endif
+    private static bool SenseGradientOwn(byte world, byte layer, float x, float y, SourceId exclude, in SplatOwn own, out float gx, out float gy)
     {
         gx = 0f;
         gy = 0f;
@@ -416,7 +475,7 @@ public static unsafe partial class World
         var g = w->Grids + gi;
         var cx = (int)(CellQ8(x, g->OriginX, g->ScaleQ8) >> 8);
         var cy = (int)(CellQ8(y, g->OriginY, g->ScaleQ8) >> 8);
-        var excluding = Applied(w, g, exclude, layer, out var source);
+        var excluding = Own(w, g, exclude, own, layer, out var source);
         var shape = excluding ? ShapeOf(w, g, source) : default;
         var perUnit = g->ScaleQ8 / 512f;
         gx = (Others(w, g, layer, excluding, source.Layer, &shape, cx + 1, cy) -
@@ -493,7 +552,7 @@ public static unsafe partial class World
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    private static bool SenseArea(byte world, byte layer, float x, float y, float reach, SourceId exclude, out long total)
+    private static bool SenseArea(byte world, byte layer, float x, float y, float reach, SourceId exclude, in SplatOwn own, out long total)
     {
         total = 0;
         var w = GetContext(world);
@@ -540,7 +599,7 @@ public static unsafe partial class World
             }
         }
 
-        if (Applied(w, g, exclude, layer, out var source))
+        if (Own(w, g, exclude, own, layer, out var source))
         {
             var shape = ShapeOf(w, g, source);
             sum += derived ? ExcludedMix(w, g, layer, source.Layer, disk, &shape) : ExcludedArea(g, layer, disk, &shape);
