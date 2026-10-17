@@ -627,14 +627,14 @@ internal sealed unsafe class StreamRunner
                 Require(actual == expected, $"source spec {exclude}: {actual} vs {expected}", _index);
                 if (!actual) break;
                 Require(
-                    spec.X == referenceSource.X && spec.Y == referenceSource.Y &&
+                    spec.X.Equals(referenceSource.X) && spec.Y.Equals(referenceSource.Y) &&
                     spec.Layer == referenceSource.Layer && spec.Stamp == referenceSource.Stamp &&
                     spec.Gain == referenceSource.Gain,
                     $"source spec {exclude} fields", _index);
                 var heading = referenceSource.Angle * ((float)Math.PI * 2 / 65536);
                 var scale = referenceSource.Scale / 256f;
                 Require(
-                    spec.HeadingRadians == heading && spec.Scale == scale,
+                    spec.HeadingRadians.Equals(heading) && spec.Scale.Equals(scale),
                     $"source spec {exclude} heading/scale: {spec.HeadingRadians}/{spec.Scale} vs {heading}/{scale}",
                     _index);
                 break;

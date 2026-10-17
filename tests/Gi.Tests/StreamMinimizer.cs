@@ -148,10 +148,11 @@ internal static class StreamMinimizer
 
     private static string PrecisionLiteral(Layer.Precision precision)
     {
-        if (precision.Equals(Layer.Precision.Exact)) return "Layer.Precision.Exact";
-        if (precision.Equals(Layer.Precision.Half)) return "Layer.Precision.Half";
-        if (precision.Equals(Layer.Precision.Quarter)) return "Layer.Precision.Quarter";
-        if (precision.Equals(Layer.Precision.Cell)) return "Layer.Precision.Cell";
+        var bits = (precision.PhaseBits, precision.TurnBits);
+        if (bits == (Layer.Precision.Exact.PhaseBits, Layer.Precision.Exact.TurnBits)) return "Layer.Precision.Exact";
+        if (bits == (Layer.Precision.Half.PhaseBits, Layer.Precision.Half.TurnBits)) return "Layer.Precision.Half";
+        if (bits == (Layer.Precision.Quarter.PhaseBits, Layer.Precision.Quarter.TurnBits)) return "Layer.Precision.Quarter";
+        if (bits == (Layer.Precision.Cell.PhaseBits, Layer.Precision.Cell.TurnBits)) return "Layer.Precision.Cell";
         return $"new Layer.Precision({precision.PhaseBits}, {precision.TurnBits})";
     }
 

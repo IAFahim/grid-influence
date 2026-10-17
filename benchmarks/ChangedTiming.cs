@@ -10,11 +10,11 @@ internal static unsafe class ChangedTiming
         var layer = Layer.New(world, Layer.Precision.Cell);
         var box = Stamp.Box(4, 4, 7);
         var rng = new Random(9);
-        const int Count = 2000;
-        var ids = new World.SourceId[Count];
-        var xs = new float[Count];
-        var ys = new float[Count];
-        for (var i = 0; i < Count; i++)
+        const int sources = 2000;
+        var ids = new World.SourceId[sources];
+        var xs = new float[sources];
+        var ys = new float[sources];
+        for (var i = 0; i < sources; i++)
         {
             xs[i] = 100f + (float)rng.NextDouble() * 7900f;
             ys[i] = 100f + (float)rng.NextDouble() * 7900f;
@@ -30,7 +30,7 @@ internal static unsafe class ChangedTiming
         {
             for (var i = 0; i < 20; i++)
             {
-                var k = rng.Next(Count);
+                var k = rng.Next(sources);
                 xs[k] += 1f;
                 World.Move(world, ids[k], xs[k], ys[k]);
             }
@@ -44,7 +44,7 @@ internal static unsafe class ChangedTiming
             var hits = 0;
             for (var rep = 0; rep < 50; rep++)
             {
-                var k = (frame * 50 + rep) % Count;
+                var k = (frame * 50 + rep) % sources;
                 if (World.Changed(world, layer, xs[k] + 600f, ys[k], 64f, tick - 3)) hits++;
             }
 

@@ -19,9 +19,9 @@ public unsafe class ReferenceWorldTests
             stamps.Add(Stamp.Box(6, 4, 40));
             stamps.Add(Stamp.Tent(8, 6, -35));
             stamps.Add(Stamp.Bell(10, 8, 60));
-            stamps.Add(Stamp.Disk(5, 50, 360));
-            stamps.Add(Stamp.Cone(7, -45, 360));
-            stamps.Add(Stamp.Dome(9, 70, 360));
+            stamps.Add(Stamp.Disk(5, 50));
+            stamps.Add(Stamp.Cone(7, -45));
+            stamps.Add(Stamp.Dome(9, 70));
             stamps.Add(Stamp.Disk(6, 55, 135));
             stamps.Add(Stamp.Cone(8, 65, 210));
             stamps.Add(Stamp.Dome(8, -60, 270));

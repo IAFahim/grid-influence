@@ -35,7 +35,7 @@ Started 2026-10-18. Day 0 is Unity's CoreCLR release, expected about 2026-11-14.
 | Tier | Where it runs | What it runs |
 |---|---|---|
 | **D** | anywhere, including CI and cloud agents | `dotnet build Gi.slnx -c Release -m:1`, `dotnet test Gi.slnx -c Release --no-build`, `unity/lint.sh`, `unity/build-plugins.sh --check` |
-| **U** | a machine with the pinned Unity editor and a license: the owner's, until O-U3 adds a CI lane | `unity/validate.sh editmode`, `playmode`, `il2cpp` or `perf` |
+| **U** | this host: the `unity` CLI (1.0.0-beta.13) with installed editors and an active Personal license — EditMode proven end to end, PlayMode is the same command, the `linux-il2cpp` module is installed for a8 (Appendix F). CI needs serial or floating licensing (O-U3) | `unity/validate.sh editmode`, `playmode`, `il2cpp` or `perf`; the script maps the CLI exits: 0 pass, 8 tests failed (terminal), anything else infrastructure (retry once) |
 | **G** | anywhere | the full `AGENTS.md` validation for `src/Gi` changes: `--verify` with and without intrinsics, plus the pinned `--gate` when a timing can move |
 
 Every **Done when** item carries its tier.
@@ -213,7 +213,7 @@ Plan §12's S1–S5 apply, plus:
 | F-1 | Contract pins and dotnet harness | foundation | P0 | — | D | 1 | done | #78 |
 | U-0 | Package skeleton, plugins, host project | runtime | P0 | — | D, U | 1 | todo | |
 | G-0a | TFM dry run | core | P0 | — | G | 1 | done | scratch, not merged |
-| G-1 | Pure exclusion reads | core | P1 | — | G | 1 | todo | |
+| G-1 | Pure exclusion reads | core | P1 | — | G | 1 | done | #81. Exclusion-row gate deltas (+8–16%) are the accepted price of pure reads; baseline untouched, quiet-host re-run pending |
 | F-2 | Scenarios, reference executor, lint, CI | foundation | P0 | F-1, U-0 | D | 2 | todo | |
 | U-1 | Frame, bootstrap, group, process | runtime | P0 | U-0, F-1 | D, U | 2 | todo | |
 | A-1 | Assets and inspectors | authoring | P0 | U-0 | U | 2 | todo | |
@@ -630,7 +630,7 @@ Done when:
 - [U] For every entity, Area, Max, Nearest and Changed match `TrySenseArea`, `TrySenseMax`, `TrySenseNearest` and `Changed`. The found and coverage tags match too.
 - [U] Exclude-self bindings match `TrySense` with exclusion.
   - They run single-threaded under `Writers` until G-1 is accepted.
-  - After that, a follow-up makes them parallel and reruns this test.
+  - After that, a follow-up makes them parallel and reruns this test. G-1 landed (#81): reads insert nothing, but the parallel window must still exclude concurrent writers — a `TryFindTaps` hit can race a write-path insert (`EmitDelta`/`FlushHistogram`; the 32-entry ring overwrites taps in place).
 - [U] Exclude-self on a transient layer is rejected both at bake and at bootstrap, because a splat has no `SourceId`.
 - [U] With `Period` set to n, each entity is sensed exactly once every n ticks.
 - [U] Steady ticks allocate 0 B.
@@ -1023,6 +1023,7 @@ This roadmap changes the plan in the ways listed here. The coordinator folds the
 12. **ConfigVars are split by area** into `GiRuntimeConfig`, `GiSenseConfig`, `GiMirrorConfig` and `GiDebugConfig`, so no two cards share a file.
 13. **Performance results** go to `unity/perf.md`, not to the package README.
 14. **Card ids.** This file's cards replace plan §10 and §11. Plan §12's ledger continues here as §2.
+15. **The editor baseline follows O-U2** (minimum Unity = whatever the supplied BovineLabs.Core targets), not the alpha pin. The host project moves to the Unity 6000.x line that com.bovinelabs.core 2.0.0-pre.1 targets (newest published; the Unity 7 alpha's builtin Collections 6.7.0 overrides manifest pins and cannot compile it). The Unity 7 alphas stay installed and remain the target of the day-0 cards (V-0, G-0); the pin moves back when BovineLabs ships Unity 7 support or CoreCLR day 0 arrives, whichever is first.
 
 New open decisions:
 
@@ -1086,3 +1087,29 @@ The coordinator checks, in this order:
    - re-plan, naming the section that moves.
 
    Then update the board and name the next cards.
+
+## Appendix F: Host environment and session notes
+
+Recorded 2026-10-18 so later sessions start from verified facts, not assumptions. Amend this appendix, not the plan, as the environment changes.
+
+### Environment (verified on this host)
+
+- `unity` CLI 1.0.0-beta.13 at `~/.local/bin/unity`. Official documentation: github.com/Unity-Technologies/skills, skill `unity-cli` (with references for editors-install, build-run-test, auth-license-cloud, integration-advanced). Clone it fresh if `/tmp/unity-skills` is gone.
+- License: Unity Personal (Assigned), active via OAuth; batchmode entitlement resolved on every launch (~10 verified runs). Personal licenses are machine-and-account bound: a service account **cannot** activate one, so a CI lane (O-U3) needs serial or floating licensing.
+- Editors installed under `~/Unity/Hub/Editor`: 7000.0.0a8 and 7000.0.0a9 (Unity 7 alphas; the day-0 cards' target), and the 6000.x editor the host project repins to per Appendix A.15. The alpha stream needs no special entitlement. The `linux-il2cpp` module for a8 is a 236 MB install (`unity install-modules -e 7000.0.0a8 -m linux-il2cpp --yes`, about a minute) — installed.
+- Tier U EditMode is proven end to end on this host by a control project: 1/1 passed, exit 0. Receipt command shape:
+  `unity test <project> --editor-version 7000.0.0a8 --mode EditMode --report-format junit --output <xml> --timeout 600`
+  Exit contract: `0` pass, `8` tests ran and failed (terminal — never retry), anything else (with `errors[0].code` `TEST_RUN_ERROR`/`TEST_TIMED_OUT`) infrastructure, safe to retry once. `validate.sh` is written against this contract.
+- A running editor is controllable headlessly: `unity pipeline install` (com.unity.pipeline, Unity 6.0+), launch the editor with `-batchmode -nographics` and no `-quit`, then `unity command eval '<C#>'` (about 40 ms round trip) and `unity close`. The editor-tooling cards (E-*) should drive editors this way instead of hand-authored UI harnesses. Safe Mode caveat: a project that boots with compile errors never loads the pipeline — fix the code and restart; `unity pipeline list` confirms.
+
+### Lessons — mistakes not to repeat
+
+1. A direct push to `main` (the engine-v2 merge, cfc38a5) bypassed CI and carried 134 latent inspection findings; every PR then failed the `inspect` gate until `hygiene/inspect-sweep` cleared them. Land every change through a PR so the gates run.
+2. "No Unity on this host" was asserted after checking only the Hub folder and `unity-editor`. Before declaring an environment limit, inventory with `which unity && unity doctor --format json`.
+3. UPM git-URL dependencies are availability risks: the pinned `github.com/terrtle/com.bovinelabs.core.git` 404s (repository gone). Depend on registry versions through the OpenUPM scoped registry, or vendor; the swap is recorded on PR #79.
+4. Unity Test Framework treats an asmdef with `"includePlatforms": []` as a PlayMode assembly: EditMode discovery finds zero tests. EditMode test assemblies need `"includePlatforms": ["Editor"]`.
+5. ReSharper findings are enforced by CI (`jb inspectcode --severity=WARNING`, zero tolerance) but not by `TreatWarningsAsErrors`; run `jb inspectcode Gi.slnx --build` locally before opening any PR, in `unity/` and `src/` alike.
+6. On Unity 7 alphas, Entities/Collections/Burst are builtin editor modules that override any manifest pin (packages-lock records "builtin"). A package built for the 6000.x registry line then fails with package-internal compile errors (com.bovinelabs.core 2.0.0-pre.1: 222 errors against builtin Collections 6.7.0, no newer version published). Treat builtin-module drift as a first-class risk of any alpha pin; O-U2's rule is the guard, and the host project's repin is Appendix A.15.
+7. `registry.openupm.com` was NXDOMAIN worldwide on 2026-10-18 (confirmed through two DoH resolvers and OpenUPM's own nameservers). The registry is served live at `package.openupm.com`, which the manifests use; a consumer-side scoped registry is therefore an install requirement, recorded in the README.
+8. On the a8 alpha, a precompiled DLL whose `.meta` carries a PluginImporter block (defineConstraints, platformData) is silently excluded from the precompiled set; bare `.meta` files (same GUIDs) register fine. Keep plugin `.metas` bare until the coreclr variant needs real per-platform settings.
+9. The gate harness mis-spawns children under `dotnet run` (Environment.ProcessPath is the apphost, so children fall through to the verify suite and the host string parses empty). Run gates against the built DLL — `taskset -c 0 dotnet benchmarks/bin/Release/net10.0/GiBenchmarks.dll --gate` — which is how the baseline was recorded. A harness fix (spawn via the dotnet host explicitly) is a queued chore.

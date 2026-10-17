@@ -67,9 +67,9 @@ public static unsafe partial class World
 
         var hist = (HistState*)NativeHeap.AllocZeroed((nuint)sizeof(HistState));
         hist->Classes = (HistClass*)NativeHeap.AllocZeroed((nuint)(256 * sizeof(HistClass)));
-        hist->Window = (int*)NativeHeap.AllocZeroed((nuint)(HistState.WindowStride * HistState.WindowSide * sizeof(int)));
-        hist->Strip = (int*)NativeHeap.AllocZeroed((nuint)(HistState.WindowSide * TileBake.TileSize * sizeof(int)));
-        hist->Out = (int*)NativeHeap.AllocZeroed((nuint)(TileBake.TileSize * TileBake.TileSize * sizeof(int)));
+        hist->Window = (int*)NativeHeap.AllocZeroed(HistState.WindowStride * HistState.WindowSide * sizeof(int));
+        hist->Strip = (int*)NativeHeap.AllocZeroed(HistState.WindowSide * TileBake.TileSize * sizeof(int));
+        hist->Out = (int*)NativeHeap.AllocZeroed(TileBake.TileSize * TileBake.TileSize * sizeof(int));
         ld->Hist = hist;
         return hist;
     }
@@ -149,7 +149,7 @@ public static unsafe partial class World
             var clampedY = Vector256.Min(Vector256.Max(cy, Vector256<int>.Zero), limit);
             var inside = Vector256.Equals(clampedX, cx) & Vector256.Equals(clampedY, cy)
                 & (Vector256.LessThan(Vector256.Abs(x), infinity) & Vector256.LessThan(Vector256.Abs(y), infinity)).AsInt32();
-            var accepted = (uint)inside.AsSingle().ExtractMostSignificantBits();
+            var accepted = inside.AsSingle().ExtractMostSignificantBits();
             var tileVector = Vector256.ShiftRightArithmetic(clampedY, TileBake.TileBits) * tilesPerSide
                 + Vector256.ShiftRightArithmetic(clampedX, TileBake.TileBits);
             var local = Vector256.ShiftLeft(clampedY & tileMask, TileBake.TileBits) + (clampedX & tileMask);
@@ -242,7 +242,7 @@ public static unsafe partial class World
         hist->Total = 0;
     }
 
-    private static void ResetHistogram(GridCtx* g, LayerData* ld)
+    private static void ResetHistogram(LayerData* ld)
     {
         var hist = ld->Hist;
         if (hist == null) return;

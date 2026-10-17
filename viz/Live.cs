@@ -35,7 +35,7 @@ internal static class Live
     private static Random _rng = new(42);
     private static LiveSheep[] _sheep = [];
     private static LiveWolf[] _wolves = [];
-    private static Gi.World.SourceId _fearSource;
+    private static World.SourceId _fearSource;
     private static float _lastPaintX = -99f;
     private static float _lastPaintY = -99f;
     private static int _eaten;
@@ -130,13 +130,13 @@ internal static class Live
         return value;
     }
 
-    internal static void Gradient(byte layer, float x, float y, Gi.World.SourceId exclude, out float gx, out float gy)
+    internal static void Gradient(byte layer, float x, float y, World.SourceId exclude, out float gx, out float gy)
     {
         _queries++;
         World.TrySenseGradient(WorldId, layer, x, y, exclude, out gx, out gy);
     }
 
-    internal static long Crowd(float x, float y, Gi.World.SourceId self)
+    internal static long Crowd(float x, float y, World.SourceId self)
     {
         _queries++;
         World.TrySenseArea(WorldId, Herd, x, y, CrowdReach, self, out var crowd);
@@ -537,7 +537,7 @@ internal static class Live
 internal sealed class LiveSheep
 {
     public float X, Y, Vx, Vy, Phase;
-    public Gi.World.SourceId Source;
+    public World.SourceId Source;
 
     public void Update(float t)
     {
@@ -608,7 +608,7 @@ internal sealed class LiveSheep
 internal sealed class LiveWolf
 {
     public float X, Y, Vx, Vy;
-    public Gi.World.SourceId Source;
+    public World.SourceId Source;
     public float HuntX, HuntY;
     public bool Hunting;
     public float RetryClock;

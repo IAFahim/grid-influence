@@ -16,7 +16,7 @@ public unsafe class FusedColumnEdgeTests
         var rng = new Random(seed);
         var size = 1 << power;
         var w = World.New();
-        var stamps = new List<byte> { Stamp.Box(5, 5, 40), Stamp.Tent(7, 7, -35), Stamp.Disk(5, 50, 360) };
+        var stamps = new List<byte> { Stamp.Box(5, 5, 40), Stamp.Tent(7, 7, -35), Stamp.Disk(5, 50) };
         try
         {
             Grid.New(w, power, 0f, 0f, size);
@@ -31,16 +31,16 @@ public unsafe class FusedColumnEdgeTests
 
             World.Process(w);
 
-            const int Count = 8192;
-            var xs = new float[Count];
-            var ys = new float[Count];
+            const int count = 8192;
+            var xs = new float[count];
+            var ys = new float[count];
             var tiles = size / 32;
-            for (var i = 0; i < Count; i += 8)
+            for (var i = 0; i < count; i += 8)
             {
                 var tx = rng.Next(tiles);
                 var ty = rng.Next(tiles);
                 var mode = rng.Next(6);
-                for (var lane = 0; lane < 8 && i + lane < Count; lane++)
+                for (var lane = 0; lane < 8 && i + lane < count; lane++)
                 {
                     var lx = EdgeBiased(rng, mode);
                     var ly = EdgeBiased(rng, mode);
@@ -52,10 +52,10 @@ public unsafe class FusedColumnEdgeTests
                 }
             }
 
-            var values = new short[Count];
-            var gx = new float[Count];
-            var gy = new float[Count];
-            var whole = new ulong[(Count + 63) >> 6];
+            var values = new short[count];
+            var gx = new float[count];
+            var gy = new float[count];
+            var whole = new ulong[(count + 63) >> 6];
             Array.Fill(whole, ulong.MaxValue);
             bool complete;
             fixed (float* px = xs)
@@ -64,10 +64,10 @@ public unsafe class FusedColumnEdgeTests
             fixed (float* pgx = gx)
             fixed (float* pgy = gy)
             fixed (ulong* pw = whole)
-                complete = (World.SenseGradientColumn(w, layer, px, py, null, Count, pv, pgx, pgy, pw) == World.ReadStatus.Complete);
+                complete = (World.SenseGradientColumn(w, layer, px, py, null, count, pv, pgx, pgy, pw) == World.ReadStatus.Complete);
 
             var expectedComplete = true;
-            for (var i = 0; i < Count; i++)
+            for (var i = 0; i < count; i++)
             {
                 var valueFilled = World.TrySense(w, layer, xs[i], ys[i], out var value);
                 var gradientFilled = World.TrySenseGradient(w, layer, xs[i], ys[i], out var dx, out var dy);
@@ -75,8 +75,8 @@ public unsafe class FusedColumnEdgeTests
                 expectedComplete &= filled;
                 var at = $"lane {i} ({i & 7}) x={xs[i]} y={ys[i]}";
                 Assert.True(value == values[i], $"{at} value {value} vs {values[i]}");
-                Assert.True(dx == gx[i], $"{at} dx {dx} vs {gx[i]}");
-                Assert.True(dy == gy[i], $"{at} dy {dy} vs {gy[i]}");
+                Assert.True(dx.Equals(gx[i]), $"{at} dx {dx} vs {gx[i]}");
+                Assert.True(dy.Equals(gy[i]), $"{at} dy {dy} vs {gy[i]}");
                 Assert.True(filled == (((whole[i >> 6] >> (i & 63)) & 1) == 1), $"{at} whole {filled}");
             }
 

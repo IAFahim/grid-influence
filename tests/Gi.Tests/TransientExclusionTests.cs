@@ -19,7 +19,8 @@ public class TransientExclusionTests
         try
         {
             var precision = new Layer.Precision((byte)phaseBits, 0);
-            var grids = new[] { Grid.New(world, 7, 0f, 0f, 128f), Grid.New(twin, 7, 0f, 0f, 128f) };
+            Grid.New(world, 7, 0f, 0f, 128f);
+            Grid.New(twin, 7, 0f, 0f, 128f);
             var layers = new[]
             {
                 Layer.New(world, Layer.Residency.Transient, precision),
