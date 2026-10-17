@@ -668,8 +668,7 @@ public static unsafe partial class World
             return shape;
 
         var grid = (int)(g - w->Grids);
-        if (KernelFactory.TryFindTaps(w, grid, source.Stamp, source.Angle, precision, &shape.P, out shape.Taps) ||
-            (w->Kernels.CanInsert && KernelFactory.TryGetTaps(w, grid, source.Stamp, source.Angle, precision, &shape.P, out shape.Taps)))
+        if (KernelFactory.TryFindTaps(w, grid, source.Stamp, source.Angle, precision, &shape.P, out shape.Taps))
             shape.HasTaps = 1;
         return shape;
     }
