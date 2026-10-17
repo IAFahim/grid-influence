@@ -68,27 +68,27 @@ F-1 pins these in `GiContractTests` (Tier D).
 
 | # | Fact | Relied on by | Status |
 |---|---|---|---|
-| C1 | When `Place` reports `Applied`, it never returns `default(SourceId)`. | `GiSource.Id == default` meaning "not placed" (U-2) | |
-| C2 | What `TransformRange.Invalid` means (an input mask of entries to skip, or an output listing the entries Gi rejected) and its bit layout. | sync fault scatter (U-3) | |
-| C3 | The largest number of commands one `ApplyBatch` call accepts, and what `TooManyCommands` reports. | batch splitting (U-2) | |
-| C4 | Field values do not depend on any of these:<br>• command order within a batch<br>• source creation order<br>• splat order<br>• how one tick's commands are split across batches | plan §5.8 | |
-| C5 | The single-stamp `Splat` overload gives the same result, bit for bit, as the per-entry overload called with one stamp and one gain for every entry. | uniform fast path (U-6) | |
-| C6 | `Process` advances `Tick` by exactly 1, and nothing else changes it. | tick equality (U-4) | |
-| C7 | Exactly which calls bump `Revision`, and that a token captured before a bump gets `StaleRevision`. | token recapture (plan §5.10) | |
-| C8 | Pure reads called from 8 threads with no writer running return the same bits as serial calls. The pure reads are:<br>• `Sense*Column` with null excludes<br>• `ChangedMask` and `ChangedTiles`<br>• `Query*` and `Covers`<br>• `TrySense*` without exclusion | parallel bindings (U-5) | |
-| C9 | Exclusion reads give the same results whatever state the kernel cache is in: cold, warm, or with this frame's inserts used up. | exclusion bindings (U-5b) | |
-| C10 | What exclusion does on a derived layer: subtracts the source with the recipe's weights, does nothing, or returns `InvalidLayer`. | binding validation (A-1, U-5b) | |
-| C11 | In the `whole` and `found` outputs, entry *i* is bit `i & 63` of word `i >> 6`. Also, what happens to the bits past `count` in the last word. | bit scatter (U-5) | |
-| C12 | When nothing is in reach, `SenseNearestColumn` writes `short.MinValue` and clears the found bit. Invalid inputs zero the outputs. | U-5b | |
-| C13 | For `ChangedTiles(world, grid, layer, since, …)`:<br>• which tiles it lists (expected: those changed after tick `since`)<br>• whether each tile appears only once<br>• how a tile is encoded<br>• the largest count a caller must make room for | GPU mirror (P-1) | |
-| C14 | `QueryRegion` writes `width × height` values in row-major order. Also, what it writes for cells outside the grid. | mirror, hashes | |
-| C15 | A grid added after sources were placed does not contain them. The adapter never does this; the pin records why D-U9 exists. | D-U9 | |
-| C16 | `Stamp.Free` returns false while any world uses the stamp, and true once every world that used it is freed. | stamp registry (U-1) | |
-| C17 | `Place`, `Fade(CreatedBy)` and `Expire(CreatedBy)` sent in one batch fade the source as asked, and remove it after exactly `Ticks` calls to `Process`. | pulses (U-2) | |
-| C18 | Whether world ids and `SourceId`s are reused after `World.Free` and `World.New`. | rebuild resets every `GiSource` (U-1) | |
-| C19 | None of the Gi calls the adapter makes on the warm path allocates managed memory. Measure: zero `GC.GetAllocatedBytesForCurrentThread` delta over 1000 scenario ticks. | axiom 8 | |
-| C20 | Gi throws only at construction, never on the warm path:<br>• `World.New` throws when 255 worlds exist.<br>• `Grid.New`, `Layer.New` and the `Stamp` factories throw on full catalogs or bad arguments.<br>• No warm-path call throws for any input the adapter can produce. | bootstrap boundary (U-1) | |
-| C21 | Gi's heading convention: which way a cone points at heading 0, and which way positive headings turn. | `GiPlane` (U-1) | |
+| C1 | When `Place` reports `Applied`, it never returns `default(SourceId)`. | `GiSource.Id == default` meaning "not placed" (U-2) | confirmed (#78) |
+| C2 | What `TransformRange.Invalid` means (an input mask of entries to skip, or an output listing the entries Gi rejected) and its bit layout. | sync fault scatter (U-3) | confirmed (#78) |
+| C3 | The largest number of commands one `ApplyBatch` call accepts, and what `TooManyCommands` reports. | batch splitting (U-2) | confirmed (#78) |
+| C4 | Field values do not depend on any of these:<br>• command order within a batch<br>• source creation order<br>• splat order<br>• how one tick's commands are split across batches | plan §5.8 | confirmed (#78) |
+| C5 | The single-stamp `Splat` overload gives the same result, bit for bit, as the per-entry overload called with one stamp and one gain for every entry. | uniform fast path (U-6) | confirmed (#78) |
+| C6 | `Process` advances `Tick` by exactly 1, and nothing else changes it. | tick equality (U-4) | confirmed (#78) |
+| C7 | Exactly which calls bump `Revision`, and that a token captured before a bump gets `StaleRevision`. | token recapture (plan §5.10) | confirmed (#78) |
+| C8 | Pure reads called from 8 threads with no writer running return the same bits as serial calls. The pure reads are:<br>• `Sense*Column` with null excludes<br>• `ChangedMask` and `ChangedTiles`<br>• `Query*` and `Covers`<br>• `TrySense*` without exclusion | parallel bindings (U-5) | confirmed (#78) |
+| C9 | Exclusion reads give the same results whatever state the kernel cache is in: cold, warm, or with this frame's inserts used up. | exclusion bindings (U-5b) | confirmed (#78) |
+| C10 | What exclusion does on a derived layer: subtracts the source with the recipe's weights, does nothing, or returns `InvalidLayer`. | binding validation (A-1, U-5b) | confirmed (#78) |
+| C11 | In the `whole` and `found` outputs, entry *i* is bit `i & 63` of word `i >> 6`. Also, what happens to the bits past `count` in the last word. | bit scatter (U-5) | confirmed (#78) |
+| C12 | When nothing is in reach, `SenseNearestColumn` writes `short.MinValue` and clears the found bit. Invalid inputs zero the outputs. | U-5b | confirmed (#78) |
+| C13 | For `ChangedTiles(world, grid, layer, since, …)`:<br>• which tiles it lists (expected: those changed after tick `since`)<br>• whether each tile appears only once<br>• how a tile is encoded<br>• the largest count a caller must make room for | GPU mirror (P-1) | confirmed (#78) |
+| C14 | `QueryRegion` writes `width × height` values in row-major order. Also, what it writes for cells outside the grid. | mirror, hashes | confirmed (#78) |
+| C15 | A grid added after sources were placed does not contain them. The adapter never does this; the pin records why D-U9 exists. | D-U9 | confirmed (#78) |
+| C16 | `Stamp.Free` returns false while any world uses the stamp, and true once every world that used it is freed. | stamp registry (U-1) | refined (#78: a pending snapshot refuses only when its recorded state names the stamp; a fresh-slot place+remove before Process does not refuse) |
+| C17 | `Place`, `Fade(CreatedBy)` and `Expire(CreatedBy)` sent in one batch fade the source as asked, and remove it after exactly `Ticks` calls to `Process`. | pulses (U-2) | confirmed (#78) |
+| C18 | Whether world ids and `SourceId`s are reused after `World.Free` and `World.New`. | rebuild resets every `GiSource` (U-1) | confirmed (#78) |
+| C19 | None of the Gi calls the adapter makes on the warm path allocates managed memory. Measure: zero `GC.GetAllocatedBytesForCurrentThread` delta over 1000 scenario ticks. | axiom 8 | confirmed (#78) |
+| C20 | Gi throws only at construction, never on the warm path:<br>• `World.New` throws when 255 worlds exist.<br>• `Grid.New`, `Layer.New` and the `Stamp` factories throw on full catalogs or bad arguments.<br>• No warm-path call throws for any input the adapter can produce. | bootstrap boundary (U-1) | confirmed (#78) |
+| C21 | Gi's heading convention: which way a cone points at heading 0, and which way positive headings turn. | `GiPlane` (U-1) | confirmed (#78) |
 
 ### Entities facts
 
@@ -210,9 +210,9 @@ Plan §12's S1–S5 apply, plus:
 
 | Card | Title | Lane | Pri | Needs | Tier | Wave | State | PR |
 |---|---|---|---|---|---|---|---|---|
-| F-1 | Contract pins and dotnet harness | foundation | P0 | — | D | 1 | todo | |
+| F-1 | Contract pins and dotnet harness | foundation | P0 | — | D | 1 | done | #78 |
 | U-0 | Package skeleton, plugins, host project | runtime | P0 | — | D, U | 1 | todo | |
-| G-0a | TFM dry run | core | P0 | — | G | 1 | todo | |
+| G-0a | TFM dry run | core | P0 | — | G | 1 | done | scratch, not merged |
 | G-1 | Pure exclusion reads | core | P1 | — | G | 1 | todo | |
 | F-2 | Scenarios, reference executor, lint, CI | foundation | P0 | F-1, U-0 | D | 2 | todo | |
 | U-1 | Frame, bootstrap, group, process | runtime | P0 | U-0, F-1 | D, U | 2 | todo | |
