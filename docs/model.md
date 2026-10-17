@@ -159,6 +159,14 @@ before reading command payloads, writing
   halves its predecessor with zero-padded 2×2 box averages (round-half-away-from-zero, divided by
   four — missing samples count as zero, so the field tapers to zero at the stamp's true extent),
   bordered identically and packed contiguously.
+  The scaled bilinear sampler (`EmitRaster` away from 256) and the turned sampler (`SampleAt`) read the
+  four taps `(ix, iy)`, `(ix+1, iy)`, `(ix, iy+1)`, `(ix+1, iy+1)` of a level of size `w×h`. Taps with
+  `ix < −1`, `ix ≥ w`, `iy < −1` or `iy ≥ h` have both samples of an axis outside the border and are zero by
+  definition, so both samplers skip them; every tap that is read lies in `[−1, w] × [−1, h]` of the
+  level's `(w+2)×(h+2)` block. Lifetime: the block is owned by the stamp and freed by `Stamp.Free`, which
+  is refused while a world uses the stamp. Aliasing: the block is written once at bake and read-only
+  afterwards. Alignment: byte reads. Concurrency: none on the warm path. The apron test copies baked
+  stamps into buffers whose surroundings are poisoned and requires identical emission.
   **Round stamps** `Stamp.Disk`/`Cone`/`Dome(radius, value, arc)` (radius 1–128 world cells,
   arc 1–360 degrees) are radial kernels evaluated per cell around the source position: with `r`
   the distance from the cell centre to the kernel centre and `R` the radius on that grid, a disk
