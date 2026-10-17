@@ -349,6 +349,14 @@ if (!World.Changed(world, threat, x, y, reach: 16f, since: lastDecision))
     return;                                                           // nothing moved near me
 ```
 
+Crowds that submit agents in spatial order run the splat, convolution and reads at their coherent
+price. `Grid.SpatialKeys(world, grid, xs, ys, keys)` gives each position a 28-bit key (the Morton
+code of its tile, then of its cell; `uint.MaxValue` outside the grid), `Grid.SortByKeys(keys,
+permutation, scratch)` is a stable LSD radix sort that allocates nothing when you supply
+`scratch` (`2 n` `ulong`s), and `Grid.Disorder(keys)` is the fraction of adjacent pairs whose tile
+descends, so you can re-sort when it passes a threshold. `samples/crowd` re-sorts a
+structure-of-arrays crowd every 64 frames.
+
 `TrySenseNearest` returns `short.MinValue` and the query point when no cell qualifies, so
 `value >= threshold` tells found from not found. `Changed` reads per-tile epochs — the tick of
 each tile's last publish — so agents can sleep until their neighbourhood changes, and
