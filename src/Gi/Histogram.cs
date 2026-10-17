@@ -26,6 +26,7 @@ internal unsafe struct HistState
     public NativeBuffer<int> OutTiles;
     public int* OutMark;
     public int MarkStamp;
+    public long Total;
     public int* Window;
     public int* Strip;
     public int* Out;
@@ -69,14 +70,19 @@ public static unsafe partial class World
         return hist;
     }
 
-    private static void HistAdd(GridCtx* g, LayerData* ld, byte stamp, int cx, int cy, int gain)
+    private static bool HistAdd(GridCtx* g, LayerData* ld, byte stamp, int cx, int cy, int gain)
     {
         var hist = EnsureHist(ld);
+        var total = hist->Total + Math.Abs(gain);
+        if (total > PlaneFold.LimitI(&ld->Store)) return false;
+
+        hist->Total = total;
         var cls = hist->Classes + stamp;
         if (cls->Directory == null) cls->Directory = (int*)NativeHeap.AllocZeroed((nuint)g->TileCount * sizeof(int));
 
         var tile = (cy >> TileBake.TileBits) * g->TilesPerSide + (cx >> TileBake.TileBits);
         HistPage(g, ld, hist, cls, tile)[(cy & (TileBake.TileSize - 1)) * TileBake.TileSize + (cx & (TileBake.TileSize - 1))] += gain;
+        return true;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -224,6 +230,7 @@ public static unsafe partial class World
         }
 
         hist->Active.Resize(0);
+        hist->Total = 0;
     }
 
     private static void ResetHistogram(GridCtx* g, LayerData* ld)
@@ -245,6 +252,7 @@ public static unsafe partial class World
         }
 
         hist->Active.Resize(0);
+        hist->Total = 0;
     }
 
     private static bool BoxKernel(
@@ -348,19 +356,26 @@ public static unsafe partial class World
             var ty0 = (outTile / tps) << TileBake.TileBits;
             GatherWindow(hist, cls, tps, size, tx0 - ox - width + 1, ty0 - oy - height + 1, windowWidth, windowHeight);
 
-            if (SumWindow(hist, width, height, windowHeight) == 0) continue;
+            var peak = SumWindow(hist, width, height, windowHeight);
+            if (peak == 0) continue;
 
             var sums = hist->Out;
-
             var set = EnsureSet(g, ld, outTile);
-            var plane = ld->Store.Cells(*set).I;
             var dirty = DirtyIndex(g, ld, outTile);
             ld->Rects.Pointer[dirty] = new TileRect { X0 = 0, Y0 = 0, X1 = TileBake.TileSize, Y1 = TileBake.TileSize };
-            AddScaled(plane, sums, value);
+            var amount = peak * Math.Abs((long)value);
+            if (amount > PlaneFold.LimitI(&ld->Store))
+            {
+                PlaneFold.AddWideI(&ld->Store, set, sums, value);
+                continue;
+            }
+
+            PlaneFold.ChargeI(&ld->Store, set, amount);
+            AddScaled(ld->Store.Cells(*set).I, sums, value);
         }
     }
 
-    private static int SumWindow(HistState* hist, int width, int height, int windowHeight)
+    private static long SumWindow(HistState* hist, int width, int height, int windowHeight)
     {
         var window = hist->Window;
         var strip = hist->Strip;
@@ -380,17 +395,19 @@ public static unsafe partial class World
                 }
             }
 
-            var seen = Vector256<int>.Zero;
+            var peak = Vector256<int>.Zero;
             for (var y = 0; y < TileBake.TileSize; y++)
             for (var block = 0; block < TileBake.TileSize; block += 8)
             {
                 var acc = Vector256.Load(strip + y * TileBake.TileSize + block);
                 for (var j = 1; j < height; j++) acc += Vector256.Load(strip + (y + j) * TileBake.TileSize + block);
                 acc.Store(sums + y * TileBake.TileSize + block);
-                seen |= acc;
+                peak = Vector256.Max(peak, Vector256.Abs(acc));
             }
 
-            return seen == Vector256<int>.Zero ? 0 : 1;
+            var best = 0;
+            for (var lane = 0; lane < 8; lane++) best = Math.Max(best, peak.GetElement(lane));
+            return best;
         }
 #endif
         for (var wy = 0; wy < windowHeight; wy++)
@@ -407,17 +424,17 @@ public static unsafe partial class World
             }
         }
 
-        var any = 0;
+        long largest = 0;
         for (var y = 0; y < TileBake.TileSize; y++)
         for (var x = 0; x < TileBake.TileSize; x++)
         {
             var sum = 0;
             for (var j = 0; j < height; j++) sum += strip[(y + j) * TileBake.TileSize + x];
             sums[y * TileBake.TileSize + x] = sum;
-            any |= sum;
+            if (Math.Abs((long)sum) > largest) largest = Math.Abs((long)sum);
         }
 
-        return any;
+        return largest;
     }
 
     private static void AddScaled(int* plane, int* sums, int value)

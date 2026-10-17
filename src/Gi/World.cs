@@ -221,6 +221,8 @@ internal unsafe struct WorldCtx
     public GridCtx* Grids;
     public int GridCount;
     public int LayerCount;
+    public long FoldLimitI;
+    public long FoldLimitQ40;
     public LayerRecipe* Recipes;
     public int DerivedCount;
     public SourceColumns Sources;
@@ -491,11 +493,26 @@ public static unsafe partial class World
         g->TilesPerSide = g->Size >> TileBake.TileBits;
         g->TileCount = g->TilesPerSide * g->TilesPerSide;
         g->Layers = (LayerData*)NativeHeap.AllocZeroed((nuint)(MaxLayers * sizeof(LayerData)));
+        for (var l = 0; l < WorldCtx.MaxLayers; l++)
+        {
+            g->Layers[l].Store.LimitI = w->FoldLimitI;
+            g->Layers[l].Store.LimitQ40 = w->FoldLimitQ40;
+        }
+
         for (var l = 0; l < w->LayerCount; l++)
             if (IsDerived(w, l))
                 g->Layers[l].Derived = 1;
         g->Records.Resize(w->Sources.Slots);
         return id;
+    }
+
+    internal static void ConfigureFoldLimits(byte world, long limitI, long limitQ40)
+    {
+        var w = GetContext(world);
+        if (w == null) return;
+
+        w->FoldLimitI = limitI;
+        w->FoldLimitQ40 = limitQ40;
     }
 
     internal static byte AddLayer(byte world, Layer.Precision precision, bool transient = false)
@@ -632,8 +649,9 @@ public static unsafe partial class World
                     {
                         if (ld->Directory[tile] < 0) continue;
 
+                        var published = TileBake.PageAny(ld->PageOf(tile));
                         DropPage(ld, tile);
-                        if (ld->Epochs != null) ld->Epochs[tile] = w->Tick + 1;
+                        if (published && ld->Epochs != null) ld->Epochs[tile] = w->Tick + 1;
                     }
 
                 ld->Max.Reset();

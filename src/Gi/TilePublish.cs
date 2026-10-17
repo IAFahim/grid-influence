@@ -14,6 +14,8 @@ internal static unsafe partial class TileBake
     internal static ResolveOutcome Publish(PlaneStore* store, TilePlanes* tile, int x0, int y0, int x1, int y1, int tick)
     {
         var cells = store->Cells(*tile);
+        if ((cells.Summary->CarryI | cells.Summary->HighT | cells.Summary->HighB) != 0)
+            return PublishWide(store, tile, x0, y0, x1, y1, tick);
 #if NET
         if (Avx2.IsSupported) return Publish256(cells, x0, y0, x1, y1, tick);
         if (Vector) return Publish128(cells, x0, y0, x1, y1, tick);
@@ -187,6 +189,40 @@ internal static unsafe partial class TileBake
         }
 
         return changed;
+    }
+
+    internal static bool AllZero(int* values, int count)
+    {
+        var i = 0;
+#if NET
+        if (Vector256.IsHardwareAccelerated)
+        {
+            var seen = Vector256<int>.Zero;
+            for (; i + 8 <= count; i += 8) seen |= Vector256.Load(values + i);
+            if (seen != Vector256<int>.Zero) return false;
+        }
+#endif
+        for (; i < count; i++)
+            if (values[i] != 0) return false;
+
+        return true;
+    }
+
+    internal static bool AllZero(long* values, int count)
+    {
+        var i = 0;
+#if NET
+        if (Vector256.IsHardwareAccelerated)
+        {
+            var seen = Vector256<long>.Zero;
+            for (; i + 4 <= count; i += 4) seen |= Vector256.Load(values + i);
+            if (seen != Vector256<long>.Zero) return false;
+        }
+#endif
+        for (; i < count; i++)
+            if (values[i] != 0) return false;
+
+        return true;
     }
 
     #if NET

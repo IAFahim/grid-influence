@@ -42,6 +42,14 @@ public static unsafe partial class World
 
             var ld = g->Layers + layer;
             var hist = EnsureHist(ld);
+            var charge = (long)count * Math.Abs((int)clamped);
+            if (hist->Total + charge > PlaneFold.LimitI(&ld->Store))
+            {
+                for (var i = 0; i < count; i++) SplatDirect(w, gi, g, ref key, mask, xs[i], ys[i]);
+                continue;
+            }
+
+            hist->Total += charge;
             var cls = hist->Classes + stamp;
             if (cls->Directory == null) cls->Directory = (int*)NativeHeap.AllocZeroed((nuint)g->TileCount * sizeof(int));
 
@@ -54,6 +62,15 @@ public static unsafe partial class World
         }
 
         return applied;
+    }
+
+    private static void SplatDirect(WorldCtx* w, int gi, GridCtx* g, ref DepositRecord key, int mask, float x, float y)
+    {
+        if (!float.IsFinite(x) || !float.IsFinite(y)) return;
+
+        key.Ax = (TileBake.AnchorQ8(x, g->OriginX, g->ScaleQ8, mask) >> 8) << 8;
+        key.Ay = (TileBake.AnchorQ8(y, g->OriginY, g->ScaleQ8, mask) >> 8) << 8;
+        EmitDelta(w, gi, in key, 1);
     }
 
     private static void SplatOne(
@@ -171,8 +188,7 @@ public static unsafe partial class World
                 var cy = key.Ay >> 8;
                 if ((uint)cx < (uint)g->Size && (uint)cy < (uint)g->Size)
                 {
-                    if (key.Gain != 0) HistAdd(g, g->Layers + layer, stamp, cx, cy, key.Gain);
-                    continue;
+                    if (key.Gain == 0 || HistAdd(g, g->Layers + layer, stamp, cx, cy, key.Gain)) continue;
                 }
             }
 
