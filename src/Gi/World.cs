@@ -508,6 +508,14 @@ public static unsafe partial class World
         return id;
     }
 
+    internal static void ConfigureConvolveCost(byte world, byte layer, long cost)
+    {
+        var w = GetContext(world);
+        if (w == null || layer >= w->LayerCount) return;
+
+        for (var gi = 0; gi < w->GridCount; gi++) EnsureHist(w->Grids[gi].Layers + layer)->ConvolveCost = cost;
+    }
+
     internal static void DisableKernelInserts(byte world)
     {
         var w = GetContext(world);

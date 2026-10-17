@@ -12,6 +12,7 @@ internal sealed unsafe class StreamRunner
     private readonly Action<int, byte, byte, short[]>? _onPage;
     private readonly (long I, long Q40)? _fold;
     private readonly bool _uncached;
+    private readonly long _convolveCost;
     private readonly List<World.SourceId> _attemptIds = [];
     private readonly int[] _actualTiles = new int[MaxTiles];
     private readonly int[] _expectedTiles = new int[MaxTiles];
@@ -42,7 +43,8 @@ internal sealed unsafe class StreamRunner
         BugInjection? bug,
         Action<int, byte, byte, short[]>? onPage,
         (long I, long Q40)? fold,
-        bool uncached)
+        bool uncached,
+        long convolveCost)
     {
         _setup = setup;
         _commands = commands;
@@ -50,6 +52,7 @@ internal sealed unsafe class StreamRunner
         _onPage = onPage;
         _fold = fold;
         _uncached = uncached;
+        _convolveCost = convolveCost;
     }
 
     public static void Run(
@@ -58,9 +61,10 @@ internal sealed unsafe class StreamRunner
         BugInjection? bug = null,
         Action<int, byte, byte, short[]>? onPage = null,
         (long I, long Q40)? fold = null,
-        bool uncached = false)
+        bool uncached = false,
+        long convolveCost = 0)
     {
-        new StreamRunner(setup, commands, bug, onPage, fold, uncached).Execute();
+        new StreamRunner(setup, commands, bug, onPage, fold, uncached, convolveCost).Execute();
     }
 
     public static StreamMismatch? TryRun(
@@ -69,11 +73,12 @@ internal sealed unsafe class StreamRunner
         BugInjection? bug = null,
         Action<int, byte, byte, short[]>? onPage = null,
         (long I, long Q40)? fold = null,
-        bool uncached = false)
+        bool uncached = false,
+        long convolveCost = 0)
     {
         try
         {
-            Run(setup, commands, bug, onPage, fold, uncached);
+            Run(setup, commands, bug, onPage, fold, uncached, convolveCost);
             return null;
         }
         catch (StreamMismatch mismatch)
@@ -115,6 +120,7 @@ internal sealed unsafe class StreamRunner
                 if (!spec.Derived)
                 {
                     layer = Layer.New(_world, spec.Transient ? Layer.Residency.Transient : Layer.Residency.Persistent, spec.Precision);
+                    if (spec.Transient && _convolveCost != 0) World.ConfigureConvolveCost(_world, layer, _convolveCost);
                     referenceLayer = _rw.AddLayer(spec.Precision, spec.Transient);
                 }
                 else
