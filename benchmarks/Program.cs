@@ -12,6 +12,7 @@ if (mode == "--splat") return SplatTiming.Run();
 if (mode == "--area") return AreaTiming.Run();
 if (mode == "--kinds") return KindTiming.Run();
 if (mode == "--changed") return ChangedTiming.Run();
+if (mode == "--region") return RegionTiming.Run();
 var result = Verification.Run();
 if (mode is "" or "--verify")
 {

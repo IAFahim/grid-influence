@@ -981,9 +981,18 @@ public static unsafe partial class World
             var lx1 = Math.Min(x1 - tx * TileBake.TileSize, TileBake.TileSize);
             var ly1 = Math.Min(y1 - ty * TileBake.TileSize, TileBake.TileSize);
             if (lx0 == 0 && ly0 == 0 && lx1 == TileBake.TileSize && ly1 == TileBake.TileSize)
+            {
                 sum += ld->SummaryOf(ty * tps + tx)->Sum;
+            }
+            else if (lx0 == 0 && lx1 == TileBake.TileSize && ld->Derived == 0)
+            {
+                var rowSums = ld->SummaryOf(ty * tps + tx)->RowSums;
+                for (var ly = ly0; ly < ly1; ly++) sum += rowSums[ly];
+            }
             else
+            {
                 sum += PartialSum(page, lx0, ly0, lx1, ly1);
+            }
         }
 
         return sum;
@@ -1069,37 +1078,52 @@ public static unsafe partial class World
         var tps = g->TilesPerSide;
         var mask = TileBake.TileSize - 1;
 
-        for (var row = 0; row < height; row++)
+        var row = 0;
+        while (row < height)
         {
             var cy = y + row;
-            var dst = destination + (long)row * width;
             if ((uint)cy >= (uint)g->Size)
             {
-                FillRun(dst, width);
+                var outside = cy < 0 ? (int)Math.Min(-(long)cy, height - row) : height - row;
+                for (var r = 0; r < outside; r++) FillRun(destination + (long)(row + r) * width, width);
+                row += outside;
                 continue;
             }
 
             var ty = cy >> TileBake.TileBits;
-            var ly = cy & mask;
+            var band = Math.Min(((ty + 1) << TileBake.TileBits) - cy, height - row);
             var cx = x;
             var col = 0;
             while (col < width)
             {
-                var run = Math.Min((((cx >> TileBake.TileBits) + 1) << TileBake.TileBits) - cx, width - col);
-                var page = (uint)cx < (uint)g->Size ? ld->PageOf(ty * tps + (cx >> TileBake.TileBits)) : null;
-                if (page != null)
+                int run;
+                short* page = null;
+                if (cx < 0)
                 {
-                    var src = page + ly * TileBake.TileSize + (cx & mask);
-                    CopyRun(dst + col, src, run);
+                    run = (int)Math.Min(-(long)cx, width - col);
+                }
+                else if (cx >= g->Size)
+                {
+                    run = width - col;
                 }
                 else
                 {
-                    FillRun(dst + col, run);
+                    run = Math.Min((((cx >> TileBake.TileBits) + 1) << TileBake.TileBits) - cx, width - col);
+                    page = ld->PageOf(ty * tps + (cx >> TileBake.TileBits));
+                }
+
+                for (var r = 0; r < band; r++)
+                {
+                    var dst = destination + (long)(row + r) * width + col;
+                    if (page != null) CopyRun(dst, page + ((cy + r) & mask) * TileBake.TileSize + (cx & mask), run);
+                    else FillRun(dst, run);
                 }
 
                 cx += run;
                 col += run;
             }
+
+            row += band;
         }
     }
 
