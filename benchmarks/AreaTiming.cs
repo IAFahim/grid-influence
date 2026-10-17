@@ -44,6 +44,39 @@ internal static class AreaTiming
             }
 
             Console.WriteLine($"area r={reach,3}: {best,7:F1} ns each, checksum {checksum}");
+
+            var bestMax = double.MaxValue;
+            var bestNearest = double.MaxValue;
+            long maxSum = 0;
+            long nearSum = 0;
+            for (var pass = 0; pass < 12; pass++)
+            {
+                var started = Stopwatch.GetTimestamp();
+                long m = 0;
+                for (var i = 0; i < Count; i++)
+                {
+                    World.TrySenseMax(world, layer, xs[i], ys[i], reach, out var value, out var bx, out var by);
+                    m += value + (long)bx + (long)by;
+                }
+
+                var middle = Stopwatch.GetTimestamp();
+                long n = 0;
+                for (var i = 0; i < Count; i++)
+                {
+                    World.TrySenseNearest(world, layer, xs[i], ys[i], reach, 14, out var value, out var nx, out var ny);
+                    n += value + (long)nx + (long)ny;
+                }
+
+                var finished = Stopwatch.GetTimestamp();
+                maxSum = m;
+                nearSum = n;
+                if (pass < 2) continue;
+                bestMax = Math.Min(bestMax, Stopwatch.GetElapsedTime(started, middle).TotalNanoseconds / Count);
+                bestNearest = Math.Min(bestNearest, Stopwatch.GetElapsedTime(middle, finished).TotalNanoseconds / Count);
+            }
+
+            Console.WriteLine($"  max  r={reach,3}: {bestMax,7:F1} ns each, checksum {maxSum}");
+            Console.WriteLine($"  near r={reach,3}: {bestNearest,7:F1} ns each, checksum {nearSum}");
         }
 
         World.Free(world);
