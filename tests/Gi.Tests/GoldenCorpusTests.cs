@@ -4,7 +4,7 @@ using Xunit;
 
 namespace Gi.Tests;
 
-public unsafe class GoldenCorpusTests
+public class GoldenCorpusTests
 {
     private const string RegenerateVariable = "GI_REGENERATE_CORPUS";
 

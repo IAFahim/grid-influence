@@ -52,7 +52,7 @@ internal readonly struct KernelKey
     }
 }
 
-internal unsafe struct KernelEntry
+internal struct KernelEntry
 {
     public ulong Key;
     public ulong Turn;

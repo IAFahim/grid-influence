@@ -22,7 +22,7 @@ public sealed class SourceIdTests : IDisposable
     }
 
     [Fact]
-    public unsafe void MillionKillSpawnCycles_OnTenSlots_NeverAliasAnId()
+    public void MillionKillSpawnCycles_OnTenSlots_NeverAliasAnId()
     {
         const int slots = 10;
         const int cycles = 1_000_000;

@@ -77,7 +77,7 @@ public sealed unsafe class StreamLawsTests
     [Fact]
     public void Translation_ByWholeCellsShiftsPagesExactly()
     {
-        var stamps = new byte[] { Stamp.Box(5, 4, 9), Stamp.Tent(6, 5, -7) };
+        var stamps = new[] { Stamp.Box(5, 4, 9), Stamp.Tent(6, 5, -7) };
         var rng = new SplitMix64(97);
         var nearPage = new short[Cells];
         var farPage = new short[Cells];

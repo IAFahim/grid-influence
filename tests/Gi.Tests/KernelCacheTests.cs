@@ -182,7 +182,7 @@ public sealed unsafe class KernelCacheTests
                     if (value == 0) continue;
                     if (first < 0) first = i;
                     last = i;
-                    var magnitude = value < 0 ? -(long)value : value;
+                    var magnitude = value < 0 ? -value : value;
                     if (magnitude > maxTap) maxTap = magnitude;
                 }
 
@@ -665,7 +665,7 @@ public sealed unsafe class KernelCacheTests
         try
         {
             var w = World.GetContext(world);
-            var full = Stamp.Disk(3, 40, 360);
+            var full = Stamp.Disk(3, 40);
             var arc = Stamp.Disk(3, 40, 120);
             foreach (var (stamp, shared) in new[] { (full, true), (arc, false) })
             {
@@ -702,7 +702,7 @@ public sealed unsafe class KernelCacheTests
             var a = Stamp.Box(4, 4, 60);
             var b = Stamp.Box(4, 4, 60);
 
-            void CheckDistinct(byte stampId, int grid, int angle, int scale, string context)
+            void CheckDistinct(byte stampId, int grid, int angle, int scale)
             {
                 Assert.True(TileBake.Place(35.5f, 41.5f, 0f, 0f, 256, Size, StampCatalog.Get(stampId), angle, scale,
                     Layer.Precision.Exact, out var p));
@@ -713,10 +713,10 @@ public sealed unsafe class KernelCacheTests
                 Assert.Equal(angle & 0xFFFF, (int)(key.Turn));
             }
 
-            CheckDistinct(a, 0, 0, 256, "base");
-            CheckDistinct(b, 1, 0, 256, "other stamp and grid");
-            CheckDistinct(a, 0, 0, 128, "other scale");
-            CheckDistinct(a, 0, 16384, 256, "other angle");
+            CheckDistinct(a, 0, 0, 256);
+            CheckDistinct(b, 1, 0, 256);
+            CheckDistinct(a, 0, 0, 128);
+            CheckDistinct(a, 0, 16384, 256);
             Assert.True(Stamp.Free(a));
             Assert.True(Stamp.Free(b));
         }

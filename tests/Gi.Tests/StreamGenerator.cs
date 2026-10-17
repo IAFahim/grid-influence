@@ -60,12 +60,15 @@ internal static class StreamGenerator
         for (var g = 0; g < gridCount; g++)
         {
             var power = heavy ? (rng.Chance(30) ? 7 : rng.Chance(50) ? 6 : 5) : (rng.Chance(20) ? 6 : 5);
+            var gridX = rng.NextInt(-2, 3) * 16f;
+            var gridY = rng.NextInt(-2, 3) * 16f;
+            var side = (1 << power) / PickSizeDivisor(ref rng);
             setup.Grids[g] = new GridSpec
             {
                 Power = power,
-                X = rng.NextInt(-2, 3) * 16f,
-                Y = rng.NextInt(-2, 3) * 16f,
-                Size = (1 << power) / PickSizeDivisor(ref rng),
+                X = gridX,
+                Y = gridY,
+                Size = side,
             };
         }
 
@@ -376,7 +379,7 @@ internal static class StreamGenerator
 
         switch (pick)
         {
-            case int p when p < 28:
+            case < 28:
                 command.Op = StreamOp.Place;
                 command.Layer = rng.Chance(3) ? (byte)rng.NextInt(0, setup.Layers.Length) : PickBaseLayer(ref rng, setup);
                 command.Stamp = (byte)rng.NextInt(0, setup.Stamps.Length);
@@ -388,42 +391,42 @@ internal static class StreamGenerator
                 attempts++;
                 live++;
                 break;
-            case int p when p < 46:
+            case < 46:
                 command.Op = StreamOp.Move;
                 command.Handle = Handle(ref rng, attempts);
                 var moveTarget = setup.Grids[rng.NextInt(0, setup.Grids.Length)];
                 command.X = CoordIn(ref rng, moveTarget.X, moveTarget.Size);
                 command.Y = CoordIn(ref rng, moveTarget.Y, moveTarget.Size);
                 break;
-            case int p when p < 54:
+            case < 54:
                 command.Op = StreamOp.Turn;
                 command.Handle = Handle(ref rng, attempts);
                 command.X = rng.Chance(20)
                     ? rng.NextInt(0, 8) * (float)(Math.PI / 2)
                     : (float)(rng.NextUnit() * Math.PI * 4 - Math.PI * 2);
                 break;
-            case int p when p < 60:
+            case < 60:
                 command.Op = StreamOp.Scale;
                 command.Handle = Handle(ref rng, attempts);
                 command.X = PickScale(ref rng);
                 break;
-            case int p when p < 66:
+            case < 66:
                 command.Op = StreamOp.SetGain;
                 command.Handle = Handle(ref rng, attempts);
                 command.Gain = (sbyte)rng.NextInt(-40, 41);
                 break;
-            case int p when p < 74:
+            case < 74:
                 command.Op = StreamOp.Remove;
                 command.Handle = Handle(ref rng, attempts);
                 live = Math.Max(0, live - 1);
                 break;
-            case int p when p < 81:
+            case < 81:
                 command.Op = StreamOp.Fade;
                 command.Handle = Handle(ref rng, attempts);
                 command.Gain = (sbyte)rng.NextInt(-40, 41);
                 command.Int0 = rng.NextInt(0, 6);
                 break;
-            case int p when p < 87:
+            case < 87:
                 command.Op = StreamOp.Expire;
                 command.Handle = Handle(ref rng, attempts);
                 command.Int0 = rng.NextInt(0, 5);

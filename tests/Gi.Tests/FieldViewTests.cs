@@ -2,7 +2,7 @@ using Xunit;
 
 namespace Gi.Tests;
 
-public unsafe class FieldViewTests
+public class FieldViewTests
 {
     [Theory]
     [InlineData(61)]
@@ -12,14 +12,14 @@ public unsafe class FieldViewTests
     {
         var rng = new Random(seed);
         var w = World.New();
-        var stamps = new List<byte> { Stamp.Box(5, 5, 40), Stamp.Tent(7, 7, -35), Stamp.Disk(5, 50, 360) };
+        var stamps = new List<byte> { Stamp.Box(5, 5, 40), Stamp.Tent(7, 7, -35), Stamp.Disk(5, 50) };
         try
         {
             Grid.New(w, 7, 0f, 0f, 128f);
             Grid.New(w, 6, 20f, 24f, 64f);
             var a = Layer.New(w, Layer.Precision.Exact);
             var b = Layer.New(w, Layer.Precision.Cell);
-            var sum = Layer.Sum(w, a, 2, b, -1, 0);
+            var sum = Layer.Sum(w, a, 2, b, -1);
             for (var i = 0; i < 260; i++)
                 World.Place(w, rng.Next(2) == 0 ? a : b, (float)(rng.NextDouble() * 120.0 + 4.0), (float)(rng.NextDouble() * 120.0 + 4.0),
                     stamps[rng.Next(stamps.Count)], (sbyte)rng.Next(-5, 6));

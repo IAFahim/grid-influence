@@ -19,7 +19,7 @@ public static unsafe partial class World
             var scaleQ8 = w->Grids[gi].ScaleQ8;
             if (scaleQ8 == 0) continue;
 
-            var sampling = (long)scaleQ8 * scale >> 8;
+            var sampling = scaleQ8 * scale >> 8;
             if (!ValidationRules.IsFootprint(v->Width * sampling + 255 >> 8) ||
                 !ValidationRules.IsFootprint(v->Height * sampling + 255 >> 8))
                 return false;
@@ -75,7 +75,7 @@ public static unsafe partial class World
     {
         var oldX = s->X[i];
         var oldY = s->Y[i];
-        if (oldX == x && oldY == y) return;
+        if (oldX.Equals(x) && oldY.Equals(y)) return;
 
         var changed = PositionChanged(w, s->Layer[i], oldX, oldY, x, y);
         if (changed) BeforeWrite(w, s, i);

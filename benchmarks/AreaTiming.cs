@@ -20,10 +20,10 @@ internal static class AreaTiming
             return 0;
         }
 
-        var Count = int.Parse(Environment.GetEnvironmentVariable("GI_COUNT") ?? "4096");
-        var xs = new float[Count];
-        var ys = new float[Count];
-        for (var i = 0; i < Count; i++)
+        var count = int.Parse(Environment.GetEnvironmentVariable("GI_COUNT") ?? "4096");
+        var xs = new float[count];
+        var ys = new float[count];
+        for (var i = 0; i < count; i++)
         {
             xs[i] = (float)(rng.NextDouble() * 850.0 + 90.0);
             ys[i] = (float)(rng.NextDouble() * 850.0 + 90.0);
@@ -38,13 +38,13 @@ internal static class AreaTiming
             {
                 var started = Stopwatch.GetTimestamp();
                 long sum = 0;
-                for (var i = 0; i < Count; i++)
+                for (var i = 0; i < count; i++)
                 {
                     ok &= World.TrySenseArea(world, layer, xs[i], ys[i], reach, out var total);
                     sum += total;
                 }
 
-                var elapsed = Stopwatch.GetElapsedTime(started).TotalNanoseconds / Count;
+                var elapsed = Stopwatch.GetElapsedTime(started).TotalNanoseconds / count;
                 checksum = sum;
                 if (pass > 1 && elapsed < best) best = elapsed;
             }
@@ -59,7 +59,7 @@ internal static class AreaTiming
             {
                 var started = Stopwatch.GetTimestamp();
                 long m = 0;
-                for (var i = 0; i < Count; i++)
+                for (var i = 0; i < count; i++)
                 {
                     World.TrySenseMax(world, layer, xs[i], ys[i], reach, out var value, out var bx, out var by);
                     m += value + (long)bx + (long)by;
@@ -67,7 +67,7 @@ internal static class AreaTiming
 
                 var middle = Stopwatch.GetTimestamp();
                 long n = 0;
-                for (var i = 0; i < Count; i++)
+                for (var i = 0; i < count; i++)
                 {
                     World.TrySenseNearest(world, layer, xs[i], ys[i], reach, 14, out var value, out var nx, out var ny);
                     n += value + (long)nx + (long)ny;
@@ -77,8 +77,8 @@ internal static class AreaTiming
                 maxSum = m;
                 nearSum = n;
                 if (pass < 2) continue;
-                bestMax = Math.Min(bestMax, Stopwatch.GetElapsedTime(started, middle).TotalNanoseconds / Count);
-                bestNearest = Math.Min(bestNearest, Stopwatch.GetElapsedTime(middle, finished).TotalNanoseconds / Count);
+                bestMax = Math.Min(bestMax, Stopwatch.GetElapsedTime(started, middle).TotalNanoseconds / count);
+                bestNearest = Math.Min(bestNearest, Stopwatch.GetElapsedTime(middle, finished).TotalNanoseconds / count);
             }
 
             Console.WriteLine($"  max  r={reach,3}: {bestMax,7:F1} ns each, checksum {maxSum}");
@@ -94,11 +94,11 @@ internal static class AreaTiming
 
     private static void ExclusionTiming(byte world, byte layer, byte box, Random rng)
     {
-        const int Probes = 2048;
-        var ids = new World.SourceId[Probes];
-        var xs = new float[Probes];
-        var ys = new float[Probes];
-        for (var i = 0; i < Probes; i++)
+        const int probes = 2048;
+        var ids = new World.SourceId[probes];
+        var xs = new float[probes];
+        var ys = new float[probes];
+        for (var i = 0; i < probes; i++)
         {
             xs[i] = 100f + (float)rng.NextDouble() * 800f;
             ys[i] = 100f + (float)rng.NextDouble() * 800f;
@@ -110,7 +110,7 @@ internal static class AreaTiming
         {
             long total = 0;
             for (var rep = 0; rep < 3000; rep++)
-            for (var i = 0; i < Probes; i++)
+            for (var i = 0; i < probes; i++)
             {
                 World.TrySense(world, layer, xs[i], ys[i], ids[i], out var v);
                 total += v;
@@ -128,42 +128,42 @@ internal static class AreaTiming
             for (var pass = 0; pass < 10; pass++)
             {
                 var t0 = Stopwatch.GetTimestamp();
-                for (var i = 0; i < Probes; i++)
+                for (var i = 0; i < probes; i++)
                 {
                     World.TrySenseArea(world, layer, xs[i], ys[i], reach, out var a);
                     guard += a;
                 }
 
                 var t1 = Stopwatch.GetTimestamp();
-                for (var i = 0; i < Probes; i++)
+                for (var i = 0; i < probes; i++)
                 {
                     World.TrySenseArea(world, layer, xs[i], ys[i], reach, ids[i], out var a);
                     guard += a;
                 }
 
                 var t2 = Stopwatch.GetTimestamp();
-                for (var i = 0; i < Probes; i++)
+                for (var i = 0; i < probes; i++)
                 {
                     World.TrySense(world, layer, xs[i], ys[i], out var v);
                     guard += v;
                 }
 
                 var t3 = Stopwatch.GetTimestamp();
-                for (var i = 0; i < Probes; i++)
+                for (var i = 0; i < probes; i++)
                 {
                     World.TrySense(world, layer, xs[i], ys[i], ids[i], out var v);
                     guard += v;
                 }
 
                 var t4 = Stopwatch.GetTimestamp();
-                for (var i = 0; i < Probes; i++)
+                for (var i = 0; i < probes; i++)
                 {
                     World.TrySenseGradient(world, layer, xs[i], ys[i], out var gx, out var gy);
                     guard += (long)gx + (long)gy;
                 }
 
                 var t5 = Stopwatch.GetTimestamp();
-                for (var i = 0; i < Probes; i++)
+                for (var i = 0; i < probes; i++)
                 {
                     World.TrySenseGradient(world, layer, xs[i], ys[i], ids[i], out var gx, out var gy);
                     guard += (long)gx + (long)gy;
@@ -171,12 +171,12 @@ internal static class AreaTiming
 
                 var t6 = Stopwatch.GetTimestamp();
                 if (pass < 2) continue;
-                plain = Math.Min(plain, Stopwatch.GetElapsedTime(t0, t1).TotalNanoseconds / Probes);
-                excluded = Math.Min(excluded, Stopwatch.GetElapsedTime(t1, t2).TotalNanoseconds / Probes);
-                point = Math.Min(point, Stopwatch.GetElapsedTime(t2, t3).TotalNanoseconds / Probes);
-                pointExcluded = Math.Min(pointExcluded, Stopwatch.GetElapsedTime(t3, t4).TotalNanoseconds / Probes);
-                gradient = Math.Min(gradient, Stopwatch.GetElapsedTime(t4, t5).TotalNanoseconds / Probes);
-                gradientExcluded = Math.Min(gradientExcluded, Stopwatch.GetElapsedTime(t5, t6).TotalNanoseconds / Probes);
+                plain = Math.Min(plain, Stopwatch.GetElapsedTime(t0, t1).TotalNanoseconds / probes);
+                excluded = Math.Min(excluded, Stopwatch.GetElapsedTime(t1, t2).TotalNanoseconds / probes);
+                point = Math.Min(point, Stopwatch.GetElapsedTime(t2, t3).TotalNanoseconds / probes);
+                pointExcluded = Math.Min(pointExcluded, Stopwatch.GetElapsedTime(t3, t4).TotalNanoseconds / probes);
+                gradient = Math.Min(gradient, Stopwatch.GetElapsedTime(t4, t5).TotalNanoseconds / probes);
+                gradientExcluded = Math.Min(gradientExcluded, Stopwatch.GetElapsedTime(t5, t6).TotalNanoseconds / probes);
             }
 
             Console.WriteLine($"exclusion r={reach,3}: area {plain,7:F1} -> {excluded,7:F1} ns; point {point:F1} -> {pointExcluded:F1}; gradient {gradient:F1} -> {gradientExcluded:F1} ({guard & 1})");

@@ -65,7 +65,7 @@ internal static class KindTiming
             {
                 xs[i] += frame % 2 == 0 ? 1f : -1f;
                 World.Move(world, ids[i], xs[i], ys[i]);
-                if (freeAngle && kind.Turns) World.Turn(world, ids[i], (float)((i * 7 + frame * 13) % 6283) / 1000f);
+                if (freeAngle && kind.Turns) World.Turn(world, ids[i], ((i * 7 + frame * 13) % 6283) / 1000f);
             }
 
             var started = Stopwatch.GetTimestamp();
