@@ -410,7 +410,7 @@ internal sealed unsafe class FrameCrowd(int entities, int power, ulong seed, boo
     {
         WorldId = Gi.World.New();
         GridId = Gi.Grid.New(WorldId, Power, 0f, 0f, Size);
-        _layer = NewLayer();
+        _layer = ReadMode.Transient ? Gi.Layer.New(WorldId, Gi.Layer.Residency.Transient, LayerPrecision) : NewLayer();
         _stamp = Gi.Stamp.Box(Width, Width, 8);
         _ids = Arena.Alloc<Gi.World.SourceId>(Entities);
         _idsNext = Arena.Alloc<Gi.World.SourceId>(Entities);
@@ -453,7 +453,8 @@ internal sealed unsafe class FrameCrowd(int entities, int power, ulong seed, boo
         }
 
         Reorder();
-        for (var i = 0; i < Entities; i++) _ids[i] = Place(_layer, _x[i], _y[i], _stamp, 1);
+        if (!ReadMode.Transient)
+            for (var i = 0; i < Entities; i++) _ids[i] = Place(_layer, _x[i], _y[i], _stamp, 1);
         Gi.World.Process(WorldId);
         ResetCounters();
     }
@@ -475,7 +476,10 @@ internal sealed unsafe class FrameCrowd(int entities, int power, ulong seed, boo
     public override bool Run(int frame, long* marks)
     {
         marks[0] = Stopwatch.GetTimestamp();
-        Gi.World.Sync(WorldId, _ids, _x, _y, Entities);
+        if (ReadMode.Transient)
+            Gi.World.Splat(WorldId, _layer, new ReadOnlySpan<float>(_x, Entities), new ReadOnlySpan<float>(_y, Entities), _stamp, 1);
+        else
+            Gi.World.Sync(WorldId, _ids, _x, _y, Entities);
         marks[1] = Stopwatch.GetTimestamp();
         Gi.World.Process(WorldId);
         marks[2] = Stopwatch.GetTimestamp();
@@ -553,6 +557,7 @@ internal sealed unsafe class FrameCrowd(int entities, int power, ulong seed, boo
 
     public override bool VerifyState()
     {
+        if (ReadMode.Transient) return true;
         for (var i = 0; i < Entities; i++)
             if (!SourceAt(_ids[i], _x[i], _y[i])) return false;
         return true;

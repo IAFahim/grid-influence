@@ -72,7 +72,19 @@ before reading command payloads, writing
   exactly when its bytes differ from the previous frame. The persistent mutators — `Place` and
   the batch `Place` — reject a transient layer as an invalid layer, and `Splat` on a
   persistent or derived layer applies nothing. Derived layers read a transient input like any
-  other.
+  other. At `PhaseBits` 0 a splat inside the grid does not emit: its clamped gain is added to a
+  per-stamp-class, per-tile `int32` **histogram** page (4,096 B, allocated on the class's first
+  splat in that tile), and `Process` turns each class's histogram into planes before publishing.
+  A class whose gain-1 taps are one nonzero value across a rectangle no wider than a tile (an
+  integer box at its phase-0 anchor, a frame-C 4×4 box) is box-filtered: for each output tile
+  the histogram window — the tile plus the kernel's reach, gathered from up to nine pages — is
+  summed along rows and then columns and `value × sum` is added to the tile's `I` plane. Every
+  other class replays its nonzero histogram cells through the exact emitters with the cell's
+  summed gain, in steps of at most 127. Emission is linear in gain and the taps of a phase-0,
+  unscaled, unturned placement do not depend on its position, so both forms add exactly what the
+  per-splat emission would; splats outside the grid, and every splat at a precision above
+  `Cell`, still emit directly. The first nonzero-gain in-grid splat of a frame allocates the
+  layer's epoch array, as the first covered deposit does for a persistent layer.
   Deposited and derived layers share one table: a world holds at most `World.MaxLayers` (32)
   layers in total, so a derived combo takes one of the same slots as a raw channel and the plan
   is `raw + derived ≤ 32`.
@@ -965,6 +977,19 @@ digits. Concurrency: single thread.
   frame's splats write the zeroed planes through the same emitters as persistent deposits (same
   bounds, alignment and single-thread rules). A tile that is dropped (its page publishes to
   zero) takes its planes with it and never enters the stale list.
+- **Histogram path**: *Lifetime*: the per-(grid, layer) `HistState` (class table, 4,096 B page slab,
+  active-class list, output-tile list, per-tile mark array, the 63×63 window and the 63×32 strip
+  scratch) is allocated on the first cell-precision splat, owned by the layer, emptied by every
+  `Process` (each page returns to the slab free list and each class directory entry is zeroed
+  through the class's tile list) and by `Clear`, and released with the layer. *Aliasing*: a splat
+  writes one `int` of one page it owns; the flush reads pages through directory entries it has not
+  yet cleared and writes `I` planes only through the tile's own set, after `EnsureSet`, so no plane
+  pointer survives a slab growth. *Bounds*: a splat is routed here only when `0 ≤ cx, cy < Size`,
+  the page index is `(cy & 31)·32 + (cx & 31)`; the box filter requires kernel `Width, Height ≤ 32`
+  and offsets that keep the window within one neighbouring tile on each side, so `GatherWindow`
+  writes at most 63 `int`s per window row of a 63-wide buffer and copies at most one page row
+  segment at a time; the strip is `windowHeight × 32 ≤ 63 × 32`. *Alignment*: natural `int`, with
+  unaligned-safe `MemoryCopy`. *Concurrency*: owning thread only.
 - **Field view**: *Lifetime*: a `FieldView` holds the layer and grid constants it was built from
   and one cached page pointer; both name directory and slab storage that only `Process`, `Clear`,
   `Rewind` and `World.Free` can grow, move or release, so a view must not be used across them (a

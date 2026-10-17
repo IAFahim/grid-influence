@@ -131,6 +131,7 @@ internal unsafe struct LayerData
     public NativeBuffer<int> Dirty;
     public NativeBuffer<int> Changed;
     public NativeBuffer<int> Stale;
+    public HistState* Hist;
     public NativeBuffer<TileRect> Rects;
     public MaxPyramid Max;
 
@@ -453,6 +454,13 @@ public static unsafe partial class World
         ld->LivePages = 0;
         NativeHeap.Free(ld->InDirty);
         NativeHeap.Free(ld->Epochs);
+        if (ld->Hist != null)
+        {
+            ld->Hist->Release(g->TileCount);
+            NativeHeap.Free(ld->Hist);
+            ld->Hist = null;
+        }
+
         ld->Dirty.Free();
         ld->Changed.Free();
         ld->Stale.Free();
@@ -616,6 +624,7 @@ public static unsafe partial class World
                 ld->Dirty.Resize(0);
                 ld->Changed.Resize(0);
                 ld->Stale.Resize(0);
+                ResetHistogram(g, ld);
                 ld->Rects.Resize(0);
 
                 if (ld->Directory != null)

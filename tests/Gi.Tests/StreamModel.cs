@@ -17,6 +17,7 @@ internal enum StreamOp : byte
     Clear,
     Process,
     Read,
+    Splat,
 }
 
 internal enum ReadKind : byte
@@ -93,6 +94,7 @@ internal struct LayerSpec
     public short Low;
     public short High;
     public Layer.Precision Precision;
+    public bool Transient;
 }
 
 internal struct StampSpec

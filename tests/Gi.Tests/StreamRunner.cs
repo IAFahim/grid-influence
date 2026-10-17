@@ -102,8 +102,8 @@ internal sealed unsafe class StreamRunner
                 byte referenceLayer;
                 if (!spec.Derived)
                 {
-                    layer = Layer.New(_world, spec.Precision);
-                    referenceLayer = _rw.AddLayer(spec.Precision);
+                    layer = Layer.New(_world, spec.Transient ? Layer.Residency.Transient : Layer.Residency.Persistent, spec.Precision);
+                    referenceLayer = _rw.AddLayer(spec.Precision, spec.Transient);
                 }
                 else
                 {
@@ -225,6 +225,12 @@ internal sealed unsafe class StreamRunner
                         World.Clear(_world);
                         _rw.Clear();
                         break;
+                    case StreamOp.Splat:
+                        var applied = World.Splat(
+                            _world, command.Layer, new[] { command.X }, new[] { command.Y }, _stamps[command.Stamp], command.Gain);
+                        var expectedSplat = _rw.Splat(command.Layer, command.X, command.Y, _stamps[command.Stamp], command.Gain) ? 1 : 0;
+                        Require(applied == expectedSplat, $"splat applied {applied} vs {expectedSplat}", _index);
+                        break;
                     case StreamOp.Process:
                         World.Process(_world);
                         _rw.Process();
@@ -295,6 +301,21 @@ internal sealed unsafe class StreamRunner
                 Require(
                     World.Query(_world, (byte)g, (byte)l, 0, 0, size, size) == _rw.Query((byte)g, (byte)l, 0, 0, size, size),
                     $"full sum g{g} l{l} f{_frames}", _index);
+
+                foreach (var since in new[] { -1, _frames - 3, _frames - 2, _frames - 1 })
+                {
+                    int sinceActual;
+                    int sinceExpected;
+                    fixed (int* pActualTiles = _actualTiles, pExpectedTiles = _expectedTiles)
+                    {
+                        sinceActual = World.ChangedTiles(_world, (byte)g, (byte)l, since, pActualTiles);
+                        sinceExpected = _rw.ChangedTiles((byte)g, (byte)l, since, pExpectedTiles);
+                    }
+
+                    Require(
+                        sinceActual == sinceExpected && TilePrefixEqual(sinceActual),
+                        $"changed tiles since {since} g{g} l{l} f{_frames}: {sinceActual} vs {sinceExpected}", _index);
+                }
 
                 var actualMax = World.QueryMax(_world, (byte)g, (byte)l, out var maxX, out var maxY);
                 var expectedMax = _rw.QueryMax((byte)g, (byte)l, out var rMaxX, out var rMaxY);

@@ -60,7 +60,7 @@ internal sealed unsafe class CorpusRunner
                 var spec = _setup.Layers[l];
                 if (!spec.Derived)
                 {
-                    Layer.New(_world, spec.Precision);
+                    Layer.New(_world, spec.Transient ? Layer.Residency.Transient : Layer.Residency.Persistent, spec.Precision);
                     continue;
                 }
 
@@ -164,6 +164,9 @@ internal sealed unsafe class CorpusRunner
                         break;
                     case StreamOp.Clear:
                         World.Clear(_world);
+                        break;
+                    case StreamOp.Splat:
+                        World.Splat(_world, command.Layer, new[] { command.X }, new[] { command.Y }, _stamps[command.Stamp], command.Gain);
                         break;
                     case StreamOp.Process:
                         World.Process(_world);
