@@ -20,67 +20,62 @@ esac
 version=$(sed -n 's/^m_EditorVersion: //p' "$project/ProjectSettings/ProjectVersion.txt")
 [ -n "$version" ] || { printf 'missing ProjectVersion.txt\n' >&2; exit 2; }
 
-unity=${UNITY_BIN:-}
-if [ -z "$unity" ]; then
-    for candidate in "$HOME/Unity/Hub/Editor/$version/Editor/Unity" "$HOME/Unity/Hub/Editor/$version/Unity" /opt/Unity/Editor/Unity; do
-        if [ -x "$candidate" ]; then
-            unity=$candidate
-            break
-        fi
-    done
-fi
-if [ -z "$unity" ]; then
-    command -v Unity >/dev/null 2>&1 && unity=$(command -v Unity)
-fi
-[ -n "$unity" ] || { printf 'Unity editor %s not found; set UNITY_BIN\n' "$version" >&2; exit 2; }
+unity=${UNITY_BIN:-unity}
+command -v "$unity" >/dev/null 2>&1 || { printf 'unity CLI not found; set UNITY_BIN\n' >&2; exit 2; }
 
 mkdir -p "$project/Logs"
-results=$project/Logs/validate-$suite.xml
+results=$project/Logs/validate-$suite.junit.xml
 log=$project/Logs/validate-$suite.log
 
-platform=EditMode
+mode=EditMode
 backend=mono
+timeout=600
+forward=()
 
 case $suite in
-    editmode) platform=EditMode ;;
-    playmode) platform=PlayMode ;;
+    editmode) mode=EditMode ;;
+    playmode) mode=PlayMode ;;
     il2cpp)
-        platform=PlayMode
+        mode=PlayMode
         backend=il2cpp
+        timeout=1800
+        forward=(-buildTarget Linux64)
         ;;
-    perf)
-        platform=PlayMode
-        ;;
+    perf) mode=PlayMode ;;
 esac
 
-args=(-batchmode -projectPath "$project" -runTests -testPlatform "$platform" -testResults "$results" -logFile "$log")
-case $suite in
-    editmode | il2cpp) args+=(-nographics) ;;
-esac
-case $suite in
-    il2cpp) args+=(-buildTarget Linux64) ;;
-    perf) args+=(-testFilter 'Gi.Entities.Performance') ;;
-esac
+args=(test "$project" --editor-version "$version" --mode "$mode" --report-format junit --output "$results" --allow-install --non-interactive --no-banner --timeout "$timeout")
+if [ "$suite" = perf ]; then
+    args+=(--filter Gi.Entities.Performance)
+fi
+if [ ${#forward[@]} -gt 0 ]; then
+    args+=(-- "${forward[@]}")
+fi
 
 set +e
-"$unity" "${args[@]}"
+"$unity" "${args[@]}" >"$log" 2>&1
 rc=$?
 set -e
 
-[ -f "$results" ] || { printf 'no results at %s; editor log: %s\n' "$results" "$log" >&2; exit 2; }
+case $rc in
+    0 | 8) ;;
+    *) printf 'unity test exited %s; log: %s\n' "$rc" "$log" >&2; exit 2 ;;
+esac
 
-if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
-    printf 'unity exited %s; editor log: %s\n' "$rc" "$log" >&2
-    exit 2
-fi
+[ -f "$results" ] || { printf 'no results at %s; log: %s\n' "$results" "$log" >&2; exit 2; }
 
 counts=$(python3 - "$results" <<'PY'
 import sys
 import xml.etree.ElementTree as ET
 
 root = ET.parse(sys.argv[1]).getroot()
-attributes = root.attrib
-print(attributes.get('passed', '0'), attributes.get('failed', '0'), attributes.get('skipped', '0'), attributes.get('duration', '0'))
+suites = [root] if root.tag == "testsuite" else list(root.iter("testsuite"))
+tests = sum(int(s.get("tests", 0)) for s in suites)
+failures = sum(int(s.get("failures", 0)) for s in suites)
+errors = sum(int(s.get("errors", 0)) for s in suites)
+skipped = sum(int(s.get("skipped", 0)) for s in suites)
+time = sum(float(s.get("time", 0)) for s in suites)
+print(tests - failures - errors - skipped, failures + errors, skipped, time)
 PY
 ) || { printf 'cannot parse %s\n' "$results" >&2; exit 2; }
 

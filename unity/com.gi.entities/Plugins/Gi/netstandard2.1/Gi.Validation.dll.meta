@@ -1,27 +1,2 @@
 fileFormatVersion: 2
 guid: 7dc3e3d5dd0343eb9e8609a7a7ae4a88
-PluginImporter:
-  externalObjects: {}
-  serializedVersion: 2
-  iconMap: {}
-  executionOrder: {}
-  defineConstraints:
-  - !GI_CORECLR
-  isPreloaded: 0
-  isOverridable: 0
-  isExplicitlyReferenced: 0
-  validateReferences: 1
-  platformData:
-  - first:
-      : Any
-  - second:
-      enabled: 1
-      settings: {}
-  - first:
-      Editor: Editor
-  - second:
-      enabled: 1
-      settings:
-        CPU: AnyCPU
-        DefaultValueInitialized: true
-        OS: AnyOS
