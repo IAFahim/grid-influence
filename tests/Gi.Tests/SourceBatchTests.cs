@@ -197,9 +197,9 @@ public sealed class SourceBatchTests : IDisposable
             World.SourceCommand.Remove(World.SourceTarget.CreatedBy(2)),
             World.SourceCommand.Place(0, 20.5f, 20.5f, _stamps[0], 2)
         ];
-        var results = Enumerable.Repeat(new World.SourceResult(123, World.SourceResultStatus.InvalidStamp), commands.Length).ToArray();
+        var results = Enumerable.Repeat(new World.SourceResult(new World.SourceId(123, 7), World.SourceResultStatus.InvalidStamp), commands.Length).ToArray();
         Assert.Equal(World.BatchStatus.InvalidReference, World.ApplyBatch(_batchWorld, commands, results));
-        Assert.All(results, result => Assert.Equal(123, result.SourceId));
+        Assert.All(results, result => Assert.Equal(new World.SourceId(123, 7), result.SourceId));
         Assert.Equal(World.BatchStatus.InsufficientResults, World.ApplyBatch(_batchWorld, commands, results.AsSpan(0, 1)));
         Assert.Equal(World.BatchStatus.InvalidCommand, World.ApplyBatch(_batchWorld,
             new[] { World.SourceCommand.Move(source, 40.5f, 40.5f), default(World.SourceCommand) }, results));
@@ -275,7 +275,7 @@ public sealed class SourceBatchTests : IDisposable
             World.SourceCommand.Place(2, 10.5f, 10.5f, _stamps[0], 1),
             World.SourceCommand.Place(0, 20.5f, 20.5f, 0, 1),
             World.SourceCommand.Move(World.SourceTarget.CreatedBy(0), 30.5f, 30.5f),
-            World.SourceCommand.Move(-1, 30.5f, 30.5f),
+            World.SourceCommand.Move(default, 30.5f, 30.5f),
             World.SourceCommand.Remove(source),
             World.SourceCommand.Move(source, 40.5f, 40.5f)
         };
@@ -422,10 +422,10 @@ public sealed class SourceBatchTests : IDisposable
     public void EmptyAndInvalidWorldBatches_DoNotWriteResults()
     {
         Assert.Equal(World.BatchStatus.Applied, World.ApplyBatch(_batchWorld, [], []));
-        var results = new[] { new World.SourceResult(123, World.SourceResultStatus.InvalidStamp) };
+        var results = new[] { new World.SourceResult(new World.SourceId(123, 7), World.SourceResultStatus.InvalidStamp) };
         Assert.Equal(World.BatchStatus.InvalidWorld, World.ApplyBatch(byte.MaxValue,
             new[] { World.SourceCommand.Place(0, 10.5f, 10.5f, _stamps[0], 1) }, results));
-        Assert.Equal(123, results[0].SourceId);
+        Assert.Equal(new World.SourceId(123, 7), results[0].SourceId);
         Assert.Equal(0, World.Tick(_batchWorld));
     }
 
@@ -488,7 +488,7 @@ public sealed class SourceBatchTests : IDisposable
         }
     }
 
-    private int PlacePair(byte layer, float positionX, float positionY, byte stamp, sbyte gain)
+    private World.SourceId PlacePair(byte layer, float positionX, float positionY, byte stamp, sbyte gain)
     {
         var source = World.Place(_batchWorld, layer, positionX, positionY, stamp, gain);
         Assert.Equal(source, World.Place(_serialWorld, layer, positionX, positionY, stamp, gain));
@@ -499,11 +499,11 @@ public sealed class SourceBatchTests : IDisposable
     {
         var results = new World.SourceResult[commands.Length];
         Assert.Equal(World.BatchStatus.Applied, World.ApplyBatch(_batchWorld, commands, results));
-        var serialResults = new int[commands.Length];
+        var serialResults = new World.SourceId[commands.Length];
         for (var index = 0; index < commands.Length; index++)
         {
             ref readonly var command = ref commands[index];
-            var target = command.Target.Pending ? serialResults[command.Target.Identifier] : command.Target.Identifier;
+            var target = command.Target.Pending ? serialResults[command.Target.Command] : command.Target.Source;
             if (command.Kind == SourceCommandKind.Place)
             {
                 var source = World.Place(_serialWorld, command.Layer, command.PositionX, command.PositionY, command.Stamp, command.Gain);
@@ -540,24 +540,20 @@ public sealed class SourceBatchTests : IDisposable
     {
         var actual = World.GetContext(_batchWorld);
         var expected = World.GetContext(_serialWorld);
-        Assert.Equal(expected->Ops.Length, actual->Ops.Length);
-        for (var index = 0; index < actual->Ops.Length; index++)
+        Assert.Equal(expected->Changed.Length, actual->Changed.Length);
+        for (var index = 0; index < actual->Changed.Length; index++)
+            Assert.Equal(expected->Changed.Pointer[index], actual->Changed.Pointer[index]);
+
+        Assert.Equal(expected->Pending.Length, actual->Pending.Length);
+        for (var index = 0; index < actual->Pending.Length; index++)
         {
-            var actualOperation = actual->Ops.Pointer[index];
-            var expectedOperation = expected->Ops.Pointer[index];
-            Assert.Equal(expectedOperation.Slot, actualOperation.Slot);
-            var expectedFrom = (expectedOperation.FromGain, expectedOperation.FromX, expectedOperation.FromY,
-                expectedOperation.FromStamp, expectedOperation.FromLayer, expectedOperation.FromAngle, expectedOperation.FromScale);
-            var actualFrom = (actualOperation.FromGain, actualOperation.FromX, actualOperation.FromY,
-                actualOperation.FromStamp, actualOperation.FromLayer, actualOperation.FromAngle, actualOperation.FromScale);
-            var expectedTo = (expectedOperation.ToGain, expectedOperation.ToX, expectedOperation.ToY,
-                expectedOperation.ToStamp, expectedOperation.ToLayer, expectedOperation.ToAngle, expectedOperation.ToScale);
-            var actualTo = (actualOperation.ToGain, actualOperation.ToX, actualOperation.ToY,
-                actualOperation.ToStamp, actualOperation.ToLayer, actualOperation.ToAngle, actualOperation.ToScale);
-            if (expectedOperation.FromGain != 0 || actualOperation.FromGain != 0)
-                Assert.True(expectedFrom == actualFrom, $"from slot {actualOperation.Slot}: expected {expectedFrom}, actual {actualFrom}");
-            if (expectedOperation.ToGain != 0 || actualOperation.ToGain != 0)
-                Assert.True(expectedTo == actualTo, $"to slot {actualOperation.Slot}: expected {expectedTo}, actual {actualTo}");
+            var a = actual->Pending.Pointer[index];
+            var e = expected->Pending.Pointer[index];
+            Assert.True(
+                a.Slot == e.Slot && a.X == e.X && a.Y == e.Y && a.Stamp == e.Stamp &&
+                a.Layer == e.Layer && a.Gain == e.Gain && a.Alive == e.Alive &&
+                a.Angle == e.Angle && a.Scale == e.Scale && a.Gen == e.Gen,
+                $"pending {index}: slot {a.Slot}");
         }
     }
 
@@ -577,14 +573,14 @@ public sealed class SourceBatchTests : IDisposable
         Assert.Equal(expected->Count, actual->Count);
         for (var slot = 0; slot < actual->Count; slot++)
         {
-            Assert.True(expected->Alive.Pointer[slot] == actual->Alive.Pointer[slot], $"alive {slot}");
-            if (expected->Alive.Pointer[slot] == 0) continue;
-            var expectedState = (expected->X.Pointer[slot], expected->Y.Pointer[slot], expected->Gain.Pointer[slot],
-                expected->Stamp.Pointer[slot], expected->Layer.Pointer[slot], expected->Angle.Pointer[slot], expected->Scale.Pointer[slot],
-                expected->Gen.Pointer[slot], expected->Timed.Pointer[slot]);
-            var actualState = (actual->X.Pointer[slot], actual->Y.Pointer[slot], actual->Gain.Pointer[slot],
-                actual->Stamp.Pointer[slot], actual->Layer.Pointer[slot], actual->Angle.Pointer[slot], actual->Scale.Pointer[slot],
-                actual->Gen.Pointer[slot], actual->Timed.Pointer[slot]);
+            Assert.True(expected->Alive[slot] == actual->Alive[slot], $"alive {slot}");
+            if (expected->Alive[slot] == 0) continue;
+            var expectedState = (expected->X[slot], expected->Y[slot], expected->Gain[slot],
+                expected->Stamp[slot], expected->Layer[slot], expected->Angle[slot], expected->Scale[slot],
+                expected->Gen[slot], expected->Timed.Pointer[slot]);
+            var actualState = (actual->X[slot], actual->Y[slot], actual->Gain[slot],
+                actual->Stamp[slot], actual->Layer[slot], actual->Angle[slot], actual->Scale[slot],
+                actual->Gen[slot], actual->Timed.Pointer[slot]);
             Assert.True(expectedState == actualState, $"slot {slot}: expected {expectedState}, actual {actualState}");
         }
     }

@@ -3,6 +3,13 @@ using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 
+internal static class ReadMode
+{
+    public static bool Fused;
+    public static bool View;
+    public static bool Transient;
+}
+
 internal sealed class FrameOptions
 {
     public string Selection = "ALL";
@@ -12,6 +19,9 @@ internal sealed class FrameOptions
     public int Entities = 1_000_000;
     public ulong Seed = 402026;
     public int JitMilliseconds = 1500;
+    public bool Fused;
+    public bool View;
+    public bool Transient;
 }
 
 internal sealed record FramePlan(string Name, Func<FrameOptions, FrameScenario> Create, Func<bool, FrameScenario> CreateSmall);
@@ -39,7 +49,6 @@ internal static class FrameHarness
             return 2;
         }
 
-        Gi.ResolvePool.SerialOnly = true;
         if (options.Selection == "VERIFY") return FrameReceipts.Run(Console.Out) == 0 ? 0 : 1;
 
         var plans = Catalog.Where(p => options.Selection == "ALL" || options.Selection == p.Name).ToArray();
@@ -58,6 +67,9 @@ internal static class FrameHarness
             return 1;
         }
 
+        ReadMode.Fused = options.Fused;
+        ReadMode.View = options.View;
+        ReadMode.Transient = options.Transient;
         var precision = options.Cell ? "cell" : "exact";
         Console.Out.Write(Header(options, precision, receipts.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries).Length));
         Console.Out.Write('\n');
@@ -86,7 +98,7 @@ internal static class FrameHarness
             .BeginObject("header")
             .Text("tool", "gi-frames")
             .Integer("version", 1)
-            .Text("engine", "main 1.x: one engine, no transient layers; frame C runs as persistent sources synced every frame")
+            .Text("engine", "engine-v2: change-rate Process, transient layers with Splat; frame C runs as a transient layer unless --layer persistent")
             .Text("cpu_model", FrameHost.CpuModel())
             .Integer("cpu_id", Thread.GetCurrentProcessorId())
             .Integer("affinity_cpus", Environment.ProcessorCount)
@@ -152,6 +164,13 @@ internal static class FrameHarness
                     break;
                 case "--seed" when ulong.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var seed):
                     options.Seed = seed;
+                    break;
+                case "--layer" when value is "persistent" or "transient":
+                    options.Transient = value == "transient";
+                    break;
+                case "--reads" when value is "fused" or "separate" or "view":
+                    options.Fused = value == "fused";
+                    options.View = value == "view";
                     break;
                 default:
                     error = "bad option " + args[i] + " " + value;

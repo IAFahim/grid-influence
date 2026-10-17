@@ -88,6 +88,13 @@ internal static unsafe partial class TileBake
 
     internal static bool Place(float x, float y, float originX, float originY, int scaleQ8, int size,
         StampVariant* v, int angle, int scale, Layer.Precision precision, out Placement p)
+        => PlaceAnchored(
+            AnchorQ8(x, originX, scaleQ8, precision.AnchorMask),
+            AnchorQ8(y, originY, scaleQ8, precision.AnchorMask),
+            scaleQ8, size, v, angle, scale, precision, out p);
+
+    internal static bool PlaceAnchored(int anchorX, int anchorY, int scaleQ8, int size,
+        StampVariant* v, int angle, int scale, Layer.Precision precision, out Placement p)
     {
         p = default;
         var sampling = (int)Math.Min((long)scaleQ8 * scale >> 8, int.MaxValue);
@@ -96,7 +103,7 @@ internal static unsafe partial class TileBake
         angle &= precision.TurnMask;
         var round = v->Kind >= StampKind.Disk;
         var turned = round || angle != 0;
-        Footprint(x, y, originX, originY, scaleQ8, sampling, size, precision.AnchorMask, v, v->Kind == StampKind.ConstantRectangle && !turned,
+        FootprintAnchored(anchorX, anchorY, sampling, size, v, v->Kind == StampKind.ConstantRectangle && !turned,
             out p.Px, out p.Py, out p.Fx, out p.Fy, out p.ExtentX, out p.ExtentY,
             out p.X0, out p.Y0, out p.X1, out p.Y1);
         p.V = v;
@@ -151,25 +158,9 @@ internal static unsafe partial class TileBake
                 p.Inverse = ((1L << 62) - 1) / reduced + 1;
             }
 
-            long x0, y0, x1, y1;
-            if (p.Arc)
-            {
-                SectorBounds(p.CentreX, p.CentreY, p.Bound, angle, v->Arc, out x0, out y0, out x1, out y1);
-                x0 -= CellHalf;
-                y0 -= CellHalf;
-                x1 += CellHalf;
-                y1 += CellHalf;
-            }
-            else
-            {
-                x0 = p.CentreX - p.Bound;
-                y0 = p.CentreY - p.Bound;
-                x1 = p.CentreX + p.Bound;
-                y1 = p.CentreY + p.Bound;
-            }
-
-            Cells(x0, x1, size, out p.X0, out p.X1);
-            Cells(y0, y1, size, out p.Y0, out p.Y1);
+            RoundFootprintCells(p.Arc, p.CentreX, p.CentreY, p.Bound, v, angle, out var rx0, out var ry0, out var rx1, out var ry1);
+            Cells(rx0, rx1, size, out p.X0, out p.X1);
+            Cells(ry0, ry1, size, out p.Y0, out p.Y1);
             return true;
         }
 
@@ -219,19 +210,57 @@ internal static unsafe partial class TileBake
             p.SampleV0 = ((long)v->Height << 47) - FloorDiv(1L << 55, sampling);
         }
 
-        var c = Math.Abs((long)p.Cos);
-        var s = Math.Abs((long)p.Sin);
-        var ax = ((c * p.SupportU + s * p.SupportV) >> 14) + CellHalf;
-        var ay = ((s * p.SupportU + c * p.SupportV) >> 14) + CellHalf;
-        Cells(p.CentreX - ax, p.CentreX + ax, size, out p.X0, out p.X1);
-        Cells(p.CentreY - ay, p.CentreY + ay, size, out p.Y0, out p.Y1);
+        TurnedFootprintCells(p.CentreX, p.CentreY, p.Cos, p.Sin, p.SupportU, p.SupportV, out var tx0, out var ty0, out var tx1, out var ty1);
+        Cells(tx0, tx1, size, out p.X0, out p.X1);
+        Cells(ty0, ty1, size, out p.Y0, out p.Y1);
         return true;
+    }
+
+    internal static void RoundFootprintCells(
+        bool arc, long centreX, long centreY, long bound, StampVariant* v, int angle,
+        out long x0, out long y0, out long x1, out long y1)
+    {
+        if (arc)
+        {
+            SectorBounds(centreX, centreY, bound, angle, v->Arc, out x0, out y0, out x1, out y1);
+            x0 -= CellHalf;
+            y0 -= CellHalf;
+            x1 += CellHalf;
+            y1 += CellHalf;
+            return;
+        }
+
+        x0 = centreX - bound;
+        y0 = centreY - bound;
+        x1 = centreX + bound;
+        y1 = centreY + bound;
+    }
+
+    internal static void TurnedFootprintCells(
+        long centreX, long centreY, int cos, int sin, long supportU, long supportV,
+        out long x0, out long y0, out long x1, out long y1)
+    {
+        var c = Math.Abs((long)cos);
+        var s = Math.Abs((long)sin);
+        var ax = ((c * supportU + s * supportV) >> 14) + CellHalf;
+        var ay = ((s * supportU + c * supportV) >> 14) + CellHalf;
+        x0 = centreX - ax;
+        y0 = centreY - ay;
+        x1 = centreX + ax;
+        y1 = centreY + ay;
     }
 
     private static void Cells(long low, long high, int size, out int first, out int end)
     {
-        first = (int)Math.Clamp(FloorDiv(low - CellHalf / 2, CellHalf), -1, size + 1L);
-        end = (int)Math.Clamp(FloorDiv(high - CellHalf / 2, CellHalf) + 1, -1, size + 1L);
+        KernelCells(low, high, out first, out end);
+        first = (int)Math.Clamp(first, -1, size + 1L);
+        end = (int)Math.Clamp(end, -1, size + 1L);
+    }
+
+    internal static void KernelCells(long low, long high, out int first, out int end)
+    {
+        first = (int)FloorDiv(low - CellHalf / 2, CellHalf);
+        end = (int)FloorDiv(high - CellHalf / 2, CellHalf) + 1;
     }
 
     private static void SectorBounds(long cx, long cy, long reach, int facing, int half,

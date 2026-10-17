@@ -6,8 +6,13 @@ public unsafe class StreamDifferentialTests
 {
     private const int GateStreams = 10_500;
     private const int GateSeedBase = 900_000;
+    private const int TransientStreams = 1200;
+    private const int TransientSeedBase = 950_000;
     private const int HeavyStreams = 48;
     private const int HeavySeedBase = 500_000;
+    private const int FoldSeedBase = 1_200_000;
+    private const int KindStreams = 300;
+    private const int KindSeedBase = 1_500_000;
 
     [Fact]
     public void GateStreamsPassAtExactCellAndQuarter()
@@ -15,6 +20,67 @@ public unsafe class StreamDifferentialTests
         for (var i = 0; i < GateStreams; i++)
         {
             var setup = StreamGenerator.Generate(GateSeedBase + i, (PrecisionMode)(i % 3), StreamProfile.Gate);
+            var mismatch = StreamRunner.TryRun(setup, setup.Commands);
+            if (mismatch == null) continue;
+
+            var minimized = StreamMinimizer.Minimize(setup, setup.Commands, null);
+            throw new Xunit.Sdk.XunitException(
+                $"{mismatch.Message}\nminimized to {minimized.Count} commands\n{StreamMinimizer.PrintAsCSharpTest(setup, minimized)}");
+        }
+    }
+
+    [Fact]
+    public void RoundArcRasterAndTurnedStreamsPassAtEveryPrecision()
+    {
+        for (var i = 0; i < KindStreams; i++)
+        {
+            var setup = StreamGenerator.Generate(KindSeedBase + i, (PrecisionMode)(i % 5), StreamProfile.Kinds);
+            var mismatch = StreamRunner.TryRun(setup, setup.Commands);
+            if (mismatch == null) continue;
+
+            var minimized = StreamMinimizer.Minimize(setup, setup.Commands, null);
+            throw new Xunit.Sdk.XunitException(
+                $"{mismatch.Message}\nminimized to {minimized.Count} commands\n{StreamMinimizer.PrintAsCSharpTest(setup, minimized)}");
+        }
+    }
+
+    [Theory]
+    [InlineData(1L)]
+    [InlineData(long.MaxValue)]
+    public void SplatCostModelExtremesMatchTheInterpreter(long convolveCost)
+    {
+        for (var i = 0; i < 200; i++)
+        {
+            var setup = StreamGenerator.Generate(TransientSeedBase + 70_000 + i, (PrecisionMode)(i % 3), StreamProfile.Transient);
+            var mismatch = StreamRunner.TryRun(setup, setup.Commands, convolveCost: convolveCost);
+            if (mismatch == null) continue;
+
+            var minimized = StreamMinimizer.Minimize(setup, setup.Commands, null);
+            throw new Xunit.Sdk.XunitException(
+                $"cost {convolveCost} seed {TransientSeedBase + 70_000 + i}: {mismatch.Message}\nminimized to {minimized.Count} commands");
+        }
+    }
+
+    [Fact]
+    public void DirectEmissionWithoutKernelInsertsMatchesTheInterpreter()
+    {
+        for (var i = 0; i < 200; i++)
+        {
+            var profile = i % 4 == 3 ? StreamProfile.Heavy : StreamProfile.Kinds;
+            var setup = StreamGenerator.Generate(KindSeedBase + 50_000 + i, (PrecisionMode)(i % 5), profile);
+            var mismatch = StreamRunner.TryRun(setup, setup.Commands, uncached: true);
+            if (mismatch == null) continue;
+
+            throw new Xunit.Sdk.XunitException($"seed {KindSeedBase + 50_000 + i}: {mismatch.Message}");
+        }
+    }
+
+    [Fact]
+    public void TransientStreamsPassAtExactCellAndQuarter()
+    {
+        for (var i = 0; i < TransientStreams; i++)
+        {
+            var setup = StreamGenerator.Generate(TransientSeedBase + i, (PrecisionMode)(i % 3), StreamProfile.Transient);
             var mismatch = StreamRunner.TryRun(setup, setup.Commands);
             if (mismatch == null) continue;
 
@@ -37,6 +103,48 @@ public unsafe class StreamDifferentialTests
             var minimized = StreamMinimizer.Minimize(setup, setup.Commands, null);
             throw new Xunit.Sdk.XunitException(
                 $"{mismatch.Message}\nminimized to {minimized.Count} commands\n{StreamMinimizer.PrintAsCSharpTest(setup, minimized)}");
+        }
+    }
+
+    [Theory]
+    [InlineData(1L, 1L, 0)]
+    [InlineData(4_100L, 1L << 42, 1)]
+    [InlineData(70_000L, 1L << 47, 2)]
+    public void FoldedPlanesStayExactAgainstTheInterpreter(long limitI, long limitQ40, int variant)
+    {
+        const int Streams = 250;
+        for (var i = 0; i < Streams; i++)
+        {
+            var seed = FoldSeedBase + variant * 10_000 + i;
+            var setup = StreamGenerator.Generate(seed, (PrecisionMode)(i % 3), StreamProfile.Gate);
+            var mismatch = StreamRunner.TryRun(setup, setup.Commands, fold: (limitI, limitQ40));
+            if (mismatch == null) continue;
+
+            var minimized = StreamMinimizer.Minimize(setup, setup.Commands, null, (limitI, limitQ40));
+            throw new Xunit.Sdk.XunitException(
+                $"seed {seed} limits {limitI}/{limitQ40}: {mismatch.Message}\nminimized to {minimized.Count} commands\n{StreamMinimizer.PrintAsCSharpTest(setup, minimized)}");
+        }
+
+        for (var i = 0; i < 90; i++)
+        {
+            var seed = FoldSeedBase + 50_000 + variant * 1_000 + i;
+            var setup = StreamGenerator.Generate(seed, (PrecisionMode)(i % 3), StreamProfile.Transient);
+            var mismatch = StreamRunner.TryRun(setup, setup.Commands, fold: (limitI, limitQ40));
+            if (mismatch == null) continue;
+
+            var minimized = StreamMinimizer.Minimize(setup, setup.Commands, null, (limitI, limitQ40));
+            throw new Xunit.Sdk.XunitException(
+                $"transient seed {seed} limits {limitI}/{limitQ40}: {mismatch.Message}\nminimized to {minimized.Count} commands\n{StreamMinimizer.PrintAsCSharpTest(setup, minimized)}");
+        }
+
+        for (var i = 0; i < 12; i++)
+        {
+            var seed = FoldSeedBase + 90_000 + variant * 100 + i;
+            var setup = StreamGenerator.Generate(seed, (PrecisionMode)(3 + i % 2), StreamProfile.Heavy);
+            var mismatch = StreamRunner.TryRun(setup, setup.Commands, fold: (limitI, limitQ40));
+            if (mismatch == null) continue;
+
+            throw new Xunit.Sdk.XunitException($"heavy seed {seed} limits {limitI}/{limitQ40}: {mismatch.Message}");
         }
     }
 

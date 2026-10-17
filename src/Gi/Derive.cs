@@ -29,6 +29,7 @@ internal struct LayerRecipe
     public short Low;
     public short High;
     public uint Reads;
+    public byte Transient;
 }
 
 public static unsafe partial class World
@@ -50,6 +51,7 @@ public static unsafe partial class World
         for (var gi = 0; gi < w->GridCount; gi++)
         {
             var g = w->Grids + gi;
+            g->Layers[id].Derived = 1;
             MarkLive(g, id, g->Layers + a);
             if (b != a) MarkLive(g, id, g->Layers + b);
         }
@@ -73,6 +75,8 @@ public static unsafe partial class World
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static bool IsDerived(WorldCtx* w, int layer) => w->Recipes[layer].Op != LayerOp.Base;
 
+    internal static bool IsTransient(WorldCtx* w, int layer) => w->Recipes[layer].Transient != 0;
+
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
@@ -92,8 +96,8 @@ public static unsafe partial class World
                 if (la->Dirty.Length == 0 && lb->Dirty.Length == 0 && own->Dirty.Length == 0) continue;
 
                 var ld = EnsureDirty(g, (byte)d);
-                MarkAll(ld, la);
-                if (r->B != r->A) MarkAll(ld, lb);
+                MarkAll(g, ld, la);
+                if (r->B != r->A) MarkAll(g, ld, lb);
                 var dirty = ld->Dirty.Pointer;
                 var count = ld->Dirty.Length;
                 var kept = 0;
@@ -101,34 +105,32 @@ public static unsafe partial class World
                 {
                     var tile = dirty[i];
                     ld->InDirty[tile] = 0;
-                    var pa = la->Pages.TryGet(tile, out var ba) ? (short*)(ba + PageOffset) : null;
-                    var pb = lb->Pages.TryGet(tile, out var bb) ? (short*)(bb + PageOffset) : null;
-                    var exists = ld->Pages.TryGet(tile, out var block);
+                    var pa = la->PageOf(tile);
+                    var pb = lb->PageOf(tile);
+                    var set = ld->SetOf(tile);
                     ResolveOutcome outcome;
                     if (pa == null && pb == null)
                     {
-                        outcome = exists && PageAny((short*)(block + PageOffset)) ? ResolveOutcome.Changed : ResolveOutcome.None;
-                        if (exists)
-                        {
-                            ld->Pages.Remove(tile);
-                            FreeBlock(block);
-                        }
+                        var existed = set != null;
+                        var page = existed ? ld->Store.Cells(*set).Page : null;
+                        outcome = existed && TileBake.PageAny(page) ? ResolveOutcome.Changed : ResolveOutcome.None;
+                        if (existed) DropPage(ld, tile);
 
                         ld->Max.Update(g->TilesPerSide, tile, 0);
                     }
                     else
                     {
-                        var target = exists ? block : NewHeader();
-                        outcome = Combine(r, pa, pb, (short*)(target + PageOffset), (long*)(target + SumOffset), (short*)(target + MaxOffset));
+                        var created = set == null;
+                        if (created) set = EnsureSet(g, ld, tile);
+                        var cells = ld->Store.Cells(*set);
+                        outcome = Combine(r, pa, pb, cells.Page, &cells.Summary->Sum, &cells.Summary->Max);
                         if ((outcome & ResolveOutcome.Empty) == 0)
                         {
-                            if (!exists) ld->Pages.Put(tile, target);
-                            ld->Max.Update(g->TilesPerSide, tile, *(short*)(target + MaxOffset));
+                            ld->Max.Update(g->TilesPerSide, tile, cells.Summary->Max);
                         }
                         else
                         {
-                            if (exists) ld->Pages.Remove(tile);
-                            FreeBlock(target);
+                            DropPage(ld, tile);
                             ld->Max.Update(g->TilesPerSide, tile, 0);
                         }
                     }
@@ -137,34 +139,26 @@ public static unsafe partial class World
                 }
 
                 ld->Dirty.Resize(kept);
+                ld->Rects.Resize(0);
             }
         }
     }
 
     private static void MarkLive(GridCtx* g, byte layer, LayerData* source)
     {
-        var pages = &source->Pages;
-        if (pages->Count == 0) return;
+        if (source->LivePages == 0) return;
 
         var target = EnsureDirty(g, layer);
-        var used = pages->Used;
-        var keys = pages->Keys;
-        for (var i = 0; i < pages->SlotCount; i++)
-            if (used[i] == PageMap.Live) MarkDirty(target, keys[i]);
+        var directory = source->Directory;
+        for (var tile = 0; tile < g->TileCount; tile++)
+            if (directory[tile] >= 0) MarkDirty(g, target, tile);
     }
 
-    private static void MarkAll(LayerData* target, LayerData* source)
+    private static void MarkAll(GridCtx* g, LayerData* target, LayerData* source)
     {
         var tiles = source->Dirty.Pointer;
         var count = source->Dirty.Length;
-        for (var i = 0; i < count; i++) MarkDirty(target, tiles[i]);
-    }
-
-    private static byte* NewHeader()
-    {
-        var block = (byte*)NativeHeap.AlignedAlloc(HeaderBytes);
-        new Span<byte>(block + PageOffset, HeaderBytes - PageOffset).Clear();
-        return block;
+        for (var i = 0; i < count; i++) MarkDirty(g, target, tiles[i]);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

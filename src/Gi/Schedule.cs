@@ -2,10 +2,10 @@ using System.Runtime.CompilerServices;
 
 namespace Gi;
 
-internal struct Alarm
+internal struct TimedEntry
 {
-    public int Due;
     public int Slot;
+    public int Next;
 }
 
 internal struct ScheduleRecord
@@ -30,21 +30,35 @@ public static unsafe partial class World
         return w == null ? 0 : w->Tick;
     }
 
-    public static void Fade(byte world, int source, sbyte gain, int ticks)
+    public static WriteStatus Fade(byte world, SourceId source, sbyte gain, int ticks)
     {
-        if (!TrySource(world, source, out var w, out var s, out var i)) return;
+        if (!TrySource(world, source, out var w, out var s, out var i)) return WriteStatus.StaleSource;
 
+        WriteFade(w, s, i, gain, ticks);
+        return WriteStatus.Applied;
+    }
+
+    public static WriteStatus Expire(byte world, SourceId source, int ticks)
+    {
+        if (!TrySource(world, source, out var w, out var s, out var i)) return WriteStatus.StaleSource;
+
+        WriteExpire(w, s, i, ticks);
+        return WriteStatus.Applied;
+    }
+
+    private static void WriteFade(WorldCtx* w, SourceColumns* s, int i, sbyte gain, int ticks)
+    {
         var target = (sbyte)Math.Clamp((int)gain, -MaxGain, MaxGain);
-        var current = (sbyte)s->Gain.Pointer[i];
+        var current = (sbyte)s->Gain[i];
         JournalSchedule(w, s, i);
         if (ticks <= 0 || target == current)
         {
             s->Timed.Pointer[i] &= unchecked((byte)~Fading);
             if (target != current)
             {
-                CountGain(w, s->Layer.Pointer[i], (byte)current, (byte)target);
-                EnqueueMutation(w, s, i, s->X.Pointer[i], s->Y.Pointer[i], target, s->Angle.Pointer[i], s->Scale.Pointer[i], true);
-                s->Gain.Pointer[i] = (byte)target;
+                BeforeWrite(w, s, i);
+                s->Gain[i] = (byte)target;
+                MarkChanged(w, s, i);
             }
         }
         else
@@ -59,10 +73,8 @@ public static unsafe partial class World
         Schedule(w, s, i);
     }
 
-    public static void Expire(byte world, int source, int ticks)
+    private static void WriteExpire(WorldCtx* w, SourceColumns* s, int i, int ticks)
     {
-        if (!TrySource(world, source, out var w, out var s, out var i)) return;
-
         JournalSchedule(w, s, i);
         if (ticks <= 0)
         {
@@ -79,8 +91,9 @@ public static unsafe partial class World
 
     private static void JournalSchedule(WorldCtx* w, SourceColumns* s, int slot)
     {
-        if (w->Recording == 0) return;
+        if (w->Recording == 0 || s->SchedStamp.Pointer[slot] == w->RecordEpoch) return;
 
+        s->SchedStamp.Pointer[slot] = w->RecordEpoch;
         var n = w->ScheduleJournal.Length;
         w->ScheduleJournal.Resize(n + 1);
         w->ScheduleJournal.Pointer[n] = new ScheduleRecord
@@ -116,7 +129,7 @@ public static unsafe partial class World
     {
         for (var i = 0; i < s->Count; i++)
         {
-            if (s->Alive.Pointer[i] == 0 || s->Timed.Pointer[i] == 0) continue;
+            if (s->Alive[i] == 0 || s->Timed.Pointer[i] == 0) continue;
             s->FadeStart.Pointer[i] += delta;
             s->ExpireAt.Pointer[i] += delta;
         }
@@ -124,22 +137,48 @@ public static unsafe partial class World
 
     private static void Schedule(WorldCtx* w, SourceColumns* s, int slot)
     {
-        if (!NextDue(s, slot, w->Tick, out var due)) return;
+        if (!NextDue(s, slot, w->Tick, out var next)) return;
 
-        s->Due.Pointer[slot] = due;
-        if (w->Timers.Length >= 2 * s->Count + 64) RebuildTimers(w);
-        else Push(w, due, slot);
+        var at = s->TimedAt.Pointer[slot];
+        if (at != 0)
+        {
+            w->TimedList.Pointer[at - 1].Next = next;
+            return;
+        }
+
+        var n = w->TimedList.Length;
+        w->TimedList.Resize(n + 1);
+        w->TimedList.Pointer[n] = new TimedEntry { Slot = slot, Next = next };
+        s->TimedAt.Pointer[slot] = n + 1;
     }
 
-    private static void RebuildTimers(WorldCtx* w)
+    private static void Unlist(WorldCtx* w, SourceColumns* s, int index)
+    {
+        var list = w->TimedList.Pointer;
+        var last = w->TimedList.Length - 1;
+        s->TimedAt.Pointer[list[index].Slot] = 0;
+        if (index != last)
+        {
+            list[index] = list[last];
+            s->TimedAt.Pointer[list[index].Slot] = index + 1;
+        }
+
+        w->TimedList.Resize(last);
+    }
+
+    private static void RebuildTimed(WorldCtx* w)
     {
         var s = &w->Sources;
-        w->Timers.Resize(0);
+        w->TimedList.Resize(0);
         for (var i = 0; i < s->Count; i++)
         {
-            if (s->Alive.Pointer[i] == 0 || s->Timed.Pointer[i] == 0 || !NextDue(s, i, w->Tick, out var due)) continue;
-            s->Due.Pointer[i] = due;
-            Push(w, due, i);
+            s->TimedAt.Pointer[i] = 0;
+            if (s->Alive[i] == 0 || s->Timed.Pointer[i] == 0 || !NextDue(s, i, w->Tick, out var next)) continue;
+
+            var n = w->TimedList.Length;
+            w->TimedList.Resize(n + 1);
+            w->TimedList.Pointer[n] = new TimedEntry { Slot = i, Next = next };
+            s->TimedAt.Pointer[i] = n + 1;
         }
     }
 
@@ -193,85 +232,78 @@ public static unsafe partial class World
         return (sbyte)(from + (delta < 0 ? -step : step));
     }
 
-    private static void RunTimers(WorldCtx* w)
+    private static void SweepTimed(WorldCtx* w)
     {
         var s = &w->Sources;
         var now = w->Tick;
-        while (w->Timers.Length > 0 && w->Timers.Pointer[0].Due - now <= 0)
+        w->TimedDue.Resize(0);
+        var list = w->TimedList.Pointer;
+        for (var i = 0; i < w->TimedList.Length; i++)
         {
-            var timer = Pop(w);
-            var slot = timer.Slot;
-            if ((uint)slot >= (uint)s->Count || s->Alive.Pointer[slot] == 0 || s->Timed.Pointer[slot] == 0 ||
-                s->Due.Pointer[slot] != timer.Due) continue;
+            if (list[i].Next - now > 0) continue;
 
+            var n = w->TimedDue.Length;
+            w->TimedDue.Resize(n + 1);
+            w->TimedDue.Pointer[n] = list[i].Slot;
+        }
+
+        var due = w->TimedDue.Pointer;
+        var count = w->TimedDue.Length;
+        SortSlots(due, count);
+        for (var k = 0; k < count; k++)
+        {
+            var slot = due[k];
+            var index = s->TimedAt.Pointer[slot] - 1;
             var timed = s->Timed.Pointer[slot];
+            if (s->Alive[slot] == 0 || timed == 0)
+            {
+                Unlist(w, s, index);
+                continue;
+            }
+
             if ((timed & Expiring) != 0 && s->ExpireAt.Pointer[slot] - now <= 0)
             {
-                CountGain(w, s->Layer.Pointer[slot], s->Gain.Pointer[slot], 0);
-                EnqueueMutation(w, s, slot, s->X.Pointer[slot], s->Y.Pointer[slot], 0, s->Angle.Pointer[slot], s->Scale.Pointer[slot], false);
-                s->Alive.Pointer[slot] = 0;
-                s->Free.Push(slot);
+                BeforeWrite(w, s, slot);
+                s->Alive[slot] = 0;
+                if (s->Gen[slot] != uint.MaxValue) s->Free.Push(slot);
+                MarkChanged(w, s, slot);
+                Unlist(w, s, index);
                 continue;
             }
 
             if ((timed & Fading) != 0)
             {
                 var gain = FadeGain(s, slot, now);
-                if (gain != (sbyte)s->Gain.Pointer[slot])
+                if (gain != (sbyte)s->Gain[slot])
                 {
-                    CountGain(w, s->Layer.Pointer[slot], s->Gain.Pointer[slot], (byte)gain);
-                    EnqueueMutation(w, s, slot, s->X.Pointer[slot], s->Y.Pointer[slot], gain, s->Angle.Pointer[slot], s->Scale.Pointer[slot], true);
-                    s->Gain.Pointer[slot] = (byte)gain;
+                    BeforeWrite(w, s, slot);
+                    s->Gain[slot] = (byte)gain;
+                    MarkChanged(w, s, slot);
                 }
             }
 
-            Schedule(w, s, slot);
+            if (NextDue(s, slot, now, out var next)) w->TimedList.Pointer[index].Next = next;
+            else Unlist(w, s, index);
         }
     }
 
-    private static void Push(WorldCtx* w, int due, int slot)
+    private static void SortSlots(int* slots, int count)
     {
-        var n = w->Timers.Length;
-        w->Timers.Resize(n + 1);
-        var heap = w->Timers.Pointer;
-        var i = n;
-        while (i > 0)
+#if NET
+        new Span<int>(slots, count).Sort();
+#else
+        for (var i = 1; i < count; i++)
         {
-            var parent = (i - 1) >> 1;
-            if (!Before(due, slot, heap[parent])) break;
-            heap[i] = heap[parent];
-            i = parent;
+            var value = slots[i];
+            var j = i - 1;
+            while (j >= 0 && slots[j] > value)
+            {
+                slots[j + 1] = slots[j];
+                j--;
+            }
+
+            slots[j + 1] = value;
         }
-
-        heap[i] = new Alarm { Due = due, Slot = slot };
-    }
-
-    private static Alarm Pop(WorldCtx* w)
-    {
-        var heap = w->Timers.Pointer;
-        var top = heap[0];
-        var n = w->Timers.Length - 1;
-        var last = heap[n];
-        w->Timers.Resize(n);
-        var i = 0;
-        while (true)
-        {
-            var child = 2 * i + 1;
-            if (child >= n) break;
-            if (child + 1 < n && Before(heap[child + 1].Due, heap[child + 1].Slot, heap[child])) child++;
-            if (!Before(heap[child].Due, heap[child].Slot, last)) break;
-            heap[i] = heap[child];
-            i = child;
-        }
-
-        if (n > 0) heap[i] = last;
-        return top;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool Before(int due, int slot, Alarm other)
-    {
-        var order = due - other.Due;
-        return order < 0 || (order == 0 && slot < other.Slot);
+#endif
     }
 }

@@ -27,7 +27,7 @@ public sealed unsafe class ColumnBudgetTests : IDisposable
         const int count = 65;
         var xs = stackalloc float[count];
         var ys = stackalloc float[count];
-        var excludes = stackalloc int[count];
+        var excludes = stackalloc World.SourceId[count];
         var values = stackalloc short[count];
         var gx = stackalloc float[count];
         var gy = stackalloc float[count];
@@ -36,17 +36,17 @@ public sealed unsafe class ColumnBudgetTests : IDisposable
         {
             xs[i] = i % 3 == 0 ? -1f : 1.5f;
             ys[i] = 1.5f;
-            excludes[i] = -1;
+            excludes[i] = default;
         }
 
         for (var mode = 0; mode < 3; mode++)
         {
             words[0] = words[1] = words[2] = ulong.MaxValue;
             var complete = mode == 0
-                ? World.SenseColumn(_world, _layer, xs, ys, count, values, words)
+                ? (World.SenseColumn(_world, _layer, xs, ys, count, values, words) == World.ReadStatus.Complete)
                 : mode == 1
-                    ? World.SenseColumn(_world, _layer, xs, ys, excludes, count, values, words)
-                    : World.SenseGradientColumn(_world, _layer, xs, ys, excludes, count, gx, gy, words);
+                    ? (World.SenseColumn(_world, _layer, xs, ys, excludes, count, values, words) == World.ReadStatus.Complete)
+                    : (World.SenseGradientColumn(_world, _layer, xs, ys, excludes, count, gx, gy, words) == World.ReadStatus.Complete);
             Assert.False(complete);
             for (var i = 0; i < count; i++)
                 Assert.Equal(i % 3 != 0, (words[i >> 6] & (1ul << (i & 63))) != 0);
@@ -59,8 +59,8 @@ public sealed unsafe class ColumnBudgetTests : IDisposable
         Assert.Equal(0ul, words[0]);
         Assert.Equal(0ul, words[1]);
         Assert.Equal(ulong.MaxValue, words[2]);
-        Assert.False(World.SenseColumn(_world, _layer, xs, ys, count, values, null));
-        Assert.False(World.SenseGradientColumn(_world, _layer, xs, ys, null, count, gx, gy, null));
+        Assert.False((World.SenseColumn(_world, _layer, xs, ys, count, values, null) == World.ReadStatus.Complete));
+        Assert.False((World.SenseGradientColumn(_world, _layer, xs, ys, null, count, gx, gy, null) == World.ReadStatus.Complete));
     }
 
     [Fact]
@@ -100,16 +100,15 @@ public sealed unsafe class ColumnBudgetTests : IDisposable
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void WarmPointGradientAndChangedColumnsAllocateZeroBytes(bool pooled)
+    [InlineData(65)]
+    [InlineData(16387)]
+    public void WarmPointGradientAndChangedColumnsAllocateZeroBytes(int count)
     {
-        var count = pooled ? 16387 : 65;
         var source = World.Place(_world, _layer, 32.5f, 31.5f, _stamp, 2);
         World.Process(_world);
         var xs = new float[count];
         var ys = new float[count];
-        var excludes = new int[count];
+        var excludes = new World.SourceId[count];
         var values = new short[count];
         var gx = new float[count];
         var gy = new float[count];
@@ -118,46 +117,37 @@ public sealed unsafe class ColumnBudgetTests : IDisposable
         {
             xs[i] = 1.5f + i % 125;
             ys[i] = 1.5f + i % 123;
-            excludes[i] = i % 2 == 0 ? source : -1;
+            excludes[i] = i % 2 == 0 ? source : default;
         }
 
-        var previousSerial = ResolvePool.SerialOnly;
-        ResolvePool.SerialOnly = !pooled;
-        try
+        fixed (float* xp = xs, yp = ys, gxp = gx, gyp = gy)
+        fixed (World.SourceId* ep = excludes)
+        fixed (short* vp = values)
+        fixed (ulong* wp = words)
         {
-            fixed (float* xp = xs, yp = ys, gxp = gx, gyp = gy)
-            fixed (int* ep = excludes)
-            fixed (short* vp = values)
-            fixed (ulong* wp = words)
+            for (var repeat = 0; repeat < 16; repeat++)
             {
-                for (var repeat = 0; repeat < 16; repeat++)
-                {
-                    World.SenseColumn(_world, _layer, xp, yp, count, vp, wp);
-                    World.SenseColumn(_world, _layer, xp, yp, ep, count, vp, wp);
-                    World.SenseGradientColumn(_world, _layer, xp, yp, ep, count, gxp, gyp, wp);
-                    World.ChangedMask(_world, _layer, xp, yp, 0f, 0, count, wp);
-                }
-
-                var complete = true;
-                var hits = 0;
-                var before = GC.GetAllocatedBytesForCurrentThread();
-                for (var repeat = 0; repeat < 16; repeat++)
-                {
-                    complete &= World.SenseColumn(_world, _layer, xp, yp, count, vp, wp);
-                    complete &= World.SenseColumn(_world, _layer, xp, yp, ep, count, vp, wp);
-                    complete &= World.SenseGradientColumn(_world, _layer, xp, yp, ep, count, gxp, gyp, wp);
-                    hits += World.ChangedMask(_world, _layer, xp, yp, 0f, 0, count, wp);
-                }
-
-                var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-                Assert.True(complete);
-                Assert.True(hits > 0);
-                Assert.Equal(0L, allocated);
+                World.SenseColumn(_world, _layer, xp, yp, count, vp, wp);
+                World.SenseColumn(_world, _layer, xp, yp, ep, count, vp, wp);
+                World.SenseGradientColumn(_world, _layer, xp, yp, ep, count, gxp, gyp, wp);
+                World.ChangedMask(_world, _layer, xp, yp, 0f, 0, count, wp);
             }
-        }
-        finally
-        {
-            ResolvePool.SerialOnly = previousSerial;
+
+            var complete = true;
+            var hits = 0;
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            for (var repeat = 0; repeat < 16; repeat++)
+            {
+                complete &= (World.SenseColumn(_world, _layer, xp, yp, count, vp, wp) == World.ReadStatus.Complete);
+                complete &= (World.SenseColumn(_world, _layer, xp, yp, ep, count, vp, wp) == World.ReadStatus.Complete);
+                complete &= (World.SenseGradientColumn(_world, _layer, xp, yp, ep, count, gxp, gyp, wp) == World.ReadStatus.Complete);
+                hits += World.ChangedMask(_world, _layer, xp, yp, 0f, 0, count, wp);
+            }
+
+            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.True(complete);
+            Assert.True(hits > 0);
+            Assert.Equal(0L, allocated);
         }
     }
 }

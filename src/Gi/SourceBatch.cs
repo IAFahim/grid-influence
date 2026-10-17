@@ -40,20 +40,22 @@ public static partial class World
 
     public readonly struct SourceTarget
     {
-        internal readonly int Identifier;
+        internal readonly SourceId Source;
+        internal readonly int Command;
         internal readonly bool Pending;
 
-        private SourceTarget(int identifier, bool pending)
+        private SourceTarget(SourceId source, int command, bool pending)
         {
-            Identifier = identifier;
+            Source = source;
+            Command = command;
             Pending = pending;
         }
 
-        public static SourceTarget Existing(int sourceId) => new(sourceId, false);
+        public static SourceTarget Existing(SourceId sourceId) => new(sourceId, 0, false);
 
-        public static SourceTarget CreatedBy(int commandIndex) => new(commandIndex, true);
+        public static SourceTarget CreatedBy(int commandIndex) => new(default, commandIndex, true);
 
-        public static implicit operator SourceTarget(int sourceId) => Existing(sourceId);
+        public static implicit operator SourceTarget(SourceId sourceId) => Existing(sourceId);
     }
 
     public readonly struct SourceCommand
@@ -123,58 +125,13 @@ public static partial class World
 
     public readonly struct SourceResult
     {
-        public readonly int SourceId;
+        public readonly SourceId SourceId;
         public readonly SourceResultStatus Status;
 
-        internal SourceResult(int sourceId, SourceResultStatus status)
+        internal SourceResult(SourceId sourceId, SourceResultStatus status)
         {
             SourceId = sourceId;
             Status = status;
         }
     }
-}
-
-internal struct SourceBatchLink
-{
-    public int Entry;
-    public int Next;
-}
-
-internal struct SourceBatchState
-{
-    public float PositionX;
-    public float PositionY;
-    public ushort Angle;
-    public ushort Scale;
-    public byte Stamp;
-    public byte Layer;
-    public byte Gain;
-    public byte Alive;
-    public byte Generation;
-    public byte Timed;
-    public sbyte FadeFrom;
-    public sbyte FadeTo;
-    public int FadeStart;
-    public int FadeTicks;
-    public int ExpireAt;
-    public int Due;
-}
-
-internal struct SourceBatchEntry
-{
-    public SourceBatchState State;
-    public DepositOp Operation;
-    public ScheduleRecord ScheduleBefore;
-    public int Slot;
-    public int FirstCommand;
-    public int LastCommand;
-    public int OriginalPending;
-    public int FirstDepositCommand;
-    public int FirstScheduleCommand;
-    public int OperationIndex;
-    public byte PlannedGeneration;
-    public byte PlannedAlive;
-    public byte InitialLayer;
-    public byte InitialGain;
-    public byte InitialAlive;
 }

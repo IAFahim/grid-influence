@@ -605,13 +605,14 @@ public sealed class EngineTests
     [Fact]
     public void InvalidWorld_DoesNotAccessNativeArena()
     {
-        Assert.Equal(-1, World.Place(255, 0, 0f, 0f, 1, 1));
+        Assert.Equal(default(World.SourceId), World.Place(255, 0, 0f, 0f, 1, 1));
         Assert.Equal(0, World.Query(255, 0, 0, 0, 0));
         Assert.Equal(0, World.Query(255, 0, 0, 0, 0, 32, 32));
         Assert.Equal(0, World.QueryAt(255, 0, 0, 0f, 0f));
-        World.Move(255, 0, 0f, 0f);
-        World.SetGain(255, 0, 1);
-        World.Remove(255, 0);
+        World.Move(0, new World.SourceId(255, 1), 0f, 0f);
+        World.Move(0, default, 0f, 0f);
+        World.SetGain(255, new World.SourceId(0, 1), 1);
+        World.Remove(255, new World.SourceId(0, 1));
         World.Process(255);
         World.Clear(255);
         Assert.Throws<ArgumentOutOfRangeException>(() => Grid.New(255, 5, 0f, 0f, 32f));
@@ -634,7 +635,7 @@ public sealed class EngineTests
         var stamp = Stamp.Box(4, 4, 100);
         try
         {
-            Assert.Equal(-1, World.Place(w, l, x, y, stamp, 2));
+            Assert.Equal(default(World.SourceId), World.Place(w, l, x, y, stamp, 2));
             var source = World.Place(w, l, 32f, 32f, stamp, 2);
             World.Move(w, source, x, y);
             World.Process(w);
@@ -706,80 +707,32 @@ public sealed class EngineTests
     }
 
     [Fact]
-    public unsafe void PageMap_TombstoneChurnKeepsCapacityBounded()
+    public unsafe void FixedSlab_RecyclesFreedUnitsAndKeepsIndicesStable()
     {
-        var map = new PageMap();
-        byte block = 1;
+        var slab = new FixedSlab();
         try
         {
-            map.Put(0, &block);
-            for (var i = 1; i < 10000; i++)
-            {
-                map.Put(i, &block);
-                Assert.True(map.Remove(i));
-                Assert.Equal(16, map.SlotCount);
-                Assert.Equal(1, map.Count);
-                Assert.True(map.TryGet(0, out var found));
-                Assert.True(found == &block);
-            }
+            var first = slab.Take(PlaneStore.PageUnit);
+            var second = slab.Take(PlaneStore.PageUnit);
+            Assert.Equal(0, first);
+            Assert.Equal(1, second);
+
+            slab.Give(second);
+            Assert.Equal(1, slab.FreeCount);
+            Assert.Equal(1, slab.Take(PlaneStore.PageUnit));
+            Assert.Equal(0, slab.FreeCount);
+
+            var survivor = (int*)slab.Unit(first);
+            survivor[0] = 0x12345678;
+            var grown = 40;
+            for (var i = 0; i < grown; i++) slab.Take(PlaneStore.PageUnit);
+            Assert.Equal(0x12345678, ((int*)slab.Unit(first))[0]);
+            Assert.True(slab.Bytes >= (2 + grown) * (long)PlaneStore.PageUnit);
         }
         finally
         {
-            map.Reset();
+            slab.Reset();
         }
-    }
-
-    [Fact]
-    public unsafe void Resolve_MatchesScalarPrefixAcrossVectorLanes()
-    {
-        var difference = stackalloc int[TileBake.DiffRows * TileBake.DiffPitch];
-        var dense = stackalloc int[32 * 32];
-        var previous = stackalloc int[32];
-        var expectedPrevious = stackalloc int[32];
-        var output = stackalloc short[32 * 32];
-        var pageSum = 0L;
-        var pageMax = short.MinValue;
-        new Span<int>(difference, TileBake.DiffRows * TileBake.DiffPitch).Clear();
-        new Span<int>(previous, 32).Clear();
-        new Span<int>(expectedPrevious, 32).Clear();
-        for (var y = 0; y < 32; y++)
-        for (var x = 0; x < 32; x++)
-        {
-            difference[y * TileBake.DiffPitch + x] = ((y * 37 + x * 13) % 41 - 20) * 4096;
-            dense[y * 32 + x] = ((y * 19 + x * 31) % 17 - 8) * 70000;
-        }
-
-        var filled = TileBake.Resolve(difference, dense, previous, null, null, output, &pageSum, &pageMax);
-        Assert.Equal(ResolveOutcome.None, filled & ResolveOutcome.Empty);
-        Assert.Equal(ResolveOutcome.Changed, filled & ResolveOutcome.Changed);
-        var expectedSum = 0L;
-        var expectedMax = short.MinValue;
-        for (var y = 0; y < 32; y++)
-        {
-            var carry = 0;
-            for (var x = 0; x < 32; x++)
-            {
-                carry += difference[y * TileBake.DiffPitch + x];
-                expectedPrevious[x] += carry;
-                var expected = (short)Math.Clamp(expectedPrevious[x] + dense[y * 32 + x], short.MinValue, short.MaxValue);
-                Assert.Equal(expected, output[y * 32 + x]);
-                expectedSum += expected;
-                if (expected > expectedMax) expectedMax = expected;
-            }
-        }
-
-        Assert.Equal(expectedSum, pageSum);
-        Assert.Equal(expectedMax, pageMax);
-
-        new Span<int>(difference, TileBake.DiffRows * TileBake.DiffPitch).Clear();
-        new Span<int>(dense, 32 * 32).Clear();
-        new Span<int>(previous, 32).Clear();
-        var emptied = TileBake.Resolve(difference, dense, previous, null, null, output, &pageSum, &pageMax);
-        Assert.Equal(ResolveOutcome.Empty, emptied & ResolveOutcome.Empty);
-        Assert.Equal(ResolveOutcome.Changed, emptied & ResolveOutcome.Changed);
-        for (var i = 0; i < 32 * 32; i++) Assert.Equal(0, output[i]);
-        Assert.Equal(0L, pageSum);
-        Assert.Equal((short)0, pageMax);
     }
 
     [Fact]
@@ -794,57 +747,58 @@ public sealed class EngineTests
         Assert.Equal(1, pending.LiveSources);
         Assert.Equal(0, pending.LiveTiles);
         Assert.Equal(0, pending.DirtyTiles);
-        Assert.Equal(64 * 40, pending.SourceBytes);
-        Assert.Equal(0, pending.MapBytes + pending.DifferenceBytes + pending.DenseBytes + pending.PageBytes);
+        Assert.Equal(1_048_576, pending.SourceBytes);
+        Assert.Equal(0, pending.DirectoryBytes + pending.SlabBytes + pending.Int32Bytes + pending.PageBytes);
         World.Process(w);
         var processed = Stats.Inspection.Read(w);
         Assert.Equal(1, processed.LiveTiles);
         Assert.Equal(0, processed.DirtyTiles);
-        Assert.Equal(World.BlockBytes, 6528);
-        Assert.Equal(World.BlockBytes, processed.DifferenceBytes + processed.DenseBytes + processed.DensePointerBytes + processed.PageBytes + processed.PageSumBytes);
-        Assert.Equal(20, processed.DirtyFlagBytes);
+        var unitBytes = PlaneStore.PageUnit + PlaneStore.Int32Unit + TileSummary.Bytes + sizeof(TilePlanes);
+        Assert.Equal(unitBytes, processed.PageBytes + processed.Int32Bytes + processed.SummaryBytes + processed.SetBytes);
+        Assert.Equal(16 * unitBytes, processed.SlabBytes);
+        Assert.Equal(32, processed.DirtyFlagBytes);
         Assert.Equal(1920, World.Query(w, g, l, 0, 0, 64, 64));
         World.Clear(w);
         var cleared = Stats.Inspection.Read(w);
         Assert.Equal(0, cleared.SourceSlots);
-        Assert.Equal(64, cleared.SourceCapacity);
+        Assert.Equal(16_384, cleared.SourceCapacity);
         Assert.Equal(0, cleared.LiveTiles);
-        Assert.Equal(0, cleared.MapBytes);
-        Assert.Equal(empty.WorldBytes + 64 * 40 + 20 + 64 + 16 * sizeof(DepositOp) + 64 * sizeof(int), cleared.WorldBytes);
+        Assert.Equal(1, cleared.Directories);
+        Assert.Equal(16, cleared.DirectoryBytes);
+        Assert.Equal(16 * unitBytes + 4 * 64, cleared.SlabBytes);
+        Assert.Equal(empty.WorldBytes + 1_048_576 + 32 + 16 * sizeof(int) + 16 * sizeof(TileRect) +
+            16 * sizeof(int) + 16 * sizeof(JournalEntry) + 16_384L * sizeof(DepositRecord) +
+            16 + 16 * unitBytes + 4 * 64 + processed.KernelBytes + cleared.EpochTreeBytes, cleared.WorldBytes);
     }
 
     [Fact]
-    public void Inspection_DenseAllocatesLazilyPerRasterTile()
+    public void Inspection_Int64AllocatesLazilyPerSmoothTile()
     {
         var w = World.New();
         var g = Grid.New(w, 6, 0f, 0f, 64f);
         var l = Layer.New(w);
-        var samples = new sbyte[6 * 6];
-        for (var i = 0; i < samples.Length; i++) samples[i] = (sbyte)(i % 7);
         World.Place(w, l, 16f, 16f, Stamp.Box(4, 4, 60), 2);
-        World.Place(w, l, 40f, 40f, Stamp.New(samples, 6, 6), 2);
+        World.Place(w, l, 40f, 40f, Stamp.Tent(4, 4, 60), 2);
 
         var pending = Stats.Inspection.Read(w);
         Assert.Equal(0, pending.LiveTiles);
-        Assert.Equal(0, pending.RasterTiles);
-        Assert.Equal(0, pending.DenseBytes);
-        Assert.Equal(0, pending.DensePointerBytes);
+        Assert.Equal(0, pending.TentTiles);
+        Assert.Equal(0, pending.TentBytes);
+        Assert.Equal(0, pending.Int32Bytes);
 
         World.Process(w);
         var processed = Stats.Inspection.Read(w);
         Assert.Equal(2, processed.LiveTiles);
-        Assert.Equal(1, processed.RasterTiles);
-        Assert.Equal(World.DenseBytes, processed.DenseBytes);
-        Assert.Equal(2 * (World.HeaderBytes - World.DensePtrOffset), processed.DensePointerBytes);
-        var expected = 0;
-        for (var y = 0; y < 6; y++)
-        for (var x = 0; x < 6; x++) expected += samples[y * 6 + x];
-        Assert.Equal(2 * expected, World.Query(w, g, l, 32, 32, 32, 32));
+        Assert.Equal(1, processed.TentTiles);
+        Assert.Equal(PlaneStore.Int64Unit, processed.TentBytes);
+        Assert.Equal(2 * PlaneStore.Int32Unit, processed.Int32Bytes);
+        Assert.True(World.Query(w, g, l, 40, 40) > 0);
 
         World.Clear(w);
         var cleared = Stats.Inspection.Read(w);
-        Assert.Equal(0, cleared.RasterTiles);
-        Assert.Equal(0, cleared.DenseBytes);
+        Assert.Equal(0, cleared.TentTiles);
+        Assert.Equal(0, cleared.TentBytes);
+        Assert.Equal(0, cleared.Int32Bytes);
     }
 
     [Fact]
@@ -1045,7 +999,7 @@ public sealed class EngineTests
         var l = Layer.New(w);
         var stamp = Stamp.Box(4, 4, 40);
         var survivor = World.Place(w, l, 12f, 12f, stamp, 5);
-        var first = -1;
+        var first = default(World.SourceId);
         for (var i = 0; i < 500; i++)
         {
             var id = World.Place(w, l, 40f, 40f, stamp, 3);
@@ -1077,11 +1031,11 @@ public sealed class EngineTests
         var w = World.New();
         var l = Layer.New(w);
         var stamp = Stamp.Box(2, 2, 10);
-        Assert.Equal(1 << 24, World.Place(w, l, 1f, 1f, stamp, 1));
+        Assert.Equal(new World.SourceId(0, 1), World.Place(w, l, 1f, 1f, stamp, 1));
         for (var i = 0; i < 200; i++) World.Place(w, l, 2f, 2f, stamp, 1);
-        Assert.Equal((1 << 24) | 201, World.Place(w, l, 3f, 3f, stamp, 1));
+        Assert.Equal(new World.SourceId(201, 1), World.Place(w, l, 3f, 3f, stamp, 1));
         World.Clear(w);
-        Assert.Equal(2 << 24, World.Place(w, l, 4f, 4f, stamp, 1));
+        Assert.Equal(new World.SourceId(0, 2), World.Place(w, l, 4f, 4f, stamp, 1));
     }
 
     [Fact]
@@ -1092,7 +1046,7 @@ public sealed class EngineTests
         var l = Layer.New(w);
         var stamp = Stamp.Box(12, 12, 40);
         var rng = new Random(61);
-        var ids = new int[40];
+        var ids = new World.SourceId[40];
         for (var i = 0; i < ids.Length; i++)
             ids[i] = World.Place(w, l,
                 (float)(rng.NextDouble() * 244 + 6), (float)(rng.NextDouble() * 244 + 6),
@@ -1147,7 +1101,7 @@ public sealed class EngineTests
             var gs = Grid.New(stepped, 8, 0f, 0f, 256f);
             var lb = Layer.New(batched);
             var ls = Layer.New(stepped);
-            var ids = new int[30];
+            var ids = new World.SourceId[30];
             var live = new bool[30];
             for (var step = 0; step < 120; step++)
             {
@@ -1164,17 +1118,17 @@ public sealed class EngineTests
                         live[k] = true;
                         break;
                     case 1:
-                        if (!live[k] || ids[k] < 0) break;
+                        if (!live[k] || ids[k] == default) break;
                         World.Move(batched, ids[k], x, y);
                         World.Move(stepped, ids[k], x, y);
                         break;
                     case 2:
-                        if (!live[k] || ids[k] < 0) break;
+                        if (!live[k] || ids[k] == default) break;
                         World.SetGain(batched, ids[k], gain);
                         World.SetGain(stepped, ids[k], gain);
                         break;
                     default:
-                        if (!live[k] || ids[k] < 0) break;
+                        if (!live[k] || ids[k] == default) break;
                         World.Remove(batched, ids[k]);
                         World.Remove(stepped, ids[k]);
                         live[k] = false;
@@ -1206,7 +1160,7 @@ public sealed class EngineTests
         var g = Grid.New(w, 8, 0f, 0f, 256f);
         var l = Layer.New(w);
         var stamp = Stamp.Box(12, 12, 40);
-        var ids = new int[200];
+        var ids = new World.SourceId[200];
         for (var i = 0; i < ids.Length; i++)
             ids[i] = World.Place(w, l, (i * 13.7f) % 240f + 8f, (i * 7.3f) % 240f + 8f, stamp, 7);
         for (var i = 0; i < ids.Length; i++) World.Remove(w, ids[i]);
@@ -1215,7 +1169,8 @@ public sealed class EngineTests
         World.Process(w);
         var after = Stats.Inspection.Read(w);
         Assert.Equal(0, after.LiveTiles);
-        Assert.Equal(0, after.MapBytes);
+        Assert.Equal(0, after.DirectoryBytes);
+        Assert.Equal(0, after.SlabBytes);
         Assert.Equal(0, after.DirtyTiles);
         Assert.Equal(0, World.Query(w, g, l, 0, 0, 256, 256));
         Assert.Equal((short)0, World.QueryMax(w, g, l, out _, out _));
@@ -1287,7 +1242,7 @@ public sealed class EngineTests
         var tents = new byte[widths.Length];
         for (var k = 0; k < widths.Length; k++) tents[k] = Stamp.Tent((ushort)widths[k], (ushort)widths[k], 40);
         const int count = 80;
-        var ids = new int[count];
+        var ids = new World.SourceId[count];
         var sx = new float[count];
         var sy = new float[count];
         var ssize = new int[count];
@@ -1382,7 +1337,7 @@ public sealed class EngineTests
         var bells = new byte[widths.Length];
         for (var k = 0; k < widths.Length; k++) bells[k] = Stamp.Bell((ushort)widths[k], (ushort)widths[k], 40);
         const int count = 80;
-        var ids = new int[count];
+        var ids = new World.SourceId[count];
         var sx = new float[count];
         var sy = new float[count];
         var ssize = new int[count];
@@ -1615,7 +1570,7 @@ public sealed class EngineTests
         var l = Layer.New(w);
         var box = Stamp.Box(12, 12, 40);
         var rng = new Random(31);
-        var ids = new int[60];
+        var ids = new World.SourceId[60];
         for (var i = 0; i < ids.Length; i++)
             ids[i] = World.Place(w, l,
                 (float)(rng.NextDouble() * 244 + 6),
@@ -1729,7 +1684,7 @@ public sealed class EngineTests
         for (var i = 0; i < layers.Length; i++) layers[i] = Layer.New(w);
         var stamp = Stamp.Box(20, 20, 25);
         var rng = new Random(53);
-        var ids = new int[120];
+        var ids = new World.SourceId[120];
         for (var round = 0; round < 4; round++)
         {
             for (var i = 0; i < ids.Length; i++)

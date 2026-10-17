@@ -20,7 +20,7 @@ public sealed unsafe class FiniteInputTests : IDisposable
     private readonly byte _layer;
     private readonly byte _derived;
     private readonly byte _box = Stamp.Box(8, 8, 100);
-    private readonly int _source;
+    private readonly World.SourceId _source;
 
     public FiniteInputTests()
     {
@@ -29,7 +29,7 @@ public sealed unsafe class FiniteInputTests : IDisposable
         _derived = Layer.Sum(_world, _layer, 1, _layer, 1);
         _source = World.Place(_world, _layer, 2f, 2f, _box, 3);
         World.Process(_world);
-        Assert.True(_source >= 0);
+        Assert.True(_source != default);
         Assert.NotEqual(0, World.Query(_world, _grid, _layer, 0, 0));
     }
 
@@ -98,7 +98,7 @@ public sealed unsafe class FiniteInputTests : IDisposable
         const int count = 3;
         var xs = stackalloc float[count] { 3f, x, 3f };
         var ys = stackalloc float[count] { 3f, y, 3f };
-        var excludes = stackalloc int[count] { -1, _source, _source };
+        var excludes = stackalloc World.SourceId[count] { default, _source, _source };
         var values = stackalloc short[count] { -1, -1, -1 };
         var fxs = stackalloc float[count];
         var fys = stackalloc float[count];
@@ -110,33 +110,33 @@ public sealed unsafe class FiniteInputTests : IDisposable
         var whole = stackalloc ulong[1] { ulong.MaxValue };
         var words = stackalloc ulong[1] { ulong.MaxValue };
 
-        Assert.False(World.SenseColumn(_world, _layer, xs, ys, count, values, whole));
+        Assert.False((World.SenseColumn(_world, _layer, xs, ys, count, values, whole) == World.ReadStatus.Complete));
         Assert.Equal(5ul, whole[0]);
         Assert.Equal(0, values[1]);
 
         values[1] = -1;
         whole[0] = ulong.MaxValue;
-        Assert.False(World.SenseColumn(_world, _layer, xs, ys, excludes, count, values, whole));
+        Assert.False((World.SenseColumn(_world, _layer, xs, ys, excludes, count, values, whole) == World.ReadStatus.Complete));
         Assert.Equal(5ul, whole[0]);
         Assert.Equal(0, values[1]);
 
         whole[0] = ulong.MaxValue;
-        Assert.False(World.SenseGradientColumn(_world, _layer, xs, ys, excludes, count, fxs, fys, whole));
+        Assert.False((World.SenseGradientColumn(_world, _layer, xs, ys, excludes, count, fxs, fys, whole) == World.ReadStatus.Complete));
         Assert.Equal(5ul, whole[0]);
         Assert.Equal((0f, 0f), (fxs[1], fys[1]));
 
         whole[0] = ulong.MaxValue;
-        Assert.False(World.SenseAreaColumn(_world, _layer, xs, ys, reaches, excludes, count, totals, whole));
+        Assert.False((World.SenseAreaColumn(_world, _layer, xs, ys, reaches, excludes, count, totals, whole) == World.ReadStatus.Complete));
         Assert.Equal(5ul, whole[0]);
         Assert.Equal(0, totals[1]);
 
         whole[0] = ulong.MaxValue;
-        Assert.False(World.SenseMaxColumn(_world, _layer, xs, ys, reaches, count, values, bestXs, bestYs, whole));
+        Assert.False((World.SenseMaxColumn(_world, _layer, xs, ys, reaches, count, values, bestXs, bestYs, whole) == World.ReadStatus.Complete));
         Assert.Equal(5ul, whole[0]);
 
         whole[0] = ulong.MaxValue;
-        Assert.False(World.SenseNearestColumn(
-            _world, _layer, xs, ys, reaches, thresholds, count, values, bestXs, bestYs, whole));
+        Assert.False((World.SenseNearestColumn(
+            _world, _layer, xs, ys, reaches, thresholds, count, values, bestXs, bestYs, whole) == World.ReadStatus.Complete));
         Assert.Equal(5ul, whole[0]);
         Assert.Equal(short.MinValue, values[1]);
 
@@ -147,7 +147,7 @@ public sealed unsafe class FiniteInputTests : IDisposable
     [Fact]
     public void LargeColumnReads_MatchScalarReadsWithNonFiniteRowsOnPooledAndSerialPaths()
     {
-        const int count = ResolvePool.ColumnThreshold + 64;
+        const int count = 8192 + 64;
         var xs = new float[count];
         var ys = new float[count];
         var random = new Random(4242);
@@ -173,33 +173,24 @@ public sealed unsafe class FiniteInputTests : IDisposable
             expectedHits++;
         }
 
-        foreach (var serial in new[] { false, true })
         {
-            ResolvePool.SerialOnly = serial;
-            try
+            var values = new short[count];
+            var whole = new ulong[expectedWhole.Length];
+            var changed = new ulong[expectedChanged.Length];
+            fixed (float* xPointer = xs)
+            fixed (float* yPointer = ys)
+            fixed (short* valuePointer = values)
+            fixed (ulong* wholePointer = whole)
+            fixed (ulong* changedPointer = changed)
             {
-                var values = new short[count];
-                var whole = new ulong[expectedWhole.Length];
-                var changed = new ulong[expectedChanged.Length];
-                fixed (float* xPointer = xs)
-                fixed (float* yPointer = ys)
-                fixed (short* valuePointer = values)
-                fixed (ulong* wholePointer = whole)
-                fixed (ulong* changedPointer = changed)
-                {
-                    World.SenseColumn(_world, _layer, xPointer, yPointer, count, valuePointer, wholePointer);
-                    Assert.Equal(expectedHits, World.ChangedMask(
-                        _world, _layer, xPointer, yPointer, 3f, 0, count, changedPointer));
-                }
+                World.SenseColumn(_world, _layer, xPointer, yPointer, count, valuePointer, wholePointer);
+                Assert.Equal(expectedHits, World.ChangedMask(
+                    _world, _layer, xPointer, yPointer, 3f, 0, count, changedPointer));
+            }
 
-                Assert.True(expectedValues.AsSpan().SequenceEqual(values));
-                Assert.True(expectedWhole.AsSpan().SequenceEqual(whole));
-                Assert.True(expectedChanged.AsSpan().SequenceEqual(changed));
-            }
-            finally
-            {
-                ResolvePool.SerialOnly = false;
-            }
+            Assert.True(expectedValues.AsSpan().SequenceEqual(values));
+            Assert.True(expectedWhole.AsSpan().SequenceEqual(whole));
+            Assert.True(expectedChanged.AsSpan().SequenceEqual(changed));
         }
     }
 
@@ -254,7 +245,7 @@ public sealed unsafe class FiniteInputTests : IDisposable
 
     [Theory]
     [InlineData(300)]
-    [InlineData(ResolvePool.ColumnThreshold + 600)]
+    [InlineData(8192 + 600)]
     public void SyncTransforms_RejectsWholeRowsWithNonFinitePositionsOnSmallAndLargePaths(int count)
     {
         var world = World.New();
@@ -266,8 +257,8 @@ public sealed unsafe class FiniteInputTests : IDisposable
         var stamp = Stamp.Box(2, 2, 1);
         try
         {
-            var mine = new int[count];
-            var theirs = new int[count];
+            var mine = new World.SourceId[count];
+            var theirs = new World.SourceId[count];
             for (var i = 0; i < count; i++)
             {
                 var row = i / 61;
@@ -332,7 +323,7 @@ public sealed unsafe class FiniteInputTests : IDisposable
 
             var mask = new ulong[expected.Length + 1];
             mask[expected.Length] = 0xA5A5A5A5A5A5A5A5UL;
-            fixed (int* idPointer = mine)
+            fixed (World.SourceId* idPointer = mine)
             fixed (float* xPointer = xs)
             fixed (float* yPointer = ys)
             fixed (float* headingPointer = headings)
@@ -388,13 +379,13 @@ public sealed unsafe class FiniteInputTests : IDisposable
         try
         {
             var count = stamps.Length * Unreachable.Length;
-            var ids = new int[count];
+            var ids = new World.SourceId[count];
             var index = 0;
             foreach (var stamp in stamps)
             foreach (var unreachable in Unreachable)
             {
                 var id = World.Place(parked, parkedLayer, unreachable, index % 2 == 0 ? unreachable : 20f, stamp, (sbyte)(1 + index % 3));
-                Assert.True(id >= 0);
+                Assert.True(id != default);
                 World.Turn(parked, id, 0.7f + index);
                 World.Scale(parked, id, 0.5f + index % 4);
                 ids[index++] = id;
@@ -435,8 +426,8 @@ public sealed unsafe class FiniteInputTests : IDisposable
     [Fact]
     public void RejectedRowsAndOutsideReads_AllocateNothingWhenWarm()
     {
-        const int count = ResolvePool.ColumnThreshold + 128;
-        var ids = new int[count];
+        const int count = 8192 + 128;
+        var ids = new World.SourceId[count];
         var xs = new float[count];
         var ys = new float[count];
         var values = new short[count];
@@ -454,7 +445,7 @@ public sealed unsafe class FiniteInputTests : IDisposable
         World.Process(_world);
         var checksum = 0L;
         var before = 0L;
-        fixed (int* idPointer = ids)
+        fixed (World.SourceId* idPointer = ids)
         fixed (float* xPointer = xs)
         fixed (float* yPointer = ys)
         fixed (short* valuePointer = values)
@@ -555,19 +546,19 @@ public sealed unsafe class FiniteInputTests : IDisposable
         Assert.False(GiValidation.TryGrid(6, 3e38f, out _));
     }
 
-    private int Place(float x, float y) => World.Place(_world, _layer, x, y, _box, 2);
+    private World.SourceId Place(float x, float y) => World.Place(_world, _layer, x, y, _box, 2);
 
-    private void SyncOne(int id, float x, float y)
+    private void SyncOne(World.SourceId id, float x, float y)
     {
-        var ids = stackalloc int[1] { id };
+        var ids = stackalloc World.SourceId[1] { id };
         var xs = stackalloc float[1] { x };
         var ys = stackalloc float[1] { y };
         World.Sync(_world, ids, xs, ys, 1);
     }
 
-    private World.BatchStatus SyncOneWithToken(int id, float x, float y)
+    private World.BatchStatus SyncOneWithToken(World.SourceId id, float x, float y)
     {
-        var ids = stackalloc int[1] { id };
+        var ids = stackalloc World.SourceId[1] { id };
         var xs = stackalloc float[1] { x };
         var ys = stackalloc float[1] { y };
         return World.Sync(World.Capture(_world), ids, xs, ys, 1);

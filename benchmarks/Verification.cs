@@ -31,7 +31,7 @@ internal static partial class Verification
         Check("fifo-free-ring-delays-slot-reuse", FifoFreeRingDelaysSlotReuse());
         Check("rewind-restores-recorded-state", RewindRestoresRecordedState());
         Check("signed-gain-exact", SignedGainExact());
-        Check("multi-layer-pooled-matches-scans", MultiLayerPooledMatchesScans());
+        Check("multi-layer-churn-matches-scans", MultiLayerChurnMatchesScans());
         Check("saturated-sum-clamps", SaturatedSumClamps());
         Check("cross-grid-sums-conserve-world-integral", CrossGridSumsConserve());
         Check("kernels-share-box-units-and-centre", KernelsShareBoxUnitsAndCentre());
@@ -76,7 +76,7 @@ internal static partial class Verification
         Check("source-batches-retract-across-layers", SourceBatchesRetractAcrossLayers());
         Check("transform-updates-match-ordered-calls", TransformUpdatesMatchOrderedCallsAndAllocateNothing());
         Check("sync-transforms-match-ordered-calls", SyncTransformsMatchOrderedCallsAndAllocateNothing());
-        Check("parallel-deposit-prep-matches-serial", ParallelDepositPrepMatchesSerial());
+        Check("mixed-stamp-process-allocates-zero-bytes", MixedStampProcessAllocatesZeroBytes());
         Check("precision-cell-skips-subcell-moves-and-matches-exclusion", PrecisionCellSkipsSubcellMovesAndMatchesExclusion());
 
         Console.WriteLine(failures == 0 ? "verification: all receipts green" : $"verification: {failures} failures");
@@ -354,7 +354,7 @@ internal static partial class Verification
             for (var i = 0; i < samples.Length; i++) samples[i] = (sbyte)(i * 17 % 40 - 20);
             var raster = Gi.Stamp.New(samples, 6, 9);
             var rng = new Random(41 + world);
-            var sources = new int[90];
+            var sources = new Gi.World.SourceId[90];
             for (var churn = 0; churn < 5; churn++)
             {
                 for (var i = 0; i < sources.Length; i++)
@@ -516,7 +516,7 @@ internal static partial class Verification
 
         if (Gi.World.QueryMax(w, g, busy, out var ex, out var ey) != 0 || ex != 0 || ey != 0) return false;
 
-        var ids = new int[140];
+        var ids = new Gi.World.SourceId[140];
         for (var round = 0; round < 3; round++)
         {
             for (var i = 0; i < ids.Length; i++)
@@ -593,7 +593,7 @@ internal static partial class Verification
         if (Gi.World.QueryMax(w, g, busy, 400, 400, 10, 10, out _, out _) != 0) return false;
         if (Gi.World.QueryMax(w, g, busy, 5, 5, 0, 8, out _, out _) != 0) return false;
 
-        var ids = new int[120];
+        var ids = new Gi.World.SourceId[120];
         for (var round = 0; round < 3; round++)
         {
             for (var i = 0; i < ids.Length; i++)
@@ -646,7 +646,7 @@ internal static partial class Verification
         var l = Gi.Layer.New(w);
         var stamp = Gi.Stamp.Box(14, 14, 35);
         var rng = new Random(307);
-        var ids = new int[60];
+        var ids = new Gi.World.SourceId[60];
         for (var round = 0; round < 3; round++)
         {
             for (var i = 0; i < ids.Length; i++)
@@ -771,7 +771,7 @@ internal static partial class Verification
             var gs = Gi.Grid.New(stepped, 8, 0f, 0f, 256f);
             var lb = Gi.Layer.New(batched);
             var ls = Gi.Layer.New(stepped);
-            var ids = new int[24];
+            var ids = new Gi.World.SourceId[24];
             var live = new bool[24];
             for (var step = 0; step < 90; step++)
             {
@@ -824,7 +824,7 @@ internal static partial class Verification
         var gc = Gi.Grid.New(collapse, 8, 0f, 0f, 256f);
         var lc = Gi.Layer.New(collapse);
         var stampC = Gi.Stamp.Box(12, 12, 40);
-        var placed = new int[200];
+        var placed = new Gi.World.SourceId[200];
         for (var i = 0; i < placed.Length; i++)
             placed[i] = Gi.World.Place(collapse, lc, (i * 13.7f) % 240f + 8f, (i * 7.3f) % 240f + 8f, stampC, 7);
         for (var i = 0; i < placed.Length; i++) Gi.World.Remove(collapse, placed[i]);
@@ -845,7 +845,7 @@ internal static partial class Verification
         var tents = new byte[widths.Length];
         for (var i = 0; i < widths.Length; i++) tents[i] = Gi.Stamp.Tent(widths[i], widths[i], 40);
         const int count = 90;
-        var ids = new int[count];
+        var ids = new Gi.World.SourceId[count];
         var sx = new float[count];
         var sy = new float[count];
         var ssize = new int[count];
@@ -934,7 +934,7 @@ internal static partial class Verification
         var bells = new byte[widths.Length];
         for (var i = 0; i < widths.Length; i++) bells[i] = Gi.Stamp.Bell(widths[i], widths[i], 40);
         const int count = 90;
-        var ids = new int[count];
+        var ids = new Gi.World.SourceId[count];
         var sx = new float[count];
         var sy = new float[count];
         var ssize = new int[count];
@@ -1019,7 +1019,7 @@ internal static partial class Verification
         var l = Gi.Layer.New(w);
         var stamp = Gi.Stamp.Box(4, 4, 40);
         var survivor = Gi.World.Place(w, l, 12f, 12f, stamp, 5);
-        var first = -1;
+        var first = default(Gi.World.SourceId);
         for (var i = 0; i < 2000; i++)
         {
             var id = Gi.World.Place(w, l, 40f, 40f, stamp, 3);
@@ -1055,19 +1055,19 @@ internal static partial class Verification
             var g = Gi.Grid.New(w, 6, 0f, 0f, 64f);
             var l = Gi.Layer.New(w);
             var stamp = Gi.Stamp.Box(1, 1, 10);
-            var initial = new int[freeSlots + liveSlots];
+            var initial = new Gi.World.SourceId[freeSlots + liveSlots];
             for (var i = 0; i < initial.Length; i++)
                 initial[i] = Gi.World.Place(w, l, 8.5f, 8.5f, stamp, 1);
             for (var i = 0; i < freeSlots; i++)
                 Gi.World.Remove(w, initial[i]);
             var stale = initial[0];
-            var active = new Queue<int>(initial.Skip(freeSlots));
+            var active = new Queue<Gi.World.SourceId>(initial.Skip(freeSlots));
             for (var step = 0; step < cycles; step++)
             {
                 var victim = active.Dequeue();
                 Gi.World.Remove(w, victim);
                 var placed = Gi.World.Place(w, l, 16.5f, 16.5f, stamp, 2);
-                if ((placed & Gi.World.SourceIndexMask) != (step % (freeSlots + liveSlots))) return false;
+                if (placed.Slot != (uint)(step % (freeSlots + liveSlots))) return false;
                 if (placed == stale || Gi.World.TryGetSourceSpec(w, stale, out _)) return false;
                 active.Enqueue(placed);
             }
@@ -1102,7 +1102,7 @@ internal static partial class Verification
                 Gi.Stamp.Cone(5, 80, 180),
             };
             var rng = new Random(1010);
-            var ids = new int[40];
+            var ids = new Gi.World.SourceId[40];
             var xs = new float[ids.Length];
             var ys = new float[ids.Length];
             for (var i = 0; i < ids.Length; i++)
@@ -1130,7 +1130,7 @@ internal static partial class Verification
                 Gi.World.Move(w, ids[i], xs[i], ys[i]);
             }
 
-            fixed (int* idPtr = ids)
+            fixed (Gi.World.SourceId* idPtr = ids)
             fixed (float* xPtr = xs, yPtr = ys)
                 Gi.World.Sync(w, idPtr, xPtr, yPtr, ids.Length);
 
@@ -1178,7 +1178,7 @@ internal static partial class Verification
         var box = Gi.Stamp.Box(6, 6, 50);
         var tent = Gi.Stamp.Tent(9, 9, 40);
         var rng = new Random(99);
-        var kept = new int[24];
+        var kept = new Gi.World.SourceId[24];
         for (var i = 0; i < kept.Length; i++)
             kept[i] = Gi.World.Place(w, l, rng.Next(4, 56), rng.Next(4, 56),
                 (i & 1) == 0 ? box : tent, (sbyte)(1 + rng.Next(14)));
@@ -1246,7 +1246,7 @@ internal static partial class Verification
         return Gi.World.Query(w, g, l, 0, 0, 64, 64) == 0;
     }
 
-    private static bool MultiLayerPooledMatchesScans()
+    private static bool MultiLayerChurnMatchesScans()
     {
         var w = Gi.World.New();
         var g = Gi.Grid.New(w, 8, 0f, 0f, 256f);
@@ -1255,13 +1255,13 @@ internal static partial class Verification
         const int layers = 16;
         var layerIds = new byte[layers];
         for (var l = 0; l < layers; l++) layerIds[l] = Gi.Layer.New(w);
-        var sources = new int[layers][];
+        var sources = new Gi.World.SourceId[layers][];
 
         for (var churn = 0; churn < 3; churn++)
         {
             for (var l = 0; l < layers; l++)
             {
-                sources[l] = new int[30];
+                sources[l] = new Gi.World.SourceId[30];
                 for (var i = 0; i < 30; i++)
                     sources[l][i] = Gi.World.Place(w, layerIds[l],
                         (float)(rng.NextDouble() * 256), (float)(rng.NextDouble() * 256), stamp, (sbyte)(1 + rng.Next(16)));
@@ -1316,7 +1316,7 @@ internal static partial class Verification
         var stamp = Gi.Stamp.Box(16, 16, 60);
         var naive = new NaiveGrid(cells);
         var rng = new Random(31);
-        var ids = new int[sources];
+        var ids = new Gi.World.SourceId[sources];
         for (var i = 0; i < ids.Length; i++)
         {
             var x = 8 + rng.Next(cells - 16);
@@ -1423,7 +1423,7 @@ internal static partial class Verification
             Gi.World.Place(w, l, (float)(rng.NextDouble() * 1024), (float)(rng.NextDouble() * 1024), stamp, 8);
         Gi.World.Process(w);
 
-        var placed = new int[200];
+        var placed = new Gi.World.SourceId[200];
         var rounds = int.Parse(Environment.GetEnvironmentVariable("PLACE_ROUNDS") ?? "4000");
         var acc = 0L;
         long placeTicks = 0, processTicks = 0, removeTicks = 0;
@@ -1458,7 +1458,7 @@ internal static partial class Verification
         var l = Gi.Layer.New(w);
         var stamp = Gi.Stamp.Box(16, 16, 60);
         var rng = new Random(17);
-        var ids = new int[4000];
+        var ids = new Gi.World.SourceId[4000];
         for (var i = 0; i < 4000; i++)
             ids[i] = Gi.World.Place(w, l, (float)(rng.NextDouble() * 1024), (float)(rng.NextDouble() * 1024), stamp, 8);
         Gi.World.Process(w);
@@ -1496,7 +1496,7 @@ internal static partial class Verification
         }
         Console.WriteLine($"query: {best / 10:F2} us per 1k cells ({acc})");
 
-        var movers = new int[200];
+        var movers = new Gi.World.SourceId[200];
         for (var i = 0; i < movers.Length; i++) movers[i] = ids[i * 19 % 4000];
         best = double.MaxValue;
         for (var r = -1; r < 20; r++)
@@ -1504,15 +1504,15 @@ internal static partial class Verification
             var t = Stopwatch.GetTimestamp();
             for (var i = 0; i < movers.Length; i++)
                 Gi.World.Move(w, movers[i],
-                    (movers[i] * 5.13f + (r + 1) * 37.7f) % 1024f,
-                    (movers[i] * 7.29f + (r + 1) * 11.3f) % 1024f);
+                    (movers[i].Slot * 5.13f + (r + 1) * 37.7f) % 1024f,
+                    (movers[i].Slot * 7.29f + (r + 1) * 11.3f) % 1024f);
             Gi.World.Process(w);
             var el = Stopwatch.GetElapsedTime(t).TotalMicroseconds;
             if (r >= 0 && el < best) best = el;
         }
         Console.WriteLine($"move-200 churn process: {best:F0} us");
 
-        var placed = new int[200];
+        var placed = new Gi.World.SourceId[200];
         best = double.MaxValue;
         for (var r = -1; r < 20; r++)
         {
@@ -1548,7 +1548,7 @@ internal static partial class Verification
         }
         Console.WriteLine($"rewind+process of 200-place window: {best:F0} us ({rewindAcc})");
 
-        var collapseIds = new int[200];
+        var collapseIds = new Gi.World.SourceId[200];
         best = double.MaxValue;
         for (var r = -1; r < 20; r++)
         {
@@ -1565,7 +1565,7 @@ internal static partial class Verification
         Console.WriteLine($"place+remove-200 collapse process: {best:F1} us");
 
         var tentStamp = Gi.Stamp.Tent(16, 16, 60);
-        var tentIds = new int[200];
+        var tentIds = new Gi.World.SourceId[200];
         best = double.MaxValue;
         for (var r = -1; r < 20; r++)
         {
@@ -1583,7 +1583,7 @@ internal static partial class Verification
         Console.WriteLine($"tent-200 churn process (16x16): {best:F0} us");
 
         var bellStamp = Gi.Stamp.Bell(16, 16, 60);
-        var bellIds = new int[200];
+        var bellIds = new Gi.World.SourceId[200];
         best = double.MaxValue;
         for (var r = -1; r < 20; r++)
         {
@@ -1683,11 +1683,11 @@ internal static partial class Verification
         Gi.Grid.New(mw, 8, 0f, 0f, 256f);
         var mStamp = Gi.Stamp.Box(10, 10, 70);
         var mLayers = new byte[16];
-        var mIds = new int[16][];
+        var mIds = new Gi.World.SourceId[16][];
         for (var li = 0; li < 16; li++)
         {
             mLayers[li] = Gi.Layer.New(mw);
-            mIds[li] = new int[25];
+            mIds[li] = new Gi.World.SourceId[25];
             for (var i = 0; i < 25; i++)
                 mIds[li][i] = Gi.World.Place(mw, mLayers[li], (float)(rng.NextDouble() * 256), (float)(rng.NextDouble() * 256), mStamp, 8);
         }
@@ -1700,8 +1700,8 @@ internal static partial class Verification
             for (var li = 0; li < 16; li++)
                 for (var i = 0; i < 25; i++)
                     Gi.World.Move(mw, mIds[li][i],
-                        (mIds[li][i] * 3.13f + (r + 1) * 17.7f) % 256f,
-                        (mIds[li][i] * 5.29f + (r + 1) * 13.3f) % 256f);
+                        (mIds[li][i].Slot * 3.13f + (r + 1) * 17.7f) % 256f,
+                        (mIds[li][i].Slot * 5.29f + (r + 1) * 13.3f) % 256f);
             Gi.World.Process(mw);
             var el = Stopwatch.GetElapsedTime(t).TotalMicroseconds;
             if (r >= 0 && el < best) best = el;
@@ -1726,7 +1726,7 @@ internal static partial class Verification
             }
         }
         Console.WriteLine($"query-region 256x256: {best:F1} us ({checksum})");
-        SenseTiming(w, l, ids[0]);
+        SenseTiming(w, l, default);
         FeatureTiming();
     }
 }

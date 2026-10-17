@@ -213,19 +213,16 @@ public sealed class TransformCommandTests : IDisposable
     }
 
     [Fact]
-    public void LargeTransformBatch_MatchesOrderedCallsAndSerialRun_WarmWithoutManagedGrowth()
+    public void LargeTransformBatch_MatchesOrderedCalls_WarmWithoutManagedGrowth()
     {
         const int count = 9000;
         var twin = World.New();
         var twinGrid = Grid.New(twin, 6, 0f, 0f, 64f);
         var twinLayer = Layer.New(twin);
-        var serial = World.New();
-        var serialGrid = Grid.New(serial, 6, 0f, 0f, 64f);
-        var serialLayer = Layer.New(serial);
         try
         {
-            var sources = new int[count];
-            var twinSources = new int[count];
+            var sources = new World.SourceId[count];
+            var twinSources = new World.SourceId[count];
             for (var index = 0; index < count; index++)
             {
                 var x = 1f + index % 60;
@@ -233,12 +230,10 @@ public sealed class TransformCommandTests : IDisposable
                 var y = 1f + row;
                 sources[index] = World.Place(_world, _layer, x, y, _stamp, 3);
                 twinSources[index] = World.Place(twin, twinLayer, x, y, _stamp, 3);
-                World.Place(serial, serialLayer, x, y, _stamp, 3);
             }
 
             World.Process(_world);
             World.Process(twin);
-            World.Process(serial);
 
             var commands = new World.SourceCommand[count];
             var results = new World.SourceResult[count];
@@ -266,19 +261,6 @@ public sealed class TransformCommandTests : IDisposable
             World.Process(twin);
             AssertIdentical(_world, _grid, _layer, twin, twinGrid, twinLayer);
 
-            ResolvePool.SerialOnly = true;
-            try
-            {
-                Assert.Equal(World.BatchStatus.Applied, World.ApplyBatch(serial, commands, results));
-                World.Process(serial);
-            }
-            finally
-            {
-                ResolvePool.SerialOnly = false;
-            }
-
-            AssertIdentical(_world, _grid, _layer, serial, serialGrid, serialLayer);
-
             var warm = GC.GetAllocatedBytesForCurrentThread();
             var status = World.ApplyBatch(_world, commands, results);
             World.Process(_world);
@@ -289,7 +271,6 @@ public sealed class TransformCommandTests : IDisposable
         finally
         {
             World.Free(twin);
-            World.Free(serial);
         }
     }
 
@@ -301,7 +282,7 @@ public sealed class TransformCommandTests : IDisposable
         World.Record(_world);
         var before = World.Query(_world, _grid, _layer, 0, 0, 64, 64);
 
-        var stale = (7 << 24) | 900;
+        var stale = new World.SourceId(900, 7);
         var commands = new[]
         {
             World.SourceCommand.Place(_layer, 12.5f, 12.5f, _stamp, 5),

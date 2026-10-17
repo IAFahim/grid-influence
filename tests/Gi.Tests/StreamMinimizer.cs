@@ -5,17 +5,17 @@ namespace Gi.Tests;
 
 internal static class StreamMinimizer
 {
-    public static List<StreamCommand> Minimize(StreamSetup setup, List<StreamCommand> commands, BugInjection? bug)
+    public static List<StreamCommand> Minimize(StreamSetup setup, List<StreamCommand> commands, BugInjection? bug, (long I, long Q40)? fold = null)
     {
         var current = new List<StreamCommand>(commands);
-        var first = StreamRunner.TryRun(setup, current, bug);
+        var first = StreamRunner.TryRun(setup, current, bug, null, fold);
         if (first == null) return current;
 
         if (first.CommandIndex >= 0 && first.CommandIndex + 1 < current.Count)
             current = current.GetRange(0, first.CommandIndex + 1);
 
         bool Fails(List<StreamCommand> candidate)
-            => candidate.Count > 0 && StreamRunner.TryRun(setup, candidate, bug) != null;
+            => candidate.Count > 0 && StreamRunner.TryRun(setup, candidate, bug, null, fold) != null;
 
         var granularity = 2;
         while (current.Count > 1)

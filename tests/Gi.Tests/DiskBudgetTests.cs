@@ -203,15 +203,15 @@ public sealed class DiskBudgetTests
                 short v = 99, threshold = 0;
                 long total = 99;
                 var mask = ulong.MaxValue;
-                Assert.False(World.SenseAreaColumn(world, layer, &x, &y, &r, null, 1, &total, &mask));
+                Assert.False((World.SenseAreaColumn(world, layer, &x, &y, &r, null, 1, &total, &mask) == World.ReadStatus.Complete));
                 Assert.Equal((0L, 0ul), (total, mask));
                 mask = ulong.MaxValue;
-                Assert.False(World.SenseMaxColumn(world, layer, &x, &y, &r, 1, &v, &bx, &by, &mask));
+                Assert.False((World.SenseMaxColumn(world, layer, &x, &y, &r, 1, &v, &bx, &by, &mask) == World.ReadStatus.Complete));
                 Assert.Equal(((short)0, 0f, 0f, 0ul), (v, bx, by, mask));
                 bx = 9f;
                 by = 9f;
                 mask = ulong.MaxValue;
-                Assert.False(World.SenseNearestColumn(world, layer, &x, &y, &r, &threshold, 1, &v, &bx, &by, &mask));
+                Assert.False((World.SenseNearestColumn(world, layer, &x, &y, &r, &threshold, 1, &v, &bx, &by, &mask) == World.ReadStatus.Complete));
                 Assert.Equal((short.MinValue, 0f, 0f, 0ul), (v, bx, by, mask));
                 mask = ulong.MaxValue;
                 Assert.Equal(0, World.ChangedMask(world, layer, &x, &y, invalid, 0, 1, &mask));

@@ -43,7 +43,7 @@ internal static partial class Verification
         var rng = new Random(73021);
 
         const int bushes = 240, wolves = 20, sheep = 200;
-        var foodIds = new int[bushes];
+        var foodIds = new Gi.World.SourceId[bushes];
         var foodX = new float[bushes];
         var foodY = new float[bushes];
         for (var i = 0; i < bushes; i++)
@@ -53,7 +53,7 @@ internal static partial class Verification
             foodIds[i] = Gi.World.Place(w, food, foodX[i], foodY[i], bush, 6);
         }
 
-        var wolfIds = new int[wolves];
+        var wolfIds = new Gi.World.SourceId[wolves];
         var wolfX = new float[wolves];
         var wolfY = new float[wolves];
         var wolfHeading = new float[wolves];
@@ -65,7 +65,7 @@ internal static partial class Verification
             wolfIds[i] = Gi.World.Place(w, threat, wolfX[i], wolfY[i], cone, 10);
         }
 
-        var sheepIds = new int[sheep];
+        var sheepIds = new Gi.World.SourceId[sheep];
         var sheepX = new float[sheep];
         var sheepY = new float[sheep];
         for (var i = 0; i < sheep; i++)

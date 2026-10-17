@@ -11,13 +11,13 @@ internal static partial class Verification
     private static readonly byte CrowdSenseTent = Gi.Stamp.Tent(14, 10, 80);
     private static readonly byte CrowdSenseBell = Gi.Stamp.Bell(18, 18, 100);
 
-    private static (byte world, byte grid, byte layer, int[] ids, float[] xs, float[] ys) Crowd(int count, int width, byte stamp, int power, int seed)
+    private static (byte world, byte grid, byte layer, Gi.World.SourceId[] ids, float[] xs, float[] ys) Crowd(int count, int width, byte stamp, int power, int seed)
     {
         var w = Gi.World.New();
         var g = Gi.Grid.New(w, power, 0f, 0f, 1 << power);
         var l = Gi.Layer.New(w);
         var rng = new Random(seed);
-        var ids = new int[count];
+        var ids = new Gi.World.SourceId[count];
         var xs = new float[count];
         var ys = new float[count];
         var span = (1 << power) - 2 * width - 8;
@@ -115,7 +115,7 @@ internal static partial class Verification
         fixed (short* vp = values)
         fixed (ulong* hp = whole)
         {
-            allWhole = Gi.World.SenseColumn(w, l, xp, yp, count, vp, hp);
+            allWhole = (Gi.World.SenseColumn(w, l, xp, yp, count, vp, hp) == Gi.World.ReadStatus.Complete);
         }
 
         var complete = 0;
@@ -138,14 +138,14 @@ internal static partial class Verification
         var xs = new float[count];
         var ys = new float[count];
         var reaches = new float[count];
-        var excludes = new int[count];
+        var excludes = new Gi.World.SourceId[count];
         var thresholds = new short[count];
         for (var i = 0; i < count; i++)
         {
             xs[i] = (float)(rng.NextDouble() * 1100 - 30);
             ys[i] = (float)(rng.NextDouble() * 1100 - 30);
             reaches[i] = 4f + i % 24;
-            excludes[i] = i % 3 == 0 ? -1 : 1 + i % 16;
+            excludes[i] = i % 3 == 0 ? default : new Gi.World.SourceId((uint)(1 + i % 16), 0);
             thresholds[i] = (short)(20 * (i % 5));
         }
 
@@ -167,16 +167,16 @@ internal static partial class Verification
 
         bool pointOk, gradOk, areaOk, maxOk, nearOk;
         fixed (float* xp = xs, yp = ys, rp = reaches, gxp = gxBatch, gyp = gyBatch, mbx = maxBx, mby = maxBy, nnx = nearNx, nny = nearNy)
-        fixed (int* ep = excludes)
+        fixed (Gi.World.SourceId* ep = excludes)
         fixed (short* tp = thresholds, pvp = pointBatch, mvp = maxBatch, nvp = nearBatch)
         fixed (long* avp = areaBatch)
         fixed (ulong* pwp = pointWhole, gwp = gradWhole, awp = areaWhole, mwp = maxWhole, nfp = nearFound)
         {
-            pointOk = Gi.World.SenseColumn(s.World, s.Layer, xp, yp, ep, count, pvp, pwp);
-            gradOk = Gi.World.SenseGradientColumn(s.World, s.Layer, xp, yp, ep, count, gxp, gyp, gwp);
-            areaOk = Gi.World.SenseAreaColumn(s.World, s.Layer, xp, yp, rp, ep, count, avp, awp);
-            maxOk = Gi.World.SenseMaxColumn(s.World, s.Layer, xp, yp, rp, count, mvp, mbx, mby, mwp);
-            nearOk = Gi.World.SenseNearestColumn(s.World, s.Layer, xp, yp, rp, tp, count, nvp, nnx, nny, nfp);
+            pointOk = (Gi.World.SenseColumn(s.World, s.Layer, xp, yp, ep, count, pvp, pwp) == Gi.World.ReadStatus.Complete);
+            gradOk = (Gi.World.SenseGradientColumn(s.World, s.Layer, xp, yp, ep, count, gxp, gyp, gwp) == Gi.World.ReadStatus.Complete);
+            areaOk = (Gi.World.SenseAreaColumn(s.World, s.Layer, xp, yp, rp, ep, count, avp, awp) == Gi.World.ReadStatus.Complete);
+            maxOk = (Gi.World.SenseMaxColumn(s.World, s.Layer, xp, yp, rp, count, mvp, mbx, mby, mwp) == Gi.World.ReadStatus.Complete);
+            nearOk = (Gi.World.SenseNearestColumn(s.World, s.Layer, xp, yp, rp, tp, count, nvp, nnx, nny, nfp) == Gi.World.ReadStatus.Complete);
         }
 
         var expectedPointAll = true;
@@ -186,19 +186,19 @@ internal static partial class Verification
         var expectedNearAll = true;
         for (var i = 0; i < count; i++)
         {
-            var pComplete = excludes[i] >= 0
+            var pComplete = excludes[i].Generation != 0
                 ? Gi.World.TrySense(s.World, s.Layer, xs[i], ys[i], excludes[i], out var pVal)
                 : Gi.World.TrySense(s.World, s.Layer, xs[i], ys[i], out pVal);
             expectedPointAll &= pComplete;
             if (pointBatch[i] != pVal || (((pointWhole[i >> 6] >> (i & 63)) & 1) == 1) != pComplete) return false;
 
-            var gComplete = excludes[i] >= 0
+            var gComplete = excludes[i].Generation != 0
                 ? Gi.World.TrySenseGradient(s.World, s.Layer, xs[i], ys[i], excludes[i], out var gx, out var gy)
                 : Gi.World.TrySenseGradient(s.World, s.Layer, xs[i], ys[i], out gx, out gy);
             expectedGradAll &= gComplete;
             if (gxBatch[i] != gx || gyBatch[i] != gy || (((gradWhole[i >> 6] >> (i & 63)) & 1) == 1) != gComplete) return false;
 
-            var aComplete = excludes[i] >= 0
+            var aComplete = excludes[i].Generation != 0
                 ? Gi.World.TrySenseArea(s.World, s.Layer, xs[i], ys[i], reaches[i], excludes[i], out var area)
                 : Gi.World.TrySenseArea(s.World, s.Layer, xs[i], ys[i], reaches[i], out area);
             expectedAreaAll &= aComplete;
@@ -222,7 +222,7 @@ internal static partial class Verification
         GC.Collect();
         var before = GC.GetAllocatedBytesForCurrentThread();
         fixed (float* xp = xs, yp = ys, rp = reaches, gxp = gxBatch, gyp = gyBatch, mbx = maxBx, mby = maxBy, nnx = nearNx, nny = nearNy)
-        fixed (int* ep = excludes)
+        fixed (Gi.World.SourceId* ep = excludes)
         fixed (short* tp = thresholds, pvp = pointBatch, mvp = maxBatch, nvp = nearBatch)
         fixed (long* avp = areaBatch)
         fixed (ulong* pwp = pointWhole, gwp = gradWhole, awp = areaWhole, mwp = maxWhole, nfp = nearFound)
@@ -293,7 +293,7 @@ internal static partial class Verification
         }
 
         for (var i = 0; i < ids.Length; i++) Gi.World.Move(oracle, ids[i], xs[i], ys[i]);
-        fixed (int* ip = ids)
+        fixed (Gi.World.SourceId* ip = ids)
         fixed (float* xp = xs, yp = ys)
         {
             Gi.World.Sync(w, ip, xp, yp, ids.Length);
@@ -519,7 +519,7 @@ internal static partial class Verification
         var (sw, _, _, sids, sxs, sys) = Crowd(100_000, 8, CrowdBox8, 10, 119);
         Gi.World.Process(sw);
         best = double.MaxValue;
-        fixed (int* ip = sids)
+        fixed (Gi.World.SourceId* ip = sids)
         fixed (float* xp = sxs, yp = sys)
         {
             for (var r = -1; r < 10; r++)

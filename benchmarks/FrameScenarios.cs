@@ -88,14 +88,14 @@ internal abstract unsafe class FrameScenario : IDisposable
 
     protected byte NewLayer() => Gi.Layer.New(WorldId, LayerPrecision);
 
-    protected int Place(byte layer, float x, float y, byte stamp, sbyte gain)
+    protected Gi.World.SourceId Place(byte layer, float x, float y, byte stamp, sbyte gain)
     {
         var id = Gi.World.Place(WorldId, layer, x, y, stamp, gain);
-        if (id < 0) throw new InvalidOperationException("Frame setup could not place a source.");
+        if (id == default) throw new InvalidOperationException("Frame setup could not place a source.");
         return id;
     }
 
-    protected bool SourceAt(int id, float x, float y)
+    protected bool SourceAt(Gi.World.SourceId id, float x, float y)
         => Gi.World.TryGetSourceSpec(WorldId, id, out var spec) &&
            BitConverter.SingleToInt32Bits(spec.X) == BitConverter.SingleToInt32Bits(x) &&
            BitConverter.SingleToInt32Bits(spec.Y) == BitConverter.SingleToInt32Bits(y);
@@ -106,7 +106,7 @@ internal abstract unsafe class FrameCanonical : FrameScenario
     protected const int Width = 8;
     protected byte BaseLayer;
     protected byte BoxStamp;
-    protected int* Ids;
+    protected Gi.World.SourceId* Ids;
     protected float* X;
     protected float* Y;
     protected float* NextX;
@@ -126,7 +126,7 @@ internal abstract unsafe class FrameCanonical : FrameScenario
         GridId = Gi.Grid.New(WorldId, Power, 0f, 0f, Size);
         BaseLayer = NewLayer();
         BoxStamp = Gi.Stamp.Box(Width, Width, 16);
-        Ids = Arena.Alloc<int>(Entities);
+        Ids = Arena.Alloc<Gi.World.SourceId>(Entities);
         X = Arena.Alloc<float>(Entities);
         Y = Arena.Alloc<float>(Entities);
         NextX = Arena.Alloc<float>(Entities);
@@ -206,9 +206,9 @@ internal sealed unsafe class FrameLegacy(int entities, int power, ulong seed, bo
         var since = Gi.World.Tick(WorldId);
         Gi.World.Process(WorldId);
         marks[2] = Stopwatch.GetTimestamp();
-        var ok = Gi.World.SenseColumn(WorldId, BaseLayer, px, py, Entities, _values, _whole);
+        var ok = (Gi.World.SenseColumn(WorldId, BaseLayer, px, py, Entities, _values, _whole) == Gi.World.ReadStatus.Complete);
         marks[3] = Stopwatch.GetTimestamp();
-        ok &= Gi.World.SenseGradientColumn(WorldId, BaseLayer, px, py, null, Entities, _gradientX, _gradientY, _gradientWhole);
+        ok &= (Gi.World.SenseGradientColumn(WorldId, BaseLayer, px, py, null, Entities, _gradientX, _gradientY, _gradientWhole) == Gi.World.ReadStatus.Complete);
         marks[4] = Stopwatch.GetTimestamp();
         _hits = Gi.World.ChangedMask(WorldId, BaseLayer, px, py, 0f, since, Entities, _changed);
         marks[5] = Stopwatch.GetTimestamp();
@@ -242,7 +242,7 @@ internal sealed unsafe class FrameSparse(int entities, int power, ulong seed, in
     private readonly int _movers = movers;
     private FrameRandom _rng = new(seed ^ 0x5851F42D4C957F2DUL);
     private byte* _phase;
-    private int* _moverIds;
+    private Gi.World.SourceId* _moverIds;
     private float* _moverX;
     private float* _moverY;
 
@@ -263,7 +263,7 @@ internal sealed unsafe class FrameSparse(int entities, int power, ulong seed, in
     {
         base.Setup();
         _phase = Arena.Alloc<byte>(Entities);
-        _moverIds = Arena.Alloc<int>(_movers);
+        _moverIds = Arena.Alloc<Gi.World.SourceId>(_movers);
         _moverX = Arena.Alloc<float>(_movers);
         _moverY = Arena.Alloc<float>(_movers);
     }
@@ -367,8 +367,8 @@ internal sealed unsafe class FrameCrowd(int entities, int power, ulong seed, boo
     private int _resortCount;
     private byte _layer;
     private byte _stamp;
-    private int* _ids;
-    private int* _idsNext;
+    private Gi.World.SourceId* _ids;
+    private Gi.World.SourceId* _idsNext;
     private float* _x;
     private float* _xNext;
     private float* _y;
@@ -410,10 +410,10 @@ internal sealed unsafe class FrameCrowd(int entities, int power, ulong seed, boo
     {
         WorldId = Gi.World.New();
         GridId = Gi.Grid.New(WorldId, Power, 0f, 0f, Size);
-        _layer = NewLayer();
+        _layer = ReadMode.Transient ? Gi.Layer.New(WorldId, Gi.Layer.Residency.Transient, LayerPrecision) : NewLayer();
         _stamp = Gi.Stamp.Box(Width, Width, 8);
-        _ids = Arena.Alloc<int>(Entities);
-        _idsNext = Arena.Alloc<int>(Entities);
+        _ids = Arena.Alloc<Gi.World.SourceId>(Entities);
+        _idsNext = Arena.Alloc<Gi.World.SourceId>(Entities);
         _x = Arena.Alloc<float>(Entities);
         _xNext = Arena.Alloc<float>(Entities);
         _y = Arena.Alloc<float>(Entities);
@@ -453,7 +453,8 @@ internal sealed unsafe class FrameCrowd(int entities, int power, ulong seed, boo
         }
 
         Reorder();
-        for (var i = 0; i < Entities; i++) _ids[i] = Place(_layer, _x[i], _y[i], _stamp, 1);
+        if (!ReadMode.Transient)
+            for (var i = 0; i < Entities; i++) _ids[i] = Place(_layer, _x[i], _y[i], _stamp, 1);
         Gi.World.Process(WorldId);
         ResetCounters();
     }
@@ -475,14 +476,34 @@ internal sealed unsafe class FrameCrowd(int entities, int power, ulong seed, boo
     public override bool Run(int frame, long* marks)
     {
         marks[0] = Stopwatch.GetTimestamp();
-        Gi.World.Sync(WorldId, _ids, _x, _y, Entities);
+        if (ReadMode.Transient)
+            Gi.World.Splat(WorldId, _layer, new ReadOnlySpan<float>(_x, Entities), new ReadOnlySpan<float>(_y, Entities), _stamp, 1);
+        else
+            Gi.World.Sync(WorldId, _ids, _x, _y, Entities);
         marks[1] = Stopwatch.GetTimestamp();
         Gi.World.Process(WorldId);
         marks[2] = Stopwatch.GetTimestamp();
-        var ok = Gi.World.SenseColumn(WorldId, _layer, _x, _y, Entities, _values, _whole);
-        marks[3] = Stopwatch.GetTimestamp();
-        ok &= Gi.World.SenseGradientColumn(WorldId, _layer, _x, _y, null, Entities, _gradientX, _gradientY, _gradientWhole);
-        marks[4] = Stopwatch.GetTimestamp();
+        bool ok;
+        if (ReadMode.View)
+        {
+            ok = ViewReads();
+            marks[3] = Stopwatch.GetTimestamp();
+            marks[4] = marks[3];
+        }
+        else if (ReadMode.Fused)
+        {
+            ok = (Gi.World.SenseGradientColumn(WorldId, _layer, _x, _y, null, Entities, _values, _gradientX, _gradientY, _whole) == Gi.World.ReadStatus.Complete);
+            marks[3] = Stopwatch.GetTimestamp();
+            marks[4] = marks[3];
+        }
+        else
+        {
+            ok = (Gi.World.SenseColumn(WorldId, _layer, _x, _y, Entities, _values, _whole) == Gi.World.ReadStatus.Complete);
+            marks[3] = Stopwatch.GetTimestamp();
+            ok &= (Gi.World.SenseGradientColumn(WorldId, _layer, _x, _y, null, Entities, _gradientX, _gradientY, _gradientWhole) == Gi.World.ReadStatus.Complete);
+            marks[4] = Stopwatch.GetTimestamp();
+        }
+
         var area = 0L;
         for (var i = 0; i < Disks; i++)
         {
@@ -496,6 +517,35 @@ internal sealed unsafe class FrameCrowd(int entities, int power, ulong seed, boo
         return ok;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    private bool ViewReads()
+    {
+        var view = Gi.World.View(WorldId, 0, _layer);
+        var size = view.Size;
+        var complete = true;
+        new Span<ulong>(_whole, (Entities + 63) >> 6).Clear();
+        for (var i = 0; i < Entities; i++)
+        {
+            if (!view.TryCell(_x[i], _y[i], out var cx, out var cy))
+            {
+                _values[i] = 0;
+                _gradientX[i] = 0f;
+                _gradientY[i] = 0f;
+                complete = false;
+                continue;
+            }
+
+            _values[i] = view[cx, cy];
+            view.Gradient(cx, cy, out var gx, out var gy);
+            _gradientX[i] = gx * 0.5f;
+            _gradientY[i] = gy * 0.5f;
+            if (cx - 1 >= 0 && cy - 1 >= 0 && cx + 1 < size && cy + 1 < size) _whole[i >> 6] |= 1ul << (i & 63);
+            else complete = false;
+        }
+
+        return complete;
+    }
+
     public override ulong Consume()
     {
         var hash = FrameHash.Mix(FrameHash.Seed, (ulong)_area);
@@ -507,6 +557,7 @@ internal sealed unsafe class FrameCrowd(int entities, int power, ulong seed, boo
 
     public override bool VerifyState()
     {
+        if (ReadMode.Transient) return true;
         for (var i = 0; i < Entities; i++)
             if (!SourceAt(_ids[i], _x[i], _y[i])) return false;
         return true;
@@ -593,14 +644,14 @@ internal sealed unsafe class FrameWorld(int entities, int power, ulong seed, boo
     private int _timedPerFrame;
     private int _plainPerFrame;
     private int _cursor;
-    private int* _agentIds;
+    private Gi.World.SourceId* _agentIds;
     private float* _agentX;
     private float* _agentY;
     private float* _agentVx;
     private float* _agentVy;
-    private int* _plainIds;
+    private Gi.World.SourceId* _plainIds;
     private byte* _plainKind;
-    private int* _timedIds;
+    private Gi.World.SourceId* _timedIds;
     private float* _gradientX;
     private float* _gradientY;
     private short* _values;
@@ -642,14 +693,14 @@ internal sealed unsafe class FrameWorld(int entities, int power, ulong seed, boo
         _derived = Gi.Layer.Sum(WorldId, _boxes, 1, _tents, 1);
         _boxStamp = Gi.Stamp.Box(4, 4, 12);
         _tentStamp = Gi.Stamp.Tent(6, 6, 12);
-        _agentIds = Arena.Alloc<int>(_agents);
+        _agentIds = Arena.Alloc<Gi.World.SourceId>(_agents);
         _agentX = Arena.Alloc<float>(_agents);
         _agentY = Arena.Alloc<float>(_agents);
         _agentVx = Arena.Alloc<float>(_agents);
         _agentVy = Arena.Alloc<float>(_agents);
-        _plainIds = Arena.Alloc<int>(_plain);
+        _plainIds = Arena.Alloc<Gi.World.SourceId>(_plain);
         _plainKind = Arena.Alloc<byte>(_plain);
-        _timedIds = Arena.Alloc<int>(_timed);
+        _timedIds = Arena.Alloc<Gi.World.SourceId>(_timed);
         _gradientX = Arena.Alloc<float>(_agents);
         _gradientY = Arena.Alloc<float>(_agents);
         _values = Arena.Alloc<short>(_agents);
@@ -743,9 +794,9 @@ internal sealed unsafe class FrameWorld(int entities, int power, ulong seed, boo
         marks[2] = Stopwatch.GetTimestamp();
         Gi.World.Process(WorldId);
         marks[3] = Stopwatch.GetTimestamp();
-        ok &= Gi.World.SenseColumn(WorldId, _derived, _agentX, _agentY, _agents, _values, _whole);
+        ok &= (Gi.World.SenseColumn(WorldId, _derived, _agentX, _agentY, _agents, _values, _whole) == Gi.World.ReadStatus.Complete);
         marks[4] = Stopwatch.GetTimestamp();
-        ok &= Gi.World.SenseGradientColumn(WorldId, _derived, _agentX, _agentY, null, _agents, _gradientX, _gradientY, _gradientWhole);
+        ok &= (Gi.World.SenseGradientColumn(WorldId, _derived, _agentX, _agentY, null, _agents, _gradientX, _gradientY, _gradientWhole) == Gi.World.ReadStatus.Complete);
         marks[5] = Stopwatch.GetTimestamp();
         var area = 0L;
         for (var i = 0; i < _churn; i++)
@@ -783,7 +834,7 @@ internal sealed unsafe class FrameWorld(int entities, int power, ulong seed, boo
         var sources = &context->Sources;
         var live = 0;
         for (var slot = 0; slot < sources->Count; slot++)
-            if (sources->Alive.Pointer[slot] != 0) live++;
+            if (sources->Alive[slot] != 0) live++;
         return live;
     }
 
@@ -807,7 +858,7 @@ internal sealed unsafe class FrameWorld(int entities, int power, ulong seed, boo
             var tent = _plainKind[victim] != 0;
             var id = Gi.World.Place(WorldId, tent ? _tents : _boxes,
                 margin + _rng.Unit() * span, margin + _rng.Unit() * span, tent ? _tentStamp : _boxStamp, 1);
-            ok &= id >= 0;
+            ok &= id != default;
             _plainIds[victim] = id;
         }
 
@@ -820,7 +871,7 @@ internal sealed unsafe class FrameWorld(int entities, int power, ulong seed, boo
             var tent = (slot & 1) == 1;
             var id = Gi.World.Place(WorldId, tent ? _tents : _boxes,
                 margin + _rng.Unit() * span, margin + _rng.Unit() * span, tent ? _tentStamp : _boxStamp, FadeGain);
-            ok &= id >= 0;
+            ok &= id != default;
             Gi.World.Fade(WorldId, id, 0, Lifetime + 1);
             Gi.World.Expire(WorldId, id, Lifetime + 1);
             _timedIds[slot] = id;

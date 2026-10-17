@@ -6,7 +6,7 @@ namespace Gi;
 
 public static unsafe partial class World
 {
-    public static bool SenseColumn(byte world, byte layer, float* xs, float* ys, int count, short* values, ulong* whole)
+    internal static bool SenseColumnCore(byte world, byte layer, float* xs, float* ys, int count, short* values, ulong* whole)
     {
         var w = GetContext(world);
         if (w == null || layer >= w->LayerCount) return Unfilled(values, whole, count);
@@ -14,13 +14,6 @@ public static unsafe partial class World
         if (xs == null || ys == null || values == null) return Unfilled(values, whole, count);
 
         ClearBits(whole, count);
-
-        if (count >= ResolvePool.ColumnThreshold && ResolvePool.TryAcquire())
-        {
-            var gaps = ResolvePool.SenseColumns(w, layer, xs, ys, values, whole, count);
-            ResolvePool.Release();
-            return gaps == 0;
-        }
 
         return SenseRange(w, layer, xs, ys, values, whole, 0, count) == 0;
     }
@@ -38,17 +31,10 @@ public static unsafe partial class World
 
         ClearBits(words, count);
 
-        if (count >= ResolvePool.ColumnThreshold && ResolvePool.TryAcquire())
-        {
-            var hits = ResolvePool.ChangedColumns(w, layer, xs, ys, reach, since, words, count);
-            ResolvePool.Release();
-            return hits;
-        }
-
         return ChangedRange(w, layer, xs, ys, reach, since, words, 0, count);
     }
 
-    public static void Sync(byte world, int* sources, float* xs, float* ys, int count)
+    public static void Sync(byte world, SourceId* sources, float* xs, float* ys, int count)
     {
         var w = GetContext(world);
         if (w == null) return;
@@ -59,7 +45,7 @@ public static unsafe partial class World
 #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
 #endif
-    internal static void SyncColumns(WorldCtx* w, int* sources, float* xs, float* ys, int count)
+    internal static void SyncColumns(WorldCtx* w, SourceId* sources, float* xs, float* ys, int count)
     {
         if (count <= 0 || sources == null || xs == null || ys == null) return;
 
@@ -76,23 +62,24 @@ public static unsafe partial class World
                 for (var i = 0; i < count; i++)
                 {
                     var id = sources[i];
-                    var slot = id & SourceIndexMask;
-                    if ((uint)slot >= (uint)s->Count || s->Alive.Pointer[slot] == 0) continue;
-                    if ((id & ~SourceIndexMask) != (s->Gen.Pointer[slot] << 24)) continue;
+                    var slot = (int)id.Slot;
+                    if ((uint)slot >= (uint)s->Count || s->Alive[slot] == 0) continue;
+                    if (id.Generation != s->Gen[slot]) continue;
 
                     var x = xs[i];
                     var y = ys[i];
-                    var oldX = s->X.Pointer[slot];
-                    var oldY = s->Y.Pointer[slot];
+                    var oldX = s->X[slot];
+                    var oldY = s->Y[slot];
                     if (*(int*)&x == *(int*)&oldX && *(int*)&y == *(int*)&oldY) continue;
                     if (!float.IsFinite(x) || !float.IsFinite(y)) continue;
-                    var mask = recipes[s->Layer.Pointer[slot]].AnchorMask;
+                    var mask = recipes[s->Layer[slot]].AnchorMask;
                     var dx = TileBake.AnchorQ8(oldX, ox, scaleQ8, mask) ^ TileBake.AnchorQ8(x, ox, scaleQ8, mask);
                     var dy = TileBake.AnchorQ8(oldY, oy, scaleQ8, mask) ^ TileBake.AnchorQ8(y, oy, scaleQ8, mask);
-                    if ((dx | dy) != 0)
-                        EnqueueMutation(w, s, slot, x, y, (sbyte)s->Gain.Pointer[slot], s->Angle.Pointer[slot], s->Scale.Pointer[slot], true);
-                    s->X.Pointer[slot] = x;
-                    s->Y.Pointer[slot] = y;
+                    var changed = (dx | dy) != 0;
+                    if (changed) BeforeWrite(w, s, slot);
+                    s->X[slot] = x;
+                    s->Y[slot] = y;
+                    if (changed) MarkChanged(w, s, slot);
                 }
 
                 return;
@@ -102,26 +89,60 @@ public static unsafe partial class World
         for (var i = 0; i < count; i++)
         {
             var id = sources[i];
-            var slot = id & SourceIndexMask;
-            if ((uint)slot >= (uint)s->Count || s->Alive.Pointer[slot] == 0) continue;
-            if ((id & ~SourceIndexMask) != (s->Gen.Pointer[slot] << 24)) continue;
+            var slot = (int)id.Slot;
+            if ((uint)slot >= (uint)s->Count || s->Alive[slot] == 0) continue;
+            if (id.Generation != s->Gen[slot]) continue;
 
             var x = xs[i];
             var y = ys[i];
-            var oldX = s->X.Pointer[slot];
-            var oldY = s->Y.Pointer[slot];
+            var oldX = s->X[slot];
+            var oldY = s->Y[slot];
             if (*(int*)&x == *(int*)&oldX && *(int*)&y == *(int*)&oldY) continue;
             if (!float.IsFinite(x) || !float.IsFinite(y)) continue;
-            if (PositionChanged(w, s->Layer.Pointer[slot], oldX, oldY, x, y))
-                EnqueueMutation(w, s, slot, x, y, (sbyte)s->Gain.Pointer[slot], s->Angle.Pointer[slot], s->Scale.Pointer[slot], true);
-            s->X.Pointer[slot] = x;
-            s->Y.Pointer[slot] = y;
+            var changed = PositionChanged(w, s->Layer[slot], oldX, oldY, x, y);
+            if (changed) BeforeWrite(w, s, slot);
+            s->X[slot] = x;
+            s->Y[slot] = y;
+            if (changed) MarkChanged(w, s, slot);
         }
     }
 
     internal static int SenseRange(WorldCtx* w, byte layer, float* xs, float* ys, short* values, ulong* whole, int from, int to)
     {
         var gaps = 0;
+        if (w->GridCount == 1)
+        {
+            var only = w->Grids;
+            var scaleQ8 = only->ScaleQ8;
+            if (scaleQ8 != 0)
+            {
+                var ox = only->OriginX;
+                var oy = only->OriginY;
+                var ld = only->Layers + layer;
+                for (var i = from; i < to; i++)
+                {
+                    var qx = CellQ8(xs[i], ox, scaleQ8);
+                    var qy = CellQ8(ys[i], oy, scaleQ8);
+                    if (!Contains(only, qx, qy))
+                    {
+                        values[i] = 0;
+                        gaps++;
+                        continue;
+                    }
+
+                    var cx = (int)(qx >> 8);
+                    var cy = (int)(qy >> 8);
+                    var page = ld->PageOf((cy >> TileBake.TileBits) * only->TilesPerSide + (cx >> TileBake.TileBits));
+                    values[i] = page == null
+                        ? (short)0
+                        : page[(cy & (TileBake.TileSize - 1)) * TileBake.TileSize + (cx & (TileBake.TileSize - 1))];
+                    if (whole != null) whole[i >> 6] |= 1ul << (i & 63);
+                }
+
+                return gaps;
+            }
+        }
+
         for (var i = from; i < to; i++)
         {
             var x = xs[i];
@@ -151,9 +172,10 @@ public static unsafe partial class World
             {
                 var cx = (int)(qx >> 8);
                 var cy = (int)(qy >> 8);
-                if (picked->Layers[layer].Pages.TryGet(
-                        (cy >> TileBake.TileBits) * picked->TilesPerSide + (cx >> TileBake.TileBits), out var block))
-                    value = ((short*)(block + PageOffset))[(cy & (TileBake.TileSize - 1)) * TileBake.TileSize + (cx & (TileBake.TileSize - 1))];
+                var page = picked->Layers[layer].PageOf(
+                    (cy >> TileBake.TileBits) * picked->TilesPerSide + (cx >> TileBake.TileBits));
+                if (page != null)
+                    value = page[(cy & (TileBake.TileSize - 1)) * TileBake.TileSize + (cx & (TileBake.TileSize - 1))];
             }
 
             values[i] = value;

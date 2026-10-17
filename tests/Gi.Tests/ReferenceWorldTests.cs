@@ -66,10 +66,10 @@ public unsafe class ReferenceWorldTests
 
             var baseLayers = new[] { l0, l1, l2 };
             var allLayers = new[] { l0, l1, l2, dSum, dMin, dMax, dMask };
-            var ids = new List<int>();
+            var ids = new List<World.SourceId>();
             var recording = false;
 
-            var syncIds = new int[16];
+            var syncIds = new World.SourceId[16];
             var syncXs = new float[16];
             var syncYs = new float[16];
 
@@ -120,7 +120,7 @@ public unsafe class ReferenceWorldTests
                         var id = World.Place(w, layer, x, y, stamp, gain);
                         var rid = rw.Place(layer, x, y, stamp, gain);
                         Assert.Equal(rid, id);
-                        if (id >= 0) ids.Add(id);
+                        if (id != default) ids.Add(id);
                     }
                     else if (choice < 50)
                     {
@@ -185,7 +185,7 @@ public unsafe class ReferenceWorldTests
                         syncYs[i] = (float)(rng.NextDouble() * 64.0);
                     }
 
-                    fixed (int* pIds = syncIds)
+                    fixed (World.SourceId* pIds = syncIds)
                     fixed (float* pXs = syncXs, pYs = syncYs)
                     {
                         World.Sync(w, pIds, pXs, pYs, syncCount);
@@ -216,7 +216,7 @@ public unsafe class ReferenceWorldTests
         byte g1,
         int size1,
         byte[] layers,
-        List<int> ids,
+        List<World.SourceId> ids,
         Random rng,
         int tick)
     {
@@ -261,14 +261,14 @@ public unsafe class ReferenceWorldTests
         }
     }
 
-    private static void VerifyReads(byte w, ReferenceWorld rw, byte[] layers, List<int> ids, Random rng, int tick)
+    private static void VerifyReads(byte w, ReferenceWorld rw, byte[] layers, List<World.SourceId> ids, Random rng, int tick)
     {
         for (var q = 0; q < 8; q++)
         {
             var x = (float)(rng.NextDouble() * 70.0 - 3.0);
             var y = (float)(rng.NextDouble() * 70.0 - 3.0);
             var reach = (float)(rng.NextDouble() * 12.0);
-            var exclude = ids.Count > 0 && rng.Next(2) == 0 ? ids[rng.Next(ids.Count)] : -1;
+            var exclude = ids.Count > 0 && rng.Next(2) == 0 ? ids[rng.Next(ids.Count)] : default;
 
             Assert.Equal(rw.Covers(x, y), World.Covers(w, x, y));
 

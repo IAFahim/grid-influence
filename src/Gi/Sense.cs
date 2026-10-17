@@ -41,10 +41,63 @@ public static unsafe partial class World
         return complete;
     }
 
+    private readonly struct SplatOwn
+    {
+        public readonly bool Active;
+        public readonly byte Stamp;
+        public readonly sbyte Gain;
+        public readonly float X;
+        public readonly float Y;
+
+        public SplatOwn(byte stamp, sbyte gain, float x, float y)
+        {
+            Active = true;
+            Stamp = stamp;
+            Gain = gain;
+            X = x;
+            Y = y;
+        }
+    }
+
+    private static bool Own(WorldCtx* w, GridCtx* g, SourceId id, in SplatOwn own, byte layer, out Placed source)
+    {
+        if (!own.Active) return Applied(w, g, id, layer, out source);
+
+        source = default;
+        var gain = Math.Clamp((int)own.Gain, -MaxGain, MaxGain);
+        if (gain == 0 || !IsTransient(w, layer) || !StampCatalog.Valid(own.Stamp)) return false;
+        if (!float.IsFinite(own.X) || !float.IsFinite(own.Y) || g->ScaleQ8 == 0) return false;
+
+        var mask = w->Recipes[layer].AnchorMask;
+        source.Ax = TileBake.AnchorQ8(own.X, g->OriginX, g->ScaleQ8, mask);
+        source.Ay = TileBake.AnchorQ8(own.Y, g->OriginY, g->ScaleQ8, mask);
+        source.Stamp = own.Stamp;
+        source.Layer = layer;
+        source.Gain = (sbyte)gain;
+        source.Angle = 0;
+        source.Size = UnitScale;
+        return true;
+    }
+
+    public static bool TrySense(byte world, byte layer, float x, float y, byte stamp, sbyte gain, out short value)
+        => SenseOwn(world, layer, x, y, default, new SplatOwn(stamp, gain, x, y), out value);
+
+    public static bool TrySenseGradient(byte world, byte layer, float x, float y, byte stamp, sbyte gain, out float gx, out float gy)
+        => SenseGradientOwn(world, layer, x, y, default, new SplatOwn(stamp, gain, x, y), out gx, out gy);
+
+    public static bool TrySenseArea(byte world, byte layer, float x, float y, float reach, byte stamp, sbyte gain, out long total)
+        => SenseArea(world, layer, x, y, reach, default, new SplatOwn(stamp, gain, x, y), out total);
+
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    public static bool TrySense(byte world, byte layer, float x, float y, int exclude, out short value)
+    public static bool TrySense(byte world, byte layer, float x, float y, SourceId exclude, out short value)
+        => SenseOwn(world, layer, x, y, exclude, default, out value);
+
+    #if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    #endif
+    private static bool SenseOwn(byte world, byte layer, float x, float y, SourceId exclude, in SplatOwn own, out short value)
     {
         value = 0;
         var w = GetContext(world);
@@ -55,7 +108,7 @@ public static unsafe partial class World
         var cx = (int)(CellQ8(x, g->OriginX, g->ScaleQ8) >> 8);
         var cy = (int)(CellQ8(y, g->OriginY, g->ScaleQ8) >> 8);
         value = Query(world, (byte)gi, layer, cx, cy);
-        if (!Applied(w, exclude, layer, out var source)) return complete;
+        if (!Own(w, g, exclude, own, layer, out var source)) return complete;
 
         var shape = ShapeOf(w, g, source);
         if (shape.P.Reaches(cx, cy)) value = ExcludedValue(w, g, layer, source.Layer, &shape, cx, cy, value);
@@ -63,10 +116,10 @@ public static unsafe partial class World
     }
 
     public static bool TrySenseArea(byte world, byte layer, float x, float y, float reach, out long total)
-        => SenseArea(world, layer, x, y, reach, -1, out total);
+        => SenseArea(world, layer, x, y, reach, default, default, out total);
 
-    public static bool TrySenseArea(byte world, byte layer, float x, float y, float reach, int exclude, out long total)
-        => SenseArea(world, layer, x, y, reach, exclude, out total);
+    public static bool TrySenseArea(byte world, byte layer, float x, float y, float reach, SourceId exclude, out long total)
+        => SenseArea(world, layer, x, y, reach, exclude, default, out total);
 
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
@@ -83,38 +136,58 @@ public static unsafe partial class World
 
         var g = w->Grids + gi;
         var disk = Disk(g, x, y, reach);
-        var pages = &g->Layers[layer].Pages;
+        var ld = g->Layers + layer;
         var tps = g->TilesPerSide;
-        var lo = stackalloc int[TileBake.TileSize];
-        var hi = stackalloc int[TileBake.TileSize];
+        var rowMaxima = !IsDerived(w, layer);
+        var found = false;
+        var best = short.MinValue;
+        var bx = 0;
+        var by = 0;
+        const int Pending = 64;
+        var pendingTiles = stackalloc int[Pending];
+        var pendingMaxima = stackalloc short[Pending];
+        var pending = 0;
         var top = -1;
-        var topMax = short.MinValue;
         for (var ty = disk.Y0 >> TileBake.TileBits; ty <= disk.Y1 >> TileBake.TileBits; ty++)
         for (var tx = disk.X0 >> TileBake.TileBits; tx <= disk.X1 >> TileBake.TileBits; tx++)
         {
             if (Outside(disk, tx, ty)) continue;
 
-            var m = pages->TryGet(ty * tps + tx, out var block) ? *(short*)(block + MaxOffset) : (short)0;
-            if (top >= 0 && m <= topMax) continue;
-            top = ty * tps + tx;
-            topMax = m;
+            if (rowMaxima && Inside(disk, tx, ty))
+            {
+                ConsiderTile(g, ld, disk, tx, ty, true, ref found, ref best, ref bx, ref by);
+                continue;
+            }
+
+            var summary = ld->SummaryOf(ty * tps + tx);
+            var m = summary != null ? summary->Max : (short)0;
+            if (pending == Pending)
+            {
+                ScanDiskTile(g, ld, disk, tx, ty, rowMaxima, ref found, ref best, ref bx, ref by);
+                continue;
+            }
+
+            pendingTiles[pending] = ty * tps + tx;
+            pendingMaxima[pending] = m;
+            if (top < 0 || m > pendingMaxima[top]) top = pending;
+            pending++;
         }
 
-        var found = false;
-        var best = short.MinValue;
-        var bx = 0;
-        var by = 0;
-        ScanDiskTile(g, pages, disk, top % tps, top / tps, lo, hi, ref found, ref best, ref bx, ref by);
-        for (var ty = disk.Y0 >> TileBake.TileBits; ty <= disk.Y1 >> TileBake.TileBits; ty++)
-        for (var tx = disk.X0 >> TileBake.TileBits; tx <= disk.X1 >> TileBake.TileBits; tx++)
+        if (top >= 0 && (!found || pendingMaxima[top] >= best))
         {
-            var tile = ty * tps + tx;
-            if (tile == top || Outside(disk, tx, ty)) continue;
+            ScanDiskTile(g, ld, disk, pendingTiles[top] % tps, pendingTiles[top] / tps, rowMaxima, ref found, ref best, ref bx, ref by);
+            pendingMaxima[top] = short.MinValue;
+        }
 
-            var m = pages->TryGet(tile, out var block) ? *(short*)(block + MaxOffset) : (short)0;
-            if (m < best) continue;
-            if (m == best && (ty << TileBake.TileBits) > by) continue;
-            ScanDiskTile(g, pages, disk, tx, ty, lo, hi, ref found, ref best, ref bx, ref by);
+        for (var i = 0; i < pending; i++)
+        {
+            if (i == top) continue;
+
+            var m = pendingMaxima[i];
+            var ty = pendingTiles[i] / tps;
+            if (found && m < best) continue;
+            if (found && m == best && (ty << TileBake.TileBits) > by) continue;
+            ScanDiskTile(g, ld, disk, pendingTiles[i] % tps, ty, rowMaxima, ref found, ref best, ref bx, ref by);
         }
 
         value = best;
@@ -132,11 +205,7 @@ public static unsafe partial class World
         var epochs = g->Layers[layer].Epochs;
         if (epochs == null) return false;
 
-        var disk = Disk(g, x, y, reach);
-        for (var ty = disk.Y0 >> TileBake.TileBits; ty <= disk.Y1 >> TileBake.TileBits; ty++)
-        for (var tx = disk.X0 >> TileBake.TileBits; tx <= disk.X1 >> TileBake.TileBits; tx++)
-            if (epochs[ty * g->TilesPerSide + tx] - since > 0 && HoldsDiskCell(disk, tx, ty)) return true;
-        return false;
+        return AnyNewerInDisk(g, g->Layers + layer, Disk(g, x, y, reach), since);
     }
 
     private static bool HoldsDiskCell(in Circle disk, int tx, int ty)
@@ -166,7 +235,7 @@ public static unsafe partial class World
 
         var g = w->Grids + gi;
         var disk = Disk(g, x, y, reach);
-        var pages = &g->Layers[layer].Pages;
+        var ld = g->Layers + layer;
         var tps = g->TilesPerSide;
         var originX = disk.Cx >> TileBake.TileBits;
         var originY = disk.Cy >> TileBake.TileBits;
@@ -189,9 +258,10 @@ public static unsafe partial class World
                 {
                     if (tx < disk.X0 >> TileBake.TileBits || tx > disk.X1 >> TileBake.TileBits || Outside(disk, tx, ty)) continue;
 
-                    var live = pages->TryGet(ty * tps + tx, out var block);
-                    if ((live ? *(short*)(block + MaxOffset) : 0) < threshold) continue;
-                    NearestInTile(disk, live ? (short*)(block + PageOffset) : null, tx, ty, threshold, ref best, ref bx, ref by);
+                    var cells = ld->CellsOf(ty * tps + tx);
+                    var live = cells.Page != null;
+                    if ((live ? cells.Summary->Max : 0) < threshold) continue;
+                    NearestInTile(disk, cells.Page, tx, ty, threshold, ref best, ref bx, ref by);
                 }
             }
         }
@@ -266,28 +336,59 @@ public static unsafe partial class World
         return true;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void ConsiderTile(GridCtx* g, LayerData* ld, in Circle disk, int tx, int ty, bool summaries,
+        ref bool found, ref short best, ref int bx, ref int by)
+    {
+        if (!summaries || !Inside(disk, tx, ty))
+        {
+            ScanDiskTile(g, ld, disk, tx, ty, summaries, ref found, ref best, ref bx, ref by);
+            return;
+        }
+
+        var tileX = tx << TileBake.TileBits;
+        var tileY = ty << TileBake.TileBits;
+        var summary = ld->SummaryOf(ty * g->TilesPerSide + tx);
+        var m = summary == null ? (short)0 : summary->Max;
+        var ax = summary == null ? tileX : tileX + summary->ArgMaxX;
+        var ay = summary == null ? tileY : tileY + summary->ArgMaxY;
+        if (found && (m < best || (m == best && (ay > by || (ay == by && ax >= bx))))) return;
+
+        found = true;
+        best = m;
+        bx = ax;
+        by = ay;
+    }
+
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    private static void ScanDiskTile(GridCtx* g, PageMap* pages, in Circle disk, int tx, int ty, int* lo, int* hi,
+    private static void ScanDiskTile(GridCtx* g, LayerData* ld, in Circle disk, int tx, int ty, bool rowMaxima,
         ref bool found, ref short best, ref int bx, ref int by)
     {
         var tileX = tx << TileBake.TileBits;
         var tileY = ty << TileBake.TileBits;
         var rowLo = Math.Max(tileY, disk.Y0);
-        var rows = Math.Min(tileY + TileBake.TileSize - 1, disk.Y1) - rowLo + 1;
-        Spans(disk, rowLo, rows, lo, hi);
-        short* page = null;
-        if (pages->TryGet(ty * g->TilesPerSide + tx, out var block)) page = (short*)(block + PageOffset);
-        for (var r = 0; r < rows; r++)
+        var rowHi = Math.Min(tileY + TileBake.TileSize - 1, disk.Y1);
+        var cells = ld->CellsOf(ty * g->TilesPerSide + tx);
+        var page = cells.Page;
+        var maxima = rowMaxima && page != null ? cells.Summary->RowMaxima : null;
+        for (var cy = rowLo; cy <= rowHi; cy++)
         {
-            var a = Math.Max(lo[r], tileX);
-            var b = Math.Min(hi[r], tileX + TileBake.TileSize);
+            if (found && maxima != null)
+            {
+                var bound = maxima[cy - tileY];
+                if (bound < best || (bound == best && cy > by)) continue;
+            }
+
+            if (!Span(disk, cy, out var lo, out var hi)) continue;
+
+            var a = Math.Max(lo, tileX);
+            var b = Math.Min(hi, tileX + TileBake.TileSize);
             if (b <= a) continue;
 
-            var cy = rowLo + r;
             var row = page == null ? null : page + (cy - tileY) * TileBake.TileSize - tileX;
-            var m = row == null ? (short)0 : SegmentMax(row + tileX, a - tileX, b - tileX);
+            var m = row == null ? (short)0 : maxima != null && b - a == TileBake.TileSize ? maxima[cy - tileY] : SegmentMax(row + tileX, a - tileX, b - tileX);
             if (found && (m < best || (m == best && (cy > by || (cy == by && a > bx))))) continue;
 
             var cx = row == null ? a : tileX + FirstEqual(row + tileX, a - tileX, b - tileX, m);
@@ -343,19 +444,27 @@ public static unsafe partial class World
         if (!Pick(w, x, y, 0f, 1, false, out var gi, out var complete)) return false;
 
         var g = w->Grids + gi;
-        var grid = (byte)gi;
+        var ld = g->Layers + layer;
         var cx = (int)(CellQ8(x, g->OriginX, g->ScaleQ8) >> 8);
         var cy = (int)(CellQ8(y, g->OriginY, g->ScaleQ8) >> 8);
+        var tile = (cy >> TileBake.TileBits) * g->TilesPerSide + (cx >> TileBake.TileBits);
+        var page = ld->PageOf(tile);
         var perUnit = g->ScaleQ8 / 512f;
-        gx = (Query(world, grid, layer, cx + 1, cy) - Query(world, grid, layer, cx - 1, cy)) * perUnit;
-        gy = (Query(world, grid, layer, cx, cy + 1) - Query(world, grid, layer, cx, cy - 1)) * perUnit;
+        gx = (CellNear(g, ld, tile, page, cx + 1, cy) - CellNear(g, ld, tile, page, cx - 1, cy)) * perUnit;
+        gy = (CellNear(g, ld, tile, page, cx, cy + 1) - CellNear(g, ld, tile, page, cx, cy - 1)) * perUnit;
         return complete;
     }
 
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    public static bool TrySenseGradient(byte world, byte layer, float x, float y, int exclude, out float gx, out float gy)
+    public static bool TrySenseGradient(byte world, byte layer, float x, float y, SourceId exclude, out float gx, out float gy)
+        => SenseGradientOwn(world, layer, x, y, exclude, default, out gx, out gy);
+
+    #if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    #endif
+    private static bool SenseGradientOwn(byte world, byte layer, float x, float y, SourceId exclude, in SplatOwn own, out float gx, out float gy)
     {
         gx = 0f;
         gy = 0f;
@@ -366,7 +475,7 @@ public static unsafe partial class World
         var g = w->Grids + gi;
         var cx = (int)(CellQ8(x, g->OriginX, g->ScaleQ8) >> 8);
         var cy = (int)(CellQ8(y, g->OriginY, g->ScaleQ8) >> 8);
-        var excluding = Applied(w, exclude, layer, out var source);
+        var excluding = Own(w, g, exclude, own, layer, out var source);
         var shape = excluding ? ShapeOf(w, g, source) : default;
         var perUnit = g->ScaleQ8 / 512f;
         gx = (Others(w, g, layer, excluding, source.Layer, &shape, cx + 1, cy) -
@@ -387,9 +496,18 @@ public static unsafe partial class World
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static short Cell(GridCtx* g, byte layer, int cx, int cy)
     {
-        if (!g->Layers[layer].Pages.TryGet((cy >> TileBake.TileBits) * g->TilesPerSide + (cx >> TileBake.TileBits), out var block))
-            return 0;
-        return ((short*)(block + PageOffset))[(cy & (TileBake.TileSize - 1)) * TileBake.TileSize + (cx & (TileBake.TileSize - 1))];
+        var page = g->Layers[layer].PageOf((cy >> TileBake.TileBits) * g->TilesPerSide + (cx >> TileBake.TileBits));
+        if (page == null) return 0;
+        return page[(cy & (TileBake.TileSize - 1)) * TileBake.TileSize + (cx & (TileBake.TileSize - 1))];
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static short CellNear(GridCtx* g, LayerData* ld, int tile, short* page, int cx, int cy)
+    {
+        if ((uint)cx >= (uint)g->Size || (uint)cy >= (uint)g->Size) return 0;
+        if (page != null && (cy >> TileBake.TileBits) * g->TilesPerSide + (cx >> TileBake.TileBits) == tile)
+            return page[(cy & (TileBake.TileSize - 1)) * TileBake.TileSize + (cx & (TileBake.TileSize - 1))];
+        return Cell(g, (byte)(ld - g->Layers), cx, cy);
     }
 
     #if NET
@@ -398,7 +516,7 @@ public static unsafe partial class World
     private static short ExcludedValue(WorldCtx* w, GridCtx* g, byte layer, byte source, Shape* s, int cx, int cy, short page)
     {
         var r = w->Recipes + layer;
-        if (r->Op == LayerOp.Base) return layer == source ? ExcludeCell(g, layer, s, cx, cy, page) : page;
+        if (r->Op == LayerOp.Base) return layer == source ? ExcludeCell(g, g->Layers + layer, s, cx, cy, page) : page;
         if ((r->Reads & (1u << source)) == 0) return page;
 
         var a = ExcludedValue(w, g, r->A, source, s, cx, cy, Cell(g, r->A, cx, cy));
@@ -434,7 +552,7 @@ public static unsafe partial class World
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    private static bool SenseArea(byte world, byte layer, float x, float y, float reach, int exclude, out long total)
+    private static bool SenseArea(byte world, byte layer, float x, float y, float reach, SourceId exclude, in SplatOwn own, out long total)
     {
         total = 0;
         var w = GetContext(world);
@@ -443,8 +561,9 @@ public static unsafe partial class World
 
         var g = w->Grids + gi;
         var disk = Disk(g, x, y, reach);
-        var pages = &g->Layers[layer].Pages;
+        var ld = g->Layers + layer;
         var tps = g->TilesPerSide;
+        var derived = IsDerived(w, layer);
         var lo = stackalloc int[TileBake.TileSize];
         var hi = stackalloc int[TileBake.TileSize];
         var sum = 0L;
@@ -456,11 +575,15 @@ public static unsafe partial class World
             var spans = false;
             for (var tx = disk.X0 >> TileBake.TileBits; tx <= disk.X1 >> TileBake.TileBits; tx++)
             {
-                if (Outside(disk, tx, ty) || !pages->TryGet(ty * tps + tx, out var block)) continue;
+                if (Outside(disk, tx, ty)) continue;
 
+                var set = ld->SetOf(ty * tps + tx);
+                if (set == null) continue;
+
+                var tile = ty * tps + tx;
                 if (Inside(disk, tx, ty))
                 {
-                    sum += *(long*)(block + SumOffset);
+                    sum += ld->SummaryOf(tile)->Sum;
                     continue;
                 }
 
@@ -470,15 +593,16 @@ public static unsafe partial class World
                     spans = true;
                 }
 
-                sum += RaggedSum((short*)(block + PageOffset) + (rowLo - tileY) * TileBake.TileSize,
-                    tx << TileBake.TileBits, rows, lo, hi);
+                var cells = ld->Store.Cells(*set);
+                sum += RaggedSum(cells.Page + (rowLo - tileY) * TileBake.TileSize,
+                    derived ? null : cells.Summary->RowSums + (rowLo - tileY), tx << TileBake.TileBits, rows, lo, hi);
             }
         }
 
-        if (Applied(w, exclude, layer, out var source))
+        if (Own(w, g, exclude, own, layer, out var source))
         {
             var shape = ShapeOf(w, g, source);
-            sum += IsDerived(w, layer) ? ExcludedMix(w, g, layer, source.Layer, disk, &shape) : ExcludedArea(g, layer, disk, &shape);
+            sum += derived ? ExcludedMix(w, g, layer, source.Layer, disk, &shape) : ExcludedArea(g, layer, disk, &shape);
         }
 
         total = WorldArea(sum, g->ScaleQ8);
@@ -488,16 +612,24 @@ public static unsafe partial class World
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    private static long RaggedSum(short* rows0, int tileX, int rows, int* lo, int* hi)
+    private static long RaggedSum(short* rows0, int* rowSums, int tileX, int rows, int* lo, int* hi)
     {
 #if NET
-        if (Vector128.IsHardwareAccelerated || Vector256.IsHardwareAccelerated) return SimdOps.RaggedSum(rows0, tileX, rows, lo, hi);
+        if (Vector128.IsHardwareAccelerated || Vector256.IsHardwareAccelerated) return SimdOps.RaggedSum(rows0, rowSums, tileX, rows, lo, hi);
 #endif
         var sum = 0L;
         for (var r = 0; r < rows; r++)
         {
             var a = Math.Max(lo[r], tileX) - tileX;
             var b = Math.Min(hi[r], tileX + TileBake.TileSize) - tileX;
+            if (b <= a) continue;
+
+            if (rowSums != null && b - a == TileBake.TileSize)
+            {
+                sum += rowSums[r];
+                continue;
+            }
+
             var row = rows0 + r * TileBake.TileSize;
             for (var i = a; i < b; i++) sum += row[i];
         }
@@ -509,12 +641,14 @@ public static unsafe partial class World
     {
         public Placement P;
         public int Gain;
+        public KernelTaps Taps;
+        public byte HasTaps;
     }
 
     private struct Placed
     {
-        public float X;
-        public float Y;
+        public int Ax;
+        public int Ay;
         public byte Stamp;
         public byte Layer;
         public int Gain;
@@ -528,8 +662,15 @@ public static unsafe partial class World
     private static Shape ShapeOf(WorldCtx* w, GridCtx* g, in Placed source)
     {
         var shape = new Shape { Gain = source.Gain };
-        TileBake.Place(source.X, source.Y, g->OriginX, g->OriginY, g->ScaleQ8, g->Size, StampCatalog.Get(source.Stamp),
-            source.Angle, source.Size, LayerPrecision(w, source.Layer), out shape.P);
+        var precision = LayerPrecision(w, source.Layer);
+        if (!TileBake.PlaceAnchored(source.Ax, source.Ay, g->ScaleQ8, g->Size, StampCatalog.Get(source.Stamp),
+            source.Angle, source.Size, precision, out shape.P))
+            return shape;
+
+        var grid = (int)(g - w->Grids);
+        if (KernelFactory.TryFindTaps(w, grid, source.Stamp, source.Angle, precision, &shape.P, out shape.Taps) ||
+            (w->Kernels.CanInsert && KernelFactory.TryGetTaps(w, grid, source.Stamp, source.Angle, precision, &shape.P, out shape.Taps)))
+            shape.HasTaps = 1;
         return shape;
     }
 
@@ -541,6 +682,17 @@ public static unsafe partial class World
         core = 0;
         smooth = 0;
         var p = &s->P;
+        if (s->HasTaps != 0)
+        {
+            var i = cx - p->Px - s->Taps.OriginX;
+            var j = cy - p->Py - s->Taps.OriginY;
+            if ((uint)i >= (uint)s->Taps.Width || (uint)j >= (uint)s->Taps.Height) return;
+
+            if (s->Taps.Cells != null) core = s->Taps.Cells[j * s->Taps.Width + i] * s->Gain;
+            else smooth = s->Taps.Q40[j * s->Taps.Width + i] * s->Gain;
+            return;
+        }
+
         switch (p->Plane)
         {
             case Plane.Difference:
@@ -578,29 +730,49 @@ public static unsafe partial class World
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    private static short ExcludeCell(GridCtx* g, byte layer, Shape* s, int cx, int cy, short page)
+    private static short ExcludeCell(GridCtx* g, LayerData* ld, Shape* s, int cx, int cy, short page)
     {
         SourceAt(s, cx, cy, out var core, out var smooth);
         var lx = cx & (TileBake.TileSize - 1);
         var ly = cy & (TileBake.TileSize - 1);
         var plane = s->P.Plane;
-        if (!g->Layers[layer].Pages.TryGet((cy >> TileBake.TileBits) * g->TilesPerSide + (cx >> TileBake.TileBits), out var block))
-            return Saturate(Absent(0, 0, 0, plane, core, smooth));
+        var cells = ld->CellsOf((cy >> TileBake.TileBits) * g->TilesPerSide + (cx >> TileBake.TileBits));
+        if (cells.Page == null)
+            return Saturate(Absent(0, 0, 0, 0, 0, plane, core, smooth));
 
         var cell = ly * TileBake.TileSize + lx;
-        var tent = TentOf(block);
-        var bell = BellOf(block);
-        var tents = tent == null ? 0 : tent[cell];
-        var bells = bell == null ? 0 : bell[cell];
+        var tents = cells.T == null ? 0 : cells.T[cell];
+        var bells = cells.B == null ? 0 : cells.B[cell];
+        long carry = 0;
+        long tentHigh = 0;
+        long bellHigh = 0;
+        var summary = cells.Summary;
+        if ((summary->CarryI | summary->HighT | summary->HighB) != 0)
+        {
+            var store = &ld->Store;
+            if (summary->CarryI != 0) carry = store->Wide(summary->CarryI)[cell];
+            if (summary->HighT != 0)
+            {
+                tentHigh = store->Wide(summary->HighT)[cell];
+                tents += store->Wide(summary->LowT)[cell];
+            }
+
+            if (summary->HighB != 0)
+            {
+                bellHigh = store->Wide(summary->HighB)[cell];
+                bells += store->Wide(summary->LowB)[cell];
+            }
+        }
+
         if (page > short.MinValue && page < short.MaxValue)
         {
-            if (plane == Plane.Tent) return Saturate(page - TileBake.RoundQ40(tents) + TileBake.RoundQ40(tents - smooth));
-            if (plane == Plane.Bell) return Saturate(page - TileBake.RoundQ40(bells) + TileBake.RoundQ40(bells - smooth));
+            if (plane == Plane.Tent) return Saturate(page - TileBake.RoundWide(tentHigh, tents) + TileBake.RoundWide(tentHigh, tents - smooth));
+            if (plane == Plane.Bell) return Saturate(page - TileBake.RoundWide(bellHigh, bells) + TileBake.RoundWide(bellHigh, bells - smooth));
             return Saturate(page - core);
         }
 
-        var boxes = TileBake.Quadrant(DiffOf(block), lx, ly) + DenseOf(block)[cell];
-        return Saturate(Absent(boxes, tents, bells, plane, core, smooth));
+        var boxes = (cells.I == null ? 0 : cells.I[cell]) + carry;
+        return Saturate(Absent(boxes, tents, bells, tentHigh, bellHigh, plane, core, smooth));
     }
 
     #if NET
@@ -627,13 +799,37 @@ public static unsafe partial class World
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static long Absent(long boxes, long tents, long bells, Plane plane, int core, long smooth)
+    private static long Absent(long boxes, long tents, long bells, long tentHigh, long bellHigh, Plane plane, int core, long smooth)
         => boxes - core +
-            TileBake.RoundQ40(tents - (plane == Plane.Tent ? smooth : 0)) +
-            TileBake.RoundQ40(bells - (plane == Plane.Bell ? smooth : 0));
+            TileBake.RoundWide(tentHigh, tents - (plane == Plane.Tent ? smooth : 0)) +
+            TileBake.RoundWide(bellHigh, bells - (plane == Plane.Bell ? smooth : 0));
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static short Saturate(long value) => (short)Math.Clamp(value, short.MinValue, short.MaxValue);
+
+    private static void FillCore(Shape* s, int* core, int tileX, int tileY, int top, int rows, int* lo, int* hi)
+    {
+        const int n = TileBake.TileSize;
+        var taps = &s->Taps;
+        var gain = s->Gain;
+        for (var r = 0; r < rows; r++)
+        {
+            var j = tileY + top + r - s->P.Py - taps->OriginY;
+            var row = (top + r) * n;
+            if ((uint)j >= (uint)taps->Height)
+            {
+                for (var c = lo[r]; c < hi[r]; c++) core[row + c] = 0;
+                continue;
+            }
+
+            var tap = taps->Cells + j * taps->Width;
+            for (var c = lo[r]; c < hi[r]; c++)
+            {
+                var i = tileX + c - s->P.Px - taps->OriginX;
+                core[row + c] = (uint)i < (uint)taps->Width ? tap[i] * gain : 0;
+            }
+        }
+    }
 
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
@@ -652,14 +848,13 @@ public static unsafe partial class World
         var lo = stackalloc int[n];
         var hi = stackalloc int[n];
         var core = stackalloc int[n * n];
-        var boxes = stackalloc long[n * n];
         var wx = stackalloc long[n];
         var wy = stackalloc long[n];
         var plane = p->Plane;
         var smooth = plane is Plane.Tent or Plane.Bell;
         var separable = smooth && !p->Turned;
         var scale = separable ? (long)p->V->Constant * gain * p->Curve : 0;
-        var pages = &g->Layers[layer].Pages;
+        var ld = g->Layers + layer;
         var delta = 0L;
         for (var ty = fy0 >> TileBake.TileBits; ty <= fy1 >> TileBake.TileBits; ty++)
         for (var tx = fx0 >> TileBake.TileBits; tx <= fx1 >> TileBake.TileBits; tx++)
@@ -682,8 +877,9 @@ public static unsafe partial class World
 
             if (cols == 0) continue;
 
-            var live = pages->TryGet(ty * g->TilesPerSide + tx, out var block);
-            var page = live ? (short*)(block + PageOffset) : null;
+            var cells = ld->CellsOf(ty * g->TilesPerSide + tx);
+            var live = cells.Page != null;
+            var page = cells.Page;
             var saturated = false;
             for (var r = 0; r < rows && live; r++)
             for (var c = lo[r]; c < hi[r]; c++)
@@ -692,7 +888,11 @@ public static unsafe partial class World
                 saturated |= cell == short.MinValue || cell == short.MaxValue;
             }
 
-            if (plane == Plane.Difference)
+            if (s->HasTaps != 0)
+            {
+                if (!smooth) FillCore(s, core, tileX, tileY, top, rows, lo, hi);
+            }
+            else if (plane == Plane.Difference)
             {
                 TileBake.BoxCells(core, tileX, tileY, p->Px, p->Py, p->Fx, p->Fy, p->ExtentX, p->ExtentY, p->V, gain);
             }
@@ -708,9 +908,31 @@ public static unsafe partial class World
                 TileBake.SmoothWeights(p->Kind, p->Py, p->Fy, p->ExtentY, tileY, top + rows, wy);
             }
 
-            var tents = live ? TentOf(block) : null;
-            var bells = live ? BellOf(block) : null;
-            if (saturated) TileBake.IntegrateBoxes(DiffOf(block), DenseOf(block), top + rows, cols, boxes);
+            var tents = cells.T;
+            var bells = cells.B;
+            var boxes = cells.I;
+            long* carryP = null;
+            long* highTP = null;
+            long* lowTP = null;
+            long* highBP = null;
+            long* lowBP = null;
+            var summary = cells.Summary;
+            if (summary != null && (summary->CarryI | summary->HighT | summary->HighB) != 0)
+            {
+                var store = &ld->Store;
+                if (summary->CarryI != 0) carryP = store->Wide(summary->CarryI);
+                if (summary->HighT != 0)
+                {
+                    highTP = store->Wide(summary->HighT);
+                    lowTP = store->Wide(summary->LowT);
+                }
+
+                if (summary->HighB != 0)
+                {
+                    highBP = store->Wide(summary->HighB);
+                    lowBP = store->Wide(summary->LowB);
+                }
+            }
 
             if (!saturated && !smooth)
             {
@@ -728,14 +950,34 @@ public static unsafe partial class World
                     var cell = live ? page[i] : (short)0;
                     var tq = tents == null ? 0 : tents[i];
                     var br = bells == null ? 0 : bells[i];
-                    var own = !smooth ? 0 : separable ? dy * wx[c] : TileBake.TurnedSmoothAt(p, tileX + c, tileY + top + r) * gain;
+                    long th = 0;
+                    long bh = 0;
+                    if (highTP != null)
+                    {
+                        th = highTP[i];
+                        tq += lowTP[i];
+                    }
+
+                    if (highBP != null)
+                    {
+                        bh = highBP[i];
+                        br += lowBP[i];
+                    }
+
+                    var own = 0L;
+                    if (smooth)
+                    {
+                        if (s->HasTaps != 0) SourceAt(s, tileX + c, tileY + top + r, out _, out own);
+                        else own = separable ? dy * wx[c] : TileBake.TurnedSmoothAt(p, tileX + c, tileY + top + r) * gain;
+                    }
+
                     long absent;
                     if (saturated && (cell == short.MinValue || cell == short.MaxValue))
-                        absent = Absent(boxes[i], tq, br, plane, smooth ? 0 : core[i], own);
+                        absent = Absent((boxes == null ? 0 : boxes[i]) + (carryP == null ? 0 : carryP[i]), tq, br, th, bh, plane, smooth ? 0 : core[i], own);
                     else if (plane == Plane.Tent)
-                        absent = cell - TileBake.RoundQ40(tq) + TileBake.RoundQ40(tq - own);
+                        absent = cell - TileBake.RoundWide(th, tq) + TileBake.RoundWide(th, tq - own);
                     else if (plane == Plane.Bell)
-                        absent = cell - TileBake.RoundQ40(br) + TileBake.RoundQ40(br - own);
+                        absent = cell - TileBake.RoundWide(bh, br) + TileBake.RoundWide(bh, br - own);
                     else
                         absent = cell - core[i];
 
@@ -750,45 +992,30 @@ public static unsafe partial class World
     #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     #endif
-    private static bool Applied(WorldCtx* w, int id, byte layer, out Placed source)
+    private static bool Applied(WorldCtx* w, GridCtx* g, SourceId id, byte layer, out Placed source)
     {
         source = default;
-        if (id < 0) return false;
 
         var s = &w->Sources;
-        var slot = id & SourceIndexMask;
+        var slot = (int)id.Slot;
         if ((uint)slot >= (uint)s->Count) return false;
 
-        var generation = (byte)((uint)id >> 24);
-        var reads = w->Recipes[layer].Reads;
-        var pending = w->Pending.Pointer[slot];
-        if (pending != 0)
-        {
-            var op = w->Ops.Pointer + pending - 1;
-            if (op->AliveFrom == 0 || op->FromGen != generation || (reads & (1u << op->FromLayer)) == 0) return false;
+        var mark = s->Mark[slot];
+        var deposited = (int)mark == w->MarkEpoch ? w->Pending.Pointer[(int)(mark >> 32)].Gen : s->Gen[slot];
+        if (deposited != id.Generation) return false;
 
-            source.X = op->FromX;
-            source.Y = op->FromY;
-            source.Stamp = op->FromStamp;
-            source.Layer = op->FromLayer;
-            source.Gain = op->FromGain;
-            source.Angle = op->FromAngle;
-            source.Size = op->FromScale;
-            return source.Gain != 0;
-        }
+        var r = RecordOf(g, slot);
+        if (r->Alive == 0 || r->Gain == 0) return false;
+        if ((w->Recipes[layer].Reads & (1u << r->Layer)) == 0) return false;
 
-        var sourceLayer = s->Layer.Pointer[slot];
-        if (s->Alive.Pointer[slot] == 0 || s->Gen.Pointer[slot] != generation || (reads & (1u << sourceLayer)) == 0)
-            return false;
-
-        source.X = s->X.Pointer[slot];
-        source.Y = s->Y.Pointer[slot];
-        source.Stamp = s->Stamp.Pointer[slot];
-        source.Layer = sourceLayer;
-        source.Gain = (sbyte)s->Gain.Pointer[slot];
-        source.Angle = s->Angle.Pointer[slot];
-        source.Size = s->Scale.Pointer[slot];
-        return source.Gain != 0;
+        source.Ax = r->Ax;
+        source.Ay = r->Ay;
+        source.Stamp = r->Stamp;
+        source.Layer = r->Layer;
+        source.Gain = r->Gain;
+        source.Angle = r->Angle;
+        source.Size = r->Scale;
+        return true;
     }
 
     #if NET
@@ -813,6 +1040,8 @@ public static unsafe partial class World
             bool whole;
             if (disk)
             {
+                if (ReachQ8(reach, g->ScaleQ8) > (long)ValidationRules.MaxReachCells << 8) continue;
+
                 var c = Disk(g, x, y, reach);
                 whole = c.X0 >= 0 && c.Y0 >= 0 && c.X1 < g->Size && c.Y1 < g->Size && !c.Clipped;
             }
@@ -956,7 +1185,7 @@ public static unsafe partial class World
     private static bool Contains(GridCtx* g, long qx, long qy)
         => qx >= 0 && qy >= 0 && (qx >> 8) < g->Size && (qy >> 8) < g->Size;
 
-    private static long ReachQ8(float reach, int scaleQ8)
+    internal static long ReachQ8(float reach, int scaleQ8)
     {
         if (!(reach > 0f)) return 0;
 

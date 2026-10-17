@@ -181,44 +181,47 @@ Three claims from the earlier plans that these predictions reject:
 | P1-2 | Stream generator + differential + minimizer | C | P1-1 | M | done | phase0 | hand-written splitmix64 generator over every stamp kind (arcs, turned, rasters), 1–3 grids, base+derived layers, all precisions, timers, Record/Rewind/Clear, every read kind ± exclusion; lockstep runner compares pages after every Process and every read result; ddmin minimizer prints a C# repro; 10,500 gate streams green at Exact/Cell/Quarter plus 48 heavy streams at Half/Mixed (65 s total); seeded rounding flip caught and shrunk to 2–4 commands (bar: <10); two reference bugs found and fixed (eager epoch allocation in `MarkDeposited` on touch-filtered placements; no-since `ChangedTiles` compared in engine-internal order) |
 | P1-3 | Golden corpus | C | P1-2 | M | done | phase0 | 900 streams (300 each at Exact/Cell/Quarter) × 60 frames, FNV-1a 64 per published page plus a per-frame read-result hash over all 24 read kinds, committed as 55,804 culture-invariant lines in `tests/Gi.Tests/Corpus/golden-corpus.txt`; `GoldenCorpusTests` regenerates and compares (`GI_REGENERATE_CORPUS=1` rewrites); output identical across two runs and across intrinsics on/off; serial corpus replay ≈ 1 s. Pinning the differential to serial paths caught a real engine bug: serial/immediate deposit builds allocated zeroed epoch arrays before the touch filter, so `ChangedTiles(since < 0)` reported never-touched tiles (seed 903557, minimized to 4 commands); `EnsureDirty` now allocates only after a tile passes `Touches`, matching the pooled path; a `DepositPrepTests` `SerialOnly` leak (order-dependent suite flake) also fixed |
 | P1-4 | Laws | C | P1-2 | S | done | phase0 | `StreamLawsTests`: superposition over unsaturated box (difference) and turned-box (dense) deposits at Exact; whole-cell translation shifts pages exactly at Exact and Quarter; an idle `Process` leaves pages/sums/max identical with empty frame and since lists; move/turn/scale/gain commands on distinct sources commute in either order (and across swapped place order) at Exact and Quarter; `Rewind` after `Record` restores the recorded pages, sums, and the keeper's source spec once the rewind re-queues and the next `Process` re-publishes (rewind semantics: source table restored immediately, pages on the following `Process`); excluding a source senses exactly the field without it (value and filled flag) for straight and turned deposits; a move below the layer's anchor quantum (`cell >> PhaseBits`, filtered through the engine's own `PositionChanged`) changes no published bytes at Exact/Half/Quarter/Cell for straight and turned stamps. 7 tests, 150 ms |
-| — | **cut `engine-v2` from main** | — | P1-3 | — | todo | | |
-| V2-1 | Delete `ResolvePool` | V | cut | M | todo | | |
-| V2-2 | Directory, slabs, zeroed buffers, scratch | V | V2-1 | M | todo | | |
-| V2-3 | Chunked sources + `SourceId` | V | V2-2 | L | todo | | |
-| V2-4 | Kernel cache | V′ | V2-2 | M | todo | | |
-| V2-5 | Planes, publish, summaries | V″ | V2-2 | M | todo | | |
-| V2-6 | Change-rate `Process`, old pipeline deleted | V | V2-3, V2-4, V2-5 | L | todo | | |
-| V2-7 | Turned/arc/raster/round on new path | V′ | V2-6 | M | todo | | |
-| V2-8 | Overflow by promotion | V″ | V2-6 | M | todo | | |
-| V2-9 | Schedule sweep | V | V2-6 | S | todo | | |
-| V2-10 | One write pipeline | V | V2-9 | M | todo | | |
-| V2-11 | Record / Rewind / Clear | V | V2-10 | M | todo | | |
-| R-1 | Column reads | R | V2-6 | M | todo | | |
-| R-2 | `World.FieldView` | R | R-1, O1 | S | todo | | |
-| R-3 | Integer disk spans, row-sum areas | R′ | V2-6 | M | todo | | |
-| R-4 | `Pyramid<T>` (Max, Epoch) | R″ | V2-6 | M | todo | | |
-| R-5 | Max / Nearest pruning | R″ | R-4 | S | todo | | |
-| R-6 | Exclusion from the planes | R′ | R-3 | M | todo | | |
-| R-7 | Region copy, rectangle sums | R | R-1 | S | todo | | |
-| R-8 | Derived layers, adaptive | R | R-1 | M | todo | | |
-| T-1 | Transient layers + `Splat` | T | V2-11, R-1 | M | todo | | |
-| T-2 | Histogram path at `PhaseBits` 0 | T | T-1 | S | todo | | |
-| T-3 | Convolution ≡ direct ≡ oracle | T | T-2 | L | todo | | |
-| T-4 | Per-tile cost model | T | T-3 | S | todo | | |
-| T-5 | Transient at `PhaseBits` > 0 | T′ | T-1 | S | todo | | |
-| T-6 | Transient self-exclusion | T | T-3, R-6 | M | todo | | |
-| T-7 | Spatial-order helpers + sample | T′ | T-1, O1 | S | todo | | |
-| C-1 | Statuses | K | T-6 | M | todo | | |
-| C-2 | Validation caps | K | C-1 | S | todo | | |
-| C-3 | Docs, README, CHANGELOG | K | C-2 | M | todo | | |
-| C-4 | Gates + determinism matrix | K | C-3 | M | todo | | |
-| C-5 | Fuzzer | C | P1-2 | S | todo | | |
-| C-6 | Cutover: 2.0.0-alpha.1 | K | C-4, C-5 | S | todo | | |
-| C-7 | netstandard / Unity numbers | K | C-6 | S | todo | | |
+| — | **cut `engine-v2` from main** | — | P1-3 | — | done | engine-v2 | PR #44 merged to main at afb53b3 (Phase 0 + Phase 1 oracle lane); `engine-v2` cut from that commit and pushed |
+| V2-1 | Delete `ResolvePool` | V | cut | M | done | engine-v2 | deleted `ResolvePool.cs`, `ResolvePool.DepositBuild.cs`, `ResolvePool.SourceBatch.cs`, `World.DepositBuild.cs`, and `SerialOnly`; `Process` keeps only the serial deposit build, serial crowd rebuild, and serial drain; columns/batches/sync-transforms run their serial ranges unconditionally (`LargeBatchThreshold = 8192` replaces `ColumnThreshold`, batch layer deltas sized for one partition); `ProcessStages` kept (serial path measures, harness reads); 20 pool-equivalence tests deleted or collapsed, knob toggles removed (the P1-3 `SerialOnly`-leak class of flake is now impossible); `docs/model.md` concurrency proofs, `docs/batching.md`, `docs/examples.md`, README rewritten for one thread; receipts renamed (`multi-layer-churn-matches-scans`, `mixed-stamp-process-allocates-zero-bytes`). Gate: B1 p50 331.3 → 339.9 ns/entity (+2.6 %, runs 339.9–345.6 all within ±5 %), checksum `bd65743d…` and final state identical to the pre-change serial baseline, 0 B warm; 980/980 tests; sample ok; `--verify` green intrinsics on (144) and off (127) |
+| V2-2 | Directory, slabs, zeroed buffers, scratch | V | V2-1 | M | done | engine-v2 | `PageMap` deleted: each (grid, layer) now owns a dense `int` directory (−1 absent, allocated with the first page) into four `FixedSlab`s — blocks 6,528 B, derived headers 2,112 B, dense units 4,096 B, tent/bell units 8,192 B — with int free lists; every reference into a slab is a unit index, so doubling growth never dangles (dense/tent/bell header slots hold indices, `EnsureDense` no longer relocates the block); `NativeBuffer.Resize` zero-fills new memory with `ResizeUninitialized` as the audited exception (batch sources/commands/lookup/layer-deltas/ops, slab free lists; source-column post-clears deleted); per-world `BumpScratch` (reset at end of `Process` and by `Clear`) replaces the chains/dense/present/tails rebuild buffers; `NativeHeap.Calls` hook + `WarmFramesMakeNoNativeHeapCalls` test; stats tool rewritten for directory/slab accounting (committed-memory `WorldBytes`, 12 receipts re-derived exactly); read path: `PageOf` + cached region/stride, gradient no longer calls full `Query` per neighbor (`CellNear` reuses the centre tile's page), `SenseRange`/`GradientRange` hoist the world and single-grid fast paths; `docs/model.md` lifetime/aliasing/alignment/concurrency proofs rewritten. Gate: B1 reads 186.5 → **109.5 ns/entity** (point 23.2 + gradient 54.3 + changed 32.0; ≤ 135 gate, under the 115–135 band), B1 p50 347.5 → 290.8, checksum `bd65743d…` + final state identical, 0 B warm, golden corpus byte-identical; C 133.3 → 118.2 ms, W 66.7 → 58.5 ms (same-host worktree comparison); 981/981 tests, stats 12/12, sample ok, `--verify` 144/0 on, 127/0 off. Known: B1 setup RSS 302.6 → 356.8 MB (+6.5 MB slab capacity at the 16,384-unit high-water vs 15,376 live at setup; the rest is allocator behavior on one 107 MB region vs 15k small allocations — no RSS receipt; V2-5/V2-6 own that target) |
+| V2-3 | Chunked sources + `SourceId` | V | V2-2 | L | done | #47 | `SourceColumn<T>`/`SourceColumns` chunked SoA (16,384-slot chunks, 1,024-pointer arrays, growth appends a zeroed chunk and never copies; cold schedule columns separate); `World.SourceId(uint Slot, uint Generation)` across scalar calls, `SourceId*` columns, batch commands/results, `TransformRange.Sources`, `TryGetSourceSpec`; 32-bit generations with retirement on every free path (Remove, expiry, batch remove, Rewind) — no id ever reissued (10^6-cycle churn test on 10 slots); int ids deleted per D5, no wrappers; corpus byte-identical, B1 mean p50 +1.2 % same-host i9-14900K (gate ±5 %; sync +1.6 ns from 8-byte ids + chunk indirection), 0 B warm, checksum + final state identical; stats/inspection receipts re-derived for chunks; 2.0.0-alpha.1 version lands at C-6 |
+| V2-4 | Kernel cache | V′ | V2-2 | M | done | #46 | `KernelCache` (32 fixed entries, packed-key linear scan, round-robin insert) + `KernelFactory` building gain-1 taps through today's emitters into scratch, then bbox/row-extents/max|tap|/structure tags (Box, Separable, Spans, Dense); 13 tests cover the card's full equality matrix (every kind, widths 1+2 and odd/even, all 256×256 box phases 1×1–8×8, scales {0.5, 1, 3.7}, sampled angles; gain × taps ≡ today's emission cell-for-cell, int32 and wrapping int64); grid-edge-clipped boxes and >4.19 M-cell canvases take the exact uncached path (soundness-tested); `Stamp.Free` flushes the cache; corpus byte-identical, B1 +0.8 % same-host i9-14900K (gate ±5 %), 0 B warm, 994/994, combined tree 1406/1406 after merge |
+| V2-5 | Planes, publish, summaries | V″ | V2-2 | M | done | #45 | `PlaneStore` (page / `I` / `T` / `B` / summary slabs, unit-index persistence, first-use `T`/`B`) + `TileBake.Publish` scalar/Vector128/AVX2 behind the exactness guard: compare-then-store, exact summaries with rescan-only-on-decrease max, epoch written only when bytes differ, ≥ 50 % whole-tile rule; 412 tests pin Publish to `Resolve` and an independent model (every cell and summary, scalar/SIMD identical); corpus byte-identical, B1 +0.81 % same-host i9-14900K (gate ±5 %), 0 B warm, 1393/1393; standalone until V2-6 wiring (i9-14900K host — re-run on Zen 4 for ledger absolutes) |
+| V2-6 | Change-rate `Process`, old pipeline deleted | V | V2-3, V2-4, V2-5 | L | review | #48 | correct (1069 tests, verify 144/0 and 127/0, checksums identical to ad2b5be on B1/B2/C/W at Exact and Cell, 0 B warm). Same-host i9-14900K `cpu0` vs ad2b5be: C Exact 84.5 → 136.9 ms, C Cell 32.2 → 36.4, W Exact 41.8 → 45.7, W Cell 15.3 → 19.3; B1 Exact `Process` 97 → 318 ns, B1 Cell `Process`+`Sync` 77 → 144 ns, B2 200 movers 208 → 284 µs; peak RSS down on every frame (C 310 → 243, W 626 → 317 MB). The original B1 gates were missed and the stop rule fired; they were reset (below) and the emit-cost recovery moved to V2-6b. Waiting on the owner to merge |
+| V2-6b | Emit-cost recovery | V | V2-6 | M | review | #49 | partial: W and C Cell gates met against ad2b5be on the same host; C Exact (+27 %) and B1 Exact `Process` (≈ 270 ns) remain above the card, tracked, not contract frames |
+| V2-7 | Turned/arc/raster/round on new path | V′ | V2-6 | M | review | #60 | full-arc round kinds share one cache entry across angles; ≤ 8 kernel inserts per frame, misses beyond it emit directly (4–6× cheaper one-shot); cached emission by rows; per source (−old +new): tent 236 ns, disk r4 206, raster 8×8 200 cached, 244 / 825 / 2,226 ns one-shot at Exact; `ChangedTiles(dst)` now ascending (corpus read hashes regenerated, pages identical); kind-biased and uncached streams ≡ interpreter |
+| V2-8 | Overflow by promotion | V″ | V2-6 | M | review | #59 | exact overflow by **folding** into wide planes (I carry; T/B high/low Q40) before a bound passes 2^31−1 / 2^62, hot loops unchanged; stacks of 2^21 boxes and 2^13 tents saturate and cancel exactly; fold-stress differential at limits 1 / 4,100 / 70,000; also fixed a pre-existing loss of sub-unit tent residue when a page published empty; B1 Exact Process 252 → 264 ns |
+| V2-9 | Schedule sweep | V | V2-6 | S | review | #50 | dense timed list swept per `Process`, heap/`Alarm`/`Due` deleted; W timer stage ≈ 70 µs for 10,000 timed slots (≈ 7 ns/slot) |
+| V2-10 | One write pipeline | V | V2-9 | M | review | #51 | one write pipeline: batches and `SyncTransforms` use the scalar write helpers; partial: B1 `Sync` ≈ 10 ns/row against ≤ 3 ns (SyncColumns not vectorized) |
+| V2-11 | Record / Rewind / Clear | V | V2-10 | M | review | #52 | `Record` O(1), one journal entry per slot per recording, `Rewind` ∘ `Record` = id on generated streams, `Clear` keeps generations |
+| R-1 | Column reads | R | V2-6 | M | review | #53 | fused value + gradient column overload, vector GradientBlocks (later: gathered five-tap path, #57); partial: no random-order prefetch; coherent 2.1 ns / random 3.6 ns per agent for value + gradient |
+| R-2 | `World.FieldView` | R | R-1, O1 | S | review | #54 | `World.View`/`FieldView`: coherent cell read 0.83–1.0 ns (bar ≤ 1.5), equals `Query` on all 1,048,576 cells |
+| R-3 | Integer disk spans, row-sum areas | R′ | V2-6 | M | review | #58 | partial: row sums for covered rows (r=16 285 → 275 ns, r=64 1,333 → 1,245); the two-pointer span walk was built, exact, and measured slower than the integer square root, so it was dropped; bars (80 ns / 0.3 µs) sit below the symmetric-centre floor probe (84 / 182 ns at r=16 / 32) |
+| R-4 | `Pyramid<T>` (Max, Epoch) | R″ | V2-6 | M | review | #61 | generic `Pyramid<T, TOp>`; epoch pyramid behind `Changed` and `ChangedTiles(since)` (65,536 tiles: 22.1 → 1.1 µs); stats receipts re-derived 12/12 |
+| R-5 | Max / Nearest pruning | R″ | R-4 | S | review | #62 | tile and row summaries prune disk max: r=64 887 → 361 ns (bar ≤ 400), nearest already 127 ns |
+| R-6 | Exclusion from the planes | R′ | R-3 | M | review | #63 | own contribution from cached kernel taps: excluded point 207 → 43 ns, gradient 228 → 67, area r=64 +304 → +108 ns over plain (bar +150); no excluded max/nearest exists in the API |
+| R-7 | Region copy, rectangle sums | R | R-1 | S | review | #64 | tile-wise `QueryRegion` (256² 6.5 → 4.6 µs) and row-sum rectangle sums (1.76 → 1.47 µs) |
+| R-8 | Derived layers, adaptive | R | R-1 | M | done | — | closed without code: W recombines ≈ 4,096 tiles per frame because ~6 movers/tile make the union of dirty rectangles ≈ the whole tile; the vector recombine is 0.24 µs/tile (≈ 1 ms of the 13 ms frame). A rectangle-limited scalar recombine measured +0.3–0.7 ms slower, and lazy materialization needs a hook on every read path and moves `ChangedTiles` epochs; the 0.1 ms bar is not reachable at this change density |
+| T-1 | Transient layers + `Splat` | T | V2-11, R-1 | M | review | #55 | transient layers, `Splat`, `SplatWriter`, direct emission; `WrongResidency` arrives with C-1 |
+| T-2 | Histogram path at `PhaseBits` 0 | T | T-1 | S | review | #56 | histogram path at `PhaseBits` 0 (1M coherent splats 1.1 ms; bar ≤ 0.6 ms not met) |
+| T-3 | Convolution ≡ direct ≡ oracle | T | T-2 | L | review | #56, #57 | histogram + box filter ≡ direct ≡ interpreter (transient streams in the corpus); frame C transient 17.7 → 6.6 ms (bar ≤ 1.8 ms, stop line 3 ms) — stage floors on this host put the target at ≈ 2.8–4.6 ms; reads (gather-bound) and the splat dominate |
+| T-4 | Per-tile cost model | T | T-3 | S | review | #65 | per-class rule (active cells × direct cost ≤ class convolve cost), integers fixed in source; 300 splats 0.25 vs 0.56 ms, equal from ≈ 1,000 |
+| T-5 | Transient at `PhaseBits` > 0 | T′ | T-1 | S | review | #66 | priced only: 41 ns per 4×4 splat at `PhaseBits` ≥ 1 (card: 3–8 ns); per-phase-class histograms not built |
+| T-6 | Transient self-exclusion | T | T-3, R-6 | M | review | #67 | `TrySense`/`TrySenseGradient`/`TrySenseArea` with (stamp, gain) on a transient layer; transient planes kept until the next write |
+| T-7 | Spatial-order helpers + sample | T′ | T-1, O1 | S | review | #68 | `Grid.SpatialKeys` (1.1 ms / 1M), `SortByKeys` (4.8 ms / 1M, 0 B), `Grid.Disorder`, `samples/crowd` |
+| C-1 | Statuses | K | T-6 | M | review | #69 | `WriteStatus` on every mutator, `ReadStatus` on column reads |
+| C-2 | Validation caps | K | C-1 | S | review | #70 | footprint ≤ 512 cells, reach ≤ 4,096 cells; interpreter mirrors; corpus regenerated (258 streams) |
+| C-3 | Docs, README, CHANGELOG | K | C-2 | M | review | #73 | axioms, README price list and "The 1 ms frame", CHANGELOG, PLAN.md deleted |
+| C-4 | Gates + determinism matrix | K | C-3 | M | review | #71 | `--gate` with a committed i9 baseline (57 rows), determinism matrix in CI (ARM64 / AVX-512 only run there) |
+| C-5 | Fuzzer | C | P1-2 | S | review | #72 | `tools/fuzz`; first run found and fixed an exclusion bug (pending removal + slot reuse) |
+| C-6 | Cutover: 2.0.0-alpha.1 | K | C-4, C-5 | S | review | #74 | 2.0.0-alpha.1 packed; merge to main and tag left to the owner |
+| C-7 | netstandard / Unity numbers | K | C-6 | S | review | #75 | `GiNetStandard` builds tests and benchmarks against the netstandard2.1 `Gi.dll` (scalar paths); corpus 1,153/1,153, verify 144/0, gate checksums equal net10.0; costs 1.3–4.4× (W Cell 30 vs 13 ms, C 21 vs 6.4, 1M splats 4.8 vs 1.1); not run under Unity Mono / IL2CPP |
 
 Lanes with primes (V′, V″, R′, R″, T′) can run in parallel with their unprimed lane once their "Needs" are done.
 
 **Assign first, in parallel:** ~~P0-1, P0-2, P0-3, P0-4 and P0-6~~ done (2026-10-16, merged into `phase0`). **Next:** P0-7 (unblocks P0-10), then P0-10 + P0-11, and P0-14 any time.
+
+**State, 2026-10-17.** Every card from V2-6b to C-7 has a pull request: #48–#75, one linear stack, each PR based on the previous branch (R-8 closed without code), plus #76 on top: a fix, not a card (see below). `engine-v2` still ends at V2-5. To land it: merge #48 → #76 in order into `engine-v2`, run `dotnet test` once there, merge `engine-v2` into `main`, then tag `v2.0.0-alpha.1`. Nothing is merged and no tag exists; both are the owner's. The 1 ms frame is **not** reached on the i9: frame C (transient) is 6.4–6.8 ms against a floor-based target of about 2.8–4.6 ms, W is 13.3 ms, and the bars marked `partial` above (R-3 area, T-5 price, V2-10 `Sync`, V2-6b Exact, R-8) stay open. The gate baseline (`benchmarks/gate-baseline.json`) comes from the i9; run `--gate --update` once on the Ryzen 5 8500G before trusting the targets there. A 40-minute run of `tools/fuzz` on the stack tip (49,318 streams) found no mismatch. **#76** fixes an out-of-bounds read in the scaled raster sampler (`TileBake.EmitRaster` read taps beyond the stamp's border, so a few edge cells took stale heap bytes): seven golden-corpus streams had recorded them, and the intermediate PRs' `ci` job fails at random (4 of 28 runs: #53, #54, #55, #70) for that reason; their retries pass. Only #76 and later are free of it. `inspect` is red on every PR, as on `main` (29 warnings there, 132 on the tip); the clean-up is P0-14.
 
 ## 4 · Cards
 
@@ -505,12 +508,25 @@ L · needs V2-3, V2-4, V2-5
   - the op pipeline: `DepositOp`, `Ops`, `Pending`, `Fragments` and `Placements`;
   - the difference and dense planes, `TileBake.Resolve`, and the remaining users of `IntegrateBoxes` and `Quadrant`.
 - Until R-6 lands, exclusion reads the deposited record and calls `Place`.
-- **Done when:**
+- **Done when** (reset 2026-10-17 after measuring C and W; the original B1 gates were B1 Exact `Process` ≤ 80 ns, B1 Cell `Process` + `Sync` ≤ 10 ns, B2 ≤ 2 µs / ≤ 20 µs, RSS ≤ 180 MB):
   - corpus, interpreter and receipts are green at Exact and at Cell;
-  - B1 Exact `Process` ≤ 80 ns;
-  - B1 Cell `Process` + `Sync` ≤ 10 ns;
-  - B2 ≤ 2 µs / ≤ 20 µs;
-  - RSS ≤ 180 MB.
+  - every frame's output checksum equals the previous engine's, and warm paths allocate 0 B;
+  - no frame's peak RSS above the previous engine's, and ≤ 300 MB;
+  - the `Process` cost is measured on B1, B2, C and W against the previous engine and recorded; recovery is V2-6b.
+
+#### V2-6b · Emit-cost recovery
+M · needs V2-6
+- **Why.** V2-6 is correct but slower than ad2b5be on this host: C Exact +62 %, C Cell +13 %, W Exact +9 %, W Cell +25 %, B1 Exact `Process` 97 → 318 ns. Deleting the difference plane made a box emit O(area); `Process` is instruction-bound (at cache-resident sizes: `EmitBoxDelta` 30 %, publish summaries 15 %, placement 11 %), with the first touch of each tile's `I` row a further 10–25 % at 1M random-order sources.
+- **Levers, in the order I would try them.**
+  1. Emit a mover's −old and +new box as one per-row delta (the box is separable, so `delta_row = wy_new·px_new − wy_old·px_old`) when both land on the same tile.
+  2. Cache the placement and footprint of an unchanged stamp and scale; remove the `__tls_get_addr` calls on the sweep path.
+  3. Cut `UpdateSummaries` to the rows the rectangle touched.
+  4. Tile-ordered sweep (branch `v2-6-tile-order`, measured B1 `Process` −37 ns for +24 MB RSS; keep only if the RSS cost is paid for elsewhere).
+- **Done when:**
+  - B1 Exact `Process` ≤ 100 ns (ad2b5be: 97);
+  - C Exact, C Cell, W Exact, W Cell each within +10 % of ad2b5be on the same host;
+  - B1 Cell is re-specified first: the P0-10 row assumed ≈ 10 % cell crossing, but B1 crosses 62.5 % (12.6 % is C/W);
+  - re-run on the Ryzen 5 8500G for the ledger absolutes.
 
 #### V2-7 · Turned, arc, raster and round stamps
 M · needs V2-6

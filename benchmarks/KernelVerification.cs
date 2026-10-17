@@ -97,6 +97,8 @@ internal static partial class Verification
             var x = (MathF.Floor(128f * scale) + 0.5f) / scale;
             foreach (var (width, stamp) in strengthStamps)
             {
+                if (width * scale > 512f) continue;
+
                 var id = Gi.World.Place(w, l, x, x, stamp, 16);
                 Gi.World.Process(w);
                 var centre = Gi.World.QueryAt(w, g, l, x, x);

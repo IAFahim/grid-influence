@@ -7,7 +7,9 @@ on any timeline package and must not gain one.
 
 The public surface is exactly `World`, `Grid`, `Layer`, `Stamp`. Do not add a second engine, a
 parallel field type, or an alternate query surface — this repository carried two engines once
-and the re-emitted marks engine was retired for it. Extensions go through the existing handles.
+and the re-emitted marks engine was retired for it. Extensions go through the existing handles;
+`World.FieldView` (a `ref struct` nested in `World`) and the `Grid` spatial-order helpers are the
+only nested additions.
 
 ## Code rules
 
@@ -29,6 +31,10 @@ dotnet run --project samples/world -c Release --no-build
 dotnet run --project benchmarks -c Release --no-build -- --verify
 DOTNET_EnableHWIntrinsic=0 dotnet run --project benchmarks -c Release --no-build -- --verify
 ```
+
+Changes that can move a timing also run `dotnet run --project benchmarks -c Release --no-build -- --gate` on one
+pinned core (`taskset -c 0`), and refresh `benchmarks/gate-baseline.json` with `--gate --update` only
+on the host that recorded it.
 
 Package changes also require `dotnet pack src/Gi` plus a version review. Never move a published
 tag.

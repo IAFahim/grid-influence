@@ -20,8 +20,8 @@ public sealed class SourceSafetyTests
             var third = World.Place(world, layer, 24.5f, 24.5f, stamp, 1);
             World.Process(world);
             World.Remove(world, first);
-            int next;
-            int last;
+            World.SourceId next;
+            World.SourceId last;
             if (batch)
             {
                 World.SourceCommand[] commands =
@@ -45,10 +45,10 @@ public sealed class SourceSafetyTests
                 last = World.Place(world, layer, 40.5f, 40.5f, stamp, 3);
             }
 
-            Assert.Equal(first & World.SourceIndexMask, next & World.SourceIndexMask);
-            Assert.Equal(second & World.SourceIndexMask, last & World.SourceIndexMask);
+            Assert.Equal(first.Slot, next.Slot);
+            Assert.Equal(second.Slot, last.Slot);
             var remaining = World.Place(world, layer, 48.5f, 48.5f, stamp, 4);
-            Assert.Equal(third & World.SourceIndexMask, remaining & World.SourceIndexMask);
+            Assert.Equal(third.Slot, remaining.Slot);
             World.Move(world, first, 1.5f, 1.5f);
             World.Remove(world, second);
             World.Process(world);
@@ -83,7 +83,7 @@ public sealed class SourceSafetyTests
             xs[0] = float.NaN;
             xs[63] = float.PositiveInfinity;
             ys[64] = float.NegativeInfinity;
-            fixed (int* id = ids)
+            fixed (World.SourceId* id = ids)
             fixed (float* x = xs, y = ys)
             fixed (ulong* invalid = mask)
             {

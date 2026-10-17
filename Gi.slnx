@@ -4,6 +4,7 @@
     <Project Path="src/Gi.Validation/Gi.Validation.csproj" />
   </Folder>
   <Folder Name="/samples/">
+    <Project Path="samples/crowd/Gi.CrowdSample.csproj" />
     <Project Path="samples/world/Gi.WorldSample.csproj" />
   </Folder>
   <Folder Name="/tests/">
@@ -14,6 +15,7 @@
   </Folder>
   <Folder Name="/tools/">
     <Project Path="viz/Gi.Viz.csproj" />
+    <Project Path="tools/fuzz/Gi.Fuzz.csproj" />
     <Project Path="tools/stats/Gi.Stats.csproj" />
   </Folder>
 </Solution>

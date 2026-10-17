@@ -412,7 +412,7 @@ public sealed class ApiExamples
         var w = World.New();
         Grid.New(w, 8, 0f, 0f, 256f);
         var threat = Layer.New(w);
-        var ids = new int[128];
+        var ids = new World.SourceId[128];
         var xs = new float[128];
         var ys = new float[128];
         for (var i = 0; i < ids.Length; i++)
@@ -428,11 +428,11 @@ public sealed class ApiExamples
         var moved = new float[128];
         fixed (float* xsp = xs, ysp = ys)
         fixed (float* mp = moved)
-        fixed (int* idp = ids)
+        fixed (World.SourceId* idp = ids)
         {
             var values = stackalloc short[128];
             var whole = stackalloc ulong[2];
-            Assert.True(World.SenseColumn(w, threat, xsp, ysp, 128, values, whole));
+            Assert.True((World.SenseColumn(w, threat, xsp, ysp, 128, values, whole) == World.ReadStatus.Complete));
             Assert.True(values[0] >= 4 * 40);
             Assert.Equal(1ul << 0, whole[0] & 1ul);
 
@@ -454,7 +454,7 @@ public sealed class ApiExamples
         var w = World.New();
         var g = Grid.New(w, 8, 0f, 0f, 256f);
         var l = Layer.New(w);
-        var ids = new int[65];
+        var ids = new World.SourceId[65];
         var xs = new float[65];
         var ys = new float[65];
         for (var i = 0; i < ids.Length; i++)
@@ -466,7 +466,7 @@ public sealed class ApiExamples
 
         World.Process(w);
         World.Remove(w, ids[64]);
-        fixed (int* idp = ids)
+        fixed (World.SourceId* idp = ids)
         fixed (float* xp = xs)
         fixed (float* yp = ys)
         {

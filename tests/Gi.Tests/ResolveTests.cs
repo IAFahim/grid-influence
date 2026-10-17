@@ -1,312 +1,6 @@
-using System.Runtime.Intrinsics.Arm;
-using System.Runtime.Intrinsics.X86;
 using Xunit;
 
 namespace Gi.Tests;
-
-public enum ResolvePath
-{
-    Dispatch,
-    Scalar,
-    Vector128,
-    Vector256,
-}
-
-public sealed unsafe class ResolveTests
-{
-    private const int Size = TileBake.TileSize;
-    private const int Cells = Size * Size;
-    private const int Pitch = TileBake.DiffPitch;
-    private const int Rows = TileBake.DiffRows;
-
-    private static readonly int[] EdgeInts =
-    {
-        int.MinValue, int.MaxValue, 1 << 29, -(1 << 29), (1 << 29) - 1, -(1 << 29) - 1,
-        1 << 30, -(1 << 30), 0, 1, -1, 17,
-    };
-
-    private static readonly long[] EdgeLongs =
-    {
-        long.MinValue, long.MaxValue, 0, 1, -1, 1L << 40, -(1L << 40), 2L << 40,
-        (1L << 51) - 1, -(1L << 51), 1L << 62, -(1L << 62),
-    };
-
-    public static TheoryData<ResolvePath> Paths()
-    {
-        var data = new TheoryData<ResolvePath>();
-        data.Add(ResolvePath.Dispatch);
-        data.Add(ResolvePath.Scalar);
-        data.Add(ResolvePath.Vector128);
-        data.Add(ResolvePath.Vector256);
-        return data;
-    }
-
-    private static bool Supported(ResolvePath path) => path switch
-    {
-        ResolvePath.Vector128 => Sse2.IsSupported || AdvSimd.IsSupported,
-        ResolvePath.Vector256 => Avx2.IsSupported,
-        _ => true,
-    };
-
-    private static ResolveOutcome Invoke(ResolvePath path, int* difference, int* dense, int* previousRow,
-        long* tent, long* bell, short* output, long* pageSum, short* pageMax) => path switch
-    {
-        ResolvePath.Vector128 => TileBake.Resolve128(difference, dense, previousRow, tent, bell, output, pageSum, pageMax),
-        ResolvePath.Vector256 => TileBake.Resolve256(difference, dense, previousRow, tent, bell, output, pageSum, pageMax),
-        ResolvePath.Scalar => TileBake.ResolveScalar(difference, dense, previousRow, tent, bell, output, pageSum, pageMax),
-        _ => TileBake.Resolve(difference, dense, previousRow, tent, bell, output, pageSum, pageMax),
-    };
-
-    private sealed class Tile
-    {
-        public int[] Difference = new int[Pitch * Rows];
-        public int[] Dense = new int[Cells];
-        public int[] PreviousRow = new int[Size];
-        public long[]? Tent;
-        public long[]? Bell;
-        public short[]? Published;
-    }
-
-    private sealed class Expected
-    {
-        public short[] Output = new short[Cells];
-        public int[] PreviousRow = new int[Size];
-        public long PageSum;
-        public short PageMax = short.MinValue;
-        public bool Any;
-        public bool Changed;
-    }
-
-    private static short[] SeedPage(int salt)
-    {
-        var page = new short[Cells];
-        for (var i = 0; i < Cells; i++) page[i] = (short)((i * 40503 + salt * 977) % 65536 - 32768);
-        return page;
-    }
-
-    private static Expected Expect(Tile tile)
-    {
-        var expected = new Expected();
-        var published = tile.Published ?? new short[Cells];
-        tile.PreviousRow.CopyTo(expected.PreviousRow, 0);
-        unchecked
-        {
-            for (var y = 0; y < Size; y++)
-            {
-                var carry = 0;
-                for (var x = 0; x < Size; x++)
-                {
-                    carry += tile.Difference[y * Pitch + x];
-                    var boxes = carry + expected.PreviousRow[x];
-                    expected.PreviousRow[x] = boxes;
-                    var tent = tile.Tent != null ? TileBake.RoundQ40(tile.Tent[y * Size + x]) : 0;
-                    var bell = tile.Bell != null ? TileBake.RoundQ40(tile.Bell[y * Size + x]) : 0;
-                    var total = (long)boxes + tile.Dense[y * Size + x] + tent + bell;
-                    if (total != 0) expected.Any = true;
-                    var cell = (short)Math.Clamp(total, short.MinValue, short.MaxValue);
-                    expected.Output[y * Size + x] = cell;
-                    if (cell != published[y * Size + x]) expected.Changed = true;
-                    if (cell > expected.PageMax) expected.PageMax = cell;
-                    expected.PageSum += cell;
-                }
-            }
-        }
-
-        return expected;
-    }
-
-    private static short[] Check(ResolvePath path, Tile tile, out bool any)
-    {
-        if (!Supported(path))
-        {
-            any = false;
-            return new short[Cells];
-        }
-
-        var expected = Expect(tile);
-        var output = new short[Cells];
-        if (tile.Published != null) tile.Published.CopyTo(output, 0);
-        var previousRow = (int[])tile.PreviousRow.Clone();
-        long pageSum = long.MinValue;
-        short pageMax = 0;
-        ResolveOutcome outcome;
-        fixed (int* difference = tile.Difference)
-        fixed (int* dense = tile.Dense)
-        fixed (int* prev = previousRow)
-        fixed (long* tent = tile.Tent)
-        fixed (long* bell = tile.Bell)
-        fixed (short* page = output)
-        {
-            outcome = Invoke(path, difference, dense, prev, tent, bell, page, &pageSum, &pageMax);
-        }
-
-        Assert.Equal(expected.Output, output);
-        Assert.Equal(expected.PreviousRow, previousRow);
-        Assert.Equal(expected.PageSum, pageSum);
-        Assert.Equal(expected.PageMax, pageMax);
-        Assert.Equal(expected.Any, (outcome & ResolveOutcome.Empty) == 0);
-        Assert.Equal(expected.Changed, (outcome & ResolveOutcome.Changed) != 0);
-        any = (outcome & ResolveOutcome.Empty) == 0;
-        return output;
-    }
-
-    [Theory]
-    [MemberData(nameof(Paths))]
-    public void BoxesAndDenseBeyondInt32_SaturatePositive(ResolvePath path)
-    {
-        if (!Supported(path)) return;
-        var tile = new Tile { Difference = new int[Pitch * Rows] };
-        tile.Difference[0] = 1_500_000_000;
-        tile.Dense[0] = 1_500_000_000;
-        var output = Check(path, tile, out _);
-        Assert.Equal((short)32767, output[0]);
-    }
-
-    [Theory]
-    [MemberData(nameof(Paths))]
-    public void BoxesAndDenseBeyondInt32_SaturateNegative(ResolvePath path)
-    {
-        if (!Supported(path)) return;
-        var tile = new Tile();
-        tile.Difference[0] = -1_500_000_000;
-        tile.Dense[0] = -1_500_000_000;
-        var output = Check(path, tile, out _);
-        Assert.Equal((short)-32768, output[0]);
-    }
-
-    [Theory]
-    [MemberData(nameof(Paths))]
-    public void Int32MaxBoxesAndDensePlusTent_ReportsAny(ResolvePath path)
-    {
-        if (!Supported(path)) return;
-        var tile = new Tile { Tent = new long[Cells] };
-        tile.Difference[0] = int.MaxValue;
-        tile.Dense[0] = int.MaxValue;
-        tile.Tent[0] = 2L << 40;
-        var output = Check(path, tile, out var any);
-        Assert.True(any);
-        Assert.Equal((short)32767, output[0]);
-    }
-
-    [Theory]
-    [MemberData(nameof(Paths))]
-    public void EdgeValueGrid_MatchesLongReference(ResolvePath path)
-    {
-        var tile = new Tile { Tent = new long[Cells], Bell = new long[Cells], Published = SeedPage(1) };
-        for (var i = 0; i < tile.Difference.Length; i++)
-            tile.Difference[i] = EdgeInts[i % EdgeInts.Length];
-        for (var i = 0; i < Cells; i++)
-        {
-            tile.Dense[i] = EdgeInts[(i * 7 + 3) % EdgeInts.Length];
-            tile.Tent[i] = EdgeLongs[i % EdgeLongs.Length];
-            tile.Bell[i] = EdgeLongs[(i * 5 + 7) % EdgeLongs.Length];
-        }
-
-        for (var i = 0; i < Size; i++)
-            tile.PreviousRow[i] = EdgeInts[(i * 5 + 1) % EdgeInts.Length];
-        Check(path, tile, out _);
-    }
-
-    public enum Regime
-    {
-        Small,
-        NearBound,
-        FullInt32,
-        MixedEdges,
-    }
-
-    public static TheoryData<Regime, int, bool, bool, ResolvePath> RandomPlanes()
-    {
-        var data = new TheoryData<Regime, int, bool, bool, ResolvePath>();
-        foreach (Regime regime in Enum.GetValues<Regime>())
-        foreach (var seed in new[] { 1, 2, 3, 4, 5 })
-        foreach (var tent in new[] { false, true })
-        foreach (var bell in new[] { false, true })
-        foreach (ResolvePath path in Enum.GetValues<ResolvePath>())
-            data.Add(regime, seed, tent, bell, path);
-        return data;
-    }
-
-    [Theory]
-    [MemberData(nameof(RandomPlanes))]
-    public void RandomPlanes_MatchLongReference(Regime regime, int seed, bool withTent, bool withBell, ResolvePath path)
-    {
-        var random = new Random((int)regime * 7919 + seed * 104729);
-        var tile = new Tile
-        {
-            Tent = withTent ? new long[Cells] : null,
-            Bell = withBell ? new long[Cells] : null,
-            Published = SeedPage(seed),
-        };
-        unchecked
-        {
-            for (var i = 0; i < tile.Difference.Length; i++)
-                tile.Difference[i] = NextInt(random, regime);
-            for (var i = 0; i < Cells; i++)
-            {
-                tile.Dense[i] = NextInt(random, regime);
-                if (withTent) tile.Tent![i] = NextLong(random, regime);
-                if (withBell) tile.Bell![i] = NextLong(random, regime);
-            }
-
-            for (var i = 0; i < Size; i++)
-                tile.PreviousRow[i] = NextInt(random, regime);
-        }
-
-        Check(path, tile, out _);
-    }
-
-    [Theory]
-    [MemberData(nameof(Paths))]
-    public void ResolveTwice_SecondPassIsNotEmptyButUnchanged(ResolvePath path)
-    {
-        if (!Supported(path)) return;
-        var tile = new Tile { Tent = new long[Cells] };
-        tile.Difference[5 * Pitch + 3] = 40_000;
-        tile.Tent[10 * Size + 11] = 3L << 40;
-        var first = Check(path, tile, out var anyFirst);
-        Assert.True(anyFirst);
-        tile.Published = first;
-        var second = Check(path, tile, out var anySecond);
-        Assert.True(anySecond);
-        Assert.Equal(first, second);
-    }
-
-    [Theory]
-    [MemberData(nameof(Paths))]
-    public void CancelledDeposit_LeavesEmptyPageUnchanged(ResolvePath path)
-    {
-        if (!Supported(path)) return;
-        var tile = new Tile();
-        var variant = StampCatalog.Get(Stamp.Box(8, 8, 60));
-        fixed (int* difference = tile.Difference)
-        {
-            if (!TileBake.Place(16.5f, 16.5f, 0f, 0f, 256, 256, variant, 0, 256, out var p)) Assert.Fail();
-            TileBake.EmitBox(difference, 0, 0, p.Px, p.Py, p.Fx, p.Fy, p.ExtentX, p.ExtentY, variant, 5);
-            TileBake.EmitBox(difference, 0, 0, p.Px, p.Py, p.Fx, p.Fy, p.ExtentX, p.ExtentY, variant, -5);
-        }
-
-        var output = Check(path, tile, out var any);
-        Assert.False(any);
-        Assert.Equal(new short[Cells], output);
-    }
-
-    private static int NextInt(Random random, Regime regime) => regime switch
-    {
-        Regime.Small => random.Next(-1000, 1001),
-        Regime.NearBound => random.Next(-(1 << 29), (1 << 29) + 1),
-        Regime.FullInt32 => random.Next(int.MinValue, int.MaxValue),
-        _ => EdgeInts[random.Next(EdgeInts.Length)],
-    };
-
-    private static long NextLong(Random random, Regime regime) => regime switch
-    {
-        Regime.Small => random.NextInt64(-(1L << 40), (1L << 40) + 1),
-        Regime.NearBound => random.NextInt64(-(1L << 51), (1L << 51) + 1),
-        Regime.FullInt32 => random.NextInt64(),
-        _ => EdgeLongs[random.Next(EdgeLongs.Length)],
-    };
-}
 
 public sealed class PlaneLimitTests
 {
@@ -331,7 +25,7 @@ public sealed class PlaneLimitTests
     }
 
     [Fact]
-    public void BoxPlane_WrapsAt2To20MaxAmplitudeSources_OnOneCell()
+    public void BoxPlane_SaturatesAt2To20MaxAmplitudeSources_OnOneCell()
     {
         var world = World.New();
         var grid = Grid.New(world, 8, 0f, 0f, 256f);
@@ -340,7 +34,7 @@ public sealed class PlaneLimitTests
         for (var i = 0; i < 1 << 20; i++)
             World.Place(world, layer, X, Y, stamp, -16);
         World.Process(world);
-        Assert.Equal((short)-32768, World.Query(world, grid, layer, CellX, CellY));
+        Assert.Equal((short)32767, World.Query(world, grid, layer, CellX, CellY));
         World.Free(world);
         Assert.True(Stamp.Free(stamp));
     }
@@ -361,7 +55,7 @@ public sealed class PlaneLimitTests
     }
 
     [Fact]
-    public void TentPlane_WrapsAt4096MaxAmplitudeSources_AtOnePeak()
+    public void TentPlane_SaturatesAt4096MaxAmplitudeSources_AtOnePeak()
     {
         var world = World.New();
         var grid = Grid.New(world, 8, 0f, 0f, 256f);
@@ -370,7 +64,7 @@ public sealed class PlaneLimitTests
         for (var i = 0; i < 4096; i++)
             World.Place(world, layer, X, Y, stamp, -16);
         World.Process(world);
-        Assert.True(World.Query(world, grid, layer, CellX, CellY) < 0);
+        Assert.Equal((short)32767, World.Query(world, grid, layer, CellX, CellY));
         World.Free(world);
         Assert.True(Stamp.Free(stamp));
     }
@@ -391,7 +85,7 @@ public sealed class PlaneLimitTests
     }
 
     [Fact]
-    public void BellPlane_WrapsAt4096MaxAmplitudeSources_AtOnePeak()
+    public void BellPlane_SaturatesAt4096MaxAmplitudeSources_AtOnePeak()
     {
         var world = World.New();
         var grid = Grid.New(world, 8, 0f, 0f, 256f);
@@ -400,13 +94,13 @@ public sealed class PlaneLimitTests
         for (var i = 0; i < 4096; i++)
             World.Place(world, layer, X, Y, stamp, -16);
         World.Process(world);
-        Assert.True(World.Query(world, grid, layer, CellX, CellY) < 0);
+        Assert.Equal((short)32767, World.Query(world, grid, layer, CellX, CellY));
         World.Free(world);
         Assert.True(Stamp.Free(stamp));
     }
 
     [Fact]
-    public void ExcludedSaturatedCell_MatchesTheFieldWithoutTheSource_WhenBoxesAndDenseOverflowInt32AsASum()
+    public void ExcludedSaturatedCell_MatchesTheFieldWithoutTheSource_WhenBoxesAndDenseSumPastInt32()
     {
         const int each = 550_000;
         const float px = 128f;
@@ -425,7 +119,7 @@ public sealed class PlaneLimitTests
 
         var box = Stamp.Box(2, 2, 127);
         var raster = Stamp.New(new sbyte[] { 127, 127, 127, 126 }, 2, 2);
-        var excluded = -1;
+        var excluded = default(World.SourceId);
         for (var i = 0; i < each; i++)
         {
             var id = World.Place(world, layers[0], px, py, box, 16);
@@ -447,7 +141,7 @@ public sealed class PlaneLimitTests
 
         Assert.True(World.TrySenseArea(world, layers[0], px, py, 4f, excluded, out var excludedArea));
         Assert.True(World.TrySenseArea(twin, layers[1], px, py, 4f, out var removedArea));
-        Assert.True(removedArea > 0);
+        Assert.True(removedArea != 0);
         Assert.Equal(removedArea, excludedArea);
 
         World.Free(world);

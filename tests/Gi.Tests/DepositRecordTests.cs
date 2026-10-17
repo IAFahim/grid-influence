@@ -3,14 +3,14 @@ using static Gi.World;
 
 namespace Gi.Tests;
 
-public sealed unsafe class LayerLiveTests : IDisposable
+public sealed unsafe class DepositRecordTests : IDisposable
 {
     private const int Layers = 3;
     private const int SeedCount = 120;
     private readonly byte _world = World.New();
     private readonly byte _stamp = Stamp.Box(1, 1, 3);
 
-    public LayerLiveTests()
+    public DepositRecordTests()
     {
         Grid.New(_world, 8, 0f, 0f, 256f);
         for (var layer = 0; layer < Layers; layer++) Assert.Equal(layer, Layer.New(_world));
@@ -29,38 +29,84 @@ public sealed unsafe class LayerLiveTests : IDisposable
         var counts = new int[Layers];
         var s = &World.GetContext(_world)->Sources;
         for (var i = 0; i < s->Count; i++)
-            if (s->Alive.Pointer[i] != 0 && s->Gain.Pointer[i] != 0) counts[s->Layer.Pointer[i]]++;
+            if (s->Alive[i] != 0 && s->Gain[i] != 0) counts[s->Layer[i]]++;
         return counts;
     }
 
     private int[] Maintained()
     {
-        var w = World.GetContext(_world);
         var counts = new int[Layers];
-        for (var layer = 0; layer < Layers; layer++) counts[layer] = w->LayerLive[layer];
+        var w = World.GetContext(_world);
+        var s = &w->Sources;
+        var records = w->Grids->Records.Pointer;
+        if (records == null) return counts;
+        for (var i = 0; i < s->Count; i++)
+            if (records[i].Alive != 0 && records[i].Gain != 0) counts[records[i].Layer]++;
         return counts;
     }
 
-    private void AssertExact(string step) => Assert.True(
-        Recount().AsSpan().SequenceEqual(Maintained()),
-        $"{step}: maintained [{string.Join(",", Maintained())}] recount [{string.Join(",", Recount())}]");
+    private static bool TargetEquals(SourceColumns* s, WorldCtx* w, DepositRecord* r, int slot)
+    {
+        if (s->Alive[slot] == 0)
+            return r->Alive == 0 && r->Gain == 0 && r->Stamp == 0 && r->Layer == 0 &&
+                r->Angle == 0 && r->Scale == 0 && r->Ax == 0 && r->Ay == 0;
 
-    private int PlaceAt(byte layer, sbyte gain, float x = 10.5f, float y = 10.5f)
+        var layer = s->Layer[slot];
+        if (r->Alive == 0 || r->Layer != layer || r->Stamp != s->Stamp[slot] ||
+            r->Gain != (sbyte)s->Gain[slot] ||
+            r->Angle != (ushort)(s->Angle[slot] & w->Recipes[layer].TurnMask) ||
+            r->Scale != s->Scale[slot])
+            return false;
+
+        var g = w->Grids;
+        var mask = w->Recipes[layer].AnchorMask;
+        return r->Ax == TileBake.AnchorQ8(s->X[slot], g->OriginX, g->ScaleQ8, mask) &&
+            r->Ay == TileBake.AnchorQ8(s->Y[slot], g->OriginY, g->ScaleQ8, mask);
+    }
+
+    private void AssertInvariant(string step)
+    {
+        var w = World.GetContext(_world);
+        var s = &w->Sources;
+        var records = w->Grids->Records.Pointer;
+        var marked = new HashSet<int>();
+        for (var i = 0; i < w->Changed.Length; i++)
+        {
+            var slot = w->Changed.Pointer[i];
+            Assert.True((int)s->Mark[slot] == w->MarkEpoch, $"{step}: changed slot {slot} unmarked");
+            Assert.True(marked.Add(slot), $"{step}: changed slot {slot} duplicated");
+        }
+
+        if (records == null) return;
+        for (var i = 0; i < s->Count; i++)
+            if ((int)s->Mark[i] != w->MarkEpoch)
+                Assert.True(TargetEquals(s, w, records + i, i), $"{step}: unswept slot {i} record diverged");
+    }
+
+    private void AssertExact(string step)
+    {
+        AssertInvariant(step);
+        Assert.True(
+            Recount().AsSpan().SequenceEqual(Maintained()),
+            $"{step}: maintained [{string.Join(",", Maintained())}] recount [{string.Join(",", Recount())}]");
+    }
+
+    private World.SourceId PlaceAt(byte layer, sbyte gain, float x = 10.5f, float y = 10.5f)
         => World.Place(_world, layer, x, y, _stamp, gain);
 
     [Fact]
-    public void ImmediateFade_KeepsTheCountExact()
+    public void ImmediateFade_KeepsTheRecordExact()
     {
         var id = PlaceAt(0, 5);
-        AssertExact("place");
+        AssertInvariant("place");
         World.Fade(_world, id, 0, 0);
-        AssertExact("fade to zero");
+        AssertInvariant("fade to zero");
         World.Fade(_world, id, 4, -1);
-        AssertExact("fade from zero");
+        AssertInvariant("fade from zero");
         World.Fade(_world, id, 4, 3);
-        AssertExact("fade to the current gain");
+        AssertInvariant("fade to the current gain");
         World.Fade(_world, id, -2, 0);
-        AssertExact("fade across zero");
+        AssertInvariant("fade across zero");
         World.Process(_world);
         AssertExact("process");
         Assert.Equal([1, 0, 0], Maintained());
@@ -100,8 +146,8 @@ public sealed unsafe class LayerLiveTests : IDisposable
         World.Expire(_world, live, 2);
         World.Expire(_world, silent, 1);
         World.Expire(_world, other, 3);
-        AssertExact("scheduled");
-        Assert.Equal([1, 0, 1], Maintained());
+        AssertInvariant("scheduled");
+        Assert.Equal([1, 0, 1], Recount());
         for (var tick = 0; tick < 4; tick++)
         {
             World.Process(_world);
@@ -127,7 +173,7 @@ public sealed unsafe class LayerLiveTests : IDisposable
     }
 
     [Fact]
-    public void BatchFold_KeepsTheCountExactAcrossPlaceRemoveFadeAndGain()
+    public void BatchFold_KeepsTheRecordExactAcrossPlaceRemoveFadeAndGain()
     {
         var first = PlaceAt(0, 3);
         var second = PlaceAt(1, 0);
@@ -147,7 +193,7 @@ public sealed unsafe class LayerLiveTests : IDisposable
         ];
         var results = new SourceResult[commands.Length];
         Assert.Equal(BatchStatus.Applied, World.ApplyBatch(_world, commands, results));
-        AssertExact("batch");
+        AssertInvariant("batch");
         World.Process(_world);
         AssertExact("process");
         World.Process(_world);
@@ -156,9 +202,9 @@ public sealed unsafe class LayerLiveTests : IDisposable
     }
 
     [Fact]
-    public void BatchAboveTheColumnThreshold_KeepsTheCountExact()
+    public void BatchAboveTheColumnThreshold_KeepsTheRecordExact()
     {
-        const int count = ResolvePool.ColumnThreshold + 1500;
+        const int count = 8192 + 1500;
         var create = new SourceCommand[count];
         for (var i = 0; i < count; i++)
         {
@@ -167,7 +213,7 @@ public sealed unsafe class LayerLiveTests : IDisposable
         }
         var created = new SourceResult[count];
         Assert.Equal(BatchStatus.Applied, World.ApplyBatch(_world, create, created));
-        AssertExact("create");
+        AssertInvariant("create");
 
         var update = new SourceCommand[count];
         for (var i = 0; i < count; i++)
@@ -185,19 +231,19 @@ public sealed unsafe class LayerLiveTests : IDisposable
 
         var updated = new SourceResult[count];
         Assert.Equal(BatchStatus.Applied, World.ApplyBatch(_world, update, updated));
-        AssertExact("update");
+        AssertInvariant("update");
         World.Process(_world);
         AssertExact("process");
     }
 
     [Fact]
-    public void Rewind_RecountsOnceAndMatchesTheStateBeforeRecording()
+    public void Rewind_RepublishesOnceAndMatchesTheStateBeforeRecording()
     {
         var a = PlaceAt(0, 3);
         var b = PlaceAt(1, 2);
         var c = PlaceAt(2, 0);
         World.Process(_world);
-        var before = Maintained();
+        var before = Recount();
         World.Record(_world);
         World.SetGain(_world, a, 0);
         World.Remove(_world, b);
@@ -206,10 +252,11 @@ public sealed unsafe class LayerLiveTests : IDisposable
         World.Process(_world);
         AssertExact("recorded");
         World.Rewind(_world);
-        AssertExact("rewound");
-        Assert.Equal(before, Maintained());
+        AssertInvariant("rewound");
+        Assert.Equal(before, Recount());
         World.Process(_world);
         AssertExact("process after rewind");
+        Assert.Equal(before, Maintained());
     }
 
     [Fact]
@@ -221,12 +268,14 @@ public sealed unsafe class LayerLiveTests : IDisposable
         World.SetGain(_world, a, 0);
         PlaceAt(1, 4);
         World.Rewind(_world);
-        AssertExact("rewound");
-        Assert.Equal([1, 0, 0], Maintained());
+        AssertInvariant("rewound");
+        Assert.Equal([1, 0, 0], Recount());
+        World.Process(_world);
+        AssertExact("process after rewind");
     }
 
     [Fact]
-    public void Clear_ResetsTheCount()
+    public void Clear_ResetsTheRecord()
     {
         PlaceAt(0, 3);
         PlaceAt(2, 1);
@@ -236,10 +285,10 @@ public sealed unsafe class LayerLiveTests : IDisposable
     }
 
     [Fact]
-    public void Process_DoesNotRecountWhileTimersAreScheduled()
+    public void Process_LeavesUnchangedSlotsOutOfTheSweep()
     {
         const int count = 200;
-        var ids = new int[count];
+        var ids = new World.SourceId[count];
         for (var i = 0; i < count; i++)
         {
             ids[i] = PlaceAt((byte)(i % Layers), 2, 1f + i, 1f + i);
@@ -248,26 +297,41 @@ public sealed unsafe class LayerLiveTests : IDisposable
 
         World.Process(_world);
         var w = World.GetContext(_world);
-        for (var layer = 0; layer < Layers; layer++) w->LayerLive[layer] = 90_000 + layer;
-        World.Move(_world, ids[0], 100.5f, 100.5f);
+        var records = w->Grids->Records.Pointer;
+        var snapshot = new DepositRecord[w->Sources.Count];
+        for (var i = 0; i < snapshot.Length; i++) snapshot[i] = records[i];
+
         World.Process(_world);
-        for (var layer = 0; layer < Layers; layer++) Assert.Equal(90_000 + layer, w->LayerLive[layer]);
+        Assert.Equal(0, w->Changed.Length);
+        for (var i = 0; i < snapshot.Length; i++)
+            Assert.Equal(snapshot[i], records[i]);
+
+        World.Move(_world, ids[0], 100.5f, 100.5f);
+        Assert.Equal(1, w->Changed.Length);
+        World.Process(_world);
+        Assert.Equal(0, w->Changed.Length);
+        Assert.NotEqual(snapshot[0], records[0]);
+        for (var i = 1; i < snapshot.Length; i++)
+            Assert.Equal(snapshot[i], records[i]);
+        World.Process(_world);
+        Assert.Equal(0, World.ChangedTiles(_world, 0, 0, null));
     }
 
     [Theory]
     [MemberData(nameof(Seeds))]
-    public void RandomStreams_KeepTheCountEqualToABruteForceRecount(int seed)
+    public void RandomStreams_KeepTheRecordEqualToABruteForceRecount(int seed)
     {
         var random = new Random(seed);
-        var ids = new List<int>();
+        var ids = new List<World.SourceId>();
         var recording = false;
         sbyte Gain() => (sbyte)random.Next(-3, 4);
-        int Target() => ids.Count == 0 ? -1 : ids[random.Next(ids.Count)];
+        World.SourceId Target() => ids.Count == 0 ? default : ids[random.Next(ids.Count)];
         float Coordinate() => 2f + random.Next(240);
 
         for (var step = 0; step < 600; step++)
         {
             var action = random.Next(100);
+            var processed = false;
             if (action < 14) ids.Add(PlaceAt((byte)random.Next(Layers), Gain(), Coordinate(), Coordinate()));
             else if (action < 20) World.Move(_world, Target(), Coordinate(), Coordinate());
             else if (action < 30) World.SetGain(_world, Target(), Gain());
@@ -276,7 +340,11 @@ public sealed unsafe class LayerLiveTests : IDisposable
             else if (action < 54) World.Remove(_world, Target());
             else if (action < 57) World.Turn(_world, Target(), random.Next(7));
             else if (action < 60) World.Scale(_world, Target(), 0.5f + random.Next(4));
-            else if (action < 76) World.Process(_world);
+            else if (action < 76)
+            {
+                World.Process(_world);
+                processed = true;
+            }
             else if (action < 90) ids.AddRange(RandomBatch(random, ids));
             else if (action < 94)
             {
@@ -297,15 +365,17 @@ public sealed unsafe class LayerLiveTests : IDisposable
             {
                 World.Clear(_world);
                 recording = false;
+                processed = true;
             }
 
-            AssertExact($"seed {seed} step {step} action {action}");
+            if (processed) AssertExact($"seed {seed} step {step} action {action}");
+            else AssertInvariant($"seed {seed} step {step} action {action}");
         }
     }
 
-    private List<int> RandomBatch(Random random, List<int> ids)
+    private List<World.SourceId> RandomBatch(Random random, List<World.SourceId> ids)
     {
-        var created = new List<int>();
+        var created = new List<World.SourceId>();
         var count = random.Next(1, 9);
         var commands = new SourceCommand[count];
         var places = new List<int>();
@@ -314,7 +384,7 @@ public sealed unsafe class LayerLiveTests : IDisposable
             SourceTarget target;
             var useCreated = places.Count > 0 && random.Next(3) == 0;
             if (useCreated) target = SourceTarget.CreatedBy(places[random.Next(places.Count)]);
-            else target = ids.Count == 0 ? -1 : ids[random.Next(ids.Count)];
+            else target = ids.Count == 0 ? default(World.SourceId) : ids[random.Next(ids.Count)];
             var gain = (sbyte)random.Next(-3, 4);
             var x = 2f + random.Next(240);
             var y = 2f + random.Next(240);

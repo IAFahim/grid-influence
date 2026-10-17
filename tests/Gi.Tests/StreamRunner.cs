@@ -5,18 +5,20 @@ internal sealed unsafe class StreamRunner
     private const ulong AuxSalt = StreamOperands.AuxSalt;
     private const int MaxTiles = 64;
     private const int MaxColumn = 8;
-    private static readonly bool PooledMode = Environment.GetEnvironmentVariable("GI_DIFFERENTIAL_POOLED") == "1";
 
     private readonly StreamSetup _setup;
     private readonly List<StreamCommand> _commands;
     private readonly BugInjection? _bug;
     private readonly Action<int, byte, byte, short[]>? _onPage;
-    private readonly List<int> _attemptIds = [];
+    private readonly (long I, long Q40)? _fold;
+    private readonly bool _uncached;
+    private readonly long _convolveCost;
+    private readonly List<World.SourceId> _attemptIds = [];
     private readonly int[] _actualTiles = new int[MaxTiles];
     private readonly int[] _expectedTiles = new int[MaxTiles];
     private readonly float[] _columnXs = new float[MaxColumn];
     private readonly float[] _columnYs = new float[MaxColumn];
-    private readonly int[] _columnExcludes = new int[MaxColumn];
+    private readonly World.SourceId[] _columnExcludes = new World.SourceId[MaxColumn];
     private readonly short[] _columnActual = new short[MaxColumn];
     private readonly short[] _columnExpected = new short[MaxColumn];
     private readonly float[] _gradientActualX = new float[MaxColumn];
@@ -39,47 +41,44 @@ internal sealed unsafe class StreamRunner
         StreamSetup setup,
         List<StreamCommand> commands,
         BugInjection? bug,
-        Action<int, byte, byte, short[]>? onPage)
+        Action<int, byte, byte, short[]>? onPage,
+        (long I, long Q40)? fold,
+        bool uncached,
+        long convolveCost)
     {
         _setup = setup;
         _commands = commands;
         _bug = bug;
         _onPage = onPage;
+        _fold = fold;
+        _uncached = uncached;
+        _convolveCost = convolveCost;
     }
 
     public static void Run(
         StreamSetup setup,
         List<StreamCommand> commands,
         BugInjection? bug = null,
-        Action<int, byte, byte, short[]>? onPage = null)
+        Action<int, byte, byte, short[]>? onPage = null,
+        (long I, long Q40)? fold = null,
+        bool uncached = false,
+        long convolveCost = 0)
     {
-        if (PooledMode)
-        {
-            new StreamRunner(setup, commands, bug, onPage).Execute();
-            return;
-        }
-
-        var previous = ResolvePool.SerialOnly;
-        ResolvePool.SerialOnly = true;
-        try
-        {
-            new StreamRunner(setup, commands, bug, onPage).Execute();
-        }
-        finally
-        {
-            ResolvePool.SerialOnly = previous;
-        }
+        new StreamRunner(setup, commands, bug, onPage, fold, uncached, convolveCost).Execute();
     }
 
     public static StreamMismatch? TryRun(
         StreamSetup setup,
         List<StreamCommand> commands,
         BugInjection? bug = null,
-        Action<int, byte, byte, short[]>? onPage = null)
+        Action<int, byte, byte, short[]>? onPage = null,
+        (long I, long Q40)? fold = null,
+        bool uncached = false,
+        long convolveCost = 0)
     {
         try
         {
-            Run(setup, commands, bug, onPage);
+            Run(setup, commands, bug, onPage, fold, uncached, convolveCost);
             return null;
         }
         catch (StreamMismatch mismatch)
@@ -91,6 +90,8 @@ internal sealed unsafe class StreamRunner
     private void Execute()
     {
         _world = World.New();
+        if (_fold is { } fold) World.ConfigureFoldLimits(_world, fold.I, fold.Q40);
+        if (_uncached) World.DisableKernelInserts(_world);
         _rw = new ReferenceWorld();
         _stamps = new byte[_setup.Stamps.Length];
         var maxCells = 1;
@@ -118,8 +119,9 @@ internal sealed unsafe class StreamRunner
                 byte referenceLayer;
                 if (!spec.Derived)
                 {
-                    layer = Layer.New(_world, spec.Precision);
-                    referenceLayer = _rw.AddLayer(spec.Precision);
+                    layer = Layer.New(_world, spec.Transient ? Layer.Residency.Transient : Layer.Residency.Persistent, spec.Precision);
+                    if (spec.Transient && _convolveCost != 0) World.ConfigureConvolveCost(_world, layer, _convolveCost);
+                    referenceLayer = _rw.AddLayer(spec.Precision, spec.Transient);
                 }
                 else
                 {
@@ -241,6 +243,12 @@ internal sealed unsafe class StreamRunner
                         World.Clear(_world);
                         _rw.Clear();
                         break;
+                    case StreamOp.Splat:
+                        var applied = World.Splat(
+                            _world, command.Layer, new[] { command.X }, new[] { command.Y }, _stamps[command.Stamp], command.Gain);
+                        var expectedSplat = _rw.Splat(command.Layer, command.X, command.Y, _stamps[command.Stamp], command.Gain) ? 1 : 0;
+                        Require(applied == expectedSplat, $"splat applied {applied} vs {expectedSplat}", _index);
+                        break;
                     case StreamOp.Process:
                         World.Process(_world);
                         _rw.Process();
@@ -263,21 +271,21 @@ internal sealed unsafe class StreamRunner
         }
     }
 
-    private int Id(int handle)
-        => (uint)handle < (uint)_attemptIds.Count ? _attemptIds[handle] : -1;
+    private World.SourceId Id(int handle)
+        => (uint)handle < (uint)_attemptIds.Count ? _attemptIds[handle] : default;
 
     private void ExecuteSync(StreamCommand command)
     {
         var count = Math.Min(command.Int0, MaxColumn);
         var rng = new SplitMix64(command.Aux ^ AuxSalt);
         var target = _setup.Grids[command.Grid];
-        var ids = new int[Math.Max(1, count)];
+        var ids = new World.SourceId[Math.Max(1, count)];
         var xs = new float[Math.Max(1, count)];
         var ys = new float[Math.Max(1, count)];
         for (var i = 0; i < count; i++) ids[i] = Id(command.Handle + i);
         StreamOperands.ColumnPositions(ref rng, target, xs, ys, count);
 
-        fixed (int* pIds = ids)
+        fixed (World.SourceId* pIds = ids)
         fixed (float* pXs = xs, pYs = ys)
         {
             World.Sync(_world, pIds, pXs, pYs, count);
@@ -311,6 +319,21 @@ internal sealed unsafe class StreamRunner
                 Require(
                     World.Query(_world, (byte)g, (byte)l, 0, 0, size, size) == _rw.Query((byte)g, (byte)l, 0, 0, size, size),
                     $"full sum g{g} l{l} f{_frames}", _index);
+
+                foreach (var since in new[] { -1, _frames - 3, _frames - 2, _frames - 1 })
+                {
+                    int sinceActual;
+                    int sinceExpected;
+                    fixed (int* pActualTiles = _actualTiles, pExpectedTiles = _expectedTiles)
+                    {
+                        sinceActual = World.ChangedTiles(_world, (byte)g, (byte)l, since, pActualTiles);
+                        sinceExpected = _rw.ChangedTiles((byte)g, (byte)l, since, pExpectedTiles);
+                    }
+
+                    Require(
+                        sinceActual == sinceExpected && TilePrefixEqual(sinceActual),
+                        $"changed tiles since {since} g{g} l{l} f{_frames}: {sinceActual} vs {sinceExpected}", _index);
+                }
 
                 var actualMax = World.QueryMax(_world, (byte)g, (byte)l, out var maxX, out var maxY);
                 var expectedMax = _rw.QueryMax((byte)g, (byte)l, out var rMaxX, out var rMaxY);
@@ -386,7 +409,7 @@ internal sealed unsafe class StreamRunner
         for (var l = 0; l < _setup.Layers.Length; l++)
         {
             var expected = _rw.LiveCount((byte)l);
-            var actual = World.GetContext(_world)->LayerLive[l];
+            var actual = LiveCount(l);
             Require(actual == expected, $"layer live {l} f{_frames}: {actual} vs {expected}", _index);
         }
     }
@@ -577,7 +600,7 @@ internal sealed unsafe class StreamRunner
                 ExecuteChangedMask(command, reach, since);
                 break;
             case ReadKind.SenseColumn:
-                ExecuteSenseColumn(command, false, -1);
+                ExecuteSenseColumn(command, false, default);
                 break;
             case ReadKind.SenseColumnEx:
                 ExecuteSenseColumn(command, true, exclude);
@@ -592,7 +615,7 @@ internal sealed unsafe class StreamRunner
                 break;
             case ReadKind.LayerLive:
             {
-                var actual = World.GetContext(_world)->LayerLive[command.Layer];
+                var actual = LiveCount(command.Layer);
                 var expected = _rw.LiveCount(command.Layer);
                 Require(actual == expected, $"layer live {command.Layer}: {actual} vs {expected}", _index);
                 break;
@@ -646,26 +669,26 @@ internal sealed unsafe class StreamRunner
             $"changed mask count {actual} vs {expected}", _index);
     }
 
-    private void ExecuteSenseColumn(StreamCommand command, bool withExcludes, int exclude)
+    private void ExecuteSenseColumn(StreamCommand command, bool withExcludes, World.SourceId exclude)
     {
         var rng = new SplitMix64(command.Aux ^ AuxSalt ^ 0x2545F4914F6CDD1Dul);
         var count = 1 + rng.NextInt(0, MaxColumn);
         FillColumnPositions(ref rng, command.Grid, count);
         if (withExcludes)
             for (var i = 0; i < count; i++)
-                _columnExcludes[i] = i == 0 ? exclude : -1;
+                _columnExcludes[i] = i == 0 ? exclude : default;
         bool actual;
         bool expected;
         fixed (float* pXs = _columnXs, pYs = _columnYs)
-        fixed (int* pExcludes = _columnExcludes)
+        fixed (World.SourceId* pExcludes = _columnExcludes)
         fixed (short* pActual = _columnActual, pExpected = _columnExpected)
         fixed (ulong* pActualWords = _wordsActual, pExpectedWords = _wordsExpected)
         {
             Array.Clear(_wordsActual);
             Array.Clear(_wordsExpected);
             actual = withExcludes
-                ? World.SenseColumn(_world, command.Layer, pXs, pYs, pExcludes, count, pActual, pActualWords)
-                : World.SenseColumn(_world, command.Layer, pXs, pYs, count, pActual, pActualWords);
+                ? (World.SenseColumn(_world, command.Layer, pXs, pYs, pExcludes, count, pActual, pActualWords) == World.ReadStatus.Complete)
+                : (World.SenseColumn(_world, command.Layer, pXs, pYs, count, pActual, pActualWords) == World.ReadStatus.Complete);
             expected = withExcludes
                 ? _rw.SenseColumn(command.Layer, pXs, pYs, pExcludes, count, pExpected, pExpectedWords)
                 : _rw.SenseColumn(command.Layer, pXs, pYs, count, pExpected, pExpectedWords);
@@ -689,8 +712,8 @@ internal sealed unsafe class StreamRunner
         fixed (ulong* pActualWords = _wordsActual)
         {
             Array.Clear(_wordsActual);
-            actual = World.SenseGradientColumn(
-                _world, command.Layer, pXs, pYs, null, count, pActualX, pActualY, pActualWords);
+            actual = (World.SenseGradientColumn(
+                _world, command.Layer, pXs, pYs, null, count, pActualX, pActualY, pActualWords) == World.ReadStatus.Complete);
         }
 
         var expected = true;
@@ -720,5 +743,14 @@ internal sealed unsafe class StreamRunner
             $"seed {_setup.Seed} command {index} ({op}): {detail}",
             index,
             (int)op);
+    }
+
+    private int LiveCount(int layer)
+    {
+        var s = &World.GetContext(_world)->Sources;
+        var count = 0;
+        for (var i = 0; i < s->Count; i++)
+            if (s->Alive[i] != 0 && s->Gain[i] != 0 && s->Layer[i] == layer) count++;
+        return count;
     }
 }

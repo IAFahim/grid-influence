@@ -5,6 +5,8 @@ internal enum StreamProfile
     Gate,
     Heavy,
     Corpus,
+    Transient,
+    Kinds,
 }
 
 internal enum PrecisionMode : byte
@@ -48,7 +50,10 @@ internal static class StreamGenerator
     {
         var rng = new SplitMix64((ulong)seed * 0x2545F4914F6CDD1Dul + 0x9E3779B97F4A7C15ul);
         var setup = new StreamSetup { Seed = seed };
-        var heavy = profile == StreamProfile.Heavy;
+        var augment = profile == StreamProfile.Transient;
+        if (augment) profile = StreamProfile.Corpus;
+        var kinds = profile == StreamProfile.Kinds;
+        var heavy = profile == StreamProfile.Heavy || kinds;
 
         var gridCount = heavy ? rng.NextInt(1, 4) : rng.NextInt(1, 3);
         setup.Grids = new GridSpec[gridCount];
@@ -118,7 +123,7 @@ internal static class StreamGenerator
         {
             StampSpec stamp;
             var axisLimit = heavy ? 8 : 6;
-            switch (rng.NextInt(0, 7))
+            switch (kinds ? rng.NextInt(3, 7) : rng.NextInt(0, 7))
             {
                 case 0:
                     stamp = new StampSpec
@@ -217,7 +222,7 @@ internal static class StreamGenerator
                     continue;
                 }
 
-                MutationCommand(ref rng, setup, ref attempts, ref live, commands);
+                MutationCommand(ref rng, setup, ref attempts, ref live, commands, kinds);
             }
 
             commands.Add(new StreamCommand { Op = StreamOp.Process, Aux = rng.Next() });
@@ -228,7 +233,78 @@ internal static class StreamGenerator
                 commands.Add(ReadCommand(ref rng, setup, attempts, frames));
         }
 
+        if (augment) AddTransient(setup, mode, seed);
         return setup;
+    }
+
+    private static readonly ReadKind[] TransientReads =
+    [
+        ReadKind.QueryRect, ReadKind.QueryRegion, ReadKind.QueryAt, ReadKind.QueryMaxWhole, ReadKind.QueryMaxRect,
+        ReadKind.QueryGradient, ReadKind.Sense, ReadKind.SenseArea, ReadKind.SenseMax, ReadKind.SenseNearest,
+        ReadKind.SenseGradient, ReadKind.ChangedDisk, ReadKind.ChangedTilesSince, ReadKind.ChangedTilesAll,
+        ReadKind.ChangedMask, ReadKind.SenseColumn, ReadKind.SenseGradientColumn, ReadKind.Covers,
+    ];
+
+    private static void AddTransient(StreamSetup setup, PrecisionMode mode, int seed)
+    {
+        var rng = new SplitMix64((ulong)seed * 0xD6E8FEB86659FD93ul + 0x1F83D9ABFB41BD6Bul);
+        var layer = (byte)setup.Layers.Length;
+        var layers = new LayerSpec[setup.Layers.Length + 1];
+        Array.Copy(setup.Layers, layers, setup.Layers.Length);
+        layers[layer] = new LayerSpec { Precision = PickPrecision(ref rng, mode), Transient = true };
+        setup.Layers = layers;
+        var commands = new List<StreamCommand>(setup.Commands.Count * 2);
+        var frames = 0;
+        StreamCommand last = default;
+        foreach (var command in setup.Commands)
+        {
+            if (command.Op != StreamOp.Process)
+            {
+                commands.Add(command);
+                continue;
+            }
+
+            var splats = rng.Chance(15) ? 0 : rng.NextInt(1, 15);
+            for (var i = 0; i < splats; i++)
+            {
+                StreamCommand splat;
+                if (last.Op == StreamOp.Splat && rng.Chance(20))
+                {
+                    splat = last;
+                    splat.Gain = (sbyte)-splat.Gain;
+                }
+                else
+                {
+                    var target = setup.Grids[rng.NextInt(0, setup.Grids.Length)];
+                    splat = new StreamCommand
+                    {
+                        Op = StreamOp.Splat,
+                        Layer = layer,
+                        Stamp = (byte)rng.NextInt(0, setup.Stamps.Length),
+                        X = CoordIn(ref rng, target.X, target.Size),
+                        Y = CoordIn(ref rng, target.Y, target.Size),
+                        Gain = (sbyte)rng.NextInt(-40, 41),
+                        Aux = rng.Next(),
+                    };
+                }
+
+                commands.Add(splat);
+                last = splat;
+            }
+
+            commands.Add(command);
+            frames++;
+            var reads = rng.NextInt(1, 3);
+            for (var r = 0; r < reads; r++)
+            {
+                var read = ReadCommand(ref rng, setup, 0, frames);
+                while (Array.IndexOf(TransientReads, read.Read) < 0) read = ReadCommand(ref rng, setup, 0, frames);
+                read.Layer = layer;
+                commands.Add(read);
+            }
+        }
+
+        setup.Commands = commands;
     }
 
     private static int PickSizeDivisor(ref SplitMix64 rng)
@@ -291,10 +367,12 @@ internal static class StreamGenerator
         StreamSetup setup,
         ref int attempts,
         ref int live,
-        List<StreamCommand> commands)
+        List<StreamCommand> commands,
+        bool kinds)
     {
         var command = new StreamCommand { Aux = rng.Next() };
         var pick = live >= setup.MaxLive ? rng.NextInt(74, 88) : rng.NextInt(0, 100);
+        if (kinds && live < setup.MaxLive && rng.Chance(30)) pick = rng.Chance(70) ? 47 : 55;
 
         switch (pick)
         {

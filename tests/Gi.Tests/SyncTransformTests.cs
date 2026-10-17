@@ -49,8 +49,8 @@ public sealed class SyncTransformTests : IDisposable
         try
         {
             const int count = 200;
-            var mine = new int[count];
-            var theirs = new int[count];
+            var mine = new World.SourceId[count];
+            var theirs = new World.SourceId[count];
             for (var index = 0; index < count; index++)
             {
                 var x = 2f + index % 60;
@@ -70,8 +70,8 @@ public sealed class SyncTransformTests : IDisposable
             World.Remove(_world, stale);
             World.Remove(twin, staleTwin);
 
-            var ids = new int[count];
-            var twinIds = new int[count];
+            var ids = new World.SourceId[count];
+            var twinIds = new World.SourceId[count];
             var xs = new float[count];
             var ys = new float[count];
             for (var index = 0; index < count; index++)
@@ -103,8 +103,8 @@ public sealed class SyncTransformTests : IDisposable
                 if (twinIds[index] == staleTwin || !float.IsFinite(xs[index]) || !float.IsFinite(ys[index]))
                     expected[index >> 6] |= 1ul << (index & 63);
 
-            fixed (int* idPointer = ids)
-            fixed (int* twinIdPointer = twinIds)
+            fixed (World.SourceId* idPointer = ids)
+            fixed (World.SourceId* twinIdPointer = twinIds)
             fixed (float* xPointer = xs)
             fixed (float* yPointer = ys)
             fixed (ulong* maskPointer = mask)
@@ -155,7 +155,7 @@ public sealed class SyncTransformTests : IDisposable
             const int firstCount = 187;
             const int secondCount = 113;
             const int count = firstCount + secondCount;
-            var mine = new int[count];
+            var mine = new World.SourceId[count];
             for (var index = 0; index < count; index++)
             {
                 var x = 2f + index % 60;
@@ -170,7 +170,7 @@ public sealed class SyncTransformTests : IDisposable
             World.Process(_world);
             World.Process(twin);
 
-            var ids = new int[count];
+            var ids = new World.SourceId[count];
             var xs = new float[count];
             var ys = new float[count];
             var headings = new float[count];
@@ -204,7 +204,7 @@ public sealed class SyncTransformTests : IDisposable
                 expected[word] |= 1ul << (local & 63);
             }
 
-            fixed (int* idPointer = ids)
+            fixed (World.SourceId* idPointer = ids)
             fixed (float* xPointer = xs)
             fixed (float* yPointer = ys)
             fixed (float* headingPointer = headings)
@@ -263,8 +263,8 @@ public sealed class SyncTransformTests : IDisposable
         {
             const int live = 9000;
             const int staleCount = 10;
-            var mine = new int[live];
-            var theirs = new int[live];
+            var mine = new World.SourceId[live];
+            var theirs = new World.SourceId[live];
             for (var index = 0; index < live; index++)
             {
                 var x = 1f + index % 61;
@@ -274,7 +274,7 @@ public sealed class SyncTransformTests : IDisposable
                 theirs[index] = World.Place(twin, twinLayer, x, y, _stamp, 1);
             }
 
-            var stale = new int[staleCount];
+            var stale = new World.SourceId[staleCount];
             for (var index = 0; index < staleCount; index++)
             {
                 stale[index] = World.Place(_world, _layer, 10f, 10f, _stamp, 1);
@@ -286,8 +286,8 @@ public sealed class SyncTransformTests : IDisposable
 
             const int count = live + staleCount;
             const int firstCount = 5000;
-            var ids = new int[count];
-            var twinIds = new int[count];
+            var ids = new World.SourceId[count];
+            var twinIds = new World.SourceId[count];
             var ax = new float[count];
             var ay = new float[count];
             var ah = new float[count];
@@ -311,7 +311,7 @@ public sealed class SyncTransformTests : IDisposable
                 if (isStale)
                 {
                     ids[index] = stale[staleAt - 1];
-                    twinIds[index] = -1;
+                    twinIds[index] = default;
                     continue;
                 }
 
@@ -334,7 +334,7 @@ public sealed class SyncTransformTests : IDisposable
                 expected[word] |= 1ul << (local & 63);
             }
 
-            fixed (int* idPointer = ids)
+            fixed (World.SourceId* idPointer = ids)
             fixed (float* axPointer = ax)
             fixed (float* ayPointer = ay)
             fixed (float* ahPointer = ah)
@@ -392,7 +392,7 @@ public sealed class SyncTransformTests : IDisposable
 
                     for (var index = 0; index < count; index++)
                     {
-                        if (twinIds[index] < 0) continue;
+                        if (twinIds[index] == default) continue;
                         World.Move(twin, twinIds[index], ax[index], ay[index]);
                         World.Turn(twin, twinIds[index], ah[index]);
                         World.Scale(twin, twinIds[index], aScale[index]);
@@ -400,7 +400,7 @@ public sealed class SyncTransformTests : IDisposable
 
                     for (var index = 0; index < count; index++)
                     {
-                        if (twinIds[index] < 0) continue;
+                        if (twinIds[index] == default) continue;
                         World.Move(twin, twinIds[index], bx[index], by[index]);
                         World.Turn(twin, twinIds[index], bh[index]);
                         World.Scale(twin, twinIds[index], bScale[index]);
@@ -419,18 +419,15 @@ public sealed class SyncTransformTests : IDisposable
     }
 
     [Fact]
-    public unsafe void SerialOnlyPool_MatchesPooledForLargeRanges()
+    public unsafe void LargeTransformRangesApplyCleanly()
     {
-        var pooled = World.New();
-        var serial = World.New();
-        var pooledGrid = Grid.New(pooled, 6, 0f, 0f, 64f);
-        var serialGrid = Grid.New(serial, 6, 0f, 0f, 64f);
-        var pooledLayer = Layer.New(pooled);
-        var serialLayer = Layer.New(serial);
+        var world = World.New();
+        var grid = Grid.New(world, 6, 0f, 0f, 64f);
+        var layer = Layer.New(world);
         try
         {
             const int count = 9000;
-            var ids = new int[count];
+            var ids = new World.SourceId[count];
             var xs = new float[count];
             var ys = new float[count];
             var headings = new float[count];
@@ -440,17 +437,15 @@ public sealed class SyncTransformTests : IDisposable
                 var x = 1f + index % 61;
                 var row = index / 61 % 60;
                 var y = 1f + row;
-                ids[index] = World.Place(pooled, pooledLayer, x, y, _stamp, 1);
-                World.Place(serial, serialLayer, x, y, _stamp, 1);
+                ids[index] = World.Place(world, layer, x, y, _stamp, 1);
                 xs[index] = Math.Min(x + 0.5f, 61.5f);
                 ys[index] = Math.Min(y + 0.5f, 60.5f);
                 headings[index] = 0.25f * (index % 4);
                 scales[index] = 1f + (index % 5) * 0.25f;
             }
 
-            World.Process(pooled);
-            World.Process(serial);
-            fixed (int* idPointer = ids)
+            World.Process(world);
+            fixed (World.SourceId* idPointer = ids)
             fixed (float* xPointer = xs)
             fixed (float* yPointer = ys)
             fixed (float* headingPointer = headings)
@@ -464,32 +459,17 @@ public sealed class SyncTransformTests : IDisposable
                 };
                 Assert.Equal(
                     World.BatchStatus.Applied,
-                    World.SyncTransforms(World.Capture(pooled), new ReadOnlySpan<World.TransformRange>(range, 1)));
-                World.Process(pooled);
-
-                ResolvePool.SerialOnly = true;
-                try
-                {
-                    Assert.Equal(
-                        World.BatchStatus.Applied,
-                        World.SyncTransforms(World.Capture(serial), new ReadOnlySpan<World.TransformRange>(range, 1)));
-                    World.Process(serial);
-                }
-                finally
-                {
-                    ResolvePool.SerialOnly = false;
-                }
+                    World.SyncTransforms(World.Capture(world), new ReadOnlySpan<World.TransformRange>(range, 1)));
+                World.Process(world);
             }
 
-            AssertIdentical(pooled, pooledGrid, pooledLayer, serial, serialGrid, serialLayer);
+            Assert.True(World.Query(world, grid, layer, 0, 0, 64, 64) > 0);
         }
         finally
         {
-            World.Free(pooled);
-            World.Free(serial);
+            World.Free(world);
         }
     }
-
     [Fact]
     public unsafe void WarmLargeSyncAndProcess_AllocateNothing()
     {
@@ -499,7 +479,7 @@ public sealed class SyncTransformTests : IDisposable
         try
         {
             const int count = 9000;
-            var ids = new int[count];
+            var ids = new World.SourceId[count];
             var ax = new float[count];
             var ay = new float[count];
             var ah = new float[count];
@@ -523,7 +503,7 @@ public sealed class SyncTransformTests : IDisposable
             World.Process(world);
             long allocated;
             long checksum = 0;
-            fixed (int* idPointer = ids)
+            fixed (World.SourceId* idPointer = ids)
             fixed (float* axPointer = ax)
             fixed (float* ayPointer = ay)
             fixed (float* ahPointer = ah)
@@ -581,8 +561,8 @@ public sealed class SyncTransformTests : IDisposable
         try
         {
             const int count = 24;
-            var mine = new int[count];
-            var theirs = new int[count];
+            var mine = new World.SourceId[count];
+            var theirs = new World.SourceId[count];
             for (var index = 0; index < count; index++)
             {
                 var x = 2f + index % 20;
@@ -607,7 +587,7 @@ public sealed class SyncTransformTests : IDisposable
                 World.Move(twin, theirs[index], 40f + index % 10, 40f + offset);
             }
 
-            fixed (int* idPointer = mine)
+            fixed (World.SourceId* idPointer = mine)
             fixed (float* xPointer = xs)
             fixed (float* yPointer = ys)
             {
@@ -639,8 +619,8 @@ public sealed class SyncTransformTests : IDisposable
         try
         {
             const int count = 40;
-            var mine = new int[count];
-            var theirs = new int[count];
+            var mine = new World.SourceId[count];
+            var theirs = new World.SourceId[count];
             for (var index = 0; index < count; index++)
             {
                 var x = 2f + index % 20;
@@ -678,7 +658,7 @@ public sealed class SyncTransformTests : IDisposable
                 headings[index] = 0.5f;
             }
 
-            fixed (int* idPointer = mine)
+            fixed (World.SourceId* idPointer = mine)
             fixed (float* xPointer = xs)
             fixed (float* yPointer = ys)
             fixed (float* headingPointer = headings)
@@ -724,7 +704,7 @@ public sealed class SyncTransformTests : IDisposable
         try
         {
             const int count = 9000;
-            var ids = new int[count];
+            var ids = new World.SourceId[count];
             var xs = new float[count];
             var ys = new float[count];
             for (var index = 0; index < count; index++)
@@ -745,7 +725,7 @@ public sealed class SyncTransformTests : IDisposable
             }
 
             World.Record(world);
-            fixed (int* idPointer = ids)
+            fixed (World.SourceId* idPointer = ids)
             fixed (float* xPointer = xs)
             fixed (float* yPointer = ys)
             {
@@ -779,7 +759,7 @@ public sealed class SyncTransformTests : IDisposable
         const int firstCount = 63;
         const int secondCount = 64;
         const int thirdCount = 65;
-        var mine = new int[firstCount + secondCount + thirdCount];
+        var mine = new World.SourceId[firstCount + secondCount + thirdCount];
         for (var index = 0; index < mine.Length; index++)
         {
             var lane = index / 60 % 60;
@@ -789,7 +769,7 @@ public sealed class SyncTransformTests : IDisposable
         World.Remove(_world, stale);
         World.Process(_world);
 
-        var ids = new int[mine.Length];
+        var ids = new World.SourceId[mine.Length];
         var xs = new float[mine.Length];
         var ys = new float[mine.Length];
         for (var index = 0; index < mine.Length; index++)
@@ -806,7 +786,7 @@ public sealed class SyncTransformTests : IDisposable
         ids[63 + 63] = stale;
         ids[63 + 64 + 64] = stale;
 
-        fixed (int* idPointer = ids)
+        fixed (World.SourceId* idPointer = ids)
         fixed (float* xPointer = xs)
         fixed (float* yPointer = ys)
         {
@@ -851,7 +831,7 @@ public sealed class SyncTransformTests : IDisposable
         var source = World.Place(_world, _layer, 5f, 5f, _stamp, 1);
         var token = World.Capture(_world);
 
-        var ids = stackalloc int[64];
+        var ids = stackalloc World.SourceId[64];
         for (var index = 0; index < 64; index++) ids[index] = source;
         var columns = stackalloc float[128];
         for (var index = 0; index < 128; index++) columns[index] = 7.5f;
@@ -939,7 +919,7 @@ public sealed class SyncTransformTests : IDisposable
             World.Process(world);
             var token = World.Capture(world);
 
-            var ids = stackalloc int[1];
+            var ids = stackalloc World.SourceId[1];
             var xs = stackalloc float[1];
             var ys = stackalloc float[1];
             var mask = stackalloc ulong[1];
@@ -1032,7 +1012,7 @@ public sealed class SyncTransformTests : IDisposable
         try
         {
             const int count = 16;
-            var mine = new int[count];
+            var mine = new World.SourceId[count];
             for (var index = 0; index < count; index++)
             {
                 mine[index] = World.Place(_world, _layer, 2f + index, 2f, _stamp, 2);
@@ -1058,7 +1038,7 @@ public sealed class SyncTransformTests : IDisposable
                 ys[index] = 30f;
             }
 
-            fixed (int* idPointer = mine)
+            fixed (World.SourceId* idPointer = mine)
             fixed (float* xPointer = xs)
             fixed (float* yPointer = ys)
             {
