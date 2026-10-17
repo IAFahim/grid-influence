@@ -371,6 +371,18 @@ before reading command payloads, writing
   rebuilds the timed list: pending fades and expiries resume with exactly the remaining time they had
   at the checkpoint, and a rewound world re-simulates tick for tick like a twin that never left
   it.
+- **Field view**: `World.View(world, grid, layer)` returns a `World.FieldView`, a `ref struct`
+  over one (grid, layer) directory and its published pages, in cell coordinates. `view[x, y]` is
+  one bounds test, one tile-index compare against a cached tile and one `int16` load (0 outside
+  the grid and in absent tiles, exactly `Query`); `view.Gradient(x, y, out gx, out gy)` is the
+  `Query` central difference, read from the cached page when the cell is at least one cell from
+  the page edge; `view.At(x, y)` and `view.TryCell(x, y, out cx, out cy)` map world floats the
+  way `QueryAt` and the column reads do. An invalid handle yields a view of size 0 that reads 0.
+  A view is valid until the next `Process`, `Clear`, `Rewind` or `World.Free` — those can
+  allocate or free pages and directories — and is for the owning thread's read phase only;
+  reads never write, so any number of views may read concurrently with each other and never with
+  mutation or `Process`. It copies nothing and allocates nothing (a coherent read costs about
+  0.8 ns; `benchmarks --view` pins it to `Query` on every cell).
 - **Query**: `World.Query(world, grid, layer, x, y)` is one hash lookup + page read;
   `(x, y, w, h)` sums a rect tile-wise — full-grid reads sum one `int64` per live page, partial
   regions sum the same `int64` slot for every tile the rect fully covers and scan only the
@@ -931,6 +943,16 @@ digits. Concurrency: single thread.
   pins managed input/output spans for its entire call;
   native callers retain their buffers unchanged for the same interval. It retains no input or
   result pointer after returning.
+- **Field view**: *Lifetime*: a `FieldView` holds the layer and grid constants it was built from
+  and one cached page pointer; both name directory and slab storage that only `Process`, `Clear`,
+  `Rewind` and `World.Free` can grow, move or release, so a view must not be used across them (a
+  stale page pointer is the one hazard, and it is confined to the caller's read phase).
+  *Aliasing*: the view only reads published `int16` pages. *Alignment*: page rows are 64 B
+  aligned and every access is a naturally aligned `int16` load. *Bounds*: every cell read is
+  preceded by `(uint)x < size && (uint)y < size`, the tile index is below the grid's tile count,
+  and the gradient fast path reads `at ± 1` and `at ± 32` only when the local cell is in
+  `[1, 30]²` of its page, so no load leaves the 32×32 page. *Concurrency*: none beyond the
+  serial-per-world rule; readers never share a view.
 - **Aliasing**: each tile's planes are written by emissions and published in place on the
   calling thread; `I`, `T` and `B` writes land on their own tile, and publish's `tentOut` and
   `bellOut` rows are stack-allocated per call; sources are read-only during emissions of other
