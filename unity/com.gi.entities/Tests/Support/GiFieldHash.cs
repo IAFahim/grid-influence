@@ -1,5 +1,3 @@
-using System;
-
 namespace Gi.Entities.Tests.Support
 {
     public static unsafe class GiFieldHash
@@ -10,7 +8,7 @@ namespace Gi.Entities.Tests.Support
         public static ulong OfWorld(byte world)
         {
             var hash = Offset;
-            var layers = Gi.Layer.Count(world);
+            var layers = Layer.Count(world);
             for (byte layer = 0; layer < layers; layer++) hash = MixValue(hash, OfLayer(world, layer));
             return hash;
         }
@@ -18,16 +16,16 @@ namespace Gi.Entities.Tests.Support
         public static ulong OfLayer(byte world, byte layer)
         {
             var hash = Offset;
-            var grids = Gi.Grid.Count(world);
+            var grids = Grid.Count(world);
             for (byte grid = 0; grid < grids; grid++)
             {
-                if (!Gi.Grid.TryGetSpec(world, grid, out var power, out _, out _, out _)) continue;
+                if (!Grid.TryGetSpec(world, grid, out var power, out _, out _, out _)) continue;
 
                 var size = 1 << power;
                 var cells = new short[size * size];
                 fixed (short* p = cells)
                 {
-                    Gi.World.QueryRegion(world, grid, layer, 0, 0, size, size, p);
+                    World.QueryRegion(world, grid, layer, 0, 0, size, size, p);
                     for (var i = 0; i < cells.Length; i++)
                     {
                         hash = Mix(hash, (byte)(cells[i] & 0xFF));
