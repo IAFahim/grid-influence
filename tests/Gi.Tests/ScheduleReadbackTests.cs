@@ -230,21 +230,15 @@ public unsafe class ScheduleReadbackTests
             var plain = World.Place(w, l, 20f, 24f, stamps[0], 4);
             World.Process(w);
 
-            sbyte gain;
-            sbyte fadeFrom;
-            sbyte fadeTo;
-            int fadeTicks;
-            int fadeTicksLeft;
-            int expireTicksLeft;
             var before = GC.GetAllocatedBytesForCurrentThread();
             for (var i = 0; i < 1000; i++)
             {
                 Assert.True(World.TryGetSchedule(w, fading,
-                    out gain, out fadeFrom, out fadeTo, out fadeTicks, out fadeTicksLeft, out expireTicksLeft));
+                    out _, out _, out _, out _, out _, out _));
                 Assert.False(World.TryGetSchedule(w, plain,
-                    out gain, out fadeFrom, out fadeTo, out fadeTicks, out fadeTicksLeft, out expireTicksLeft));
+                    out _, out _, out _, out _, out _, out _));
                 Assert.False(World.TryGetSchedule(w, default,
-                    out gain, out fadeFrom, out fadeTo, out fadeTicks, out fadeTicksLeft, out expireTicksLeft));
+                    out _, out _, out _, out _, out _, out _));
             }
 
             Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
@@ -261,7 +255,7 @@ public unsafe class ScheduleReadbackTests
     {
         const int interrupt = 15;
         const int total = 90;
-        var stamps = new List<byte> { Stamp.Box(3, 3, 30), Stamp.Tent(5, 5, -20), Stamp.Cone(4, 25, 360) };
+        var stamps = new List<byte> { Stamp.Box(3, 3, 30), Stamp.Tent(5, 5, -20), Stamp.Cone(4, 25) };
         var page = new short[64 * 64];
         try
         {
@@ -691,7 +685,7 @@ public unsafe class ScheduleReadbackTests
         public bool Active;
     }
 
-    private sealed unsafe class StreamHarness : IDisposable
+    private sealed class StreamHarness : IDisposable
     {
         private const int MaxColumn = 8;
 
