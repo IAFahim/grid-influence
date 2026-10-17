@@ -1,0 +1,27 @@
+fileFormatVersion: 2
+guid: eae338abb9e3425da3b256a2834b2c77
+PluginImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  iconMap: {}
+  executionOrder: {}
+  defineConstraints:
+  - GI_CORECLR
+  isPreloaded: 0
+  isOverridable: 0
+  isExplicitlyReferenced: 0
+  validateReferences: 1
+  platformData:
+  - first:
+      : Any
+  - second:
+      enabled: 1
+      settings: {}
+  - first:
+      Editor: Editor
+  - second:
+      enabled: 1
+      settings:
+        CPU: AnyCPU
+        DefaultValueInitialized: true
+        OS: AnyOS
