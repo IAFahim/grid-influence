@@ -105,7 +105,9 @@ internal static unsafe class FloorDiskKernel
                + Avx2.MultiplyAddAdjacent(Vector256.Load(cells + 16) & mask1, ones);
     }
 
+#if !GI_NETSTANDARD
     [SkipLocalsInit]
+#endif
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public static long SumScalar(in FloorDiskField field, int cx, int cy, int radius)
     {

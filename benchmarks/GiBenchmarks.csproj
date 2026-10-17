@@ -8,8 +8,13 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(GiNetStandard)' == 'true'">
+    <DefineConstants>$(DefineConstants);GI_NETSTANDARD</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
-    <ProjectReference Include="../src/Gi/Gi.csproj" />
+    <ProjectReference Include="../src/Gi/Gi.csproj" Condition="'$(GiNetStandard)' != 'true'" />
+    <ProjectReference Include="../src/Gi/Gi.csproj" SetTargetFramework="TargetFramework=netstandard2.1" Condition="'$(GiNetStandard)' == 'true'" />
   </ItemGroup>
 
   <ItemGroup>
