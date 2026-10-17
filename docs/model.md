@@ -433,6 +433,26 @@ before reading command payloads, writing
   gain change or removal — marked, snapshotted, and merged exactly like the API calls — so
   scheduled and manual mutations are indistinguishable downstream, and determinism follows from
   the ascending-slot order (expired slots return to the free ring in that order). Ticks count `Process` calls, not time: Gi has no clock.
+- **Schedule read-back**: `World.TryGetSchedule(world, source, out gain, out fadeFrom, out fadeTo,
+  out fadeTicks, out fadeTicksLeft, out expireTicksLeft)` reads one live source's schedule. It
+  returns false — every out zeroed — for a dead world, a stale or dead id, or a source with
+  nothing left scheduled, and true otherwise. `gain` is the current effective gain, the column
+  the sweep steps and deposits read. `fadeTicks > 0` marks a fade that still has a gain step to
+  apply — a fade whose rounded gain has already reached `fadeTo` no longer counts, even before
+  its nominal end — and carries `fadeFrom`/`fadeTo` (the ramp ends), `fadeTicks` (the requested
+  duration) and `fadeTicksLeft` (ticks to the nominal end, at least 1 while stepping);
+  `fadeTicks − fadeTicksLeft` is the elapsed tick, so the whole staircase `from +
+  sign(Δ)·⌊(|Δ|·k + ⌊ticks/2⌋) / ticks⌋` is recomputable and an interrupted run can be re-driven
+  tick for tick (a single fresh `Fade(world, source, fadeTo, fadeTicksLeft)` restarts rounding
+  from the current gain and is not bit-exact in general). `expireTicksLeft` is the ticks before
+  the pending removal, so `Expire(world, source, expireTicksLeft)` reproduces the removal tick;
+  a source both fading and expiring reports both. *Lifetime*: the call borrows the world's
+  source columns for its duration only and no pointer escapes it. *Aliasing*: the out
+  parameters are caller-owned slots, never aliasing Gi memory. *Alignment*: outs sit at their
+  natural alignment (sbyte 1 B, int 4 B). *Concurrency*: a per-world read under the same
+  serial-per-world rule as `TryGetSourceSpec` — safe on any thread that already respects that
+  rule, torn rather than protected against a concurrent writer or `Process` on the same world;
+  it writes nothing, allocates nothing, and throws nothing.
 - **Rewind**: `Record` drops any prior journal, bumps a per-world record epoch in O(1), and
   moves the pending snapshots (mutations made since the last `Process`) into the journal. From
   then on the first marked write to each slot journals that slot's 24 B column state (position,
@@ -1259,6 +1279,8 @@ digits. Concurrency: single thread.
   store slabs, kernel cache and source columns without writing anything, so it is safe on any
   thread that already respects that world's serial rule, and a value read while a writer or
   `Process` runs on that world is torn, not protected — no lock is taken by design.
+  `World.TryGetSchedule` is a one-slot read of the same kind: it probes the source columns'
+  gain and schedule fields without writing anything, under the same serial-per-world rule.
   Mutations only write the owning world's source columns, mark its changed list, and snapshot into
   its `Pending` buffer; the mark column is the one writer-side dedup. `Rewind` runs entirely on
   the owning thread: it writes source columns, marks restored slots on the same changed list, and
