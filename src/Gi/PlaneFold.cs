@@ -43,7 +43,7 @@ internal static unsafe class PlaneFold
     private static void FoldI(PlaneStore* store, TilePlanes* set)
     {
         var carry = EnsureCarry(store, set);
-        var plane = (int*)store->Int32s.Unit(set->I);
+        var plane = (int*)store->Int32Planes.Unit(set->I);
         for (var i = 0; i < Cells; i++)
         {
             carry[i] += plane[i];
@@ -57,7 +57,7 @@ internal static unsafe class PlaneFold
     {
         EnsureHighLow(store, set, tent);
         var summary = (TileSummary*)store->Summaries.Unit(set->Summary);
-        var plane = (long*)store->Int64s.Unit(tent ? set->T : set->B);
+        var plane = (long*)store->Int64Planes.Unit(tent ? set->T : set->B);
         var high = store->Wide(tent ? summary->HighT : summary->HighB);
         var low = store->Wide(tent ? summary->LowT : summary->LowB);
         for (var i = 0; i < Cells; i++)

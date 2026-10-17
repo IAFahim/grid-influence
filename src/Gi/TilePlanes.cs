@@ -18,7 +18,7 @@ internal unsafe struct TileSummary
     public int LowB;
 }
 
-internal unsafe struct TilePlanes
+internal struct TilePlanes
 {
     public int Page;
     public int I;
@@ -47,13 +47,13 @@ internal unsafe struct PlaneStore
     public const int Int64Unit = TileBake.TileSize * TileBake.TileSize * sizeof(long);
 
     public FixedSlab Pages;
-    public FixedSlab Int32s;
-    public FixedSlab Int64s;
+    public FixedSlab Int32Planes;
+    public FixedSlab Int64Planes;
     public FixedSlab Summaries;
     public long LimitI;
     public long LimitQ40;
 
-    public readonly long Bytes => Pages.Bytes + Int32s.Bytes + Int64s.Bytes + Summaries.Bytes;
+    public readonly long Bytes => Pages.Bytes + Int32Planes.Bytes + Int64Planes.Bytes + Summaries.Bytes;
 
     public TilePlanes Take()
     {
@@ -61,8 +61,8 @@ internal unsafe struct PlaneStore
         var page = (short*)Pages.Unit(pageIndex);
         new Span<short>(page, TileBake.TileSize * TileBake.TileSize).Clear();
 
-        var int32Index = Int32s.Take(Int32Unit);
-        var i = (int*)Int32s.Unit(int32Index);
+        var int32Index = Int32Planes.Take(Int32Unit);
+        var i = (int*)Int32Planes.Unit(int32Index);
         new Span<int>(i, TileBake.TileSize * TileBake.TileSize).Clear();
 
         var summaryIndex = Summaries.Take(TileSummary.Bytes);
@@ -101,16 +101,16 @@ internal unsafe struct PlaneStore
 
     public long* EnsureT(ref TilePlanes tile)
     {
-        if (tile.T >= 0) return (long*)Int64s.Unit(tile.T);
+        if (tile.T >= 0) return (long*)Int64Planes.Unit(tile.T);
         tile.T = TakeInt64();
-        return (long*)Int64s.Unit(tile.T);
+        return (long*)Int64Planes.Unit(tile.T);
     }
 
     public long* EnsureB(ref TilePlanes tile)
     {
-        if (tile.B >= 0) return (long*)Int64s.Unit(tile.B);
+        if (tile.B >= 0) return (long*)Int64Planes.Unit(tile.B);
         tile.B = TakeInt64();
-        return (long*)Int64s.Unit(tile.B);
+        return (long*)Int64Planes.Unit(tile.B);
     }
 
     public readonly bool PlanesZero(in TilePlanes tile)
@@ -119,16 +119,16 @@ internal unsafe struct PlaneStore
         if ((summary->CarryI | summary->HighT | summary->HighB) != 0) return TotalsZero(tile, summary);
 
         var count = TileBake.TileSize * TileBake.TileSize;
-        if (tile.I >= 0 && !TileBake.AllZero((int*)Int32s.Unit(tile.I), count)) return false;
-        if (tile.T >= 0 && !TileBake.AllZero((long*)Int64s.Unit(tile.T), count)) return false;
-        return tile.B < 0 || TileBake.AllZero((long*)Int64s.Unit(tile.B), count);
+        if (tile.I >= 0 && !TileBake.AllZero((int*)Int32Planes.Unit(tile.I), count)) return false;
+        if (tile.T >= 0 && !TileBake.AllZero((long*)Int64Planes.Unit(tile.T), count)) return false;
+        return tile.B < 0 || TileBake.AllZero((long*)Int64Planes.Unit(tile.B), count);
     }
 
     private readonly bool TotalsZero(in TilePlanes tile, TileSummary* summary)
     {
-        var i32 = tile.I < 0 ? null : (int*)Int32s.Unit(tile.I);
-        var tent = tile.T < 0 ? null : (long*)Int64s.Unit(tile.T);
-        var bell = tile.B < 0 ? null : (long*)Int64s.Unit(tile.B);
+        var i32 = tile.I < 0 ? null : (int*)Int32Planes.Unit(tile.I);
+        var tent = tile.T < 0 ? null : (long*)Int64Planes.Unit(tile.T);
+        var bell = tile.B < 0 ? null : (long*)Int64Planes.Unit(tile.B);
         var carry = summary->CarryI == 0 ? null : Wide(summary->CarryI);
         var highT = summary->HighT == 0 ? null : Wide(summary->HighT);
         var lowT = summary->LowT == 0 ? null : Wide(summary->LowT);
@@ -149,9 +149,9 @@ internal unsafe struct PlaneStore
     public readonly PlaneCells Cells(in TilePlanes tile) => new()
     {
         Page = (short*)Pages.Unit(tile.Page),
-        I = tile.I < 0 ? null : (int*)Int32s.Unit(tile.I),
-        T = tile.T < 0 ? null : (long*)Int64s.Unit(tile.T),
-        B = tile.B < 0 ? null : (long*)Int64s.Unit(tile.B),
+        I = tile.I < 0 ? null : (int*)Int32Planes.Unit(tile.I),
+        T = tile.T < 0 ? null : (long*)Int64Planes.Unit(tile.T),
+        B = tile.B < 0 ? null : (long*)Int64Planes.Unit(tile.B),
         Summary = (TileSummary*)Summaries.Unit(tile.Summary),
     };
 
@@ -163,9 +163,9 @@ internal unsafe struct PlaneStore
         GiveWide(summary->LowT);
         GiveWide(summary->HighB);
         GiveWide(summary->LowB);
-        if (tile.T >= 0) Int64s.Give(tile.T);
-        if (tile.B >= 0) Int64s.Give(tile.B);
-        if (tile.I >= 0) Int32s.Give(tile.I);
+        if (tile.T >= 0) Int64Planes.Give(tile.T);
+        if (tile.B >= 0) Int64Planes.Give(tile.B);
+        if (tile.I >= 0) Int32Planes.Give(tile.I);
         Summaries.Give(tile.Summary);
         Pages.Give(tile.Page);
     }
@@ -173,8 +173,8 @@ internal unsafe struct PlaneStore
     public void Reset()
     {
         Pages.Reset();
-        Int32s.Reset();
-        Int64s.Reset();
+        Int32Planes.Reset();
+        Int64Planes.Reset();
         Summaries.Reset();
     }
 
@@ -198,11 +198,11 @@ internal unsafe struct PlaneStore
         tile->BoundB = 0;
     }
 
-    public readonly long* Wide(int index) => (long*)Int64s.Unit(index - 1);
+    public readonly long* Wide(int index) => (long*)Int64Planes.Unit(index - 1);
 
     public void GiveWide(int index)
     {
-        if (index != 0) Int64s.Give(index - 1);
+        if (index != 0) Int64Planes.Give(index - 1);
     }
 
     public readonly bool HasWide(in TilePlanes tile)
@@ -213,8 +213,8 @@ internal unsafe struct PlaneStore
 
     private int TakeInt64()
     {
-        var index = Int64s.Take(Int64Unit);
-        new Span<long>(Int64s.Unit(index), TileBake.TileSize * TileBake.TileSize).Clear();
+        var index = Int64Planes.Take(Int64Unit);
+        new Span<long>(Int64Planes.Unit(index), TileBake.TileSize * TileBake.TileSize).Clear();
         return index;
     }
 }

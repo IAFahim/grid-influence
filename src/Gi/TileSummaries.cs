@@ -151,9 +151,9 @@ internal static unsafe partial class TileBake
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static short MaxLane(Vector128<short> v)
     {
-        v = Vector128.Max(v, Vector128.Shuffle(v, Vector128.Create((short)4, 5, 6, 7, 0, 1, 2, 3)));
-        v = Vector128.Max(v, Vector128.Shuffle(v, Vector128.Create((short)2, 3, 0, 1, 6, 7, 4, 5)));
-        v = Vector128.Max(v, Vector128.Shuffle(v, Vector128.Create((short)1, 0, 3, 2, 5, 4, 7, 6)));
+        v = Vector128.Max(v, Vector128.Shuffle(v, Vector128.Create(4, 5, 6, 7, 0, 1, 2, 3)));
+        v = Vector128.Max(v, Vector128.Shuffle(v, Vector128.Create(2, 3, 0, 1, 6, 7, 4, 5)));
+        v = Vector128.Max(v, Vector128.Shuffle(v, Vector128.Create(1, 0, 3, 2, 5, 4, 7, 6)));
         return v.ToScalar();
     }
 #endif

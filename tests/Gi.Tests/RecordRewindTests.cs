@@ -15,7 +15,7 @@ public unsafe class RecordRewindTests
     {
         var a = World.New();
         var b = World.New();
-        var stamps = new List<byte> { Stamp.Box(3, 3, 30), Stamp.Box(6, 2, -25), Stamp.Tent(6, 6, 40), Stamp.Disk(4, 50, 360) };
+        var stamps = new List<byte> { Stamp.Box(3, 3, 30), Stamp.Box(6, 2, -25), Stamp.Tent(6, 6, 40), Stamp.Disk(4, 50) };
         try
         {
             var idsA = new List<World.SourceId>();

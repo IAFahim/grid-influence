@@ -60,7 +60,7 @@ internal static unsafe partial class Verification
         var stamp = Stamp.Box(3, 3, 5);
         try
         {
-            var ids = new Gi.World.SourceId[count];
+            var ids = new World.SourceId[count];
             var fades = new World.SourceCommand[count];
             var results = new World.SourceResult[count];
             var ax = new float[count];
@@ -122,7 +122,7 @@ internal static unsafe partial class Verification
             long allocated;
             var matches = true;
             var syncToken = World.Capture(syncWorld);
-            fixed (Gi.World.SourceId* idPointer = ids)
+            fixed (World.SourceId* idPointer = ids)
             fixed (float* axPointer = ax)
             fixed (float* ayPointer = ay)
             fixed (float* ahPointer = ah)

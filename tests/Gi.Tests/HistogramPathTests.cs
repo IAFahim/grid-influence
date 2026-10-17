@@ -20,7 +20,7 @@ public unsafe class HistogramPathTests
         stamps.Add(Stamp.Box(4, 4, 7));
         stamps.Add(Stamp.Box(6, 6, -9));
         stamps.Add(Stamp.Tent(5, 5, 30));
-        stamps.Add(Stamp.Disk(4, 40, 360));
+        stamps.Add(Stamp.Disk(4, 40));
         try
         {
             Grid.New(w, 6, 0f, 0f, 64f);

@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 #if NET
 using System.Numerics;
 using System.Runtime.Intrinsics;

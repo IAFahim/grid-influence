@@ -15,7 +15,7 @@ internal static partial class Verification
         var world = World.New();
         Grid.New(world, 12, 0f, 0f, 4096f);
         Layer.New(world);
-        var ids = new Gi.World.SourceId[count];
+        var ids = new World.SourceId[count];
         var rng = new Random(11);
         for (var i = 0; i < count; i++)
             ids[i] = World.Place(world, 0,
@@ -25,7 +25,12 @@ internal static partial class Verification
         var dx = 0.5f;
         for (var f = 0; f < 5; f++)
         {
-            for (var i = 0; i < count; i++) World.Move(world, ids[i], 50f + i % 4000 + f * dx, 50f + i / 500 + f * dx * 0.5f);
+            for (var i = 0; i < count; i++)
+            {
+                var row = i / 500;
+                World.Move(world, ids[i], 50f + i % 4000 + f * dx, 50f + row + f * dx * 0.5f);
+            }
+
             World.Process(world);
         }
 
@@ -40,7 +45,10 @@ internal static partial class Verification
                 if (random)
                     World.Move(world, ids[i], (float)(rng.NextDouble() * 4000), (float)(rng.NextDouble() * 4000));
                 else
-                    World.Move(world, ids[i], 50f + i % 4000 + (f + 5) * dx, 50f + i / 500 + (f + 5) * dx * 0.5f);
+                {
+                    var row = i / 500;
+                    World.Move(world, ids[i], 50f + i % 4000 + (f + 5) * dx, 50f + row + (f + 5) * dx * 0.5f);
+                }
             }
 
             World.Process(world);
