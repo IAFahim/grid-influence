@@ -1041,6 +1041,14 @@ digits. Concurrency: single thread.
   tail slack of the slab. The path is disabled when the page slab exceeds `int.MaxValue` bytes.
   *Alignment*: gathers take unaligned byte offsets with scale 1. *Concurrency*: none beyond the
   serial-per-world rule.
+- **Spatial order**: *Lifetime*: `SpatialKeys` and `SortByKeys` borrow the caller's spans for the
+  duration of the call and keep nothing; the sort's histograms (3 × 2,048 `int`) are stack memory.
+  *Aliasing*: the key vector loop reads `xs` and `ys` and writes `keys` through pinned spans that
+  may not overlap; `SortByKeys` reads `keys` and writes `permutation` and the first `2 n`
+  `ulong`s of `scratch`. *Bounds*: every block load or store covers indices `i .. i + 7` with
+  `i + 8 ≤ min(xs, ys, keys)`; the scalar tail takes the rest; histogram indices are masked to
+  11 bits (the top digit is `key >> 22 < 1,024`), and prefix sums give each bucket a slot
+  inside `[0, n)`. *Alignment*: unaligned vector loads and stores. *Concurrency*: none.
 - **Plane folds**: *Lifetime*: a fold takes up to five `int64` units from the world's `Int64s`
   slab (`TakeWide`), records their index plus one in the tile's summary block (zero means none),
   and returns them with the tile (`PlaneStore.Give`) or when a transient tile is retired. *Aliasing*:

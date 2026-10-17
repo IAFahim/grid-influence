@@ -13,6 +13,7 @@ if (mode == "--area") return AreaTiming.Run();
 if (mode == "--kinds") return KindTiming.Run();
 if (mode == "--changed") return ChangedTiming.Run();
 if (mode == "--region") return RegionTiming.Run();
+if (mode == "--order") return OrderTiming.Run();
 var result = Verification.Run();
 if (mode is "" or "--verify")
 {
