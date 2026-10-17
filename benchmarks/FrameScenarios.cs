@@ -206,9 +206,9 @@ internal sealed unsafe class FrameLegacy(int entities, int power, ulong seed, bo
         var since = Gi.World.Tick(WorldId);
         Gi.World.Process(WorldId);
         marks[2] = Stopwatch.GetTimestamp();
-        var ok = Gi.World.SenseColumn(WorldId, BaseLayer, px, py, Entities, _values, _whole);
+        var ok = (Gi.World.SenseColumn(WorldId, BaseLayer, px, py, Entities, _values, _whole) == Gi.World.ReadStatus.Complete);
         marks[3] = Stopwatch.GetTimestamp();
-        ok &= Gi.World.SenseGradientColumn(WorldId, BaseLayer, px, py, null, Entities, _gradientX, _gradientY, _gradientWhole);
+        ok &= (Gi.World.SenseGradientColumn(WorldId, BaseLayer, px, py, null, Entities, _gradientX, _gradientY, _gradientWhole) == Gi.World.ReadStatus.Complete);
         marks[4] = Stopwatch.GetTimestamp();
         _hits = Gi.World.ChangedMask(WorldId, BaseLayer, px, py, 0f, since, Entities, _changed);
         marks[5] = Stopwatch.GetTimestamp();
@@ -492,15 +492,15 @@ internal sealed unsafe class FrameCrowd(int entities, int power, ulong seed, boo
         }
         else if (ReadMode.Fused)
         {
-            ok = Gi.World.SenseGradientColumn(WorldId, _layer, _x, _y, null, Entities, _values, _gradientX, _gradientY, _whole);
+            ok = (Gi.World.SenseGradientColumn(WorldId, _layer, _x, _y, null, Entities, _values, _gradientX, _gradientY, _whole) == Gi.World.ReadStatus.Complete);
             marks[3] = Stopwatch.GetTimestamp();
             marks[4] = marks[3];
         }
         else
         {
-            ok = Gi.World.SenseColumn(WorldId, _layer, _x, _y, Entities, _values, _whole);
+            ok = (Gi.World.SenseColumn(WorldId, _layer, _x, _y, Entities, _values, _whole) == Gi.World.ReadStatus.Complete);
             marks[3] = Stopwatch.GetTimestamp();
-            ok &= Gi.World.SenseGradientColumn(WorldId, _layer, _x, _y, null, Entities, _gradientX, _gradientY, _gradientWhole);
+            ok &= (Gi.World.SenseGradientColumn(WorldId, _layer, _x, _y, null, Entities, _gradientX, _gradientY, _gradientWhole) == Gi.World.ReadStatus.Complete);
             marks[4] = Stopwatch.GetTimestamp();
         }
 
@@ -794,9 +794,9 @@ internal sealed unsafe class FrameWorld(int entities, int power, ulong seed, boo
         marks[2] = Stopwatch.GetTimestamp();
         Gi.World.Process(WorldId);
         marks[3] = Stopwatch.GetTimestamp();
-        ok &= Gi.World.SenseColumn(WorldId, _derived, _agentX, _agentY, _agents, _values, _whole);
+        ok &= (Gi.World.SenseColumn(WorldId, _derived, _agentX, _agentY, _agents, _values, _whole) == Gi.World.ReadStatus.Complete);
         marks[4] = Stopwatch.GetTimestamp();
-        ok &= Gi.World.SenseGradientColumn(WorldId, _derived, _agentX, _agentY, null, _agents, _gradientX, _gradientY, _gradientWhole);
+        ok &= (Gi.World.SenseGradientColumn(WorldId, _derived, _agentX, _agentY, null, _agents, _gradientX, _gradientY, _gradientWhole) == Gi.World.ReadStatus.Complete);
         marks[5] = Stopwatch.GetTimestamp();
         var area = 0L;
         for (var i = 0; i < _churn; i++)

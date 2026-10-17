@@ -30,18 +30,20 @@ public static unsafe partial class World
         return w == null ? 0 : w->Tick;
     }
 
-    public static void Fade(byte world, SourceId source, sbyte gain, int ticks)
+    public static WriteStatus Fade(byte world, SourceId source, sbyte gain, int ticks)
     {
-        if (!TrySource(world, source, out var w, out var s, out var i)) return;
+        if (!TrySource(world, source, out var w, out var s, out var i)) return WriteStatus.StaleSource;
 
         WriteFade(w, s, i, gain, ticks);
+        return WriteStatus.Applied;
     }
 
-    public static void Expire(byte world, SourceId source, int ticks)
+    public static WriteStatus Expire(byte world, SourceId source, int ticks)
     {
-        if (!TrySource(world, source, out var w, out var s, out var i)) return;
+        if (!TrySource(world, source, out var w, out var s, out var i)) return WriteStatus.StaleSource;
 
         WriteExpire(w, s, i, ticks);
+        return WriteStatus.Applied;
     }
 
     private static void WriteFade(WorldCtx* w, SourceColumns* s, int i, sbyte gain, int ticks)

@@ -432,7 +432,7 @@ public sealed class ApiExamples
         {
             var values = stackalloc short[128];
             var whole = stackalloc ulong[2];
-            Assert.True(World.SenseColumn(w, threat, xsp, ysp, 128, values, whole));
+            Assert.True((World.SenseColumn(w, threat, xsp, ysp, 128, values, whole) == World.ReadStatus.Complete));
             Assert.True(values[0] >= 4 * 40);
             Assert.Equal(1ul << 0, whole[0] & 1ul);
 

@@ -391,7 +391,7 @@ to stepping the same mutations one `Process` at a time — asserted, not hoped.
 The same batching serves agent loops. Kernels can take a Gi column like any other column:
 
 ```csharp
-// fill a kernel column straight from the field (returns false only off every grid)
+// fill a kernel column straight from the field (ReadStatus.Outside when every row is off every grid)
 World.SenseColumn(world, threat, agentXs, agentYs, agentCount, threats, null);
 
 // one call per swarm, not one Changed per agent — emits the 64-bit words kernels consume
@@ -404,6 +404,13 @@ World.Sync(world, sourceIds, newXs, newYs, count);
 // borrow whole pose columns — optional heading/scale, null preserves; one invalid bit per row
 World.SyncTransforms(token, ranges);
 ```
+
+Every mutator returns a `World.WriteStatus` — `Applied`, `StaleSource`, `NonFinite`, `InvalidLayer`,
+`InvalidStamp`, `WrongResidency` (a source on a transient layer) or `CapacityReached` — and `Place` has
+an overload with `out WriteStatus` beside the `SourceId` it returns. Column reads return a
+`World.ReadStatus`: `Complete` (every row filled), `Partial` (some rows filled, found from the `whole`
+mask when you pass one), `Outside` (none), `InvalidLayer`, or `LengthMismatch` (a required column is
+null). Scalar reads keep returning `bool`.
 
 `SenseColumn` reads agent coordinates as `float*` and writes `short*` values (plus optional
 whole-tile flags); `ChangedMask` writes one `ulong` per 64 agents, zeros for the quiet ones;

@@ -69,7 +69,7 @@ public sealed class ColumnSenseTests : IDisposable
                 scalarComplete &= filled;
             }
 
-            var batchComplete = World.SenseColumn(_world, _layer, xPointer, yPointer, excludePointer, count, batchPointer, wholePointer);
+            var batchComplete = (World.SenseColumn(_world, _layer, xPointer, yPointer, excludePointer, count, batchPointer, wholePointer) == World.ReadStatus.Complete);
             Assert.Equal(scalarComplete, batchComplete);
         }
 
@@ -113,8 +113,8 @@ public sealed class ColumnSenseTests : IDisposable
                 scalarComplete &= filled;
             }
 
-            var batchComplete = World.SenseGradientColumn(
-                _world, _layer, xPointer, yPointer, excludePointer, count, batchXPointer, batchYPointer, wholePointer);
+            var batchComplete = (World.SenseGradientColumn(
+                _world, _layer, xPointer, yPointer, excludePointer, count, batchXPointer, batchYPointer, wholePointer) == World.ReadStatus.Complete);
             Assert.Equal(scalarComplete, batchComplete);
         }
 
@@ -161,8 +161,8 @@ public sealed class ColumnSenseTests : IDisposable
                 scalarComplete &= filled;
             }
 
-            var batchComplete = World.SenseAreaColumn(
-                _world, _layer, xPointer, yPointer, reachPointer, excludePointer, count, batchPointer, wholePointer);
+            var batchComplete = (World.SenseAreaColumn(
+                _world, _layer, xPointer, yPointer, reachPointer, excludePointer, count, batchPointer, wholePointer) == World.ReadStatus.Complete);
             Assert.Equal(scalarComplete, batchComplete);
         }
 
@@ -204,8 +204,8 @@ public sealed class ColumnSenseTests : IDisposable
                 scalarComplete &= World.TrySenseMax(_world, _layer, xs[i], ys[i], reaches[i],
                     out scalarPointer[i], out scalarXPointer[i], out scalarYPointer[i]);
 
-            var batchComplete = World.SenseMaxColumn(
-                _world, _layer, xPointer, yPointer, reachPointer, count, batchPointer, batchXPointer, batchYPointer, wholePointer);
+            var batchComplete = (World.SenseMaxColumn(
+                _world, _layer, xPointer, yPointer, reachPointer, count, batchPointer, batchXPointer, batchYPointer, wholePointer) == World.ReadStatus.Complete);
             Assert.Equal(scalarComplete, batchComplete);
         }
 
@@ -255,9 +255,9 @@ public sealed class ColumnSenseTests : IDisposable
                 scalarComplete &= World.TrySenseNearest(_world, _layer, xs[i], ys[i], reaches[i], thresholds[i],
                     out scalarPointer[i], out scalarXPointer[i], out scalarYPointer[i]);
 
-            var batchComplete = World.SenseNearestColumn(
+            var batchComplete = (World.SenseNearestColumn(
                 _world, _layer, xPointer, yPointer, reachPointer, thresholdPointer, count,
-                batchPointer, batchXPointer, batchYPointer, foundPointer);
+                batchPointer, batchXPointer, batchYPointer, foundPointer) == World.ReadStatus.Complete);
             Assert.Equal(scalarComplete, batchComplete);
         }
 
@@ -281,10 +281,10 @@ public sealed class ColumnSenseTests : IDisposable
         fixed (float* yPointer = ys)
         fixed (short* valuePointer = values)
         {
-            Assert.False(World.SenseColumn(255, _layer, xPointer, yPointer, null, 2, valuePointer, null));
-            Assert.False(World.SenseColumn(_world, 31, xPointer, yPointer, null, 2, valuePointer, null));
-            Assert.True(World.SenseColumn(_world, _layer, xPointer, yPointer, null, 0, valuePointer, null));
-            Assert.False(World.SenseColumn(_world, _layer, null, yPointer, null, 2, valuePointer, null));
+            Assert.False((World.SenseColumn(255, _layer, xPointer, yPointer, null, 2, valuePointer, null) == World.ReadStatus.Complete));
+            Assert.False((World.SenseColumn(_world, 31, xPointer, yPointer, null, 2, valuePointer, null) == World.ReadStatus.Complete));
+            Assert.True((World.SenseColumn(_world, _layer, xPointer, yPointer, null, 0, valuePointer, null) == World.ReadStatus.Complete));
+            Assert.False((World.SenseColumn(_world, _layer, null, yPointer, null, 2, valuePointer, null) == World.ReadStatus.Complete));
         }
     }
 
