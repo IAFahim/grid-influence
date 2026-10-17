@@ -1,0 +1,16 @@
+{
+    "name": "Gi.Entities.Tests.Support",
+    "rootNamespace": "Gi.Entities.Tests.Support",
+    "references": [],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "Gi.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

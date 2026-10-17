@@ -1,0 +1,23 @@
+{
+    "name": "Gi.Entities.Netcode",
+    "rootNamespace": "Gi.Entities.Netcode",
+    "references": [
+        "BovineLabs.Core",
+        "Gi.Entities",
+        "Unity.Burst",
+        "Unity.Collections",
+        "Unity.Entities",
+        "Unity.Mathematics"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "UNITY_NETCODE"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
