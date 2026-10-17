@@ -1535,3 +1535,29 @@ native memory. All pointer reads use the naturally aligned owning structs and bo
 capacities. The CLI is single-threaded and formats only after capture and timing. JSON uses
 `Utf8JsonWriter` directly with static UTF-8 property names and a fixed object/array layout;
 serializer reflection is disabled in the tool project.
+
+## Unity boundary
+
+### U-1
+
+Pending.
+
+### U-2
+
+Pending.
+
+### U-3
+
+Pending.
+
+### U-5
+
+Pending.
+
+### U-6
+
+Pending.
+
+### P-1
+
+Pending.

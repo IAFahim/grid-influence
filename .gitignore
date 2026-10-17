@@ -16,4 +16,13 @@ samples/unity-demo/Build/
 samples/unity-demo/*.csproj
 samples/unity-demo/*.sln
 samples/unity-demo/Assets/GiDemo/Plugins/*.pdb
+unity/project/Library/
+unity/project/Temp/
+unity/project/Logs/
+unity/project/Obj/
+unity/project/obj/
+unity/project/UserSettings/
+unity/project/Build/
+unity/project/*.csproj
+unity/project/*.sln
 scratch/
