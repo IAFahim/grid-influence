@@ -73,6 +73,7 @@ internal unsafe struct KernelCache
     internal const int MaxSide = 64;
     internal const int MaxCells = MaxSide * MaxSide;
     internal const int CanvasCellLimit = 1 << 22;
+    internal const int FrameInsertCap = 8;
 
     private NativeBuffer<KernelEntry> _entries;
     private NativeBuffer<long> _taps;
@@ -80,6 +81,7 @@ internal unsafe struct KernelCache
     private NativeBuffer<long> _canvas;
     private NativeBuffer<int> _canvasRows;
     private int _cursor;
+    private int _inserts;
 
     public readonly long Bytes =>
         (long)_entries.Capacity * sizeof(KernelEntry) + (long)_taps.Capacity * sizeof(long) +
@@ -108,10 +110,18 @@ internal unsafe struct KernelCache
             entry->Plane == Plane.Tent || entry->Plane == Plane.Bell ? taps : null);
     }
 
+    public bool InsertsDisabled;
+
+    public readonly bool CanInsert => !InsertsDisabled && _inserts < FrameInsertCap;
+
+
+    public void BeginFrame() => _inserts = 0;
+
     public void Clear()
     {
         if (_entries.Pointer != null) new Span<KernelEntry>(_entries.Pointer, EntryCount).Clear();
         _cursor = 0;
+        _inserts = 0;
     }
 
     public void Release()
@@ -130,6 +140,7 @@ internal unsafe struct KernelCache
         int* rowExtents, int* cells, long* q40)
     {
         EnsureStorage();
+        _inserts++;
         var slot = _cursor;
         _cursor = slot + 1 == EntryCount ? 0 : slot + 1;
 
@@ -185,12 +196,27 @@ internal unsafe struct KernelCache
 
 internal static unsafe class KernelFactory
 {
+    public static bool TryFindTaps(
+        WorldCtx* w, int grid, byte stamp, int angle, Layer.Precision precision, Placement* p, out KernelTaps taps)
+    {
+        taps = default;
+        if (!TileBake.Unclipped(p->V, p)) return false;
+
+        var masked = p->V->Kind >= StampKind.Disk && p->V->Arc == 0 ? 0 : angle & precision.TurnMask;
+        var key = new KernelKey(stamp, p->Sampling, grid, p->Fx, p->Fy, masked);
+        var hit = w->Kernels.Find(key.Main, key.Turn);
+        if (hit == null) return false;
+
+        taps = w->Kernels.View(hit);
+        return true;
+    }
+
     public static bool TryGetTaps(
         WorldCtx* w, int grid, byte stamp, int angle, Layer.Precision precision, Placement* p, out KernelTaps taps)
     {
         var cache = &w->Kernels;
         var clipped = !TileBake.Unclipped(p->V, p);
-        var masked = angle & precision.TurnMask;
+        var masked = p->V->Kind >= StampKind.Disk && p->V->Arc == 0 ? 0 : angle & precision.TurnMask;
         var key = new KernelKey(stamp, p->Sampling, grid, p->Fx, p->Fy, masked);
         if (!clipped)
         {

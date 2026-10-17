@@ -443,7 +443,7 @@ before reading command payloads, writing
   `ChangedTiles(world, grid, layer, int* dst)` returns how many tiles the most recent
   `Process` changed on that (grid, layer) — changed meaning the tile's published `int16`
   bytes differ from what they were before that `Process`, on every deposit path — and copies
-  the tile ids to `dst` when it is not
+  the tile ids to `dst` (ascending tile index, whichever deposit path ran) when it is not
   null — repainting, incremental network sync, and dirty-rect presentation read one call
   instead of diffing pages. The list includes a tile that resolved to zero and left the map
   exactly when its old page held a non-zero cell; a deposit that cancels inside one window

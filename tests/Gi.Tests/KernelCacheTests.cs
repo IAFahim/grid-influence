@@ -599,6 +599,7 @@ public sealed unsafe class KernelCacheTests
 
             for (var phase = 2; phase <= KernelCache.EntryCount + 1; phase++)
             {
+                w->Kernels.BeginFrame();
                 var placement = PlaceAt(phase);
                 Assert.True(KernelFactory.TryGetTaps(w, 0, stamp, 0, Layer.Precision.Exact, &placement, out _));
             }
@@ -617,6 +618,72 @@ public sealed unsafe class KernelCacheTests
 
             Assert.True(Stamp.Free(big));
             Assert.True(Stamp.Free(stamp));
+        }
+        finally
+        {
+            World.Free(world);
+        }
+    }
+
+    [Fact]
+    public void InsertCap_ClosesAfterEightInsertsAndReopensEachFrame()
+    {
+        var world = NewWorld();
+        try
+        {
+            var w = World.GetContext(world);
+            var stamp = Stamp.Box(4, 4, 60);
+            var variant = StampCatalog.Get(stamp);
+            w->Kernels.BeginFrame();
+            for (var phase = 1; phase <= KernelCache.FrameInsertCap + 4; phase++)
+            {
+                Assert.Equal(phase <= KernelCache.FrameInsertCap, w->Kernels.CanInsert);
+                var x = ((35L << 8) + phase - ((long)variant->OriginQ8X * 256 >> 8) + 0.5f) / 256f;
+                Assert.True(TileBake.Place(x, 41.5f, 0f, 0f, 256, Size, variant, 0, 256, Layer.Precision.Exact, out var p));
+                Assert.False(KernelFactory.TryFindTaps(w, 0, stamp, 0, Layer.Precision.Exact, &p, out _));
+                Assert.True(KernelFactory.TryGetTaps(w, 0, stamp, 0, Layer.Precision.Exact, &p, out _));
+                Assert.True(KernelFactory.TryFindTaps(w, 0, stamp, 0, Layer.Precision.Exact, &p, out var found));
+                Assert.True(found.MaxTap > 0);
+            }
+
+            w->Kernels.BeginFrame();
+            Assert.True(w->Kernels.CanInsert);
+            w->Kernels.InsertsDisabled = true;
+            Assert.False(w->Kernels.CanInsert);
+            Assert.True(Stamp.Free(stamp));
+        }
+        finally
+        {
+            World.Free(world);
+        }
+    }
+
+    [Fact]
+    public void FullArcRoundKernels_ShareOneEntryAcrossAngles_AndArcsDoNot()
+    {
+        var world = NewWorld();
+        try
+        {
+            var w = World.GetContext(world);
+            var full = Stamp.Disk(3, 40, 360);
+            var arc = Stamp.Disk(3, 40, 120);
+            foreach (var (stamp, shared) in new[] { (full, true), (arc, false) })
+            {
+                var seen = new HashSet<long>();
+                foreach (var angle in new[] { 0, 777, 16384, 40000 })
+                {
+                    w->Kernels.BeginFrame();
+                    Assert.True(TileBake.Place(35.5f, 41.5f, 0f, 0f, 256, Size, StampCatalog.Get(stamp), angle, 256,
+                        Layer.Precision.Exact, out var p));
+                    Assert.True(KernelFactory.TryGetTaps(w, 0, stamp, angle, Layer.Precision.Exact, &p, out var taps));
+                    seen.Add((long)taps.Cells);
+                }
+
+                Assert.Equal(shared ? 1 : 4, seen.Count);
+            }
+
+            Assert.True(Stamp.Free(full));
+            Assert.True(Stamp.Free(arc));
         }
         finally
         {
