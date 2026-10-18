@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Gi\Gi.csproj" />
     <ProjectReference Include="..\..\..\src\Gi.Validation\Gi.Validation.csproj" />
+    <ProjectReference Include="..\Gi.Corpus\Gi.Corpus.csproj" />
     <Compile Include="..\..\com.gi.entities\Runtime\Columns\**\*.cs" Link="Columns\%(RecursiveDir)%(Filename)%(Extension)" />
     <Compile Include="..\..\com.gi.entities\Tests\Support\**\*.cs" Link="Support\%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
