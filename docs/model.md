@@ -38,6 +38,18 @@ The rest of this file derives from seven statements.
   allocated world in id order on the calling thread. `World.Teardown()` returns the process-wide
   pools to the OS once no world is live: it returns `false` and changes nothing while any world
   is live, and `true` once it has freed everything (the pools paragraph states the full contract).
+  `World.SetAllocator(allocate, free)` routes every native allocation and free Gi performs through
+  two unmanaged function pointers, so a host can account Gi's memory under its own allocator and
+  labels. `allocate(bytes, alignment)` receives the byte count and an alignment of 0 (default,
+  pointer-sized) or 64 (SIMD buffers) and returns memory of at least that alignment with
+  undefined contents — Gi zeroes the blocks that must start zeroed; `free(pointer)` receives
+  exactly the pointers `allocate` returned, whichever alignment they were asked for. The pair is
+  installed before the first allocation or after a `World.Teardown` has returned Gi to a pristine
+  process: `SetAllocator` returns `false` and changes nothing while Gi holds native memory, a
+  call naming exactly one null pointer throws `ArgumentException`, and passing two null pointers
+  restores the default allocator under the same rule. An install survives teardowns — it is
+  restored only by an explicit two-null call — and `NativeHeap.Calls` counts hook calls like
+  default calls, so the teardown receipt (calls back to zero) holds under a hook too.
   `World.Memory(world, out storeBytes,
   out liveTiles, out pages, out kernelEntries, out liveSources)` is the tooling read-out: it
   sums, over every (grid, layer) of the world, the retained capacity of the four plane slabs
@@ -47,7 +59,20 @@ The rest of this file derives from seven statements.
   cache's occupied entries out of 32 and the sources whose alive bit is set. It reads only
   existing counters, allocates nothing, throws nothing, and returns all zeros for a dead or
   never-allocated handle; `Clear` empties the live counts while the slab bytes stay (regions are
-  retained, free lists grow), and `Free` returns everything to zero. `World.Revision(world)` returns an `int`
+  retained, free lists grow), and `Free` returns everything to zero. `World.LayerHash(world,
+grid, layer)` is the incremental content hash: an XOR, over every 32×32 tile of that grid and
+layer, of a per-tile hash of the tile's published page — FNV-1a 64 (offset
+`0xcbf29ce484222325`, prime `0x100000001b3`) seeded with the tile index and folded over the
+2,048 page bytes as 256 little-endian 64-bit words — where a tile whose published page is all
+zero contributes nothing, so an empty or absent (grid, layer) hashes to 0. `Process` maintains
+the XOR incrementally: after each dirty tile publishes (base, transient, and derived passes
+alike, drops included) Gi replaces that tile's stored contribution with a fresh hash of the
+final page, so the cost follows changed tiles, never grid area, and a full recompute — the XOR
+of the same per-tile function over a `QueryRegion` read-back of every tile — equals it after
+every tick (a fuzz-stream test pins this; the stored hash and the read-back read the same page
+bytes, and the word order is fixed as little-endian so any two little-endian hosts agree). The
+page-hash work runs in `Process` on the owning thread after publish; `Clear` returns the hash to
+0 with everything else. `World.Revision(world)` returns an `int`
   that changes whenever queued work could be stale — `World.New` assigns it a fresh value,
   and `Clear`, `Rewind`, `Free`, and slot reuse bump it; mutations, `Process`, and `ProcessAll`
   leave it alone. `World.Capture(world)` seals the id and that revision into a `World.Token`
@@ -1026,7 +1051,10 @@ digits. Concurrency: single thread.
   reads "nothing deposited" (`Clear` zeroes it); and per (grid, layer) the layer's directory, its
   `PlaneStore` slabs, its tile-set slab, the dirty flags and tile epochs (allocated together by
   the layer's first marked tile on that grid and kept until `World.Free`), the dirty list with
-  its parallel rectangle list, the changed list, and two pyramids built on one generic layout
+  its parallel rectangle list, the changed list, the per-tile hash table (one zeroed `ulong` per
+  tile with the layer's running XOR, allocated by the layer's first refreshed tile — which is
+  its first published dirty tile, so every earlier tile contributes zero — kept until
+  `World.Free`, zeroed by `World.Clear` with the running hash), and two pyramids built on one generic layout
   (`Pyramid<T, TOp>`: a flat slot array plus per-level offset and side tables, each node an 8×8
   block of its children's maxima, with the combiner a `struct` type argument so the library still
   targets netstandard): the max pyramid (`int16`, allocated zeroed by the layer's first
@@ -1087,6 +1115,25 @@ digits. Concurrency: single thread.
   the context; a context without a grid array is not a world, so `GetContext` returns null for it
   and every handle-taking call reads a freed handle as absent. No pointer escapes an owner: handles
   are bytes and source ids carry a generation.
+- **Allocator hook**: `World.SetAllocator` stores the two unmanaged pointers in `NativeHeap`'s
+  statics; every allocation and free site already funnels through `NativeHeap`, so the hook sees
+  each block exactly once on the allocating thread. *Lifetime*: the pointers are process-lifetime
+  and never invoked after a two-null restore; installation is gated on `Runtime.Worlds == null`,
+  which is exactly "no `NativeHeap` block is live" — pools, stamp payloads, and the zero page are
+  allocated after the gate and freed before it reopens, so no block can be allocated by one
+  allocator and freed by another. *Aliasing*: Gi hands the hook only pointers it received from the
+  same hook (or, by default, only pointers `NativeMemory`/`Marshal` returned), one free per
+  allocation, never a block interior — `SourceColumns` chunks, slab regions, and buffers are freed
+  at their base and exactly once by the same owner that grew them. *Alignment*: `allocate` is
+  called with alignment 0 or 64; a hook may return over-aligned memory for the 0 case freely
+  (every Gi access is at most naturally aligned), and the default path is byte-identical to the
+  unhooked build — `NativeMemory.AllocZeroed`/`Free` and `AlignedAlloc(64)`/`AlignedFree` on .NET,
+  `Marshal.AllocHGlobal` with platform-natural alignment on netstandard2.1. *Concurrency*: the
+  hook is installed or restored before the first allocation or after a full teardown, both
+  process-wide serialized points (below), so the pointer fields are never written while any Gi
+  call runs; afterwards the fields are read-only. The hook itself runs on the calling thread of
+  each cold-path allocation (creation, growth, teardown) and must be safe to call from any thread
+  Gi runs on; warm paths never allocate, so no synchronization is added anywhere.
 - **Source columns**: the hot columns (x, y, stamp, layer, gain, angle, scale, liveness,
   generation, mark) live in 16,384-slot chunks. *Lifetime*: each column owns an array of up to 1,024
   chunk pointers, allocated zeroed when the first chunk is added and freed exactly once by
@@ -1266,7 +1313,7 @@ digits. Concurrency: single thread.
   the allocated ids, ascending, on the calling thread — it adds no parallelism claim, it only
   packages the loop, and freed slots read as absent to it exactly as they do to `Process`.
   World creation, `World.Free`, `World.CopyWorldIds` (which reads the world count and each
-  slot's `Grids` pointer), `World.ProcessAll`, `World.Teardown`, and stamp catalog mutation (`Stamp` creation
+  slot's `Grids` pointer), `World.ProcessAll`, `World.Teardown`, `World.SetAllocator`, and stamp catalog mutation (`Stamp` creation
   and `Stamp.Free`, which scans every world for references) are process-wide scans:
   serialize them with one another; `World.Teardown` frees the arenas every one of those scans
   walks, so it must not overlap any other Gi call at all — its precondition, no live world,
@@ -1293,7 +1340,12 @@ digits. Concurrency: single thread.
   planes only on the owning thread, never concurrently with publish. Publish runs sequentially:
   tiles that publish to zero perform their own directory drop and slab give-back and leave the
   dirty list inside the same pass, and the dirty lists are then walked again, on the owning
-  thread alone, to fold each tile's page max into its max pyramid. Warm `Process` and warm reads
+  thread alone, to fold each tile's page max into its max pyramid. The layer hash rides the same
+  pass on the same thread: each dirty tile's contribution is replaced immediately after its
+  publish-or-drop decision, reading the final page through the layer's own directory before any
+  later tile can recycle the freed units, so no tile's stored hash is ever read against another
+  tile's page, and `World.LayerHash` is a plain read of the running `ulong` under the same
+  serial-per-world rule as `World.Memory`. Warm `Process` and warm reads
   make no `NativeHeap` calls at all: slabs, directories, and every list are sized by grow-to-max
   before steady state, and the hook counter (`NativeHeap.Calls`) is asserted flat by a test
   across warm frames that move and read. Kernel-cache builds run on the owning world's thread

@@ -30,7 +30,7 @@ public sealed unsafe class TeardownTests
         var total = 0;
         int readCount;
         while (total < 4096 && (readCount = read(descriptor, buffer + total, (nuint)(4096 - total))) > 0) total += readCount;
-        close(descriptor);
+        _ = close(descriptor);
 
         var span = new ReadOnlySpan<byte>(buffer, total);
         var marker = "VmRSS:"u8;

@@ -284,7 +284,7 @@ public sealed class SlotRingTests : IDisposable
             previous = spawned;
             if (retired.Count > lag)
             {
-                var stale = retired[retired.Count - lag];
+                var stale = retired[^lag];
                 World.Move(_world, stale, 50f, 50f);
                 World.SetGain(_world, stale, 16);
                 World.Fade(_world, stale, 0, 2);

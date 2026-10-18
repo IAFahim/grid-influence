@@ -22,7 +22,12 @@ public sealed unsafe class DepositRecordTests : IDisposable
         Assert.True(Stamp.Free(_stamp));
     }
 
-    public static IEnumerable<object[]> Seeds() => Enumerable.Range(1, SeedCount).Select(seed => new object[] { seed });
+    public static TheoryData<int> Seeds()
+    {
+        var data = new TheoryData<int>();
+        for (var seed = 1; seed <= SeedCount; seed++) data.Add(seed);
+        return data;
+    }
 
     private int[] Recount()
     {
