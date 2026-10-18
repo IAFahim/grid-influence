@@ -104,7 +104,7 @@ The card named in each row pins its fact (Tier U).
 | E6 | Whether `FixedStepSimulationSystemGroup` updates in the Editor world. | U-4 | |
 | E7 | An entity baked without `TransformUsageFlags.Dynamic` has `LocalToWorld` but no `LocalTransform`. | U-2 | |
 | E8 | `FixedStepSimulationSystemGroup` runs before `TransformSystemGroup`, so `LocalToWorld` read during a fixed tick is from the previous frame. | U-3 | |
-| E9 | A non-Burst job scheduled from a non-Burst `ISystem.OnUpdate` runs on a worker thread under Mono and IL2CPP, and under CoreCLR at V-0. | U-1 | |
+| E9 | A non-Burst job scheduled from a non-Burst `ISystem.OnUpdate` runs on a worker thread under IL2CPP and CoreCLR (Mono no longer exists in Unity 7). | U-1 | confirmed (U-1): a managed `IJob` runs on a worker while the main thread polls `IsCompleted`. Scheduled and then `Complete()`d at once, the main thread runs it inline, so a test that needs a worker must poll. Same on CoreCLR editor, CoreCLR player and IL2CPP player |
 | E10 | Gi's `SourceCommand` factories compile under Burst. If they do not, the diff job writes an adapter struct and the apply job converts it. | U-2 | |
 
 ## 2. Prediction ledger
@@ -215,7 +215,7 @@ Plan §12's S1–S5 apply, plus:
 | G-0a | TFM dry run | core | P0 | — | G | 1 | done | scratch, not merged |
 | G-1 | Pure exclusion reads | core | P1 | — | G | 1 | done | #81. Exclusion-row gate deltas (+8–16%) are the accepted price of pure reads; baseline untouched, quiet-host re-run pending |
 | F-2 | Scenarios, reference executor, lint, CI | foundation | P0 | F-1, U-0 | D | 2 | done | stacked on #86 |
-| U-1 | Frame, bootstrap, group, process | runtime | P0 | U-0, F-1 | D, U | 2 | todo | |
+| U-1 | Frame, bootstrap, group, process | runtime | P0 | U-0, F-1 | D, U | 2 | done | stacked after #88 |
 | A-1 | Assets and inspectors | authoring | P0 | U-0 | U | 2 | todo | |
 | V-1 | Gi parity on Unity backends | verification | P0 | U-0, F-1 | D, U | 2 | todo | |
 | G-3 | Tooling read-outs | core | P1 | — | G | 2 | done | #82. `World.Memory(world, out storeBytes, out liveTiles, out pages, out kernelEntries, out liveSources)`; E-1/E-4/E-6 consume it |
@@ -1026,6 +1026,11 @@ This roadmap changes the plan in the ways listed here. The coordinator folds the
 15. **The editor baseline follows O-U2** (minimum Unity = whatever the supplied BovineLabs.Core targets) — **attempted and refuted on 2026-10-18**: the 6000.7 repin hits the same wall as the Unity 7 alphas, because on 6000.7 the builtin Collections is a type-forwarding shim into the engine's `UnityEngine.ManagedKernelModule.dll`, where `HashMapHelper`, `Pair`, `UnsafeParallelHashMapData` and `UntypedUnsafeList` are internal with a Unity-only friend list, and the public registry serves no standalone 6.x Collections to pin instead. BovineLabs 2.0.0-pre.1 is the newest published build (its main branch is an unpublished pre.2 evidently built against a 6000.7 newer than b5). **The host project keeps the 7000.0.0a8 pin.** U-0 is `blocked` (Tier D accepted); the exits are a published BovineLabs build against a 6000.7.0f1+/Unity 7 installable editor, or the owner revisiting O-U6. Editors 6000.7.0b4 and b5 stay installed for the retry.
 
     **Superseded 2026-10-18 (later the same day): the refutation tested the wrong BovineLabs build.** It repinned to `com.bovinelabs.core` 2.0.0-pre.1, the only version on OpenUPM, which targets the 6000.x registry line. BovineLabs' own registry (`upm.bovinelabs.com`) serves up to 2.0.0-pre.5 (built for 7000.0.0a7), and the public GitLab `main` is 2.0.0-pre.6 with `"unity": "7000.0", "unityRelease": "0a9"`. The host project is now pinned to editor 7000.0.0a9 and to `com.bovinelabs.core` at GitLab commit `82be2794cf7535f6fb598bb704527f41629a8f64` (pre.6). It compiles, and the EditMode, PlayMode, CoreCLR-player and IL2CPP-player suites run (Appendix F). U-0's Tier U items are unblocked.
+
+16. **Content hashes are FNV-1a 64 with a finalizer, not xxHash3** (`GiContentHash`). It is Unity-free, so `dotnet test` pins it and the profile hash, the stamp registry key and the rebuild check use one implementation. A collision needs 2^-64 luck; the profile blob also stores the hash and bootstrap recomputes it, so a corrupted blob is rejected.
+17. **The ConfigVar is `gi.runtime.keep-orphans` (default false), not `gi.runtime.reclaim`.** A `SharedStatic<bool>` is false until ConfigVarManager applies its default, and `[OnCodeLoaded]` callbacks have no defined order, so the safe polarity is the one whose zero value means "reclaim".
+18. **Fences are implemented in U-1** (`GiRuntime.BeginWrite/EndWrite/BeginRead/EndRead/CompleteAll`), because U-1's process job already needs them. U-4 keeps the guard, the cross-world proof and the Editor-world check.
+19. **`GiSystemGroup` and every system use `Worlds.SimulationEditor`.** Whether the group actually updates in the Editor world is still U-4's pin (E6).
 
 New open decisions:
 

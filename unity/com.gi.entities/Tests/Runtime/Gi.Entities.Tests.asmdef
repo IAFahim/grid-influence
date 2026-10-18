@@ -9,11 +9,12 @@
         "Unity.Collections",
         "Unity.Entities",
         "Unity.Mathematics",
-        "Unity.Transforms"
+        "Unity.Transforms",
+        "UnityEngine.TestRunner"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
-    "allowUnsafeCode": false,
+    "allowUnsafeCode": true,
     "overrideReferences": true,
     "precompiledReferences": [
         "Gi.Validation.dll",
