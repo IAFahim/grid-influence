@@ -16,7 +16,7 @@ namespace Gi.Entities.Tests
         private const short Threshold = 3;
         private const int Probes = 240;
 
-        private static readonly GiBindingSpec Area = new GiBindingSpec
+        internal static readonly GiBindingSpec Area = new GiBindingSpec
         {
             Kind = GiBindingKind.Area,
             Layer = 3,
@@ -24,7 +24,7 @@ namespace Gi.Entities.Tests
             Total = GiBindingFields.Of<KindArea>("Total"),
         };
 
-        private static readonly GiBindingSpec Max = new GiBindingSpec
+        internal static readonly GiBindingSpec Max = new GiBindingSpec
         {
             Kind = GiBindingKind.Max,
             Layer = 4,
@@ -33,7 +33,7 @@ namespace Gi.Entities.Tests
             Position = GiBindingFields.Of<KindMax>("Position"),
         };
 
-        private static readonly GiBindingSpec Nearest = new GiBindingSpec
+        internal static readonly GiBindingSpec Nearest = new GiBindingSpec
         {
             Kind = GiBindingKind.Nearest,
             Layer = 1,
@@ -44,7 +44,7 @@ namespace Gi.Entities.Tests
             Coverage = GiBindingFields.Tag<KindFound>(),
         };
 
-        private static readonly GiBindingSpec Changed = new GiBindingSpec
+        internal static readonly GiBindingSpec Changed = new GiBindingSpec
         {
             Kind = GiBindingKind.Changed,
             Layer = 1,
@@ -127,7 +127,8 @@ namespace Gi.Entities.Tests
                     Assert.That(Same(by, max.Position.y), Is.True, $"max y {i}");
                 }
 
-                var nearOk = GiWorld.TrySenseNearest(frame.World, cellLayer, xs[i], zs[i], Reach, Threshold, out var near, out var nx, out var ny);
+                GiWorld.TrySenseNearest(frame.World, cellLayer, xs[i], zs[i], Reach, Threshold, out var near, out var nx, out var ny);
+                var nearOk = near != short.MinValue;
                 var nearest = fixture.Manager.GetComponentData<KindNearest>(entities[i]);
                 Assert.That(nearest.Value, Is.EqualTo(near), $"nearest {i}");
                 Assert.That(fixture.Manager.IsComponentEnabled<KindFound>(entities[i]), Is.EqualTo(nearOk), $"found {i}");
@@ -177,9 +178,9 @@ namespace Gi.Entities.Tests
                 GiWorld.TrySenseArea(frame.World, areaLayer, xs[i], zs[i], field.Reach, out var total);
                 Assert.That(fixture.Manager.GetComponentData<KindArea>(entities[i]).Total, Is.EqualTo(total), $"area {i}");
 
-                var ok = GiWorld.TrySenseNearest(frame.World, cellLayer, xs[i], zs[i], field.Reach, field.Threshold, out var near, out _, out _);
+                GiWorld.TrySenseNearest(frame.World, cellLayer, xs[i], zs[i], field.Reach, field.Threshold, out var near, out _, out _);
                 Assert.That(fixture.Manager.GetComponentData<KindNearest>(entities[i]).Value, Is.EqualTo(near), $"nearest {i}");
-                Assert.That(fixture.Manager.IsComponentEnabled<KindFound>(entities[i]), Is.EqualTo(ok), $"found {i}");
+                Assert.That(fixture.Manager.IsComponentEnabled<KindFound>(entities[i]), Is.EqualTo(near != short.MinValue), $"found {i}");
 
                 GiWorld.TrySenseArea(frame.World, areaLayer, xs[i], zs[i], Reach, out var constant);
                 if (constant != total) differing++;
