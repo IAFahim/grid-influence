@@ -64,6 +64,29 @@ namespace Gi.Entities.Tests
             }
         }
 
+        public void AdoptFrom(GiEcsExecutor source)
+        {
+            var from = source.Fixture.Manager;
+            var to = Fixture.Manager;
+            GiSave.Prepare(from);
+            for (var i = 0; i < Entities.Length; i++)
+            {
+                if (!source._spawned[i] || !from.Exists(source.Entities[i]) || !from.HasComponent<GiEmitter>(source.Entities[i])) continue;
+
+                Entities[i] = GiSaveCopy.Emitter(from, source.Entities[i], to);
+                _spawned[i] = true;
+            }
+
+            foreach (var splat in source._splats)
+                if (from.Exists(splat))
+                    _splats.Add(GiSaveCopy.Splat(from, splat, to));
+
+            var saved = from.GetBuffer<GiSavedPulse>(GiSave.Holder(from));
+            var holder = to.GetBuffer<GiSavedPulse>(GiSave.Holder(to));
+            for (var i = 0; i < saved.Length; i++) holder.Add(saved[i]);
+            GiSave.Release(from);
+        }
+
         public ulong[] Hashes()
         {
             GiRuntime.CompleteAll();

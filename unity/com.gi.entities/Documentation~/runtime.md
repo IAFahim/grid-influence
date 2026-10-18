@@ -102,3 +102,12 @@ The plane projection is `frame.Plane.Project(x, y, z, out var px, out var py)`.
 behind `BeginRead`/`EndRead`. In checked builds `GiGuard` reports — with both systems named — if a
 reader overlaps a writer on one Gi world. `gi.guard` turns that off. You do not need the guard's
 forgiveness; you need its discipline: one writer, then readers, per Gi world, per tick.
+
+## Save and load
+
+Mark nothing yourself: `GiEmitter`, `GiSplat`, `GiGainRamp`, `GiOriented` and `GiScaled` already carry `[Save]` (BovineLabs' attribute), and `GiSource`, which Gi owns, does not. Gi's state is rebuilt from the saved entities: on load the reconcile system places every emitter again.
+
+What entity data cannot say is what was in flight: a gain ramp half way up, and pulses (which have no entity). Call `GiSave.Prepare(entityManager)` just before your save system runs and `GiSave.Release(entityManager)` after. `Prepare` writes a `GiSavedSource` component on every ramped emitter and a `GiSavedPulse` element per live pulse on a `GiSaveHolder` entity, both `[Save]`; the first tick of the loaded world restores them, so the field continues exactly as an uninterrupted run would — a ramp keeps its staircase, a pulse keeps its remaining ticks. Without `Prepare` a loaded ramp restarts from zero and pulses are lost.
+
+Gi's tick counter starts again from zero in a loaded world. Nothing the adapter keeps depends on it.
+
