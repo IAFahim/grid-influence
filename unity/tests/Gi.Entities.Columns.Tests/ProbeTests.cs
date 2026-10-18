@@ -64,7 +64,7 @@ public sealed class ProbeTests
     {
         var request = new GiProbeRequest { Kind = GiProbeKind.Value, World = 200, Layer = 3, X = 1, Y = 1 };
         Assert.False(GiProbe.Run(request).Ok);
-        foreach (GiProbeKind kind in Enum.GetValues(typeof(GiProbeKind)))
+        foreach (var kind in Enum.GetValues<GiProbeKind>())
         {
             request.Kind = kind;
             request.Reach = 5;

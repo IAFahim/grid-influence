@@ -428,17 +428,17 @@ public sealed class FrameColumnsTests
         GiWorldBuilder.Release(world, tables, registry);
     }
 
-    public static IEnumerable<object[]> Directions()
+    public static TheoryData<GiPlaneAxes, int, int> Directions() => new()
     {
-        yield return new object[] { GiPlaneAxes.Xz, 1, 0 };
-        yield return new object[] { GiPlaneAxes.Xz, -1, 0 };
-        yield return new object[] { GiPlaneAxes.Xz, 0, 1 };
-        yield return new object[] { GiPlaneAxes.Xz, 0, -1 };
-        yield return new object[] { GiPlaneAxes.Xy, 1, 0 };
-        yield return new object[] { GiPlaneAxes.Xy, -1, 0 };
-        yield return new object[] { GiPlaneAxes.Xy, 0, 1 };
-        yield return new object[] { GiPlaneAxes.Xy, 0, -1 };
-    }
+        { GiPlaneAxes.Xz, 1, 0 },
+        { GiPlaneAxes.Xz, -1, 0 },
+        { GiPlaneAxes.Xz, 0, 1 },
+        { GiPlaneAxes.Xz, 0, -1 },
+        { GiPlaneAxes.Xy, 1, 0 },
+        { GiPlaneAxes.Xy, -1, 0 },
+        { GiPlaneAxes.Xy, 0, 1 },
+        { GiPlaneAxes.Xy, 0, -1 },
+    };
 
     [Theory]
     [MemberData(nameof(Directions))]
