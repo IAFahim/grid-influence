@@ -14,6 +14,7 @@ namespace Gi.Entities.Editor
             var root = new VisualElement();
             var stack = new VisualElement();
             var issues = new GiIssueBox();
+            var overview = new GiProfileOverview();
 
             root.Add(new PropertyField(serializedObject.FindProperty("Axes")));
             root.Add(new PropertyField(serializedObject.FindProperty("Origin")));
@@ -22,6 +23,7 @@ namespace Gi.Entities.Editor
             root.Add(AddRow());
             root.Add(new PropertyField(serializedObject.FindProperty("Stamps")));
             root.Add(new PropertyField(serializedObject.FindProperty("Bindings")));
+            root.Add(overview);
             root.Add(issues);
             root.Bind(serializedObject);
 
@@ -29,6 +31,7 @@ namespace Gi.Entities.Editor
             {
                 RebuildStack(stack);
                 issues.Show(profile.Check());
+                overview.Show(profile);
             }
 
             root.TrackSerializedObjectValue(serializedObject, _ => Refresh());
