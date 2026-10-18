@@ -10,10 +10,14 @@ namespace Gi.Entities.Presentation
     public partial class GiInspectorSystem : SystemBase
     {
         private GiWorldInfo _info;
+        private EntityQuery _sources;
+        private EntityQuery _profiles;
 
         protected override void OnCreate()
         {
             RequireForUpdate<GiFrame>();
+            _sources = GetEntityQuery(ComponentType.ReadOnly<GiSource>());
+            _profiles = GetEntityQuery(ComponentType.ReadOnly<GiProfileReference>());
         }
 
         protected override void OnDestroy()
@@ -34,6 +38,7 @@ namespace Gi.Entities.Presentation
             }
 
             while (GiInspectorBoard.TryDequeue(name, out var request)) Serve(request, frame);
+            ServeExplain(name, frame);
             UpdateViews(name, frame);
         }
 
