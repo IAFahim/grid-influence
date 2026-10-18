@@ -38,6 +38,18 @@ The rest of this file derives from seven statements.
   allocated world in id order on the calling thread. `World.Teardown()` returns the process-wide
   pools to the OS once no world is live: it returns `false` and changes nothing while any world
   is live, and `true` once it has freed everything (the pools paragraph states the full contract).
+  `World.SetAllocator(allocate, free)` routes every native allocation and free Gi performs through
+  two unmanaged function pointers, so a host can account Gi's memory under its own allocator and
+  labels. `allocate(bytes, alignment)` receives the byte count and an alignment of 0 (default,
+  pointer-sized) or 64 (SIMD buffers) and returns memory of at least that alignment with
+  undefined contents — Gi zeroes the blocks that must start zeroed; `free(pointer)` receives
+  exactly the pointers `allocate` returned, whichever alignment they were asked for. The pair is
+  installed before the first allocation or after a `World.Teardown` has returned Gi to a pristine
+  process: `SetAllocator` returns `false` and changes nothing while Gi holds native memory, a
+  call naming exactly one null pointer throws `ArgumentException`, and passing two null pointers
+  restores the default allocator under the same rule. An install survives teardowns — it is
+  restored only by an explicit two-null call — and `NativeHeap.Calls` counts hook calls like
+  default calls, so the teardown receipt (calls back to zero) holds under a hook too.
   `World.Memory(world, out storeBytes,
   out liveTiles, out pages, out kernelEntries, out liveSources)` is the tooling read-out: it
   sums, over every (grid, layer) of the world, the retained capacity of the four plane slabs
@@ -1087,6 +1099,25 @@ digits. Concurrency: single thread.
   the context; a context without a grid array is not a world, so `GetContext` returns null for it
   and every handle-taking call reads a freed handle as absent. No pointer escapes an owner: handles
   are bytes and source ids carry a generation.
+- **Allocator hook**: `World.SetAllocator` stores the two unmanaged pointers in `NativeHeap`'s
+  statics; every allocation and free site already funnels through `NativeHeap`, so the hook sees
+  each block exactly once on the allocating thread. *Lifetime*: the pointers are process-lifetime
+  and never invoked after a two-null restore; installation is gated on `Runtime.Worlds == null`,
+  which is exactly "no `NativeHeap` block is live" — pools, stamp payloads, and the zero page are
+  allocated after the gate and freed before it reopens, so no block can be allocated by one
+  allocator and freed by another. *Aliasing*: Gi hands the hook only pointers it received from the
+  same hook (or, by default, only pointers `NativeMemory`/`Marshal` returned), one free per
+  allocation, never a block interior — `SourceColumns` chunks, slab regions, and buffers are freed
+  at their base and exactly once by the same owner that grew them. *Alignment*: `allocate` is
+  called with alignment 0 or 64; a hook may return over-aligned memory for the 0 case freely
+  (every Gi access is at most naturally aligned), and the default path is byte-identical to the
+  unhooked build — `NativeMemory.AllocZeroed`/`Free` and `AlignedAlloc(64)`/`AlignedFree` on .NET,
+  `Marshal.AllocHGlobal` with platform-natural alignment on netstandard2.1. *Concurrency*: the
+  hook is installed or restored before the first allocation or after a full teardown, both
+  process-wide serialized points (below), so the pointer fields are never written while any Gi
+  call runs; afterwards the fields are read-only. The hook itself runs on the calling thread of
+  each cold-path allocation (creation, growth, teardown) and must be safe to call from any thread
+  Gi runs on; warm paths never allocate, so no synchronization is added anywhere.
 - **Source columns**: the hot columns (x, y, stamp, layer, gain, angle, scale, liveness,
   generation, mark) live in 16,384-slot chunks. *Lifetime*: each column owns an array of up to 1,024
   chunk pointers, allocated zeroed when the first chunk is added and freed exactly once by
@@ -1266,7 +1297,7 @@ digits. Concurrency: single thread.
   the allocated ids, ascending, on the calling thread — it adds no parallelism claim, it only
   packages the loop, and freed slots read as absent to it exactly as they do to `Process`.
   World creation, `World.Free`, `World.CopyWorldIds` (which reads the world count and each
-  slot's `Grids` pointer), `World.ProcessAll`, `World.Teardown`, and stamp catalog mutation (`Stamp` creation
+  slot's `Grids` pointer), `World.ProcessAll`, `World.Teardown`, `World.SetAllocator`, and stamp catalog mutation (`Stamp` creation
   and `Stamp.Free`, which scans every world for references) are process-wide scans:
   serialize them with one another; `World.Teardown` frees the arenas every one of those scans
   walks, so it must not overlap any other Gi call at all — its precondition, no live world,
