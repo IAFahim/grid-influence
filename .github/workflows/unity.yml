@@ -39,6 +39,19 @@ jobs:
       - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7
         with:
           dotnet-version: ${{ steps.sdk.outputs.version }}
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet
+      - name: Assert the manifest SDK
+        run: |
+          export DOTNET_ROOT="${RUNNER_TEMP:?}/dotnet"
+          export PATH="$DOTNET_ROOT:$PATH"
+          wanted='${{ steps.sdk.outputs.version }}'
+          got="$(dotnet --version)"
+          printf 'dotnet %s, manifest sdk %s\n' "$got" "$wanted"
+          if [ "$got" != "$wanted" ]; then
+            printf '::error title=sdk-mismatch::dotnet --version resolved %s but unity/com.gi.entities/Plugins/Gi/manifest.txt pins %s, the runner image preinstall is shadowing actions/setup-dotnet\n' "$got" "$wanted"
+            exit 1
+          fi
       - run: unity/build-plugins.sh --check
 
   columns:
@@ -50,6 +63,14 @@ jobs:
       - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7
         with:
           dotnet-version: 10.0.x
+      - name: Assert the 10.0 SDK band
+        run: |
+          got="$(dotnet --version)"
+          printf 'dotnet %s\n' "$got"
+          case "$got" in
+            10.0.*) ;;
+            *) printf '::error title=sdk-mismatch::dotnet --version resolved %s but this job pins 10.0.x, the runner image preinstall is shadowing actions/setup-dotnet\n' "$got"; exit 1 ;;
+          esac
       - run: unity/lint.sh
       - run: dotnet build unity/tests/Gi.Entities.Columns.Tests -c Release -m:1
       - run: dotnet build unity/tests/Gi.Entities.Columns.Compat -c Release -m:1
