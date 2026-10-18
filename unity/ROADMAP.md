@@ -223,12 +223,12 @@ Plan §12's S1–S5 apply, plus:
 | U-4 | Fences, guard, cross-world writers | runtime | P0 | U-1 | U | 3 | todo | |
 | U-6 | Splat | runtime | P0 | U-1, F-2 | D, U | 3 | done | stacked after #91 |
 | A-2 | Bakers, builders, live baking | authoring | P0 | A-1, U-1 | U | 3 | todo | |
-| P-1 | GPU mirror and heatmap | presentation | P1 | U-1, F-2 | D, U | 3 | todo | |
+| P-1 | GPU mirror and heatmap | presentation | P1 | U-1, F-2 | D, U | 3 | active | #97 carries the Columns slice (GiPageTable, Tier D receipts); the GraphicsBuffer/uploader/shader half and Tier U receipts wait out the owner's pause of build runs |
 | E-3 | Stamp Studio | editor | P1 | A-1, U-1 | U | 3 | todo | |
 | E-4 | Profile editor | editor | P1 | A-1 | U | 3 | todo | |
 | E-6 | Profiler module and ConfigVars | editor | P1 | U-1 | U | 3 | todo | |
 | G-2 | Runtime teardown | core | P1 | — | G | 3 | done | #84. `World.Teardown()`; revision floor keeps pre-teardown tokens refused; RSS-flat over 1000 cycles |
-| G-7 | Incremental layer hash | core | P1 | — | G | 3 | todo | |
+| G-7 | Incremental layer hash | core | P1 | — | G | 3 | review | #98, accepted in review (changed-only refresh; full-recompute oracle after every tick, 40 fuzz streams; gate pass on a quiet host, baseline untouched). Owner merges |
 | U-3 | Sync | runtime | P0 | U-2 | D, U | 4 | done | stacked after #90 |
 | U-5 | Read bindings: value and gradient | runtime | P0 | U-2 | D, U | 4 | done | stacked after #93. CoreCLR and IL2CPP players 49/49 at c6723dc; editmode and a fresh PlayMode editor run deferred by the owner |
 | V-2 | ECS determinism and allocation | verification | P0 | U-3, U-4, U-5, U-6 | U | 5 | todo | |
@@ -1174,6 +1174,11 @@ Recorded 2026-10-18 so later sessions start from verified facts, not assumptions
 17. Hand-written plugin `.meta` files with the old list-form `platformData` are ignored by Unity 7 without a message, so the DLL silently vanishes from the precompiled set (this was lesson 8). Let the `PluginImporter` API write them (`unity/project/Assets/Editor/GiPluginSetup.cs`).
 18. A heading recovered from a quaternion (`atan2`) is a ulp off the angle it came from. Gi quantizes angles to 16 bits, so an angle that sits exactly on a quantization boundary can fall into the neighbouring cell. Scenario headings are therefore offset a quarter of a quantum (`GiScenarioOp.HeadingBiasRadians`); production lockstep code must supply headings from deterministic state instead of deriving them from rotations (plan §5.8).
 
-### Session state (2026-10-18, handed off)
+### Session state (2026-10-18, second session stopped by the owner)
 
-The previous agent's session ended; **`unity/HANDOFF.md` is the current state and the instructions for what to do next.** It lists the pull request stack (#86 to #92, all green), the checkpoint branch `unity/u-5-bindings`, the validation commands, the traps, and the order of the remaining cards.
+The owner paused Unity build runs mid-session ("drop build requirement for now") and then stopped the session. What stands:
+
+- **PR stack (owner merges in order):** #86 → #87 → #88 → #89 → #90 → #91 → #92 → **#93** (U-5, all four suites at `c6723dc`; editmode and a fresh PlayMode editor run were not re-run at the final head — player suites and the previous session's editor receipts stand) → **#94** (U-5b Columns half) → **#96** (V-1 Tier D half) → **#97** (P-1 Columns slice). Separate lane, into `main`: **#95** (G-6, accepted in review) and **#98** (G-7, accepted in review). Everything is pushed; every PR's CI is green except #98's, which was still running when the session stopped.
+- **Deferred by the build-run pause:** U-4 (all Tier U), the Unity halves of U-5b and V-1 (`Tests/Runtime/SenseKinds/`, `Tests/Corpus/` + the `--corpus` staging metas), V-2, and every remaining [U] receipt. The first move when the pause lifts: run the four suites on #93's head, then take the deferred halves in §6 order.
+- **G-4 not started.** The agent's exploration findings, for whoever takes it: the kernel canvas is already per world (`WorldCtx.Kernels`); the remaining process-wide write-path state is `ProcessStages`' static accumulators (make them per world in `WorldCtx`, keep the `ProcessStages` static surface as a facade because `benchmarks/` is off-limits) and `NativeHeap.Calls` (`Interlocked` when branching from main without G-6, or removable via the counting hook when stacked after #95); the two-thread 10k-tick receipt needs its own `QueryRegion`-based hash helper on main (`LayerHash` exists only on #98).
+- `unity/HANDOFF.md` §3, §5 traps and §6 order still govern; its §2 stack table predates #93-#98 and this block supersedes it.
