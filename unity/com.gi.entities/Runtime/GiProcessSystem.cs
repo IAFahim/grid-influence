@@ -37,18 +37,22 @@ namespace Gi.Entities
                 if (!frame.Alive) return;
 
                 GiGuard.Begin(frame.World, GiGuard.Process, true);
-                var status = GiWorld.Process(frame.Token);
-                if (status == GiWorld.BatchStatus.StaleRevision)
+                using (GiMarkers.Process.Auto())
                 {
-                    frame.Token = GiWorld.Capture(frame.World);
-                    status = GiWorld.Process(frame.Token);
-                    if (status == GiWorld.BatchStatus.StaleRevision) frame.Faults.Raise(GiFaultKind.StaleToken, frame.Tick);
+                    var status = GiWorld.Process(frame.Token);
+                    if (status == GiWorld.BatchStatus.StaleRevision)
+                    {
+                        frame.Token = GiWorld.Capture(frame.World);
+                        status = GiWorld.Process(frame.Token);
+                        if (status == GiWorld.BatchStatus.StaleRevision) frame.Faults.Raise(GiFaultKind.StaleToken, frame.Tick);
+                    }
+
+                    if (status != GiWorld.BatchStatus.Applied && status != GiWorld.BatchStatus.StaleRevision)
+                        frame.Faults.Raise(GiFaultKind.Adapter, frame.Tick);
+
+                    frame.Tick = GiWorld.Tick(frame.World);
                 }
 
-                if (status != GiWorld.BatchStatus.Applied && status != GiWorld.BatchStatus.StaleRevision)
-                    frame.Faults.Raise(GiFaultKind.Adapter, frame.Tick);
-
-                frame.Tick = GiWorld.Tick(frame.World);
                 GiGuard.End(frame.World, true);
                 Frames[Frame] = frame;
             }

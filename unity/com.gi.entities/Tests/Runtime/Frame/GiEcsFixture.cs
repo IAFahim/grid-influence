@@ -19,6 +19,7 @@ namespace Gi.Entities.Tests
         public readonly SystemHandle Sync;
         public readonly SystemHandle Splat;
         public readonly GiSenseSystem Sense;
+        public readonly GiCountersSystem Counters;
         public readonly SystemHandle Process;
         private BlobAssetReference<GiProfileBlob> _profile;
         private Entity _profileEntity;
@@ -40,6 +41,7 @@ namespace Gi.Entities.Tests
             Sync = World.GetOrCreateSystem<GiSyncSystem>();
             Splat = World.GetOrCreateSystem<GiSplatSystem>();
             Sense = World.GetOrCreateSystemManaged<GiSenseSystem>();
+            Counters = World.GetOrCreateSystemManaged<GiCountersSystem>();
             Process = World.GetOrCreateSystem<GiProcessSystem>();
             Group.AddSystemToUpdateList(Bootstrap);
             Group.AddSystemToUpdateList(Reconcile);
@@ -47,6 +49,7 @@ namespace Gi.Entities.Tests
             Group.AddSystemToUpdateList(Splat);
             Group.AddSystemToUpdateList(Sense);
             Group.AddSystemToUpdateList(Process);
+            Group.AddSystemToUpdateList(Counters);
             Group.SortSystems();
             FixedStep.SortSystems();
             simulation.SortSystems();

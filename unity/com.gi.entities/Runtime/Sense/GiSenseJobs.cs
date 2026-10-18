@@ -218,7 +218,9 @@ namespace Gi.Entities
                 Rows = Rows[0],
             };
             GiGuard.Begin(context.World, GiGuard.Sense, false);
+            var scope = GiMarkers.Sense.Auto();
             GiSensePass.ReadColumns(Kind, context.World, layer, columns, Reach, GiSensePass.SinceTick(context.Tick, Since), Batch, batchIndex);
+            scope.Dispose();
             GiGuard.End(context.World, false);
         }
     }
