@@ -42,7 +42,8 @@ unity/lint.sh                                                   # must print "li
 dotnet test unity/tests/Gi.Entities.Columns.Tests -c Release    # Unity-free tests (88 pass now)
 dotnet build unity/tests/Gi.Entities.Columns.Compat -c Release  # C# 9 / netstandard2.1 compile check
 unity/build-plugins.sh --check                                  # plugin DLLs match src/Gi
-unity/validate.sh editmode                                      # then playmode, coreclr, il2cpp
+unity/compile.sh                                                # editor compile of the host project, ~25 s, must print errors: 0
+unity/validate.sh editmode                                      # final pass only (owner decision O-U9): then playmode, coreclr, il2cpp
 jb inspectcode Gi.slnx --severity=WARNING --build --output=/tmp/inspect.json   # must find 0 problems
 ```
 
