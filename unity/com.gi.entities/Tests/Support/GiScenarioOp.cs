@@ -30,6 +30,7 @@ namespace Gi.Entities.Tests.Support
     public readonly struct GiScenarioOp : IEquatable<GiScenarioOp>
     {
         public const float HeadingStepRadians = 0.39269908169872414f;
+        public const float HeadingBiasRadians = 2.3968450e-05f;
 
         public readonly GiScenarioOpKind Kind;
         public readonly int Entity;
@@ -63,7 +64,7 @@ namespace Gi.Entities.Tests.Support
 
         public float Y => YQuarters * 0.25f;
 
-        public float Heading => HeadingSteps * HeadingStepRadians;
+        public float Heading => HeadingOf(HeadingSteps);
 
         public float Scale => ScaleQuarters * 0.25f;
 
@@ -95,6 +96,11 @@ namespace Gi.Entities.Tests.Support
             hash.Add(Ticks);
             hash.Add(Flags);
             return hash.ToHashCode();
+        }
+
+        public static float HeadingOf(int steps)
+        {
+            return steps * HeadingStepRadians + HeadingBiasRadians;
         }
 
         public static GiScenarioOp Spawn(int entity, int layer, int stamp, int gain, int xQuarters, int yQuarters,

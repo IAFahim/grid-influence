@@ -10,9 +10,12 @@ namespace Gi.Entities.Tests.Support
         public readonly int SplatsPerTick;
         public readonly bool Pulses;
         public readonly bool Ramps;
+        public readonly bool Transforms;
 
-        public GiScenarioOptions(int ticks, int initialEntities, int maxEntities, int splatsPerTick, bool pulses, bool ramps)
+        public GiScenarioOptions(int ticks, int initialEntities, int maxEntities, int splatsPerTick, bool pulses, bool ramps,
+            bool transforms = true)
         {
+            Transforms = transforms;
             Ticks = ticks;
             InitialEntities = initialEntities;
             MaxEntities = maxEntities;
@@ -22,6 +25,16 @@ namespace Gi.Entities.Tests.Support
         }
 
         public static GiScenarioOptions Standard => new GiScenarioOptions(8, 24, 64, 8, true, true);
+
+        public GiScenarioOptions WithoutTransforms()
+        {
+            return new GiScenarioOptions(Ticks, InitialEntities, MaxEntities, SplatsPerTick, Pulses, Ramps, false);
+        }
+
+        public GiScenarioOptions WithoutSplats()
+        {
+            return new GiScenarioOptions(Ticks, InitialEntities, MaxEntities, 0, Pulses, Ramps, Transforms);
+        }
     }
 
     public static class GiScenarioGenerator
@@ -57,7 +70,7 @@ namespace Gi.Entities.Tests.Support
             for (var t = 0; t < ticks.Length; t++)
             {
                 var ops = new List<GiScenarioOp>();
-                if (t > 0) MutateEntities(ref rng, profile, persistent, entities, ops);
+                if (t > 0) MutateEntities(ref rng, profile, persistent, entities, ops, options.Transforms);
 
                 var spawns = t == 0 ? options.InitialEntities : rng.Next(3);
                 for (var i = 0; i < spawns && entities.Count < options.MaxEntities; i++)
@@ -129,7 +142,7 @@ namespace Gi.Entities.Tests.Support
         }
 
         private static void MutateEntities(ref GiRandom rng, GiScenarioProfile profile, int[] persistent,
-            List<EntityState> entities, List<GiScenarioOp> ops)
+            List<EntityState> entities, List<GiScenarioOp> ops, bool transforms)
         {
             for (var e = 0; e < entities.Count; e++)
             {
@@ -153,20 +166,20 @@ namespace Gi.Entities.Tests.Support
                     ops.Add(GiScenarioOp.Enable(e));
                 }
 
-                if (rng.Chance(25, 100))
+                if (transforms && rng.Chance(25, 100))
                 {
                     state.XQuarters = Moved(ref rng, state.XQuarters);
                     state.YQuarters = Moved(ref rng, state.YQuarters);
                     ops.Add(GiScenarioOp.Move(e, state.XQuarters, state.YQuarters));
                 }
 
-                if (state.Oriented && rng.Chance(10, 100))
+                if (transforms && state.Oriented && rng.Chance(10, 100))
                 {
                     state.HeadingSteps = rng.Next(16);
                     ops.Add(GiScenarioOp.Turn(e, state.HeadingSteps));
                 }
 
-                if (state.Scaled && rng.Chance(8, 100))
+                if (transforms && state.Scaled && rng.Chance(8, 100))
                 {
                     state.ScaleQuarters = ScaleChoices[rng.Next(ScaleChoices.Length)];
                     ops.Add(GiScenarioOp.ScaleTo(e, state.ScaleQuarters));
