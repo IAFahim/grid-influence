@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using BovineLabs.Core;
 using Unity.Entities;
 using UnityEngine;
@@ -7,29 +8,32 @@ namespace Gi.Entities.Presentation
 {
     [WorldSystemFilter(Worlds.SimulationEditor)]
     [UpdateInGroup(typeof(PresentationSystemGroup))]
-    public partial class GiInspectorSystem : SystemBase
+    public partial struct GiInspectorSystem : ISystem
     {
-        private GiWorldInfo _info;
+        private GCHandle _info;
         private EntityQuery _sources;
         private EntityQuery _profiles;
 
-        protected override void OnCreate()
+        private GiWorldInfo Published => _info.IsAllocated ? (GiWorldInfo)_info.Target : null;
+
+        public void OnCreate(ref SystemState state)
         {
-            RequireForUpdate<GiFrame>();
-            _sources = GetEntityQuery(ComponentType.ReadOnly<GiSource>());
-            _profiles = GetEntityQuery(ComponentType.ReadOnly<GiProfileReference>());
+            state.RequireForUpdate<GiFrame>();
+            _sources = state.GetEntityQuery(ComponentType.ReadOnly<GiSource>());
+            _profiles = state.GetEntityQuery(ComponentType.ReadOnly<GiProfileReference>());
         }
 
-        protected override void OnDestroy()
+        public void OnDestroy(ref SystemState state)
         {
-            GiInspectorBoard.Retire(World.Name);
+            GiInspectorBoard.Retire(state.World.Name);
+            if (_info.IsAllocated) _info.Free();
         }
 
-        protected override void OnUpdate()
+        public void OnUpdate(ref SystemState state)
         {
             var entity = SystemAPI.GetSingletonEntity<GiFrame>();
-            var frame = EntityManager.GetComponentData<GiFrame>(entity);
-            var name = World.Name;
+            var frame = state.EntityManager.GetComponentData<GiFrame>(entity);
+            var name = state.World.Name;
             Publish(name, frame);
             if (!frame.Alive)
             {
@@ -38,17 +42,18 @@ namespace Gi.Entities.Presentation
             }
 
             while (GiInspectorBoard.TryDequeue(name, out var request)) Serve(request, frame);
-            ServeExplain(name, frame);
+            ServeExplain(ref state, name, frame);
             UpdateViews(name, frame);
         }
 
         private void Publish(string name, in GiFrame frame)
         {
-            if (_info != null && _info.Alive == frame.Alive && _info.Generation == frame.Generation && _info.GiWorld == frame.World)
+            var current = Published;
+            if (current != null && current.Alive == frame.Alive && current.Generation == frame.Generation && current.GiWorld == frame.World)
             {
-                _info.Tick = frame.Tick;
-                _info.Faults = frame.Faults.Raised;
-                _info.DesyncTick = frame.Faults.FirstTick(GiFaultKind.Desync);
+                current.Tick = frame.Tick;
+                current.Faults = frame.Faults.Raised;
+                current.DesyncTick = frame.Faults.FirstTick(GiFaultKind.Desync);
                 return;
             }
 
@@ -74,7 +79,8 @@ namespace Gi.Entities.Presentation
                 }
             }
 
-            _info = info;
+            if (_info.IsAllocated) _info.Free();
+            _info = GCHandle.Alloc(info);
             GiInspectorBoard.Publish(name, info);
         }
 

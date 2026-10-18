@@ -18,9 +18,9 @@ namespace Gi.Entities.Tests
         public readonly SystemHandle Reconcile;
         public readonly SystemHandle Sync;
         public readonly SystemHandle Splat;
-        public readonly GiSenseSystem Sense;
-        public readonly GiCountersSystem Counters;
-        public Presentation.GiInspectorSystem Inspector;
+        public readonly SystemHandle Sense;
+        public readonly SystemHandle Counters;
+        public SystemHandle Inspector;
         public readonly SystemHandle Process;
         public readonly SystemHandle Recorder;
         public readonly SystemHandle Restore;
@@ -45,8 +45,8 @@ namespace Gi.Entities.Tests
             Reconcile = World.GetOrCreateSystem<GiReconcileSystem>();
             Sync = World.GetOrCreateSystem<GiSyncSystem>();
             Splat = World.GetOrCreateSystem<GiSplatSystem>();
-            Sense = World.GetOrCreateSystemManaged<GiSenseSystem>();
-            Counters = World.GetOrCreateSystemManaged<GiCountersSystem>();
+            Sense = World.GetOrCreateSystem<GiSenseSystem>();
+            Counters = World.GetOrCreateSystem<GiCountersSystem>();
             Process = World.GetOrCreateSystem<GiProcessSystem>();
             Recorder = World.GetOrCreateSystem<GiRecorderSystem>();
             Restore = World.GetOrCreateSystem<GiSaveRestoreSystem>();
@@ -72,11 +72,11 @@ namespace Gi.Entities.Tests
 
         public void AddInspector()
         {
-            if (Inspector != null) return;
+            if (Inspector != SystemHandle.Null) return;
 
             var presentation = World.GetOrCreateSystemManaged<PresentationSystemGroup>();
             Simulation.AddSystemToUpdateList(presentation);
-            Inspector = World.GetOrCreateSystemManaged<Presentation.GiInspectorSystem>();
+            Inspector = World.GetOrCreateSystem<Presentation.GiInspectorSystem>();
             presentation.AddSystemToUpdateList(Inspector);
             presentation.SortSystems();
             Simulation.SortSystems();

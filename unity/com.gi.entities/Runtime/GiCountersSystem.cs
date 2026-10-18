@@ -8,22 +8,22 @@ namespace Gi.Entities
     [WorldSystemFilter(Worlds.SimulationEditor)]
     [UpdateInGroup(typeof(GiSystemGroup), OrderLast = true)]
     [UpdateAfter(typeof(GiSenseSystem))]
-    public partial class GiCountersSystem : SystemBase
+    public partial struct GiCountersSystem : ISystem
     {
-        protected override void OnCreate()
+        public void OnCreate(ref SystemState state)
         {
-            RequireForUpdate<GiFrame>();
+            state.RequireForUpdate<GiFrame>();
         }
 
-        protected override void OnUpdate()
+        public void OnUpdate(ref SystemState state)
         {
             if (!Profiler.enabled) return;
 
             var entity = SystemAPI.GetSingletonEntity<GiFrame>();
-            var frame = EntityManager.GetComponentData<GiFrame>(entity);
+            var frame = state.EntityManager.GetComponentData<GiFrame>(entity);
             if (!frame.Alive) return;
 
-            var stats = EntityManager.GetComponentData<GiStats>(entity);
+            var stats = state.EntityManager.GetComponentData<GiStats>(entity);
             GiCounters.Commands.Value = stats.Commands;
             GiCounters.Pulses.Value = stats.Pulses;
             GiCounters.Splats.Value = stats.Splats;

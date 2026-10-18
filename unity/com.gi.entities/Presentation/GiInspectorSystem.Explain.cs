@@ -7,12 +7,12 @@ using GiWorld = Gi.World;
 
 namespace Gi.Entities.Presentation
 {
-    public partial class GiInspectorSystem
+    public partial struct GiInspectorSystem
     {
-        private void ServeExplain(string name, in GiFrame frame)
+        private void ServeExplain(ref SystemState state, string name, in GiFrame frame)
         {
             while (GiInspectorBoard.TryDequeueExplain(name, out var request)) GiInspectorBoard.StoreExplain(Explain(request, frame));
-            while (GiInspectorBoard.TryDequeueEntity(name, out var request)) GiInspectorBoard.StoreEntity(Report(request, frame));
+            while (GiInspectorBoard.TryDequeueEntity(name, out var request)) GiInspectorBoard.StoreEntity(Report(ref state, request, frame));
         }
 
         private GiExplainResult Explain(in GiExplainRequest request, in GiFrame frame)
@@ -65,10 +65,10 @@ namespace Gi.Entities.Presentation
             return result;
         }
 
-        private GiEntityReport Report(in GiEntityRequest request, in GiFrame frame)
+        private GiEntityReport Report(ref SystemState state, in GiEntityRequest request, in GiFrame frame)
         {
             var report = new GiEntityReport { Id = request.Id, Tick = frame.Tick, Entity = request.Entity };
-            var manager = EntityManager;
+            var manager = state.EntityManager;
             if (request.Entity == Entity.Null || !manager.Exists(request.Entity)) return report;
 
             GiRuntime.CompleteAll();
