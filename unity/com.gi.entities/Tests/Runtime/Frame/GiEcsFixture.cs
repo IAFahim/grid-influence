@@ -10,10 +10,12 @@ namespace Gi.Entities.Tests
     public sealed class GiEcsFixture : IDisposable
     {
         public readonly EcsWorld World;
+        public readonly SimulationSystemGroup Simulation;
         public readonly FixedStepSimulationSystemGroup FixedStep;
         public readonly GiSystemGroup Group;
         public readonly SystemHandle Bootstrap;
         public readonly SystemHandle Reconcile;
+        public readonly SystemHandle Sync;
         public readonly SystemHandle Process;
         private BlobAssetReference<GiProfileBlob> _profile;
         private Entity _profileEntity;
@@ -22,7 +24,8 @@ namespace Gi.Entities.Tests
         public GiEcsFixture(string name = "GiFixture")
         {
             World = new EcsWorld(name, WorldFlags.Game);
-            var simulation = World.GetOrCreateSystemManaged<SimulationSystemGroup>();
+            Simulation = World.GetOrCreateSystemManaged<SimulationSystemGroup>();
+            var simulation = Simulation;
             FixedStep = World.GetOrCreateSystemManaged<FixedStepSimulationSystemGroup>();
             FixedStep.RateManager = new RateUtils.FixedRateSimpleManager(1f / 60f);
             simulation.AddSystemToUpdateList(FixedStep);
@@ -30,9 +33,11 @@ namespace Gi.Entities.Tests
             FixedStep.AddSystemToUpdateList(Group);
             Bootstrap = World.GetOrCreateSystem<GiBootstrapSystem>();
             Reconcile = World.GetOrCreateSystem<GiReconcileSystem>();
+            Sync = World.GetOrCreateSystem<GiSyncSystem>();
             Process = World.GetOrCreateSystem<GiProcessSystem>();
             Group.AddSystemToUpdateList(Bootstrap);
             Group.AddSystemToUpdateList(Reconcile);
+            Group.AddSystemToUpdateList(Sync);
             Group.AddSystemToUpdateList(Process);
             Group.SortSystems();
             FixedStep.SortSystems();
@@ -40,6 +45,21 @@ namespace Gi.Entities.Tests
         }
 
         public EntityManager Manager => World.EntityManager;
+
+        public void AddTransformSystems()
+        {
+            var transforms = World.GetOrCreateSystemManaged<TransformSystemGroup>();
+            Simulation.AddSystemToUpdateList(transforms);
+            transforms.AddSystemToUpdateList(World.GetOrCreateSystem<ParentSystem>());
+            transforms.AddSystemToUpdateList(World.GetOrCreateSystem<LocalToWorldSystem>());
+            transforms.SortSystems();
+            Simulation.SortSystems();
+        }
+
+        public void Frame1()
+        {
+            Simulation.Update();
+        }
 
         public Entity FrameEntity
         {

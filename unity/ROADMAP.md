@@ -100,10 +100,10 @@ The card named in each row pins its fact (Tier U).
 | E2 | `WithDisabled<T>` matches entities whose `T` is present but disabled; `WithAbsent<T>` matches only entities without `T`; `WithNone<T>` matches both. | U-2 | confirmed (U-2). `WithAll<T>` matches only entities where `T` is enabled; `WithNone<T>` matches the disabled and the absent. Queries on a world also match the `GiFrame` entity, so scope them with another component |
 | E3 | Destroying an entity that has an `ICleanupComponentData` leaves it alive with only its cleanup components until they are removed. | U-2 | confirmed (U-2) |
 | E4 | `CalculateBaseEntityIndexArrayAsync` counts only entities that pass the query's enabled bits. Also, how change filters affect it. | U-2 | confirmed (U-2) for enabled bits: the base of chunk `c` is the number of enabled matches in earlier chunks. Change filters are not exercised: reconcile counts per chunk itself, so U-3 and U-5 pin the filter case when they use it |
-| E5 | Change filters work per chunk: a chunk counts as changed when any system took write access to the type since this system last ran. | U-3 | |
+| E5 | Change filters work per chunk: a chunk counts as changed when any system took write access to the type since this system last ran. | U-3 | confirmed (U-3): a main-thread write marks its whole chunk changed at the current system version, so "changed since" only means something once a system has advanced the version; chunks of other archetypes are unaffected |
 | E6 | Whether `FixedStepSimulationSystemGroup` updates in the Editor world. | U-4 | |
 | E7 | An entity baked without `TransformUsageFlags.Dynamic` has `LocalToWorld` but no `LocalTransform`. | U-2 | open: needs a baker, so A-2 pins it. The reconcile view already falls back to `LocalToWorld` when a chunk has no `LocalTransform` |
-| E8 | `FixedStepSimulationSystemGroup` runs before `TransformSystemGroup`, so `LocalToWorld` read during a fixed tick is from the previous frame. | U-3 | |
+| E8 | `FixedStepSimulationSystemGroup` runs before `TransformSystemGroup`, so `LocalToWorld` read during a fixed tick is from the previous frame. | U-3 | confirmed (U-3) in a world with `ParentSystem` and `LocalToWorldSystem`: a parented emitter reaches Gi one frame after its parent moved |
 | E9 | A non-Burst job scheduled from a non-Burst `ISystem.OnUpdate` runs on a worker thread under IL2CPP and CoreCLR (Mono no longer exists in Unity 7). | U-1 | confirmed (U-1): a managed `IJob` runs on a worker while the main thread polls `IsCompleted`. Scheduled and then `Complete()`d at once, the main thread runs it inline, so a test that needs a worker must poll. Same on CoreCLR editor, CoreCLR player and IL2CPP player |
 | E10 | Gi's `SourceCommand` factories compile under Burst. If they do not, the diff job writes an adapter struct and the apply job converts it. | U-2 | not needed (U-2): Burst writes the adapter `GiCommand`, and the managed apply pass converts to `SourceCommand`, because slicing a batch must re-index `CreatedBy` anyway |
 
@@ -229,7 +229,7 @@ Plan §12's S1–S5 apply, plus:
 | E-6 | Profiler module and ConfigVars | editor | P1 | U-1 | U | 3 | todo | |
 | G-2 | Runtime teardown | core | P1 | — | G | 3 | done | #84. `World.Teardown()`; revision floor keeps pre-teardown tokens refused; RSS-flat over 1000 cycles |
 | G-7 | Incremental layer hash | core | P1 | — | G | 3 | todo | |
-| U-3 | Sync | runtime | P0 | U-2 | D, U | 4 | todo | |
+| U-3 | Sync | runtime | P0 | U-2 | D, U | 4 | done | stacked after #90 |
 | U-5 | Read bindings: value and gradient | runtime | P0 | U-2 | D, U | 4 | todo | |
 | V-2 | ECS determinism and allocation | verification | P0 | U-3, U-4, U-5, U-6 | U | 5 | todo | |
 | U-5b | Read bindings: area, max, nearest, changed | runtime | P1 | U-3, U-5 | D, U | 5 | todo | |
@@ -1035,6 +1035,10 @@ This roadmap changes the plan in the ways listed here. The coordinator folds the
 20. **Reconcile skips unchanged chunks** by change version: a chunk is scanned when `GiEmitter`, `GiSource` or the chunk order changed since the system last ran, or when it has no `GiEmitter` at all (destroyed or removed emitters). The 50-seed ECS equivalence test covers every operation kind, including enable-bit toggles, so a miss would fail it.
 21. **Batch commands are an adapter type** (`GiCommand`), not Gi's `SourceCommand`. The managed apply pass converts and slices at command-group boundaries (never between a `Place` and the `CreatedBy` commands that follow it), re-indexing `CreatedBy` per slice, and retries once after a stale token.
 22. **Cleanup components are removed through a command buffer played back at the start of the next update** and only when the retire query is non-empty, so a quiet tick has no structural change and no sync point.
+
+23. **Sync is one `SyncTransforms` call over up to four row categories** (none, oriented, scaled, both), because the call accepts null heading and scale columns and reports rejected rows through the `Invalid` mask. The plan's separate `Sync` call for position-only rows is not needed. Gi clears and fills the mask itself.
+24. **A parented emitter's pose comes from `LocalToWorld`** (a chunk with `Parent`, or without `LocalTransform`), and a root's from `LocalTransform`; both reconcile and sync use `GiPose`.
+25. **`GiStats` is a component on the frame entity** (commands, pulses, sync rows, splats, sensed, changed tiles). Jobs write it; the profiler module (E-6) and tests read it.
 
 New open decisions:
 

@@ -1568,7 +1568,12 @@ The unsafe code in reconcile is the pointer access to the command and owner list
 
 ### U-3
 
-Pending.
+The unsafe code in sync is the raw column pointers handed to `World.SyncTransforms` in `GiSyncPass.Apply` (a `stackalloc` array of `TransformRange`), the pointer arithmetic over the `Meta` array, and the `NativeArray` writes in the write pass.
+
+- **Lifetime.** The column lists and the `Invalid` list come from `state.WorldUpdateAllocator` and stay valid for the update. `SyncTransforms` reads and writes them only inside the call (`src/Gi/World.SyncTransforms.cs`: validation, mask clear, then `ApplyTransformRanges`, which keeps no pointer), and the `TransformRange` array is on the stack of that call, so nothing outlives it.
+- **Aliasing.** Each column is its own list and each category is a disjoint slice of every column; each category's mask occupies its own word range in `Invalid`. Gi rejects overlapping buffers with `OverlappingBuffers` before touching anything, and the tests pass real data, so the rule is checked on every run.
+- **Alignment.** `SourceId`, `float` and `ulong` columns are naturally aligned list storage. Category slices start at element boundaries.
+- **Concurrency.** The write pass runs in parallel over chunks; chunk `c` writes the rows `[Offsets[c*4+k], Offsets[c*4+k] + Counts[c*4+k])` of its single category `k`, which are disjoint by the prefix sum. `GiSyncApplyJob` is the only Gi writer here and runs behind `GiRuntime.BeginWrite` and `EndWrite`. The scatter pass reads the finished columns and mask and writes only `GiFault` data and enabled bits of its own chunk.
 
 ### U-5
 

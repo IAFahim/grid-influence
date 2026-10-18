@@ -4,7 +4,7 @@ using GiWorld = Gi.World;
 
 namespace Gi.Entities.Tests.Support
 {
-    public static class GiColumnsExecutor
+    public static unsafe class GiColumnsExecutor
     {
         public static GiScenarioHashes Run(GiScenario scenario)
         {
@@ -49,6 +49,9 @@ namespace Gi.Entities.Tests.Support
                         if (fault != GiFaultCode.None) throw new InvalidOperationException(commands[i].Kind + " " + fault);
                     }
 
+                    var rejected = Sync(setup.World, ref token, desired, applied);
+                    if (rejected != 0) throw new InvalidOperationException("sync rejected " + rejected);
+
                     EmitSplats(setup, scenario.Profile, splats);
                     GiWorld.Process(setup.World);
                     var hashes = new ulong[setup.Layers.Length];
@@ -57,6 +60,64 @@ namespace Gi.Entities.Tests.Support
                 }
 
                 return new GiScenarioHashes(perTick);
+            }
+        }
+
+        private static int Sync(byte world, ref GiWorld.Token token, GiDesired[] desired, GiApplied[] applied)
+        {
+            var counts = new int[GiSyncPass.Categories];
+            for (var e = 0; e < desired.Length; e++)
+                if (applied[e].Placed && desired[e].Want)
+                    counts[GiSyncPass.Category(desired[e].Oriented, desired[e].Scaled)]++;
+
+            var starts = new int[GiSyncPass.Categories];
+            var wordStarts = new int[GiSyncPass.Categories];
+            var total = 0;
+            var words = 0;
+            for (var k = 0; k < GiSyncPass.Categories; k++)
+            {
+                starts[k] = total;
+                wordStarts[k] = words;
+                total += counts[k];
+                words += GiSyncPass.Words(counts[k]);
+            }
+
+            if (total == 0) return 0;
+
+            var sources = new GiWorld.SourceId[total];
+            var xs = new float[total];
+            var ys = new float[total];
+            var headings = new float[total];
+            var scales = new float[total];
+            var invalid = new ulong[words];
+            var cursor = (int[])starts.Clone();
+            for (var e = 0; e < desired.Length; e++)
+            {
+                if (!applied[e].Placed || !desired[e].Want) continue;
+
+                var row = cursor[GiSyncPass.Category(desired[e].Oriented, desired[e].Scaled)]++;
+                sources[row] = applied[e].Source;
+                xs[row] = desired[e].X;
+                ys[row] = desired[e].Y;
+                headings[row] = desired[e].Heading;
+                scales[row] = desired[e].Scale;
+            }
+
+            fixed (GiWorld.SourceId* sourcePointer = sources)
+            fixed (float* xPointer = xs, yPointer = ys, headingPointer = headings, scalePointer = scales)
+            fixed (ulong* invalidPointer = invalid)
+            fixed (int* startPointer = starts, countPointer = counts, wordPointer = wordStarts)
+            {
+                var status = GiSyncPass.Apply(ref token, world, sourcePointer, xPointer, yPointer, headingPointer, scalePointer,
+                    invalidPointer, startPointer, countPointer, wordPointer);
+                if (status != GiApplyStatus.Applied) throw new InvalidOperationException("sync " + status);
+
+                var rejected = 0;
+                for (var k = 0; k < GiSyncPass.Categories; k++)
+                for (var i = 0; i < counts[k]; i++)
+                    if (GiSyncPass.Rejected(invalidPointer, wordStarts[k], i))
+                        rejected++;
+                return rejected;
             }
         }
 

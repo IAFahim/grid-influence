@@ -2,7 +2,6 @@ using Unity.Burst.Intrinsics;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
-using Unity.Mathematics;
 using Unity.Transforms;
 
 namespace Gi.Entities
@@ -18,6 +17,7 @@ namespace Gi.Entities
         [ReadOnly] public ComponentTypeHandle<Disabled> Disabled;
         [ReadOnly] public ComponentTypeHandle<LocalTransform> Transforms;
         [ReadOnly] public ComponentTypeHandle<LocalToWorld> Matrices;
+        [ReadOnly] public ComponentTypeHandle<Parent> Parents;
         public ComponentTypeHandle<GiFault> Faults;
 
         public int Visit(in ArchetypeChunk chunk, in GiReconcileContext context, uint lastVersion, int baseIndex,
@@ -37,8 +37,9 @@ namespace Gi.Entities
             var ramps = chunk.Has(ref Ramps) ? chunk.GetNativeArray(ref Ramps) : default;
             var oriented = chunk.Has(ref Oriented);
             var scaled = chunk.Has(ref Scaled);
-            var transforms = chunk.Has(ref Transforms) ? chunk.GetNativeArray(ref Transforms) : default;
-            var matrices = chunk.Has(ref Matrices) ? chunk.GetNativeArray(ref Matrices) : default;
+            var useMatrix = chunk.Has(ref Parents) || !chunk.Has(ref Transforms);
+            var transforms = !useMatrix ? chunk.GetNativeArray(ref Transforms) : default;
+            var matrices = useMatrix && chunk.Has(ref Matrices) ? chunk.GetNativeArray(ref Matrices) : default;
             var entities = chunk.GetNativeArray(Entities);
             var hasFault = commands != null && chunk.Has(ref Faults);
             var faults = hasFault ? chunk.GetNativeArray(ref Faults) : default;
@@ -56,7 +57,7 @@ namespace Gi.Entities
                     desired.Ramp = ramps.IsCreated ? ramps[i].Ticks : (ushort)0;
                     desired.Oriented = oriented;
                     desired.Scaled = scaled;
-                    Place(context.Plane, transforms, matrices, i, ref desired);
+                    GiPose.Read(context.Plane, useMatrix, transforms, matrices, i, out desired.X, out desired.Y, out desired.Heading, out desired.Scale);
                 }
 
                 var source = sources[i];
@@ -89,31 +90,6 @@ namespace Gi.Entities
             }
 
             return count;
-        }
-
-        private static void Place(in GiPlane plane, NativeArray<LocalTransform> transforms, NativeArray<LocalToWorld> matrices,
-            int index, ref GiDesired desired)
-        {
-            if (transforms.IsCreated)
-            {
-                var transform = transforms[index];
-                plane.Project(transform.Position.x, transform.Position.y, transform.Position.z, out desired.X, out desired.Y);
-                var q = transform.Rotation.value;
-                desired.Heading = plane.Heading(q.x, q.y, q.z, q.w);
-                desired.Scale = transform.Scale;
-            }
-            else if (matrices.IsCreated)
-            {
-                var matrix = matrices[index].Value;
-                plane.Project(matrix.c3.x, matrix.c3.y, matrix.c3.z, out desired.X, out desired.Y);
-                var q = matrices[index].Rotation.value;
-                desired.Heading = plane.Heading(q.x, q.y, q.z, q.w);
-                desired.Scale = math.length(matrix.c0.xyz);
-            }
-            else
-            {
-                desired.Scale = 1f;
-            }
         }
     }
 }
