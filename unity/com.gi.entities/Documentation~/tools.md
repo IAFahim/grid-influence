@@ -33,10 +33,14 @@ so a click costs one pass over the sources of the world and nothing while the wi
 
 ## Scene overlay (Gi ▸ Toggle Scene Overlay Heatmap)
 
-Draws grid bounds, the heatmap lattice and every emitter's footprint in the Scene view. Settings
-persist in a deterministic file under `UserSettings/Gi/`. Dragging an emitter in edit mode changes
-the field on the next editor tick. The reach-disc toggle is stored but draws nothing yet, and the
-footprints are of every emitter in the Gi world, not only the selection.
+Draws grid bounds, the heatmap lattice, and stamp footprints in the Scene view. Footprints belong to
+the selection: select a GameObject that bakes to an emitter (the overlay finds its entity through the
+`EntityGuid` the baker leaves), or an entity in the Entities Hierarchy, and its footprint is drawn
+rotated and scaled; `Gi ▸ Toggle Scene Overlay All Footprints` draws every emitter instead. `Gi ▸
+Toggle Scene Overlay Reach Discs` draws, for each selected entity, one disc per Area, Max, Nearest or
+Changed binding that writes to a component the entity has, with the radius from the binding or from
+the entity's reach field. Settings persist in a deterministic file under `UserSettings/Gi/`. Dragging
+an emitter in edit mode changes the field on the next editor tick.
 
 ## Flight recorder (Gi ▸ Flight Recorder)
 

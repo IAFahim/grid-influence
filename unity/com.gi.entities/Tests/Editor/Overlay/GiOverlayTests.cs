@@ -201,7 +201,7 @@ namespace Gi.Entities.Editor.Tests
             Assert.That((loaded.Heatmap, loaded.ReachDiscs, loaded.Layer, loaded.Grid, loaded.ValueScale), Is.EqualTo((false, true, 3, 1, 33.25f)));
             GiOverlaySettingsStore.Save(loaded, path);
             Assert.That(File.ReadAllBytes(path), Is.EqualTo(first));
-            Assert.That(System.Text.Encoding.UTF8.GetString(first), Does.StartWith("{\n  \"footprints\""));
+            Assert.That(System.Text.Encoding.UTF8.GetString(first), Does.StartWith("{\n  \"allFootprints\""));
             Assert.That(first.Length, Is.GreaterThan(0));
             Assert.That(first[0], Is.EqualTo((byte)'{'));
         }
