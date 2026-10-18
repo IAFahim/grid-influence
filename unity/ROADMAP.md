@@ -1173,7 +1173,3 @@ Recorded 2026-10-18 so later sessions start from verified facts, not assumptions
 ### Session state (2026-10-18, handed off)
 
 The previous agent's session ended; **`unity/HANDOFF.md` is the current state and the instructions for what to do next.** It lists the pull request stack (#86 to #92, all green), the checkpoint branch `unity/u-5-bindings`, the validation commands, the traps, and the order of the remaining cards.
-
-Merged earlier: #78 (F-1), #79 (U-0, Tier D), #80 (inspection hygiene), #81 (G-1), #82 (G-3), #83 (G-5), #84 (G-2), #85 (gate baseline). This session unblocked Tier U (A.15, Appendix F): editor 7000.0.0a9, BovineLabs Core pre.6 from GitLab `82be2794`, all four `validate.sh` suites green (EditMode, PlayMode, CoreCLR player, IL2CPP player).
-
-Next, in order: F-2 (scenarios, reference executor, lint, CI), then wave 2 (U-1, A-1, V-1), then the rest of the board. V-0 can start now: CoreCLR is the a9 default, so the Appendix A checklist is answerable today.
