@@ -59,7 +59,7 @@ namespace Gi.Entities.Editor
             if (!choices.Contains(current)) choices.Add(current);
 
             Func<GiLayerAsset, string> name = value => value == null ? "(none)" : value.name;
-            var popup = new PopupField<GiLayerAsset>(label, choices, current, name, name);
+            var popup = new PopupField<GiLayerAsset>(label, choices, choices.IndexOf(current), name, name);
             popup.RegisterValueChangedCallback(change =>
             {
                 if (!GiLayerStack.SetInput(serializedObject, second, change.newValue)) popup.SetValueWithoutNotify(change.previousValue);
