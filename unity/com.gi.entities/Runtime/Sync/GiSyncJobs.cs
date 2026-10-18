@@ -138,10 +138,15 @@ namespace Gi.Entities
 
             var token = frame.Token;
             var starts = (int*)Meta.GetUnsafeReadOnlyPtr();
+            var sources = (GiWorld.SourceId*)Sources.GetUnsafePtr();
+            var xs = (float*)Xs.GetUnsafePtr();
+            var ys = (float*)Ys.GetUnsafePtr();
+            var headings = (float*)Headings.GetUnsafePtr();
+            var scales = (float*)Scales.GetUnsafePtr();
             GiGuard.Begin(frame.World, GiGuard.Sync, true);
             var scope = GiMarkers.Sync.Auto();
-            var status = GiSyncPass.Apply(ref token, frame.World, (GiWorld.SourceId*)Sources.GetUnsafePtr(), (float*)Xs.GetUnsafePtr(),
-                (float*)Ys.GetUnsafePtr(), (float*)Headings.GetUnsafePtr(), (float*)Scales.GetUnsafePtr(), (ulong*)Invalid.GetUnsafePtr(),
+            if (GiRecorderGate.Enabled) GiRecorderGate.Sync(frame.World, sources, xs, ys, headings, scales, starts, starts + GiSyncPass.Categories);
+            var status = GiSyncPass.Apply(ref token, frame.World, sources, xs, ys, headings, scales, (ulong*)Invalid.GetUnsafePtr(),
                 starts, starts + GiSyncPass.Categories, starts + 2 * GiSyncPass.Categories);
             scope.Dispose();
             GiGuard.End(frame.World, true);

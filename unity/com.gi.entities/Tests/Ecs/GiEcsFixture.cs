@@ -22,6 +22,7 @@ namespace Gi.Entities.Tests
         public readonly GiCountersSystem Counters;
         public Presentation.GiInspectorSystem Inspector;
         public readonly SystemHandle Process;
+        public readonly SystemHandle Recorder;
         private BlobAssetReference<GiProfileBlob> _profile;
         private Entity _profileEntity;
         private bool _disposed;
@@ -44,7 +45,9 @@ namespace Gi.Entities.Tests
             Sense = World.GetOrCreateSystemManaged<GiSenseSystem>();
             Counters = World.GetOrCreateSystemManaged<GiCountersSystem>();
             Process = World.GetOrCreateSystem<GiProcessSystem>();
+            Recorder = World.GetOrCreateSystem<GiRecorderSystem>();
             Group.AddSystemToUpdateList(Bootstrap);
+            Group.AddSystemToUpdateList(Recorder);
             Group.AddSystemToUpdateList(Reconcile);
             Group.AddSystemToUpdateList(Sync);
             Group.AddSystemToUpdateList(Splat);

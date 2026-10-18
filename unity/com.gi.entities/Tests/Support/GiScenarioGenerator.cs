@@ -11,11 +11,15 @@ namespace Gi.Entities.Tests.Support
         public readonly bool Pulses;
         public readonly bool Ramps;
         public readonly bool Transforms;
+        public readonly bool Recycle;
+        public readonly int Spawns;
 
         public GiScenarioOptions(int ticks, int initialEntities, int maxEntities, int splatsPerTick, bool pulses, bool ramps,
-            bool transforms = true)
+            bool transforms = true, bool recycle = false, int spawns = 0)
         {
             Transforms = transforms;
+            Recycle = recycle;
+            Spawns = spawns;
             Ticks = ticks;
             InitialEntities = initialEntities;
             MaxEntities = maxEntities;
@@ -28,12 +32,12 @@ namespace Gi.Entities.Tests.Support
 
         public GiScenarioOptions WithoutTransforms()
         {
-            return new GiScenarioOptions(Ticks, InitialEntities, MaxEntities, SplatsPerTick, Pulses, Ramps, false);
+            return new GiScenarioOptions(Ticks, InitialEntities, MaxEntities, SplatsPerTick, Pulses, Ramps, false, Recycle, Spawns);
         }
 
         public GiScenarioOptions WithoutSplats()
         {
-            return new GiScenarioOptions(Ticks, InitialEntities, MaxEntities, 0, Pulses, Ramps, Transforms);
+            return new GiScenarioOptions(Ticks, InitialEntities, MaxEntities, 0, Pulses, Ramps, Transforms, Recycle, Spawns);
         }
     }
 
@@ -61,7 +65,11 @@ namespace Gi.Entities.Tests.Support
 
         public static GiScenario Create(ulong seed, GiScenarioOptions options)
         {
-            var profile = GiScenarioProfile.Standard();
+            return Create(seed, options, GiScenarioProfile.Standard());
+        }
+
+        public static GiScenario Create(ulong seed, GiScenarioOptions options, GiScenarioProfile profile)
+        {
             var rng = new GiRandom(seed);
             var persistent = LayersOf(profile, GiScenarioLayerKind.Persistent);
             var transient = LayersOf(profile, GiScenarioLayerKind.Transient);
@@ -72,9 +80,14 @@ namespace Gi.Entities.Tests.Support
                 var ops = new List<GiScenarioOp>();
                 if (t > 0) MutateEntities(ref rng, profile, persistent, entities, ops, options.Transforms);
 
-                var spawns = t == 0 ? options.InitialEntities : rng.Next(3);
-                for (var i = 0; i < spawns && entities.Count < options.MaxEntities; i++)
-                    ops.Add(Spawn(ref rng, profile, persistent, options, entities));
+                var spawns = t == 0 ? options.InitialEntities : options.Spawns > 0 ? options.Spawns : rng.Next(3);
+                for (var i = 0; i < spawns; i++)
+                {
+                    var slot = options.Recycle ? FirstDead(entities) : -1;
+                    if (slot < 0 && entities.Count >= options.MaxEntities) break;
+
+                    ops.Add(Spawn(ref rng, profile, persistent, options, entities, slot));
+                }
 
                 if (options.Pulses && rng.Chance(1, 2))
                 {
@@ -108,8 +121,16 @@ namespace Gi.Entities.Tests.Support
             return gain == 0 ? 4 : gain;
         }
 
+        private static int FirstDead(List<EntityState> entities)
+        {
+            for (var i = 0; i < entities.Count; i++)
+                if (!entities[i].Alive)
+                    return i;
+            return -1;
+        }
+
         private static GiScenarioOp Spawn(ref GiRandom rng, GiScenarioProfile profile, int[] persistent,
-            GiScenarioOptions options, List<EntityState> entities)
+            GiScenarioOptions options, List<EntityState> entities, int slot)
         {
             var state = new EntityState
             {
@@ -129,8 +150,17 @@ namespace Gi.Entities.Tests.Support
             if (state.Oriented) flags |= GiScenarioFlags.Oriented;
             if (state.Scaled) flags |= GiScenarioFlags.Scaled;
             if (!state.Enabled) flags |= GiScenarioFlags.Disabled;
-            entities.Add(state);
-            return GiScenarioOp.Spawn(entities.Count - 1, state.Layer, state.Stamp, state.Gain, state.XQuarters,
+            if (slot < 0)
+            {
+                entities.Add(state);
+                slot = entities.Count - 1;
+            }
+            else
+            {
+                entities[slot] = state;
+            }
+
+            return GiScenarioOp.Spawn(slot, state.Layer, state.Stamp, state.Gain, state.XQuarters,
                 state.YQuarters, state.HeadingSteps, state.ScaleQuarters, ramp, flags);
         }
 

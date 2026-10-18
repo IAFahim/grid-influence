@@ -148,6 +148,9 @@ namespace Gi.Entities
                 new System.Span<GiWorld.SourceResult>(BatchResults.GetUnsafePtr(), count), GiApplyPass.BatchLimit);
             scope.Dispose();
             GiGuard.End(frame.World, true);
+            if (GiRecorderGate.Enabled)
+                GiRecorderGate.Commands(frame.World, new System.ReadOnlySpan<GiCommand>(Commands.GetUnsafeReadOnlyPtr(), count),
+                    new System.ReadOnlySpan<GiCommandResult>(Results.GetUnsafePtr(), count));
 
             frame.Token = token;
             if (status == GiApplyStatus.Stale) frame.Faults.Raise(GiFaultKind.StaleToken, frame.Tick);

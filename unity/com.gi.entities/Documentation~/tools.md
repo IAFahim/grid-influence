@@ -38,6 +38,29 @@ persist in a deterministic file under `UserSettings/Gi/`. Dragging an emitter in
 the field on the next editor tick. The reach-disc toggle is stored but draws nothing yet, and the
 footprints are of every emitter in the Gi world, not only the selection.
 
+## Flight recorder (Gi ▸ Flight Recorder)
+
+Set the `gi.record` ConfigVar (or the toggle in the window) and the adapter records every input Gi
+receives each tick — the reconcile commands and their results, the sync rows, the splat rows — plus
+the per-layer field hashes after `Process`, into a ring of `gi.record.ticks` ticks (default 600),
+compressed with LZ4 through BovineLabs' `CodecService` (stored uncompressed if the native library is
+missing). A keyframe of every live source, with its fade and expiry state in flight and the tick's
+splats, is taken every `gi.record.keyframe` ticks (default 120), so any tick in the window can be
+rebuilt.
+
+The window scrubs to a tick (a scratch Gi world restores the nearest earlier keyframe and replays the
+ticks after it, checking every hash against the recorded one), compares the replay with the live
+field and highlights the tiles that differ, exports a range as a C# test for `tests/Gi.Tests`, and
+saves the whole ring to a `.girec` file. The exported file builds a `StreamSetup` from the profile and
+runs it through the same differential runner as the fuzz regressions, so a bug seen in play becomes a
+Gi regression test without edits: `unity/export-check.sh` records a crowd, exports a range, drops it
+into `tests/Gi.Tests`, runs it and removes it again. The stream format has no raster stamps and no
+single-input `Sum` layer; a profile that uses one is refused with a named reason.
+
+Start recording before the first tick if you can. A recorder started mid-run adopts the entity sources
+that exist but cannot know pulses already in flight or the transient layers' current contents; its
+first keyframe then reports that it does not rebuild the field it was taken from.
+
 ## Stamp Studio (Gi ▸ Stamp Studio)
 
 Scratch-world previews of any phase, angle and scale — exact and cell layers — plus texture import

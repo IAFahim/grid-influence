@@ -27,6 +27,19 @@ namespace Gi.Entities
             }
         }
 
+        public static GiProfileSpec ToSpec(ref GiProfileBlob blob)
+        {
+            return new GiProfileSpec
+            {
+                Plane = blob.Plane,
+                Grids = blob.Grids.ToArray(),
+                Layers = blob.Layers.ToArray(),
+                Stamps = blob.Stamps.ToArray(),
+                Cells = blob.Cells.ToArray(),
+                Bindings = blob.Bindings.ToArray(),
+            };
+        }
+
         private static void Fill<T>(ref BlobBuilder builder, ref BlobArray<T> array, T[] values)
             where T : unmanaged
         {
