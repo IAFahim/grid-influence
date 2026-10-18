@@ -8,6 +8,7 @@
     "license": "MIT",
     "dependencies": {
         "com.bovinelabs.core": "2.0.0-pre.6",
+        "com.bovinelabs.quill": "2.0.0-pre.5",
         "com.unity.burst": "2.0.0",
         "com.unity.collections": "6.7.0",
         "com.unity.entities": "6.7.0",

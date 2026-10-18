@@ -3,11 +3,13 @@
     "rootNamespace": "Gi.Entities.Presentation",
     "references": [
         "BovineLabs.Core",
+        "BovineLabs.Quill",
         "Gi.Entities",
         "Unity.Burst",
         "Unity.Collections",
         "Unity.Entities",
         "Unity.Mathematics",
+        "Unity.Mathematics.Extensions",
         "Unity.Transforms"
     ],
     "includePlatforms": [],
