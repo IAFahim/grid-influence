@@ -149,11 +149,13 @@ namespace Gi.Entities
             }
 
             var token = frame.Token;
+            GiGuard.Begin(frame.World, GiGuard.Reconcile, true);
             var status = GiApplyPass.Apply(ref token, frame.World,
                 new System.ReadOnlySpan<GiCommand>(Commands.GetUnsafeReadOnlyPtr(), count),
                 new System.Span<GiCommandResult>(Results.GetUnsafePtr(), count),
                 new System.Span<GiWorld.SourceCommand>(Scratch.GetUnsafePtr(), count),
                 new System.Span<GiWorld.SourceResult>(BatchResults.GetUnsafePtr(), count), GiApplyPass.BatchLimit);
+            GiGuard.End(frame.World, true);
 
             frame.Token = token;
             if (status == GiApplyStatus.Stale) frame.Faults.Raise(GiFaultKind.StaleToken, frame.Tick);

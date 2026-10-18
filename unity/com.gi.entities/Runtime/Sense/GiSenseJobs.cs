@@ -137,10 +137,12 @@ namespace Gi.Entities
             var context = Context.Value;
             if (Rows[1] == 0 || Rows[0] == 0 || !context.Tables.TryLayer(Layer, out var layer)) return;
 
+            GiGuard.Begin(context.World, GiGuard.Sense, false);
             GiSensePass.ReadBatch(Kind, context.World, layer, (float*)Xs.GetUnsafeReadOnlyPtr(), (float*)Ys.GetUnsafeReadOnlyPtr(), Rows[0],
                 Batch, batchIndex, Values.Length == 0 ? null : (short*)Values.GetUnsafePtr(),
                 GradientXs.Length == 0 ? null : (float*)GradientXs.GetUnsafePtr(),
                 GradientYs.Length == 0 ? null : (float*)GradientYs.GetUnsafePtr(), (ulong*)Whole.GetUnsafePtr());
+            GiGuard.End(context.World, false);
         }
     }
 

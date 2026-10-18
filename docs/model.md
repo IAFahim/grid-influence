@@ -1627,6 +1627,17 @@ The unsafe code in sync is the raw column pointers handed to `World.SyncTransfor
 - **Alignment.** `SourceId`, `float` and `ulong` columns are naturally aligned list storage. Category slices start at element boundaries.
 - **Concurrency.** The write pass runs in parallel over chunks; chunk `c` writes the rows `[Offsets[c*4+k], Offsets[c*4+k] + Counts[c*4+k])` of its single category `k`, which are disjoint by the prefix sum. `GiSyncApplyJob` is the only Gi writer here and runs behind `GiRuntime.BeginWrite` and `EndWrite`. The scatter pass reads the finished columns and mask and writes only `GiFault` data and enabled bits of its own chunk.
 
+### U-4
+
+The unsafe code in the guard is the pointer access to one `GiGuardTable` in persistent native memory and the `ref *word` arguments to `Interlocked` and `Volatile`.
+
+- **Lifetime.** `GiGuard.Create` allocates one cleared, 64-byte aligned table with `Allocator.Persistent` when code loads or at the first `Register`; `GiGuard.Destroy` frees it in `GiRuntime.Unload`, after `CompleteAll`, so no job holding the pointer outlives it. Jobs read the static pointer and never keep it past `Execute`. When the table is absent `Begin`, `End` and `TryTake` do nothing.
+- **Aliasing.** The table holds 256 state words and 256 holder words, indexed by the Gi world id (a `byte`), and one report slot. Every access to a state or holder word is an `Interlocked` or `Volatile` operation. The report fields are written only by the thread that moved the slot from free to filling and read only after it is ready, so the slot has one writer at a time.
+- **Alignment.** Every field is an `int` at a 4-byte offset inside a 64-byte aligned block.
+- **Concurrency.** `Begin` always registers its party (a reader adds one, a writer adds `WriterBit`), and `End` always removes it, so the word balances even after a conflict. The party that enters second sees the conflict: a reader finds the writer bit set, a writer finds anything other than its own bit. The first conflict since the last `TryTake` keeps its details (world, both tags, whether the intruder writes) and later ones only add to the total. The guard reads and writes no Gi state, so it can report an overlap but cannot cause or hide one. `ENABLE_UNITY_COLLECTIONS_CHECKS` gates the calls with `[Conditional]`, so release builds contain none.
+
+The fences in `GiRuntime.Fences.cs` are two `SharedStatic<JobHandle>` values written only on the main thread, in system `OnUpdate`, and reset when code loads. `GuardTests` in `unity/tests/Gi.Entities.Columns.Tests` pins the table against single-thread sequences and eight-thread stress; `Tests/Runtime/Concurrency` pins the fences, the Editor world and the two-world run.
+
 ### U-5
 
 The unsafe code in sense is the raw pointers `GiSenseReadJob` hands to `GiSensePass.ReadBatch`, the `byte*` component access and `ulong*` word reads in `GiSenseScatterJob`, and the span over the profile blob's binding array in `GiSenseSystem.Rebuild`.

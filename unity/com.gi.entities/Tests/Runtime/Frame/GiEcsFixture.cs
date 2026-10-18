@@ -1,6 +1,7 @@
 using System;
 using Gi.Entities.Tests.Support;
 using Unity.Collections;
+using Unity.Core;
 using Unity.Entities;
 using Unity.Transforms;
 using EcsWorld = Unity.Entities.World;
@@ -22,6 +23,7 @@ namespace Gi.Entities.Tests
         private BlobAssetReference<GiProfileBlob> _profile;
         private Entity _profileEntity;
         private bool _disposed;
+        private double _elapsed;
 
         public GiEcsFixture(string name = "GiFixture")
         {
@@ -64,6 +66,19 @@ namespace Gi.Entities.Tests
 
         public void Frame1()
         {
+            Simulation.Update();
+        }
+
+        public void UseCatchUp(float timestep)
+        {
+            FixedStep.RateManager = new RateUtils.FixedRateCatchUpManager(timestep);
+            World.MaximumDeltaTime = 1f;
+        }
+
+        public void Advance(float seconds)
+        {
+            _elapsed += seconds;
+            World.SetTime(new TimeData(_elapsed, seconds));
             Simulation.Update();
         }
 
