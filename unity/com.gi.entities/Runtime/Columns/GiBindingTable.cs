@@ -12,6 +12,8 @@ namespace Gi.Entities
         DuplicateWriter,
         ExcludeUnavailable,
         Unsupported,
+        InvalidReach,
+        ExcludeOnTransient,
     }
 
     [Flags]
@@ -24,11 +26,25 @@ namespace Gi.Entities
         All = Basic | Extended | Exclusion,
     }
 
+    [Flags]
+    public enum GiSenseNeeds : byte
+    {
+        None = 0,
+        Value = 1,
+        Vector = 2,
+        Reach = 4,
+        Threshold = 8,
+        Exclude = 16,
+        Total = 32,
+    }
+
     public static class GiBindingTable
     {
         public const int ValueSize = 2;
         public const int VectorSize = 8;
         public const int TotalSize = 8;
+        public const int ReachSize = 4;
+        public const int ThresholdSize = 2;
 
         public static int Validate(ReadOnlySpan<GiBindingSpec> bindings, int layerCount, GiBindingSupport support,
             Span<GiBindingStatus> statuses)
@@ -37,6 +53,22 @@ namespace Gi.Entities
             for (var i = 0; i < bindings.Length; i++)
             {
                 statuses[i] = Check(bindings[i], layerCount, support);
+                if (statuses[i] == GiBindingStatus.Valid) statuses[i] = Duplicate(bindings, statuses, i);
+                if (statuses[i] != GiBindingStatus.Valid) invalid++;
+            }
+
+            return invalid;
+        }
+
+        public static int Validate(ReadOnlySpan<GiBindingSpec> bindings, ReadOnlySpan<GiLayerSpec> layers, GiBindingSupport support,
+            Span<GiBindingStatus> statuses)
+        {
+            var invalid = 0;
+            for (var i = 0; i < bindings.Length; i++)
+            {
+                statuses[i] = Check(bindings[i], layers.Length, support);
+                if (statuses[i] == GiBindingStatus.Valid && ExcludesTransient(bindings[i], layers))
+                    statuses[i] = GiBindingStatus.ExcludeOnTransient;
                 if (statuses[i] == GiBindingStatus.Valid) statuses[i] = Duplicate(bindings, statuses, i);
                 if (statuses[i] != GiBindingStatus.Valid) invalid++;
             }
@@ -62,6 +94,10 @@ namespace Gi.Entities
                     return "Another binding writes the same output field.";
                 case GiBindingStatus.ExcludeUnavailable:
                     return "Excluding the entity's own source is not possible for this binding kind.";
+                case GiBindingStatus.InvalidReach:
+                    return "The binding has neither a reach field nor a positive constant reach.";
+                case GiBindingStatus.ExcludeOnTransient:
+                    return "Excluding the entity's own source is not possible on a transient layer, because a splat has no source.";
                 default:
                     return "This binding kind is not supported by the running Gi adapter.";
             }
@@ -93,7 +129,63 @@ namespace Gi.Entities
             if (status == GiBindingStatus.Valid) status = Field(binding.Total, wantsTotal, TotalSize);
             if (status == GiBindingStatus.Valid) status = Field(binding.Position, wantsPosition, VectorSize);
             if (status == GiBindingStatus.Valid && wantsCoverage && !Present(binding.Coverage)) status = GiBindingStatus.MissingOutput;
+
+            var wantsReach = NeedsReach(binding.Kind);
+            if (status == GiBindingStatus.Valid) status = Optional(binding.ReachField, ReachPerRow(binding.Kind), ReachSize);
+            if (status == GiBindingStatus.Valid) status = Optional(binding.ThresholdField, binding.Kind == GiBindingKind.Nearest, ThresholdSize);
+            if (status == GiBindingStatus.Valid && wantsReach && !Present(binding.ReachField) && !(binding.Reach > 0f && float.IsFinite(binding.Reach)))
+                status = GiBindingStatus.InvalidReach;
             return status;
+        }
+
+        public static bool NeedsReach(GiBindingKind kind)
+        {
+            return kind == GiBindingKind.Area || kind == GiBindingKind.Max || kind == GiBindingKind.Nearest || kind == GiBindingKind.Changed;
+        }
+
+        public static bool ReachPerRow(GiBindingKind kind)
+        {
+            return kind == GiBindingKind.Area || kind == GiBindingKind.Max || kind == GiBindingKind.Nearest;
+        }
+
+        public static GiSenseNeeds NeedsOf(in GiBindingSpec binding)
+        {
+            var needs = GiSenseNeeds.None;
+            switch (binding.Kind)
+            {
+                case GiBindingKind.Value:
+                    needs = GiSenseNeeds.Value;
+                    break;
+                case GiBindingKind.Gradient:
+                    needs = GiSenseNeeds.Vector;
+                    break;
+                case GiBindingKind.ValueGradient:
+                    needs = GiSenseNeeds.Value | GiSenseNeeds.Vector;
+                    break;
+                case GiBindingKind.Area:
+                    needs = GiSenseNeeds.Total | GiSenseNeeds.Reach;
+                    break;
+                case GiBindingKind.Max:
+                    needs = GiSenseNeeds.Value | GiSenseNeeds.Vector | GiSenseNeeds.Reach;
+                    break;
+                case GiBindingKind.Nearest:
+                    needs = GiSenseNeeds.Value | GiSenseNeeds.Vector | GiSenseNeeds.Reach | GiSenseNeeds.Threshold;
+                    break;
+            }
+
+            return (binding.Flags & GiBindingSpec.ExcludeSelf) != 0 ? needs | GiSenseNeeds.Exclude : needs;
+        }
+
+        private static bool ExcludesTransient(in GiBindingSpec binding, ReadOnlySpan<GiLayerSpec> layers)
+        {
+            return (binding.Flags & GiBindingSpec.ExcludeSelf) != 0 && layers[binding.Layer].Kind == GiLayerKind.Transient;
+        }
+
+        private static GiBindingStatus Optional(in GiBindingField field, bool allowed, int size)
+        {
+            if (!Present(field)) return GiBindingStatus.Valid;
+            if (!allowed) return GiBindingStatus.UnexpectedField;
+            return field.Size == size ? GiBindingStatus.Valid : GiBindingStatus.WrongFieldSize;
         }
 
         private static bool Supported(GiBindingKind kind, GiBindingSupport support)

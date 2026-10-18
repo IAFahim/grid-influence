@@ -10,6 +10,8 @@ namespace Gi.Entities
         [ReadOnly] public ComponentTypeHandle<LocalTransform> Transforms;
         [ReadOnly] public ComponentTypeHandle<LocalToWorld> Matrices;
         [ReadOnly] public ComponentTypeHandle<Parent> Parents;
+        [ReadOnly] public ComponentTypeHandle<GiSource> Sources;
+        [ReadOnly] public EntityTypeHandle Entities;
 
         public bool Eligible(in ArchetypeChunk chunk)
         {
@@ -24,6 +26,11 @@ namespace Gi.Entities
         public ChunkEntityEnumerator Rows(in ArchetypeChunk chunk, bool useEnabledMask, in v128 chunkEnabledMask)
         {
             return new ChunkEntityEnumerator(useEnabledMask, chunkEnabledMask, chunk.Count);
+        }
+
+        public NativeArray<Entity> EntitiesOf(in ArchetypeChunk chunk)
+        {
+            return chunk.GetNativeArray(Entities);
         }
     }
 }
