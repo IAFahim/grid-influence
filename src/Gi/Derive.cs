@@ -117,6 +117,7 @@ public static unsafe partial class World
                         if (existed) DropPage(ld, tile);
 
                         ld->Max.Update(g->TilesPerSide, tile, 0);
+                        if (existed) RefreshTileHash(g, ld, tile);
                     }
                     else
                     {
@@ -133,6 +134,9 @@ public static unsafe partial class World
                             DropPage(ld, tile);
                             ld->Max.Update(g->TilesPerSide, tile, 0);
                         }
+
+                        if ((outcome & (ResolveOutcome.Empty | ResolveOutcome.Changed)) != 0)
+                            RefreshTileHash(g, ld, tile);
                     }
 
                     if ((outcome & ResolveOutcome.Changed) != 0) dirty[kept++] = tile;

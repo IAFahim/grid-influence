@@ -577,17 +577,21 @@ public static unsafe partial class World
                     var rect = rects + i;
                     if (transient) PrepareTransientSet(ld, set);
                     var outcome = TileBake.Publish(&ld->Store, set, rect->X0, rect->Y0, rect->X1, rect->Y1, w->Tick);
+                    bool dropped;
                     if ((outcome & ResolveOutcome.Empty) != 0 && (transient || ld->Store.PlanesZero(*set)))
                     {
                         DropPage(ld, tile);
                         ld->Max.Update(tps, tile, 0);
+                        dropped = true;
                     }
                     else
                     {
                         ld->Max.Update(tps, tile, ld->Store.Cells(*set).Summary->Max);
                         if (transient) RetireTransientTile(ld, set, tile);
+                        dropped = false;
                     }
 
+                    if (dropped || (outcome & ResolveOutcome.Changed) != 0) RefreshTileHash(g, ld, tile);
                     if ((outcome & ResolveOutcome.Changed) != 0) dirty[kept++] = tile;
                 }
 
