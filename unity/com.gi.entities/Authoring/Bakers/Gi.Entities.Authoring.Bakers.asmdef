@@ -1,0 +1,26 @@
+{
+    "name": "Gi.Entities.Authoring.Bakers",
+    "rootNamespace": "Gi.Entities.Authoring",
+    "references": [
+        "BovineLabs.Core",
+        "BovineLabs.Core.Authoring",
+        "Gi.Entities",
+        "Gi.Entities.Authoring",
+        "Unity.Collections",
+        "Unity.Entities",
+        "Unity.Entities.Hybrid",
+        "Unity.Mathematics",
+        "Unity.Transforms"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

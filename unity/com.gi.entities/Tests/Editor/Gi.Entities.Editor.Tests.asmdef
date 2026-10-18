@@ -1,0 +1,40 @@
+{
+    "name": "Gi.Entities.Editor.Tests",
+    "rootNamespace": "Gi.Entities.Editor.Tests",
+    "references": [
+        "BovineLabs.Core",
+        "Gi.Entities",
+        "Gi.Entities.Authoring",
+        "Gi.Entities.Authoring.Bakers",
+        "Gi.Entities.Editor",
+        "Gi.Entities.Presentation",
+        "Gi.Entities.Tests.Authored",
+        "Gi.Entities.Tests.Ecs",
+        "Gi.Entities.Tests.Support",
+        "Unity.Collections",
+        "Unity.Entities",
+        "Unity.Entities.Hybrid",
+        "Unity.Mathematics",
+        "Unity.Profiling.Core",
+        "Unity.Transforms",
+        "UnityEditor.TestRunner",
+        "UnityEngine.TestRunner"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "Gi.Validation.dll",
+        "Gi.dll",
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

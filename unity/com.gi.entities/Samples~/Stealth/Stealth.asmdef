@@ -1,0 +1,24 @@
+{
+    "name": "Gi.Entities.Samples.Stealth",
+    "rootNamespace": "Gi.Entities.Samples.Stealth",
+    "references": [
+        "BovineLabs.Core",
+        "BovineLabs.Core.Authoring",
+        "Gi.Entities",
+        "Gi.Entities.Authoring",
+        "Unity.Collections",
+        "Unity.Entities",
+        "Unity.Entities.Hybrid",
+        "Unity.Mathematics",
+        "Unity.Transforms"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -1,0 +1,5 @@
+sdk 10.0.401
+netstandard2.1 Gi.dll ab8bd1d269d3752f72b5f3b8043012e26d3f1abc1a3ee831f602331a389c7d9b
+netstandard2.1 Gi.Validation.dll c4b740373d54d2a248a9daf88bd55b12a9884e55d7cd776e30846d49ad415f09
+corpus Gi.Corpus.dll 4cca98a67eaf12e7c8ea70e5827da9888baa42fcf56d1679ba608d3e7561cb20
+frames GiBenchmarks.dll 91b6e84fc9d40c93e48d90a9f91e135485d0113919c9ed00e48f9865a7e35a41

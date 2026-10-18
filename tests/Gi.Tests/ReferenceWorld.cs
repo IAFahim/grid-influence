@@ -598,7 +598,7 @@ internal sealed unsafe class ReferenceWorld
         }
     }
 
-    private void MarkCovered(GridData g, in Source s, Layer.Precision precision, HashSet<int> processed)
+    private static void MarkCovered(GridData g, in Source s, Layer.Precision precision, HashSet<int> processed)
     {
         var v = StampCatalog.Get(s.Stamp);
         if (!TileBake.Place(s.X, s.Y, g.OriginX, g.OriginY, g.ScaleQ8, g.Size, v, s.Angle, s.Scale,

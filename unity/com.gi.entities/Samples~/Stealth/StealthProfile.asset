@@ -1,0 +1,56 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a58d95727fc2e186fba15d0a95140cbe, type: 3}
+  m_Name: StealthProfile
+  m_EditorClassIdentifier: Gi.Entities.Authoring::Gi.Entities.Authoring.GiProfile
+  Axes: 0
+  Origin: {x: 0, y: 0}
+  Grids:
+  - Power: 6
+    Origin: {x: -32, y: -32}
+    Size: 64
+  Layers:
+  - {fileID: 11400000, guid: 5c6b6a73c3102d5509bcc0dbb7deb610, type: 2}
+  - {fileID: 11400000, guid: fef9a52fbe61df65c90118f04f69ac49, type: 2}
+  Stamps:
+  - {fileID: 11400000, guid: 51620bbb62316dfc793f5cbca17812ff, type: 2}
+  - {fileID: 11400000, guid: 78017c388f8a7b08ea7f7f2fe5d5f8f9, type: 2}
+  - {fileID: 11400000, guid: fc29e0fe401309419af1fc235ad2fb17, type: 2}
+  Bindings:
+  - Kind: 5
+    Layer: {fileID: 11400000, guid: fef9a52fbe61df65c90118f04f69ac49, type: 2}
+    ExcludeSelf: 0
+    Period: 0
+    Since: 0
+    Reach: 0
+    Threshold: 200
+    Value:
+      Type: Gi.Entities.Samples.Stealth.StealthGuard, Gi.Entities.Samples.Stealth, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+      Field: Loudness
+    Gradient:
+      Type: 
+      Field: 
+    Total:
+      Type: 
+      Field: 
+    Position:
+      Type: Gi.Entities.Samples.Stealth.StealthGuard, Gi.Entities.Samples.Stealth, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+      Field: Where
+    Coverage:
+      Type: Gi.Entities.Samples.Stealth.StealthAlert, Gi.Entities.Samples.Stealth, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+      Field: 
+    ReachField:
+      Type: Gi.Entities.Samples.Stealth.StealthGuard, Gi.Entities.Samples.Stealth, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+      Field: Hearing
+    ThresholdField:
+      Type: 
+      Field: 
