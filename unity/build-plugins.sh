@@ -32,7 +32,7 @@ status=0
 
 for variant in $variants; do
     for project in $projects; do
-        dotnet build "$root/src/$project/$project.csproj" -c Release -f "$variant" -t:Rebuild -m:1 -nodeReuse:false -p:Deterministic=true -p:ContinuousIntegrationBuild=true
+        dotnet build "$root/src/$project/$project.csproj" -c Release -f "$variant" -t:Rebuild -m:1 -nodeReuse:false -p:Deterministic=true -p:ContinuousIntegrationBuild=true -p:IncludeSourceRevisionInInformationalVersion=false -p:DebugType=none -p:EnableSourceLink=false -p:EmbedAllSources=false
         dll=$root/src/$project/bin/Release/$variant/$project.dll
         [ -f "$dll" ] || { printf 'missing %s\n' "$dll" >&2; exit 2; }
         sha=$(sha256sum "$dll" | cut -d' ' -f1)
