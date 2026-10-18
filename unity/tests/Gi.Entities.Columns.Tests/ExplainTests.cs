@@ -1,6 +1,9 @@
 using System;
 using Gi.Entities.Tests.Support;
 using Xunit;
+using GiGrid = Gi.Grid;
+using GiLayer = Gi.Layer;
+using GiStamp = Gi.Stamp;
 using GiWorld = Gi.World;
 
 namespace Gi.Entities.Columns.Tests;
@@ -325,5 +328,38 @@ public sealed class ExplainTests
         broken[2].First = GiLayerSpec.NoLayer;
         Assert.Equal(0, GiRecipe.Trace(setup.World, broken, setup.Layers, 2, 20.5f, 20.5f, steps));
         Assert.Equal(0, GiRecipe.Trace(setup.World, specs, new byte[2], 5, 1f, 1f, steps));
+    }
+
+    [Fact]
+    public void AOneInputSumTracesWithoutASecondLayer()
+    {
+        var world = GiWorld.New();
+        var stamp = GiStamp.Box(3, 3, 20);
+        try
+        {
+            GiGrid.New(world, 6, 0f, 0f, 64f);
+            var baseLayer = GiLayer.New(world, GiLayer.Residency.Persistent, GiLayer.Precision.Cell);
+            var summed = GiLayer.Sum(world, baseLayer, 3, 1);
+            GiWorld.Place(world, baseLayer, 20f, 20f, stamp, 5);
+            GiWorld.Process(world);
+
+            var specs = new[]
+            {
+                new GiLayerSpec { Kind = GiLayerKind.Persistent, First = GiLayerSpec.NoLayer, Second = GiLayerSpec.NoLayer },
+                new GiLayerSpec { Kind = GiLayerKind.Sum, First = 0, Second = GiLayerSpec.NoLayer, FirstWeight = 3, Shift = 1 },
+            };
+            var steps = new GiRecipeStep[2];
+            Assert.Equal(1, GiRecipe.Trace(world, specs, new[] { baseLayer, summed }, 1, 20.5f, 20.5f, steps));
+            Assert.Equal(-1, steps[0].Second);
+            Assert.True(steps[0].Matches);
+            Assert.NotEqual(0, steps[0].Value);
+            Assert.Equal(steps[0].A * 3, steps[0].Raw);
+            Assert.DoesNotContain("and layer", GiExplainText.Step(steps[0]));
+        }
+        finally
+        {
+            GiWorld.Free(world);
+            GiStamp.Free(stamp);
+        }
     }
 }

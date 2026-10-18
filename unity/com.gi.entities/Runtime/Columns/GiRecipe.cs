@@ -71,14 +71,16 @@ namespace Gi.Entities
             if ((visited & bit) != 0u) return;
 
             visited |= bit;
+            var single = spec.Kind == GiLayerKind.Sum && spec.Second == GiLayerSpec.NoLayer;
             Visit(world, specs, ids, spec.First, x, y, steps, ref count, ref visited);
-            if (spec.Second != spec.First) Visit(world, specs, ids, spec.Second, x, y, steps, ref count, ref visited);
+            if (!single && spec.Second != spec.First) Visit(world, specs, ids, spec.Second, x, y, steps, ref count, ref visited);
 
             if (count >= steps.Length) return;
-            if (spec.First >= ids.Length || spec.Second >= ids.Length) return;
+            if (spec.First >= ids.Length || (!single && spec.Second >= ids.Length)) return;
 
             GiWorld.TrySense(world, ids[spec.First], x, y, out var a);
-            GiWorld.TrySense(world, ids[spec.Second], x, y, out var b);
+            short b = 0;
+            if (!single) GiWorld.TrySense(world, ids[spec.Second], x, y, out b);
             GiWorld.TrySense(world, ids[layer], x, y, out var actual);
             var value = Combine(spec, a, b, out var raw);
             steps[count++] = new GiRecipeStep
@@ -86,7 +88,7 @@ namespace Gi.Entities
                 Layer = layer,
                 Kind = spec.Kind,
                 First = spec.First,
-                Second = spec.Second,
+                Second = single ? -1 : spec.Second,
                 A = a,
                 B = b,
                 FirstWeight = spec.FirstWeight,

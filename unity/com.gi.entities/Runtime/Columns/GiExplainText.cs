@@ -36,8 +36,10 @@ namespace Gi.Entities
         {
             var text = new StringBuilder();
             text.Append("layer ").Append(step.Layer.ToString(CultureInfo.InvariantCulture)).Append(" = ").Append(step.Kind).Append(" of layer ")
-                .Append(step.First.ToString(CultureInfo.InvariantCulture)).Append(" (").Append(step.A.ToString(CultureInfo.InvariantCulture)).Append(") and layer ")
-                .Append(step.Second.ToString(CultureInfo.InvariantCulture)).Append(" (").Append(step.B.ToString(CultureInfo.InvariantCulture)).Append(")");
+                .Append(step.First.ToString(CultureInfo.InvariantCulture)).Append(" (").Append(step.A.ToString(CultureInfo.InvariantCulture)).Append(")");
+            if (step.Second >= 0)
+                text.Append(" and layer ").Append(step.Second.ToString(CultureInfo.InvariantCulture)).Append(" (")
+                    .Append(step.B.ToString(CultureInfo.InvariantCulture)).Append(")");
             switch (step.Kind)
             {
                 case GiLayerKind.Sum:
