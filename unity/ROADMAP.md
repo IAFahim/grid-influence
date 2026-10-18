@@ -97,15 +97,15 @@ The card named in each row pins its fact (Tier U).
 | # | Fact | Pinned by | Status |
 |---|---|---|---|
 | E1 | Registering a component type in `OnCreate` (through a type handle, lookup or query) makes `state.Dependency` include earlier jobs on that type. A writer waits for earlier readers and writers; a reader waits for earlier writers. | U-4 | |
-| E2 | `WithDisabled<T>` matches entities whose `T` is present but disabled; `WithAbsent<T>` matches only entities without `T`; `WithNone<T>` matches both. | U-2 | |
-| E3 | Destroying an entity that has an `ICleanupComponentData` leaves it alive with only its cleanup components until they are removed. | U-2 | |
-| E4 | `CalculateBaseEntityIndexArrayAsync` counts only entities that pass the query's enabled bits. Also, how change filters affect it. | U-2 | |
+| E2 | `WithDisabled<T>` matches entities whose `T` is present but disabled; `WithAbsent<T>` matches only entities without `T`; `WithNone<T>` matches both. | U-2 | confirmed (U-2). `WithAll<T>` matches only entities where `T` is enabled; `WithNone<T>` matches the disabled and the absent. Queries on a world also match the `GiFrame` entity, so scope them with another component |
+| E3 | Destroying an entity that has an `ICleanupComponentData` leaves it alive with only its cleanup components until they are removed. | U-2 | confirmed (U-2) |
+| E4 | `CalculateBaseEntityIndexArrayAsync` counts only entities that pass the query's enabled bits. Also, how change filters affect it. | U-2 | confirmed (U-2) for enabled bits: the base of chunk `c` is the number of enabled matches in earlier chunks. Change filters are not exercised: reconcile counts per chunk itself, so U-3 and U-5 pin the filter case when they use it |
 | E5 | Change filters work per chunk: a chunk counts as changed when any system took write access to the type since this system last ran. | U-3 | |
 | E6 | Whether `FixedStepSimulationSystemGroup` updates in the Editor world. | U-4 | |
-| E7 | An entity baked without `TransformUsageFlags.Dynamic` has `LocalToWorld` but no `LocalTransform`. | U-2 | |
+| E7 | An entity baked without `TransformUsageFlags.Dynamic` has `LocalToWorld` but no `LocalTransform`. | U-2 | open: needs a baker, so A-2 pins it. The reconcile view already falls back to `LocalToWorld` when a chunk has no `LocalTransform` |
 | E8 | `FixedStepSimulationSystemGroup` runs before `TransformSystemGroup`, so `LocalToWorld` read during a fixed tick is from the previous frame. | U-3 | |
 | E9 | A non-Burst job scheduled from a non-Burst `ISystem.OnUpdate` runs on a worker thread under IL2CPP and CoreCLR (Mono no longer exists in Unity 7). | U-1 | confirmed (U-1): a managed `IJob` runs on a worker while the main thread polls `IsCompleted`. Scheduled and then `Complete()`d at once, the main thread runs it inline, so a test that needs a worker must poll. Same on CoreCLR editor, CoreCLR player and IL2CPP player |
-| E10 | Gi's `SourceCommand` factories compile under Burst. If they do not, the diff job writes an adapter struct and the apply job converts it. | U-2 | |
+| E10 | Gi's `SourceCommand` factories compile under Burst. If they do not, the diff job writes an adapter struct and the apply job converts it. | U-2 | not needed (U-2): Burst writes the adapter `GiCommand`, and the managed apply pass converts to `SourceCommand`, because slicing a batch must re-index `CreatedBy` anyway |
 
 ## 2. Prediction ledger
 
@@ -219,7 +219,7 @@ Plan §12's S1–S5 apply, plus:
 | A-1 | Assets and inspectors | authoring | P0 | U-0 | U | 2 | todo | |
 | V-1 | Gi parity on Unity backends | verification | P0 | U-0, F-1 | D, U | 2 | todo | |
 | G-3 | Tooling read-outs | core | P1 | — | G | 2 | done | #82. `World.Memory(world, out storeBytes, out liveTiles, out pages, out kernelEntries, out liveSources)`; E-1/E-4/E-6 consume it |
-| U-2 | Reconcile, emitters, pulses | runtime | P0 | U-1, F-2 | D, U | 3 | todo | |
+| U-2 | Reconcile, emitters, pulses | runtime | P0 | U-1, F-2 | D, U | 3 | done | stacked after #89 |
 | U-4 | Fences, guard, cross-world writers | runtime | P0 | U-1 | U | 3 | todo | |
 | U-6 | Splat | runtime | P0 | U-1, F-2 | D, U | 3 | todo | |
 | A-2 | Bakers, builders, live baking | authoring | P0 | A-1, U-1 | U | 3 | todo | |
@@ -1032,6 +1032,10 @@ This roadmap changes the plan in the ways listed here. The coordinator folds the
 18. **Fences are implemented in U-1** (`GiRuntime.BeginWrite/EndWrite/BeginRead/EndRead/CompleteAll`), because U-1's process job already needs them. U-4 keeps the guard, the cross-world proof and the Editor-world check.
 19. **`GiSystemGroup` and every system use `Worlds.SimulationEditor`.** Whether the group actually updates in the Editor world is still U-4's pin (E6).
 
+20. **Reconcile skips unchanged chunks** by change version: a chunk is scanned when `GiEmitter`, `GiSource` or the chunk order changed since the system last ran, or when it has no `GiEmitter` at all (destroyed or removed emitters). The 50-seed ECS equivalence test covers every operation kind, including enable-bit toggles, so a miss would fail it.
+21. **Batch commands are an adapter type** (`GiCommand`), not Gi's `SourceCommand`. The managed apply pass converts and slices at command-group boundaries (never between a `Place` and the `CreatedBy` commands that follow it), re-indexing `CreatedBy` per slice, and retries once after a stale token.
+22. **Cleanup components are removed through a command buffer played back at the start of the next update** and only when the retire query is non-empty, so a quiet tick has no structural change and no sync point.
+
 New open decisions:
 
 | ID | Question | Default |
@@ -1047,7 +1051,7 @@ The questions are plan Appendix A. V-0 runs them and records the answers here. R
 |---|---|---|
 | 1 | Runtime | CoreCLR, **.NET 10.0.10-dev** (`System.Private.CoreLib`, no `Mono.Runtime`) in the editor and in the Linux player. `ScriptingImplementation` is `Mono2x, IL2CPP, WinRTDotNET, CoreCLR`. Script assemblies still compile against netstandard / .NET 4.8 reference assemblies: `ApiCompatibilityLevel.NET` (net10) exists but is marked "still a work in progress and is disabled for now", and `EditorAssembliesCompatibilityLevel` has only Default, NET_Unity_4_8 and NET_Standard. |
 | 2 | Define | `ENABLE_CORECLR` (editor and CoreCLR player, set per assembly by Bee). IL2CPP player: `ENABLE_IL2CPP`. `ENABLE_MONO` is never defined. Plugin define constraints do evaluate `ENABLE_CORECLR`. |
-| 3 | Load | The netstandard2.1 `Gi.dll` loads and runs in all three: editor, CoreCLR player, IL2CPP player. A `net10.0` `Gi.dll` is selected correctly by a define-constrained importer but **cannot be referenced by script assemblies**: CS1705 (`Gi` uses `System.Runtime 10.0.0.0`, higher than the referenced assembly). It stays unusable until the net10 API level is enabled. |
+| 3 | Load | The netstandard2.1 `Gi.dll` loads and runs in all three: editor, CoreCLR player, IL2CPP player. A `net10.0` `Gi.dll` is selected correctly by a define-constrained importer but **cannot be referenced by script assemblies**: CS1705 (`Gi` uses `System.Runtime 10.0.0.0`, higher than the referenced assembly). It stays unusable until the net10 API level is enabled. 7000.0.0a10 (installed and checked 2026-10-18) is unchanged: `ApiCompatibilityLevel.NET` is still "disabled for now" and `EditorAssembliesCompatibilityLevel` still has only Default, NET_Unity_4_8 and NET_Standard. |
 | 4 | Intrinsics | CoreCLR editor and player: `Vector128`/`Vector256` accelerated; SSE4.1, AVX2, BMI2, POPCNT supported; AVX-512 absent on this CPU. IL2CPP player: nothing usable (`Avx2` type missing, `Vector128.IsHardwareAccelerated` false, `Sse41` and `Popcnt` report false). So IL2CPP must keep the scalar build. |
 | 5 | JIT | `DOTNET_TieredCompilation`, `DOTNET_TieredPGO`, `DOTNET_EnableHWIntrinsic` unset by default; GC is workstation, latency Interactive (CoreCLR) or Batch (IL2CPP). Warm-up and environment-variable behaviour: V-3. |
 | 6 | Reload | Not yet tested (U-1 covers code unload and orphan reclaim). |
@@ -1157,6 +1161,7 @@ Recorded 2026-10-18 so later sessions start from verified facts, not assumptions
 15. `set -o pipefail` plus an early-exiting `awk` in a pipeline turns the upstream command into SIGPIPE (exit 141) and aborts the script under `set -e`. Capture the producer's output in a variable first.
 16. Unity 7 alphas: pin one exact alpha for the host project and the package (`unityRelease`), and bump them together. The package's `package.json` now says `"unity": "7000.0", "unityRelease": "0a9"` and depends on the builtin module versions (entities and collections 6.7.0, burst 2.0.0, mathematics 1.4.0).
 17. Hand-written plugin `.meta` files with the old list-form `platformData` are ignored by Unity 7 without a message, so the DLL silently vanishes from the precompiled set (this was lesson 8). Let the `PluginImporter` API write them (`unity/project/Assets/Editor/GiPluginSetup.cs`).
+18. A heading recovered from a quaternion (`atan2`) is a ulp off the angle it came from. Gi quantizes angles to 16 bits, so an angle that sits exactly on a quantization boundary can fall into the neighbouring cell. Scenario headings are therefore offset a quarter of a quantum (`GiScenarioOp.HeadingBiasRadians`); production lockstep code must supply headings from deterministic state instead of deriving them from rotations (plan §5.8).
 
 ### Session state (2026-10-18, second session)
 

@@ -160,7 +160,7 @@ namespace Gi.Entities.Tests.Support
 
             if (entity.Oriented && entity.PlacedHeadingSteps != entity.HeadingSteps)
             {
-                Expect(GiWorld.Turn(world, entity.Source, entity.HeadingSteps * GiScenarioOp.HeadingStepRadians), "turn");
+                Expect(GiWorld.Turn(world, entity.Source, GiScenarioOp.HeadingOf(entity.HeadingSteps)), "turn");
                 entity.PlacedHeadingSteps = entity.HeadingSteps;
             }
 
@@ -179,7 +179,7 @@ namespace Gi.Entities.Tests.Support
                 entity.YQuarters * 0.25f, setup.Stamps[entity.Stamp], (sbyte)start, out var status);
             Expect(status, "place");
             if (entity.Oriented && entity.HeadingSteps != 0)
-                Expect(GiWorld.Turn(world, entity.Source, entity.HeadingSteps * GiScenarioOp.HeadingStepRadians), "turn");
+                Expect(GiWorld.Turn(world, entity.Source, GiScenarioOp.HeadingOf(entity.HeadingSteps)), "turn");
             if (entity.Scaled && entity.ScaleQuarters != 4)
                 Expect(GiWorld.Scale(world, entity.Source, entity.ScaleQuarters * 0.25f), "scale");
             if (entity.Ramp > 0)

@@ -1557,7 +1557,14 @@ The unsafe code in the frame and bootstrap is three things: the fixed buffers in
 
 ### U-2
 
-Pending.
+The unsafe code in reconcile is the pointer access to the command and owner lists in `GiReconcileView.Visit`, the `Span` views of the lists in `GiApplyJob`, and the managed apply job itself.
+
+- **Lifetime.** Every list and array is allocated from `state.WorldUpdateAllocator`, which stays valid for the whole world update and rewinds only when the next update begins. All jobs that touch them are in one dependency chain returned as `state.Dependency`, so none is still running when the allocator rewinds. The `EntityCommandBuffer` is created with `Allocator.TempJob`, played back and disposed at the start of the next update, after `state.Dependency.Complete()`. The spans in `GiApplyJob` cover list storage that outlives the call and are not stored.
+- **Aliasing.**
+  - The count pass only reads. The write pass writes disjoint ranges: chunk `c` owns `[Offsets[c], Offsets[c] + Counts[c])`, which are disjoint by the prefix sum, and the count and write passes make the same decision because they run `Visit` with identical inputs. The pulse commands occupy `[entityTotal, total)`, written by the prefix job before the write pass starts, so they never overlap an entity range.
+  - The apply job reads the commands and writes three other lists (`Results`, `Scratch`, `BatchResults`). The write-back job reads commands, results and owners and writes component data only through `ComponentLookup`.
+- **Alignment.** All element types are blittable structs with natural alignment, and list and array storage is allocated with at least that alignment, so the pointers and spans are aligned.
+- **Concurrency.** Only the count and write passes run in parallel, and they work on distinct chunks, so they touch distinct ranges and distinct component arrays; the `GiFault` write for an entity happens in the chunk that owns it. `GiApplyJob` is the only job that calls into Gi, and it runs behind `GiRuntime.BeginWrite` and `EndWrite`. The write-back job is serial.
 
 ### U-3
 

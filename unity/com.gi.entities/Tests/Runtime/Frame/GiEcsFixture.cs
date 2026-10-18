@@ -2,6 +2,7 @@ using System;
 using Gi.Entities.Tests.Support;
 using Unity.Collections;
 using Unity.Entities;
+using Unity.Transforms;
 using EcsWorld = Unity.Entities.World;
 
 namespace Gi.Entities.Tests
@@ -12,6 +13,7 @@ namespace Gi.Entities.Tests
         public readonly FixedStepSimulationSystemGroup FixedStep;
         public readonly GiSystemGroup Group;
         public readonly SystemHandle Bootstrap;
+        public readonly SystemHandle Reconcile;
         public readonly SystemHandle Process;
         private BlobAssetReference<GiProfileBlob> _profile;
         private Entity _profileEntity;
@@ -27,8 +29,10 @@ namespace Gi.Entities.Tests
             Group = World.GetOrCreateSystemManaged<GiSystemGroup>();
             FixedStep.AddSystemToUpdateList(Group);
             Bootstrap = World.GetOrCreateSystem<GiBootstrapSystem>();
+            Reconcile = World.GetOrCreateSystem<GiReconcileSystem>();
             Process = World.GetOrCreateSystem<GiProcessSystem>();
             Group.AddSystemToUpdateList(Bootstrap);
+            Group.AddSystemToUpdateList(Reconcile);
             Group.AddSystemToUpdateList(Process);
             Group.SortSystems();
             FixedStep.SortSystems();
@@ -67,6 +71,29 @@ namespace Gi.Entities.Tests
         public void SetStandardProfile()
         {
             SetProfile(GiScenarioProfile.Standard().ToSpec());
+        }
+
+        public Entity CreateEmitter(byte layer, byte stamp, sbyte gain, float x, float z, ushort ramp = 0)
+        {
+            var types = ramp > 0
+                ? new[]
+                {
+                    ComponentType.ReadWrite<GiEmitter>(), ComponentType.ReadWrite<GiFault>(), ComponentType.ReadWrite<LocalTransform>(),
+                    ComponentType.ReadWrite<GiGainRamp>(),
+                }
+                : new[] { ComponentType.ReadWrite<GiEmitter>(), ComponentType.ReadWrite<GiFault>(), ComponentType.ReadWrite<LocalTransform>() };
+            var entity = Manager.CreateEntity(Manager.CreateArchetype(types));
+            Manager.SetComponentData(entity, new GiEmitter { Layer = new GiLayerKey(layer), Stamp = new GiStampKey(stamp), Gain = gain });
+            Manager.SetComponentData(entity, LocalTransform.FromPosition(x, 0f, z));
+            Manager.SetComponentEnabled<GiFault>(entity, false);
+            if (ramp > 0) Manager.SetComponentData(entity, new GiGainRamp { Ticks = ramp });
+            return entity;
+        }
+
+        public void Complete()
+        {
+            GiRuntime.CompleteAll();
+            Manager.CompleteAllTrackedJobs();
         }
 
         public void Tick(int count = 1)
