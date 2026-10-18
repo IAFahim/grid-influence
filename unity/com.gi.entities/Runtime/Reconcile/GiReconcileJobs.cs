@@ -20,7 +20,7 @@ namespace Gi.Entities
         public void Execute()
         {
             var frame = Frames[Frame];
-            Context.Value = new GiReconcileContext { Alive = frame.Alive, Plane = frame.Plane, Tables = frame.Tables };
+            Context.Value = new GiReconcileContext { Alive = frame.Alive, World = frame.World, Plane = frame.Plane, Tables = frame.Tables };
         }
     }
 

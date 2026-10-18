@@ -1577,7 +1577,21 @@ The unsafe code in sync is the raw column pointers handed to `World.SyncTransfor
 
 ### U-5
 
-Pending.
+The unsafe code in sense is the raw pointers `GiSenseReadJob` hands to `GiSensePass.ReadBatch`, the `byte*` component access and `ulong*` word reads in `GiSenseScatterJob`, and the span over the profile blob's binding array in `GiSenseSystem.Rebuild`.
+
+- **Lifetime.**
+  - Every list, array and the `NativeReference<GiReconcileContext>` is allocated from `state.WorldUpdateAllocator` (lists directly, arrays through `CollectionHelper.CreateNativeArray`), so all of it is valid for the whole world update; the update's jobs form one chain stored in `state.Dependency`, so none is still running when the allocator rewinds.
+  - The read job takes its pointers from `NativeList` storage inside `Execute`, for one batch, and stores none of them; the scatter job takes its chunk's component array pointer the same way.
+  - The span in `Rebuild` covers the profile blob's `BlobArray<GiBindingSpec>`; `Rebuild` runs on the main thread while the `GiProfileReference` component holds the blob, and the span does not escape — the bindings copy every value they keep.
+- **Aliasing.**
+  - The count pass only reads. The write pass writes the rows `[Offsets[c], Offsets[c] + Counts[c])` of `Xs` and `Ys`, disjoint by the prefix sum, and the count and write passes make the same decision because they run the same `GiSenseView` over the same query with nothing between them in the chain that changes it.
+  - Read batches are disjoint: batch `b` reads `Xs` and `Ys` read-only and writes the rows `[b·batch, min((b+1)·batch, rows))` of the outputs and the words from `b·batch / 64` of `Whole`; the batch size is a multiple of 64 (`GiSensePass.Batch`), so no `Whole` word straddles two batches.
+  - Each scatter job writes only its own chunk's component bytes, at `i·TypeSize + Offset` for offsets already validated to lie inside the component, and there is one scatter job per output type, so two scatter jobs never write the same component type; `GiBindingTable` has rejected a second writer to the same field before the binding exists. `Whole` is read-only here.
+- **Alignment.** `short`, `float` and `ulong` list storage is naturally aligned, and every batch starts at a multiple of 64 rows, so each `whole + (start >> 6)` word is aligned. Component arrays are aligned for their type, `i·TypeSize` preserves that alignment, and the field offsets arrive from the authoring path's `GetFieldOffset` over real component layouts, so they are naturally aligned; `Resolve` rejects any offset whose field leaves its component.
+- **Concurrency.**
+  - `GiSenseReadJob` is the only job that touches Gi. It is scheduled behind `GiRuntime.BeginRead` and registered with `EndRead`, and its reads are the pure column reads of C8 (`Sense*Column` with null excludes), so its batches run in parallel and any Gi writer waits for them through the same fences.
+  - The scatter jobs write the game's own components through `state.Dependency` on the binding's query, each chunk writing only its entities, and the coverage tag's enabled-bit write happens in the chunk that owns the entity.
+  - `Rebuild`, `Resolve` and `Report` run on the main thread and touch managed ECS state only — queries, `TypeManager` lookups, and the frame's fault word through the EntityManager; no pointer into Gi or blob storage survives them.
 
 ### U-6
 

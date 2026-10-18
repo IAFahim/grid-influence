@@ -230,7 +230,7 @@ Plan §12's S1–S5 apply, plus:
 | G-2 | Runtime teardown | core | P1 | — | G | 3 | done | #84. `World.Teardown()`; revision floor keeps pre-teardown tokens refused; RSS-flat over 1000 cycles |
 | G-7 | Incremental layer hash | core | P1 | — | G | 3 | todo | |
 | U-3 | Sync | runtime | P0 | U-2 | D, U | 4 | done | stacked after #90 |
-| U-5 | Read bindings: value and gradient | runtime | P0 | U-2 | D, U | 4 | todo | |
+| U-5 | Read bindings: value and gradient | runtime | P0 | U-2 | D, U | 4 | done | stacked after #93. CoreCLR and IL2CPP players 49/49 at c6723dc; editmode and a fresh PlayMode editor run deferred by the owner |
 | V-2 | ECS determinism and allocation | verification | P0 | U-3, U-4, U-5, U-6 | U | 5 | todo | |
 | U-5b | Read bindings: area, max, nearest, changed | runtime | P1 | U-3, U-5 | D, U | 5 | todo | |
 | E-1 | Field window | editor | P1 | P-1 | U | 5 | todo | |
@@ -1043,6 +1043,10 @@ This roadmap changes the plan in the ways listed here. The coordinator folds the
 26. **Layer residency is part of `GiTables`** (`TransientMask`), because `World.Splat` returns 0 for a non-transient layer without saying why. The splat pass maps an unknown layer key to `InvalidLayer`, a persistent or derived layer to `WrongResidency`, and an unknown stamp key to `InvalidStamp`, and skips the entity.
 27. **Splats are not change-filtered**: a transient layer is cleared by every `Process`, so every enabled `GiSplat` is read and splatted every tick. The sort is a stable counting sort by layer (chunk order, then entity order) and a layer whose stamps and gains all agree uses the single-stamp overload.
 
+28. **The coverage tag of a `ValueGradient` binding means "the gradient is computable"** (Gi needs the neighbouring cells), so at a grid edge an entity can carry a value while its tag is clear; a `Value` binding's tag is that value's own coverage. Tests pin both meanings.
+29. **Per-binding queries ask for a coverage-tag component with `Present`, not `All`,** so an entity whose tag is disabled still matches the query and the scatter can switch the tag on.
+30. **Coverage tags are written through `ArchetypeChunk.SetComponentEnabled`,** which performs the card's `GetEnabledBitsRW` + `UpdateChunkDisabledCount` work for the entity's own chunk.
+
 New open decisions:
 
 | ID | Question | Default |
@@ -1170,8 +1174,6 @@ Recorded 2026-10-18 so later sessions start from verified facts, not assumptions
 17. Hand-written plugin `.meta` files with the old list-form `platformData` are ignored by Unity 7 without a message, so the DLL silently vanishes from the precompiled set (this was lesson 8). Let the `PluginImporter` API write them (`unity/project/Assets/Editor/GiPluginSetup.cs`).
 18. A heading recovered from a quaternion (`atan2`) is a ulp off the angle it came from. Gi quantizes angles to 16 bits, so an angle that sits exactly on a quantization boundary can fall into the neighbouring cell. Scenario headings are therefore offset a quarter of a quantum (`GiScenarioOp.HeadingBiasRadians`); production lockstep code must supply headings from deterministic state instead of deriving them from rotations (plan §5.8).
 
-### Session state (2026-10-18, second session)
+### Session state (2026-10-18, handed off)
 
-Merged earlier: #78 (F-1), #79 (U-0, Tier D), #80 (inspection hygiene), #81 (G-1), #82 (G-3), #83 (G-5), #84 (G-2), #85 (gate baseline). This session unblocked Tier U (A.15, Appendix F): editor 7000.0.0a9, BovineLabs Core pre.6 from GitLab `82be2794`, all four `validate.sh` suites green (EditMode, PlayMode, CoreCLR player, IL2CPP player).
-
-Next, in order: F-2 (scenarios, reference executor, lint, CI), then wave 2 (U-1, A-1, V-1), then the rest of the board. V-0 can start now: CoreCLR is the a9 default, so the Appendix A checklist is answerable today.
+The previous agent's session ended; **`unity/HANDOFF.md` is the current state and the instructions for what to do next.** It lists the pull request stack (#86 to #92, all green), the checkpoint branch `unity/u-5-bindings`, the validation commands, the traps, and the order of the remaining cards.
