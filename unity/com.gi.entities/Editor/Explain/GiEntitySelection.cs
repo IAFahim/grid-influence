@@ -2,10 +2,12 @@ using System;
 using System.Reflection;
 using Unity.Entities;
 using UnityEditor;
+using Unity.Scripting.LifecycleManagement;
 using EcsWorld = Unity.Entities.World;
 
 namespace Gi.Entities.Editor
 {
+    [NoAutoStaticsCleanup]
     public static class GiEntitySelection
     {
         private static readonly Type ProxyType = Type.GetType("Unity.Entities.Editor.EntitySelectionProxy, Unity.Entities.Editor");

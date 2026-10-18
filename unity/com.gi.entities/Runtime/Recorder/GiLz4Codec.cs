@@ -1,8 +1,10 @@
 using System;
 using BovineLabs.Core.Utility;
+using Unity.Scripting.LifecycleManagement;
 
 namespace Gi.Entities
 {
+    [NoAutoStaticsCleanup]
     public sealed unsafe class GiLz4Codec : IGiCodec
     {
         private static bool _probed;

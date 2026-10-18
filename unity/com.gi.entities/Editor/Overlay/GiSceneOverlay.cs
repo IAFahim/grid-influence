@@ -4,10 +4,12 @@ using Gi.Entities.Presentation;
 using Unity.Entities;
 using UnityEditor;
 using UnityEngine;
+using Unity.Scripting.LifecycleManagement;
 
 namespace Gi.Entities.Editor
 {
     [InitializeOnLoad]
+    [NoAutoStaticsCleanup]
     public static class GiSceneOverlay
     {
         private const int Lattice = 48;
@@ -183,7 +185,7 @@ namespace Gi.Entities.Editor
 
         private static GiProfile FindProfile()
         {
-            foreach (var authoring in Object.FindObjectsByType<GiProfileAuthoring>(FindObjectsSortMode.None))
+            foreach (var authoring in Object.FindObjectsByType<GiProfileAuthoring>())
                 if (authoring.Profile != null)
                     return authoring.Profile;
             return null;

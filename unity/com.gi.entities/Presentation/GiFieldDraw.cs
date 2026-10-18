@@ -22,8 +22,6 @@ namespace Gi.Entities.Presentation
         public const string MirrorName = "Gi.Draw.Mirror";
         public const string HeatName = "Gi.Draw.Heat";
 
-        public static readonly string[] Names = { DrawName, MirrorName, HeatName };
-
         public static readonly ProfilerMarker Draw = new ProfilerMarker(ProfilerCategory.Scripts, DrawName);
         public static readonly ProfilerMarker Mirror = new ProfilerMarker(ProfilerCategory.Scripts, MirrorName);
         public static readonly ProfilerMarker Heat = new ProfilerMarker(ProfilerCategory.Scripts, HeatName);

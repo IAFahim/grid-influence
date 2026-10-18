@@ -4,6 +4,7 @@ using NUnit.Framework;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Jobs;
+using Unity.Scripting.LifecycleManagement;
 using EcsWorld = Unity.Entities.World;
 
 namespace Gi.Entities.Tests
@@ -13,6 +14,7 @@ namespace Gi.Entities.Tests
         public int Value;
     }
 
+    [NoAutoStaticsCleanup]
     public static class FenceGate
     {
         public static int Open;

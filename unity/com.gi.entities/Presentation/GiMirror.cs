@@ -3,10 +3,12 @@ using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine;
 using UnityEngine.Rendering;
+using Unity.Scripting.LifecycleManagement;
 using GiWorld = Gi.World;
 
 namespace Gi.Entities.Presentation
 {
+    [NoAutoStaticsCleanup]
     public sealed unsafe class GiMirror : IDisposable
     {
         public const string ComputeName = "GiMirror";

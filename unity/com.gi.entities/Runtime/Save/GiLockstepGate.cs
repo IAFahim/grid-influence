@@ -1,3 +1,5 @@
+using Unity.Scripting.LifecycleManagement;
+
 namespace Gi.Entities
 {
     public sealed class GiLockstepTrack
@@ -18,6 +20,7 @@ namespace Gi.Entities
         }
     }
 
+    [NoAutoStaticsCleanup]
     public static class GiLockstepGate
     {
         private static readonly GiLockstepTrack[] Tracks = new GiLockstepTrack[256];

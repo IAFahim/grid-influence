@@ -5,6 +5,7 @@ using System.Runtime.Versioning;
 using System.Text;
 using NUnit.Framework;
 using Unity.Jobs.LowLevel.Unsafe;
+using UnityEngine.Assemblies;
 using GiWorld = Gi.World;
 
 namespace Gi.Entities.Tests
@@ -107,7 +108,7 @@ namespace Gi.Entities.Tests
 
         private static Type FindLoaded(string typeName)
         {
-            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            foreach (var assembly in CurrentAssemblies.GetLoadedAssemblies())
             {
                 var type = assembly.GetType(typeName);
                 if (type != null) return type;

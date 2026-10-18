@@ -2,10 +2,12 @@ using System;
 using System.Reflection;
 using Unity.Entities;
 using UnityEngine;
+using Unity.Scripting.LifecycleManagement;
 using EcsWorld = Unity.Entities.World;
 
 namespace Gi.Entities.Editor.Tests
 {
+    [NoAutoStaticsCleanup]
     internal static class GiBaking
     {
         public static EcsWorld Bake(params GameObject[] roots)
