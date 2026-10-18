@@ -14,6 +14,8 @@ namespace Gi.Entities
         private Entity _frame;
         private EntityQuery _profiles;
         private EntityQuery _sources;
+        private EntityQuery _suppress;
+        private bool _suppressed;
         private ComponentTypeHandle<GiSource> _sourceHandle;
         private ulong _builtHash;
         private ulong _failedHash;
@@ -25,6 +27,7 @@ namespace Gi.Entities
             state.EntityManager.SetComponentData(_frame, new GiPulseMirror { Entries = Unity.Collections.LowLevel.Unsafe.UnsafeList<GiPulseEntry>.Create(16, Unity.Collections.Allocator.Persistent) });
             _profiles = state.GetEntityQuery(ComponentType.ReadOnly<GiProfileReference>());
             _sources = state.GetEntityQuery(ComponentType.ReadWrite<GiSource>());
+            _suppress = state.GetEntityQuery(ComponentType.ReadOnly<GiSuppress>());
             _sourceHandle = state.GetComponentTypeHandle<GiSource>();
         }
 
@@ -39,6 +42,13 @@ namespace Gi.Entities
         public void OnUpdate(ref SystemState state)
         {
             DrainGuard(ref state);
+            if (!_suppress.IsEmptyIgnoreFilter)
+            {
+                Suppress(ref state);
+                return;
+            }
+
+            _suppressed = false;
             if (_profiles.IsEmptyIgnoreFilter)
             {
                 if (_builtHash != 0ul) Release(ref state);
@@ -52,6 +62,19 @@ namespace Gi.Entities
             if (blob.Hash == _builtHash || blob.Hash == _failedHash) return;
 
             Rebuild(ref state, ref blob);
+        }
+
+        private void Suppress(ref SystemState state)
+        {
+            if (_suppressed) return;
+
+            _suppressed = true;
+            GiRuntime.CompleteAll();
+            state.EntityManager.CompleteAllTrackedJobs();
+            Release(ref state);
+            var frame = state.EntityManager.GetComponentData<GiFrame>(_frame);
+            RaiseProfileFault(ref frame, "suppressed");
+            state.EntityManager.SetComponentData(_frame, frame);
         }
 
         private void DrainGuard(ref SystemState state)

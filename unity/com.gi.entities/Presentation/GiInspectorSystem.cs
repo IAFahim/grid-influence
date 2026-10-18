@@ -47,6 +47,8 @@ namespace Gi.Entities.Presentation
             if (_info != null && _info.Alive == frame.Alive && _info.Generation == frame.Generation && _info.GiWorld == frame.World)
             {
                 _info.Tick = frame.Tick;
+                _info.Faults = frame.Faults.Raised;
+                _info.DesyncTick = frame.Faults.FirstTick(GiFaultKind.Desync);
                 return;
             }
 
@@ -57,6 +59,8 @@ namespace Gi.Entities.Presentation
                 Alive = frame.Alive,
                 Generation = frame.Generation,
                 Tick = frame.Tick,
+                Faults = frame.Faults.Raised,
+                DesyncTick = frame.Faults.FirstTick(GiFaultKind.Desync),
                 LayerCount = frame.Alive ? frame.Tables.LayerCount : 0,
             };
             if (frame.Alive)

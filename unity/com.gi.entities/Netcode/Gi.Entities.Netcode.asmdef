@@ -7,17 +7,29 @@
         "Unity.Burst",
         "Unity.Collections",
         "Unity.Entities",
-        "Unity.Mathematics"
+        "Unity.Entities.Hybrid",
+        "Unity.Mathematics",
+        "Unity.NetCode",
+        "Unity.Networking.Transport",
+        "Unity.Transforms"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
-    "overrideReferences": false,
-    "precompiledReferences": [],
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "Gi.dll"
+    ],
     "autoReferenced": true,
     "defineConstraints": [
         "UNITY_NETCODE"
     ],
-    "versionDefines": [],
+    "versionDefines": [
+        {
+            "name": "com.unity.netcode",
+            "expression": "6.7.0",
+            "define": "UNITY_NETCODE"
+        }
+    ],
     "noEngineReferences": false
 }

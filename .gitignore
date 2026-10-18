@@ -33,3 +33,6 @@ unity/project/Assets/SceneDependencyCache.meta
 unity/project/*.csproj
 unity/project/*.sln
 scratch/
+unity/project/Packages/com.unity.netcode/
+unity/project/Assets/NetcodeConfig.asset
+unity/project/Assets/NetcodeConfig.asset.meta

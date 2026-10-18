@@ -1,3 +1,0 @@
-namespace Gi.Entities.Netcode
-{
-}
