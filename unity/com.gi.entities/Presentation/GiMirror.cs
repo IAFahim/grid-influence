@@ -23,6 +23,8 @@ namespace Gi.Entities.Presentation
         private static readonly int OpacityId = Shader.PropertyToID("_Opacity");
         private static readonly int CountId = Shader.PropertyToID("_Count");
 
+        private static int _live;
+
         private readonly GiMirrorPlanner _planner;
         private readonly ComputeShader _compute;
         private readonly int _decode;
@@ -30,6 +32,8 @@ namespace Gi.Entities.Presentation
         private readonly int _grow;
         private readonly int _tilesPerSide;
         private readonly int[] _taken;
+        private readonly byte[] _changedFlags;
+        private int _lastChanged;
         private NativeArray<int> _changed;
         private NativeArray<int> _staging;
         private NativeArray<int> _entry;
@@ -41,6 +45,7 @@ namespace Gi.Entities.Presentation
         public GiMirror(byte world, byte grid, byte layer, int power, ComputeShader compute = null, int maxBudget = 4096)
         {
             World = world;
+            _live++;
             Grid = grid;
             Layer = layer;
             Power = power;
@@ -52,6 +57,7 @@ namespace Gi.Entities.Presentation
             _heatmap = _compute.FindKernel("Heatmap");
             _grow = _compute.FindKernel("Grow");
             _taken = new int[maxBudget];
+            _changedFlags = new byte[tiles];
             _changed = new NativeArray<int>(tiles, Allocator.Persistent);
             _staging = new NativeArray<int>(GiMirrorPlanner.TileInts, Allocator.Persistent);
             _entry = new NativeArray<int>(1, Allocator.Persistent);
@@ -59,6 +65,8 @@ namespace Gi.Entities.Presentation
             _table.SetData(new int[tiles]);
             Grow(GiMirrorPlanner.GrownCapacity(0, 1));
         }
+
+        public static int Live => _live;
 
         public byte World { get; }
 
@@ -76,6 +84,12 @@ namespace Gi.Entities.Presentation
 
         public int Pending => _planner.Pending;
 
+        public int TilesPerSide => _tilesPerSide;
+
+        public bool IsLive(int tile) => _planner.SlotOf(tile) >= 0;
+
+        public bool WasChanged(int tile) => (uint)tile < (uint)_changedFlags.Length && _changedFlags[tile] != 0;
+
         public int PoolSlots => _poolSlots;
 
         public long UploadedBytes { get; private set; }
@@ -84,11 +98,20 @@ namespace Gi.Entities.Presentation
 
         public int Update(int budget)
         {
+            for (var i = 0; i < _lastChanged; i++) _changedFlags[_changed[i]] = 0;
+            _lastChanged = 0;
+
             var changed = GiWorld.ChangedTiles(World, Grid, Layer, _since, (int*)null);
             if (changed > 0)
             {
                 GiWorld.ChangedTiles(World, Grid, Layer, _since, (int*)_changed.GetUnsafePtr());
-                for (var i = 0; i < changed; i++) _planner.Enqueue(_changed[i]);
+                for (var i = 0; i < changed; i++)
+                {
+                    _planner.Enqueue(_changed[i]);
+                    _changedFlags[_changed[i]] = 1;
+                }
+
+                _lastChanged = changed;
             }
 
             _since = GiWorld.Tick(World);
@@ -125,6 +148,7 @@ namespace Gi.Entities.Presentation
 
         public void Dispose()
         {
+            if (_table != null) _live--;
             _table?.Dispose();
             _pool?.Dispose();
             _table = null;

@@ -20,6 +20,7 @@ namespace Gi.Entities.Tests
         public readonly SystemHandle Splat;
         public readonly GiSenseSystem Sense;
         public readonly GiCountersSystem Counters;
+        public Presentation.GiInspectorSystem Inspector;
         public readonly SystemHandle Process;
         private BlobAssetReference<GiProfileBlob> _profile;
         private Entity _profileEntity;
@@ -56,6 +57,18 @@ namespace Gi.Entities.Tests
         }
 
         public EntityManager Manager => World.EntityManager;
+
+        public void AddInspector()
+        {
+            if (Inspector != null) return;
+
+            var presentation = World.GetOrCreateSystemManaged<PresentationSystemGroup>();
+            Simulation.AddSystemToUpdateList(presentation);
+            Inspector = World.GetOrCreateSystemManaged<Presentation.GiInspectorSystem>();
+            presentation.AddSystemToUpdateList(Inspector);
+            presentation.SortSystems();
+            Simulation.SortSystems();
+        }
 
         public void AddTransformSystems()
         {
