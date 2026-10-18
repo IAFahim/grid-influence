@@ -1615,4 +1615,11 @@ The unsafe code in splat is the pointer access in `GiSplatView.Visit`, the `stac
 
 ### P-1
 
-Pending.
+The unsafe code in the mirror is two pointer hand-offs to Gi from `Presentation/GiMirror.cs`: `ChangedTiles` into a persistent `NativeArray<int>`, and `QueryRegion` into a persistent `NativeArray<int>` read as `short`. Everything else (the page table, the pending queue, the budget) is managed code in `Runtime/Columns` with no pointers.
+
+- **Lifetime.** The two arrays and the one-element entry array are allocated with `Allocator.Persistent` in the constructor and freed in `Dispose`; Gi writes into them only during the call that receives the pointer, and the mirror keeps no pointer between calls. The `GraphicsBuffer`s are owned by the mirror, created in the constructor (the pool again when it grows) and disposed with it. Growth copies the old pool into the new one on the GPU, then disposes the old.
+- **Aliasing.** `ChangedTiles` writes at most one `int` per tile of the grid into an array that holds exactly that many. `QueryRegion` writes one 32 x 32 tile, 1,024 `short` values, into an array of 512 `int` values (2,048 bytes); the tile is read whole before the next call reuses the array. No other reference to either array exists while Gi writes.
+- **Alignment.** Both arrays come from `NativeArray` with at least 4-byte alignment, which satisfies `short` and `int` access. Two `short` values share one `int` word of the pool, the lower index in the low half; the compute kernel sign-extends each half.
+- **Concurrency.** The mirror is main-thread only and reads Gi, so the caller must hold a window in which no Gi write job runs (`GiRuntime.CompleteAll`, or the inspector system's completed `GiFrame` dependency). The mirror takes no fence itself and writes no Gi state.
+
+A tile that reads back all zero returns its pool slot and clears its table entry, so the pool holds only tiles with content. `gi.mirror.budget` caps the tiles uploaded per frame; the rest wait in a queue that keeps first-in order and holds each tile at most once, and the queue drains in `ceil(pending / budget)` frames once changes stop (`MirrorPlannerTests` pins the planner under 100 random schedules). The compute decode and the heatmap are the same function of the table and pool, so the test that compares the decode with `QueryRegion` over 50 seeds also covers what the heatmap draws.

@@ -35,6 +35,11 @@ namespace Gi.Entities.Tests.Support
 
         public static GiScenarioHashes Run(GiScenario scenario)
         {
+            return Run(scenario, null);
+        }
+
+        public static GiScenarioHashes Run(GiScenario scenario, Action<GiScenarioWorld, int> afterTick)
+        {
             using (var setup = GiScenarioWorld.Create(scenario.Profile))
             {
                 var entities = new Entity[scenario.EntityCount];
@@ -51,6 +56,7 @@ namespace Gi.Entities.Tests.Support
                     foreach (var pulse in pulses) EmitPulse(setup, pulse);
                     EmitSplats(setup, scenario.Profile, splats);
                     GiWorld.Process(setup.World);
+                    afterTick?.Invoke(setup, t);
 
                     var hashes = new ulong[setup.Layers.Length];
                     for (var l = 0; l < hashes.Length; l++) hashes[l] = GiFieldHash.OfLayer(setup.World, setup.Layers[l]);
