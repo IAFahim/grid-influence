@@ -217,7 +217,7 @@ Plan §12's S1–S5 apply, plus:
 | F-2 | Scenarios, reference executor, lint, CI | foundation | P0 | F-1, U-0 | D | 2 | done | stacked on #86 |
 | U-1 | Frame, bootstrap, group, process | runtime | P0 | U-0, F-1 | D, U | 2 | done | stacked after #88 |
 | A-1 | Assets and inspectors | authoring | P0 | U-0 | U | 2 | todo | |
-| V-1 | Gi parity on Unity backends | verification | P0 | U-0, F-1 | D, U | 2 | todo | |
+| V-1 | Gi parity on Unity backends | verification | P0 | U-0, F-1 | D, U | 2 | active | #96 carries the Tier D receipts (corpus DLL deterministic, dotnet tests unchanged); the Unity replay waits out the owner's pause of build runs. Gi.Corpus needs InternalsVisibleTo (see #96) — a public live-count read-out would remove it |
 | G-3 | Tooling read-outs | core | P1 | — | G | 2 | done | #82. `World.Memory(world, out storeBytes, out liveTiles, out pages, out kernelEntries, out liveSources)`; E-1/E-4/E-6 consume it |
 | U-2 | Reconcile, emitters, pulses | runtime | P0 | U-1, F-2 | D, U | 3 | done | stacked after #89 |
 | U-4 | Fences, guard, cross-world writers | runtime | P0 | U-1 | U | 3 | todo | |
