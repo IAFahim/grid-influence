@@ -19,16 +19,17 @@ namespace Gi.Entities
         {
             if (!Profiler.enabled) return;
 
-            var frame = SystemAPI.GetSingleton<GiFrame>();
-            var stats = SystemAPI.GetSingleton<GiStats>();
+            var entity = SystemAPI.GetSingletonEntity<GiFrame>();
+            var frame = EntityManager.GetComponentData<GiFrame>(entity);
+            if (!frame.Alive) return;
+
+            var stats = EntityManager.GetComponentData<GiStats>(entity);
             GiCounters.Commands.Value = stats.Commands;
             GiCounters.Pulses.Value = stats.Pulses;
             GiCounters.Splats.Value = stats.Splats;
             GiCounters.ChangedTiles.Value = stats.ChangedTiles;
             GiCounters.ImpureReads.Value = 0;
             GiCounters.Faults.Value = GiFaultBits(frame.Faults.Raised);
-            if (!frame.Alive) return;
-
             GiWorld.Memory(frame.World, out var bytes, out _, out _, out _, out var sources);
             GiCounters.Sources.Value = sources;
             GiCounters.Bytes.Value = bytes;
