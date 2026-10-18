@@ -11,12 +11,13 @@ namespace Gi.Entities
     internal unsafe struct GiSplatCountJob : IJobChunk
     {
         public GiSplatView View;
-        [ReadOnly] public NativeReference<GiReconcileContext> Context;
+        public Entity Frame;
+        [ReadOnly] public ComponentLookup<GiFrame> Frames;
         [NativeDisableParallelForRestriction] public NativeArray<int> Counts;
 
         public void Execute(in ArchetypeChunk chunk, int unfilteredChunkIndex, bool useEnabledMask, in v128 chunkEnabledMask)
         {
-            View.Visit(chunk, Context.Value, (int*)Counts.GetUnsafePtr() + unfilteredChunkIndex * GiSplatPass.Layers, null, null, null,
+            View.Visit(chunk, GiReconcileContext.Of(Frames[Frame]), (int*)Counts.GetUnsafePtr() + unfilteredChunkIndex * GiSplatPass.Layers, null, null, null,
                 null, null);
         }
     }
@@ -24,6 +25,9 @@ namespace Gi.Entities
     [BurstCompile]
     internal struct GiSplatPrefixJob : IJob
     {
+        public Entity Frame;
+        [ReadOnly] public ComponentLookup<GiFrame> Frames;
+        public NativeReference<GiReconcileContext> Context;
         [ReadOnly] public NativeArray<int> Counts;
         public NativeArray<int> Offsets;
         public NativeArray<int> Meta;
@@ -34,6 +38,7 @@ namespace Gi.Entities
 
         public void Execute()
         {
+            Context.Value = GiReconcileContext.Of(Frames[Frame]);
             var chunks = Counts.Length / GiSplatPass.Layers;
             var total = 0;
             for (var k = 0; k < GiSplatPass.Layers; k++)
@@ -75,6 +80,20 @@ namespace Gi.Entities
 
             View.Visit(chunk, Context.Value, null, cursor, (float*)Xs.GetUnsafePtr(), (float*)Ys.GetUnsafePtr(),
                 (byte*)Stamps.GetUnsafePtr(), (sbyte*)Gains.GetUnsafePtr());
+        }
+    }
+
+    [BurstCompile]
+    internal struct GiSplatIdleJob : IJob
+    {
+        public Entity Frame;
+        public ComponentLookup<GiStats> Stats;
+
+        public void Execute()
+        {
+            var stats = Stats[Frame];
+            stats.Splats = 0;
+            Stats[Frame] = stats;
         }
     }
 

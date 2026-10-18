@@ -13,9 +13,13 @@ namespace Gi.Entities
     {
         public Entity Stats;
         public ComponentLookup<GiStats> Lookup;
+        public Entity Frame;
+        [ReadOnly] public ComponentLookup<GiFrame> Frames;
+        public NativeReference<GiReconcileContext> Context;
 
         public void Execute()
         {
+            Context.Value = GiReconcileContext.Of(Frames[Frame]);
             var stats = Lookup[Stats];
             stats.Sensed = 0;
             Lookup[Stats] = stats;

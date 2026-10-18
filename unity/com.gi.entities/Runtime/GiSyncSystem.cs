@@ -63,11 +63,13 @@ namespace Gi.Entities
             var scales = new NativeList<float>(allocator);
             var invalid = new NativeList<ulong>(allocator);
 
-            var handle = new GiPrepareJob { Frame = frameEntity, Frames = _frames, Context = context }.Schedule(state.Dependency);
-            handle = new GiSyncCountJob { View = _view, LastVersion = state.LastSystemVersion, Context = context, Counts = counts }
-                .ScheduleParallel(_placed, handle);
+            var handle = new GiSyncCountJob { View = _view, LastVersion = state.LastSystemVersion, Frame = frameEntity, Frames = _frames, Counts = counts }
+                .ScheduleParallel(_placed, state.Dependency);
             handle = new GiSyncPrefixJob
             {
+                Frame = frameEntity,
+                Frames = _frames,
+                Context = context,
                 Counts = counts,
                 Offsets = offsets,
                 Meta = meta,
