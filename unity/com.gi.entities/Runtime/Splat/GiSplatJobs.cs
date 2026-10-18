@@ -115,10 +115,14 @@ namespace Gi.Entities
             if (frame.Alive && Xs.Length > 0)
             {
                 var meta = (int*)Meta.GetUnsafeReadOnlyPtr();
+                var xs = (float*)Xs.GetUnsafePtr();
+                var ys = (float*)Ys.GetUnsafePtr();
+                var stamps = (byte*)Stamps.GetUnsafePtr();
+                var gains = (sbyte*)Gains.GetUnsafePtr();
                 GiGuard.Begin(frame.World, GiGuard.Splat, true);
                 var scope = GiMarkers.Splat.Auto();
-                applied = GiSplatPass.Apply(frame.World, frame.Tables, meta, meta + GiSplatPass.Layers, (float*)Xs.GetUnsafePtr(),
-                    (float*)Ys.GetUnsafePtr(), (byte*)Stamps.GetUnsafePtr(), (sbyte*)Gains.GetUnsafePtr());
+                if (GiRecorderGate.Enabled) GiRecorderGate.Splat(frame.World, meta, meta + GiSplatPass.Layers, xs, ys, stamps, gains);
+                applied = GiSplatPass.Apply(frame.World, frame.Tables, meta, meta + GiSplatPass.Layers, xs, ys, stamps, gains);
                 scope.Dispose();
                 GiGuard.End(frame.World, true);
             }

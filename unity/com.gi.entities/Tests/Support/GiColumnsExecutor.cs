@@ -13,57 +13,15 @@ namespace Gi.Entities.Tests.Support
 
         public static GiScenarioHashes Run(GiScenario scenario, int batchLimit)
         {
-            using (var setup = GiScenarioWorld.Create(scenario.Profile))
+            using (var session = new GiColumnsSession(scenario, batchLimit))
             {
-                var tables = TablesOf(setup, scenario.Profile);
-                var token = GiWorld.Capture(setup.World);
-                var desired = new GiDesired[scenario.EntityCount];
-                var exists = new bool[scenario.EntityCount];
-                var enabled = new bool[scenario.EntityCount];
-                var applied = new GiApplied[scenario.EntityCount];
                 var perTick = new ulong[scenario.Ticks.Length][];
-                for (var t = 0; t < scenario.Ticks.Length; t++)
-                {
-                    var pulses = new List<GiPulse>();
-                    var splats = new List<GiScenarioOp>();
-                    foreach (var op in scenario.Ticks[t].Ops) Fold(op, desired, exists, enabled, pulses, splats);
-                    for (var e = 0; e < desired.Length; e++) desired[e].Want = exists[e] && enabled[e];
-
-                    var commands = new List<GiCommand>();
-                    for (var e = 0; e < desired.Length; e++)
-                        AppendPlan(commands, GiDiff.Plan(desired[e], applied[e], tables, e, commands.Count));
-
-                    pulses.Sort(new GiPulseOrder());
-                    foreach (var pulse in pulses) AppendPlan(commands, GiPulseExpand.Plan(pulse, tables, commands.Count));
-
-                    var results = new GiCommandResult[commands.Count];
-                    var status = GiApplyPass.Apply(ref token, setup.World, commands.ToArray(), results,
-                        new GiWorld.SourceCommand[commands.Count], new GiWorld.SourceResult[commands.Count], batchLimit);
-                    if (status != GiApplyStatus.Applied) throw new InvalidOperationException("apply " + status);
-
-                    for (var i = 0; i < commands.Count; i++)
-                    {
-                        var owner = commands[i].Owner;
-                        if (owner < 0) continue;
-                        var fault = GiWriteBack.Fold(commands[i], results[i], ref applied[owner]);
-                        if (fault != GiFaultCode.None) throw new InvalidOperationException(commands[i].Kind + " " + fault);
-                    }
-
-                    var rejected = Sync(setup.World, ref token, desired, applied);
-                    if (rejected != 0) throw new InvalidOperationException("sync rejected " + rejected);
-
-                    EmitSplats(setup, tables, splats);
-                    GiWorld.Process(setup.World);
-                    var hashes = new ulong[setup.Layers.Length];
-                    for (var l = 0; l < hashes.Length; l++) hashes[l] = GiFieldHash.OfLayer(setup.World, setup.Layers[l]);
-                    perTick[t] = hashes;
-                }
-
+                for (var t = 0; t < scenario.Ticks.Length; t++) perTick[t] = session.Step(t);
                 return new GiScenarioHashes(perTick);
             }
         }
 
-        private static int Sync(byte world, ref GiWorld.Token token, GiDesired[] desired, GiApplied[] applied)
+        internal static int Sync(byte world, ref GiWorld.Token token, GiDesired[] desired, GiApplied[] applied, GiRecorder recorder)
         {
             var counts = new int[GiSyncPass.Categories];
             for (var e = 0; e < desired.Length; e++)
@@ -108,6 +66,7 @@ namespace Gi.Entities.Tests.Support
             fixed (ulong* invalidPointer = invalid)
             fixed (int* startPointer = starts, countPointer = counts, wordPointer = wordStarts)
             {
+                recorder?.OnSync(sourcePointer, xPointer, yPointer, headingPointer, scalePointer, startPointer, countPointer);
                 var status = GiSyncPass.Apply(ref token, world, sourcePointer, xPointer, yPointer, headingPointer, scalePointer,
                     invalidPointer, startPointer, countPointer, wordPointer);
                 if (status != GiApplyStatus.Applied) throw new InvalidOperationException("sync " + status);
@@ -130,12 +89,12 @@ namespace Gi.Entities.Tests.Support
             return tables;
         }
 
-        private static void AppendPlan(List<GiCommand> commands, GiPlan plan)
+        internal static void AppendPlan(List<GiCommand> commands, GiPlan plan)
         {
             for (var i = 0; i < plan.Count; i++) commands.Add(plan[i]);
         }
 
-        private static void Fold(GiScenarioOp op, GiDesired[] desired, bool[] exists, bool[] enabled, List<GiPulse> pulses,
+        internal static void Fold(GiScenarioOp op, GiDesired[] desired, bool[] exists, bool[] enabled, List<GiPulse> pulses,
             List<GiScenarioOp> splats)
         {
             switch (op.Kind)
@@ -203,7 +162,7 @@ namespace Gi.Entities.Tests.Support
             }
         }
 
-        private static void EmitSplats(GiScenarioWorld setup, GiTables tables, List<GiScenarioOp> splats)
+        internal static void EmitSplats(GiScenarioWorld setup, GiTables tables, List<GiScenarioOp> splats, GiRecorder recorder)
         {
             var counts = new int[GiSplatPass.Layers];
             var valid = new List<GiScenarioOp>();
@@ -244,6 +203,7 @@ namespace Gi.Entities.Tests.Support
             fixed (sbyte* g = gains)
             fixed (int* s = starts, c = counts)
             {
+                recorder?.OnSplat(s, c, x, y, st, g);
                 var applied = GiSplatPass.Apply(setup.World, tables, s, c, x, y, st, g);
                 if (applied != total) throw new InvalidOperationException("splat accepted " + applied + " of " + total);
             }

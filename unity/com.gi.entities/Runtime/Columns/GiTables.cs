@@ -38,6 +38,34 @@ namespace Gi.Entities
             return true;
         }
 
+        public readonly bool TryLayerKey(byte layer, out GiLayerKey key)
+        {
+            for (var i = 0; i < LayerCount; i++)
+            {
+                if (_layers[i] != layer) continue;
+
+                key = new GiLayerKey((byte)i);
+                return true;
+            }
+
+            key = default;
+            return false;
+        }
+
+        public readonly bool TryStampKey(byte stamp, out GiStampKey key)
+        {
+            for (var i = 0; i < StampCount; i++)
+            {
+                if (_stamps[i] != stamp) continue;
+
+                key = new GiStampKey((byte)i);
+                return true;
+            }
+
+            key = default;
+            return false;
+        }
+
         public void AddGrid(byte grid)
         {
             _grids[GridCount++] = grid;

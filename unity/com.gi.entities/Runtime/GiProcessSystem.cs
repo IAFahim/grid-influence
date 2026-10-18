@@ -51,6 +51,7 @@ namespace Gi.Entities
                         frame.Faults.Raise(GiFaultKind.Adapter, frame.Tick);
 
                     frame.Tick = GiWorld.Tick(frame.World);
+                    if (GiRecorderGate.Enabled) GiRecorderGate.Processed(frame.World);
                 }
 
                 GiGuard.End(frame.World, true);
