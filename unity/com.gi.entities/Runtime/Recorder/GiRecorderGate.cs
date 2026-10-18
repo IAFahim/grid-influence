@@ -1,7 +1,9 @@
 using System;
+using Unity.Scripting.LifecycleManagement;
 
 namespace Gi.Entities
 {
+    [NoAutoStaticsCleanup]
     public static class GiRecorderGate
     {
         private static readonly GiRecorder[] Active = new GiRecorder[256];

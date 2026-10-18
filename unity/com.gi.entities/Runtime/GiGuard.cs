@@ -2,9 +2,11 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
+using Unity.Scripting.LifecycleManagement;
 
 namespace Gi.Entities
 {
+    [NoAutoStaticsCleanup]
     public static unsafe class GiGuard
     {
         public const int Process = 1;

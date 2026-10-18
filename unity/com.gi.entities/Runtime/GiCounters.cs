@@ -1,7 +1,9 @@
 using Unity.Profiling;
+using Unity.Scripting.LifecycleManagement;
 
 namespace Gi.Entities
 {
+    [NoAutoStaticsCleanup]
     public static class GiCounters
     {
         public const string SourcesName = "Gi Sources";
