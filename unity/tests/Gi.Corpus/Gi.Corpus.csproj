@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsPackable>false</IsPackable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Gi\Gi.csproj" />
+    <Compile Include="..\..\..\tests\Gi.Tests\CorpusBuilder.cs" Link="Corpus\CorpusBuilder.cs" />
+    <Compile Include="..\..\..\tests\Gi.Tests\CorpusRunner.cs" Link="Corpus\CorpusRunner.cs" />
+    <Compile Include="..\..\..\tests\Gi.Tests\StreamGenerator.cs" Link="Corpus\StreamGenerator.cs" />
+    <Compile Include="..\..\..\tests\Gi.Tests\StreamModel.cs" Link="Corpus\StreamModel.cs" />
+    <Compile Include="..\..\..\tests\Gi.Tests\StreamOperands.cs" Link="Corpus\StreamOperands.cs" />
+  </ItemGroup>
+
+</Project>

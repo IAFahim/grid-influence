@@ -217,7 +217,7 @@ Plan §12's S1–S5 apply, plus:
 | F-2 | Scenarios, reference executor, lint, CI | foundation | P0 | F-1, U-0 | D | 2 | done | stacked on #86 |
 | U-1 | Frame, bootstrap, group, process | runtime | P0 | U-0, F-1 | D, U | 2 | done | stacked after #88 |
 | A-1 | Assets and inspectors | authoring | P0 | U-0 | U | 2 | todo | |
-| V-1 | Gi parity on Unity backends | verification | P0 | U-0, F-1 | D, U | 2 | todo | |
+| V-1 | Gi parity on Unity backends | verification | P0 | U-0, F-1 | D, U | 2 | active | #96 carries the Tier D receipts (corpus DLL deterministic, dotnet tests unchanged); the Unity replay waits out the owner's pause of build runs. Gi.Corpus needs InternalsVisibleTo (see #96) — a public live-count read-out would remove it |
 | G-3 | Tooling read-outs | core | P1 | — | G | 2 | done | #82. `World.Memory(world, out storeBytes, out liveTiles, out pages, out kernelEntries, out liveSources)`; E-1/E-4/E-6 consume it |
 | U-2 | Reconcile, emitters, pulses | runtime | P0 | U-1, F-2 | D, U | 3 | done | stacked after #89 |
 | U-4 | Fences, guard, cross-world writers | runtime | P0 | U-1 | U | 3 | todo | |
@@ -243,7 +243,7 @@ Plan §12's S1–S5 apply, plus:
 | S-1 | Save | save | P2 | V-2 | U | 6 | todo | |
 | G-4 | Cross-world `Process` | core | P2 | — | G | 6 | todo | |
 | G-5 | Schedule read-back | core | P2 | — | G | 6 | done | #83. `World.TryGetSchedule` (gain, fade ends/duration/ticks-left, expiry ticks-left); save/continue equals uninterrupted, proven |
-| G-6 | Allocator hook | core | P2 | — | G | 6 | todo | |
+| G-6 | Allocator hook | core | P2 | — | G | 6 | review | #95, accepted in review (8/8 CI green; allocator==frees over a full lifecycle; warm frames make 0 hook calls, no gate needed). Owner merges |
 | N-2 | Lockstep checks | netcode | P2 | N-1 | U | 7 | todo | |
 | G-8 | Parallel splat | core | P3 | V-3 | G | 7 | todo | |
 | V-0 | CoreCLR day 0 | verification | P0 | V-1, V-2, a CoreCLR build | U | day 0 | active | Preview answers in Appendix B (items 1-5, 7); the flip (item 11) waits for Unity's net10 API level |

@@ -10,12 +10,16 @@ root=$(cd -- "$(dirname -- "$0")/.." && pwd)
 plugins=$root/unity/com.gi.entities/Plugins/Gi
 variants="netstandard2.1:netstandard2.1"
 projects="Gi Gi.Validation"
+corpus_project=$root/unity/tests/Gi.Corpus/Gi.Corpus.csproj
+corpus_stage=$root/unity/com.gi.entities/Tests/Corpus
 check=false
+corpus=false
 
 for arg in "$@"; do
     case $arg in
         --check) check=true ;;
-        *) printf 'usage: build-plugins.sh [--check]\n' >&2; exit 2 ;;
+        --corpus) corpus=true ;;
+        *) printf 'usage: build-plugins.sh [--check] [--corpus]\n' >&2; exit 2 ;;
     esac
 done
 
@@ -47,6 +51,17 @@ for entry in $variants; do
         fi
     done
 done
+
+if $corpus; then
+    dotnet build "$corpus_project" -c Release -f netstandard2.1 -t:Rebuild -m:1 -nodeReuse:false -p:Deterministic=true -p:ContinuousIntegrationBuild=true -p:IncludeSourceRevisionInInformationalVersion=false -p:DebugType=none -p:EnableSourceLink=false -p:EmbedAllSources=false
+    dll=$root/unity/tests/Gi.Corpus/bin/Release/netstandard2.1/Gi.Corpus.dll
+    [ -f "$dll" ] || { printf 'missing %s\n' "$dll" >&2; exit 2; }
+    sha=$(sha256sum "$dll" | cut -d' ' -f1)
+    printf 'corpus Gi.Corpus.dll %s\n' "$sha"
+    mkdir -p "$corpus_stage"
+    cp -- "$dll" "$corpus_stage/Gi.Corpus.dll"
+    cp -- "$root/tests/Gi.Tests/Corpus/golden-corpus.txt" "$corpus_stage/golden-corpus.txt"
+fi
 
 if $check; then
     cmp -s "$manifest" "$plugins/manifest.txt" || { printf 'manifest differs\n' >&2; status=1; }

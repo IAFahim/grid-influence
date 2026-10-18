@@ -117,24 +117,3 @@ internal sealed class StreamSetup
     public int MaxLive;
     public List<StreamCommand> Commands = [];
 }
-
-internal struct BugInjection
-{
-    public int AfterProcess;
-    public byte Grid;
-    public byte Layer;
-    public int Cell;
-    public short Delta;
-}
-
-internal sealed class StreamMismatch : Exception
-{
-    public int CommandIndex;
-    public int OpIndex;
-
-    public StreamMismatch(string detail, int commandIndex, int opIndex) : base(detail)
-    {
-        CommandIndex = commandIndex;
-        OpIndex = opIndex;
-    }
-}
