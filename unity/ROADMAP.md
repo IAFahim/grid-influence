@@ -36,9 +36,15 @@ Started 2026-10-18. Day 0 is Unity's CoreCLR release, expected about 2026-11-14.
 |---|---|---|
 | **D** | anywhere, including CI and cloud agents | `dotnet build Gi.slnx -c Release -m:1`, `dotnet test Gi.slnx -c Release --no-build`, `unity/lint.sh`, `unity/build-plugins.sh --check` |
 | **U** | this host: the `unity` CLI (1.0.0-beta.13) with installed editors and an active Personal license — EditMode proven end to end, PlayMode is the same command, the `linux-il2cpp` module is installed for a8 (Appendix F). CI needs serial or floating licensing (O-U3) | `unity/validate.sh editmode`, `playmode`, `il2cpp` or `perf`; the script maps the CLI exits: 0 pass, 8 tests failed (terminal), anything else infrastructure (retry once) |
+| **C** | this host: `unity/compile.sh`, the editor in batch mode (about 25 s) | the host project, test assemblies included, compiles with `errors: 0`; it proves the sources compile, not what they do |
 | **G** | anywhere | the full `AGENTS.md` validation for `src/Gi` changes: `--verify` with and without intrinsics, plus the pinned `--gate` when a timing can move |
 
 Every **Done when** item carries its tier.
+
+**O-U9 (owner, 2026-10-18).** Tier U suites do not run during card work; they run once, in the final verification pass.
+- Until then every change under `unity/` passes Tier C (`errors: 0`) besides Tier D, and a card whose only open items are [U] receipts moves to `U-pending`.
+- R-13 is suspended for the same period.
+- The final pass runs `validate.sh` editmode, playmode, coreclr, il2cpp and perf in that order, fixes what fails, and clears every `U-pending` card.
 - D items are accepted on the agent's report.
 - U items are accepted on a `validate.sh` summary.
 
@@ -197,7 +203,7 @@ Cut line:
 ### Receipts
 
 - **R-12** Every Done-when item names its test or command and its tier. Receipts come before numbers. No test is skipped, muted or made inconclusive to get a pass.
-- **R-13** At most three cards can be in `U-pending` at once. A card cannot be `done` while a card it needs is still `U-pending`.
+- **R-13** At most three cards can be in `U-pending` at once. A card cannot be `done` while a card it needs is still `U-pending`. Suspended by O-U9 until the final verification pass.
 - **R-14** A refuted contract row (C or E) stops the card. Report it with the failing test; the coordinator re-plans.
 
 ### Stop rules
@@ -1173,6 +1179,8 @@ Recorded 2026-10-18 so later sessions start from verified facts, not assumptions
 16. Unity 7 alphas: pin one exact alpha for the host project and the package (`unityRelease`), and bump them together. The package's `package.json` now says `"unity": "7000.0", "unityRelease": "0a9"` and depends on the builtin module versions (entities and collections 6.7.0, burst 2.0.0, mathematics 1.4.0).
 17. Hand-written plugin `.meta` files with the old list-form `platformData` are ignored by Unity 7 without a message, so the DLL silently vanishes from the precompiled set (this was lesson 8). Let the `PluginImporter` API write them (`unity/project/Assets/Editor/GiPluginSetup.cs`).
 18. A heading recovered from a quaternion (`atan2`) is a ulp off the angle it came from. Gi quantizes angles to 16 bits, so an angle that sits exactly on a quantization boundary can fall into the neighbouring cell. Scenario headings are therefore offset a quarter of a quantum (`GiScenarioOp.HeadingBiasRadians`); production lockstep code must supply headings from deterministic state instead of deriving them from rotations (plan §5.8).
+19. `unity recompile` and `unity status` need the Pipeline package and a connected editor; the host project has neither. `unity/compile.sh` launches the editor with `-batchmode -nographics -quit` and reads `error CS` from the log: about 25 s when nothing changed (Tundra reports 0 items updated), longer after edits.
+20. `pkill -f <pattern>` kills the calling shell when the pattern appears in its own command line. Kill by PID.
 
 ### Session state (2026-10-18, second session stopped by the owner)
 

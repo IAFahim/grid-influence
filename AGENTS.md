@@ -36,5 +36,14 @@ Changes that can move a timing also run `dotnet run --project benchmarks -c Rele
 pinned core (`taskset -c 0`), and refresh `benchmarks/gate-baseline.json` with `--gate --update` only
 on the host that recorded it.
 
+## Unity work
+
+Applies to anything under `unity/`.
+
+- After every edit run `unity/compile.sh`: it compiles the host project, tests included, with the editor in batch mode (about 25 s, no tests) and must print `errors: 0`. Prefer it, `unity/lint.sh` and the dotnet tests over any Unity test run.
+- Prove engine-neutral logic in `unity/com.gi.entities/Runtime/Columns` with dotnet tests first.
+- `unity/validate.sh` suites run only in the final verification pass or when the owner asks, never as the inner loop.
+- Drive the editor through the `unity` CLI (`unity skill show` prints its guide) rather than hand-built editor command lines.
+
 Package changes also require `dotnet pack src/Gi` plus a version review. Never move a published
 tag.
