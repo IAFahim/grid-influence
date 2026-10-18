@@ -11,9 +11,7 @@
         "Unity.Mathematics",
         "Unity.Transforms"
     ],
-    "includePlatforms": [
-        "Editor"
-    ],
+    "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
     "overrideReferences": true,

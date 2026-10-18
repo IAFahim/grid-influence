@@ -1,41 +1,42 @@
 {
   "dependencies": {
     "com.bovinelabs.core": {
-      "version": "2.0.0-pre.1",
+      "version": "https://gitlab.com/tertle/com.bovinelabs.core.git#82be2794cf7535f6fb598bb704527f41629a8f64",
       "depth": 0,
-      "source": "registry",
+      "source": "git",
       "dependencies": {
+        "com.unity.collections": "6.7.0",
         "com.unity.entities": "6.7.0"
       },
-      "url": "https://package.openupm.com"
+      "hash": "82be2794cf7535f6fb598bb704527f41629a8f64"
     },
     "com.gi.entities": {
       "version": "file:../../com.gi.entities",
       "depth": 0,
       "source": "local",
       "dependencies": {
-        "com.bovinelabs.core": "2.0.0-pre.1",
-        "com.unity.burst": "1.8.31",
-        "com.unity.collections": "2.7.1",
+        "com.bovinelabs.core": "2.0.0-pre.6",
+        "com.unity.burst": "2.0.0",
+        "com.unity.collections": "6.7.0",
         "com.unity.entities": "6.7.0",
-        "com.unity.mathematics": "1.3.2"
+        "com.unity.mathematics": "1.4.0"
       }
     },
     "com.unity.burst": {
       "version": "2.0.0",
-      "depth": 0,
+      "depth": 1,
       "source": "builtin",
       "dependencies": {}
     },
     "com.unity.collections": {
       "version": "6.7.0",
-      "depth": 0,
+      "depth": 1,
       "source": "builtin",
       "dependencies": {}
     },
     "com.unity.entities": {
       "version": "6.7.0",
-      "depth": 0,
+      "depth": 1,
       "source": "builtin",
       "dependencies": {
         "com.unity.nuget.mono-cecil": "1.11.6",
@@ -59,31 +60,47 @@
     },
     "com.unity.mathematics": {
       "version": "1.4.0",
-      "depth": 0,
+      "depth": 1,
       "source": "builtin",
       "dependencies": {}
     },
     "com.unity.nuget.mono-cecil": {
       "version": "1.11.6",
-      "depth": 1,
+      "depth": 2,
       "source": "registry",
       "dependencies": {},
       "url": "https://packages.unity.com"
     },
     "com.unity.profiling.core": {
       "version": "1.0.3",
-      "depth": 1,
+      "depth": 2,
       "source": "builtin",
       "dependencies": {}
     },
     "com.unity.scriptablebuildpipeline": {
-      "version": "4.0.0",
-      "depth": 1,
+      "version": "4.0.1",
+      "depth": 2,
       "source": "registry",
       "dependencies": {
         "com.unity.test-framework": "1.4.5",
         "com.unity.modules.assetbundle": "1.0.0"
       },
+      "url": "https://packages.unity.com"
+    },
+    "com.unity.sdk.linux-x86_64": {
+      "version": "1.1.0",
+      "depth": 0,
+      "source": "registry",
+      "dependencies": {
+        "com.unity.sysroot.base": "1.1.0"
+      },
+      "url": "https://packages.unity.com"
+    },
+    "com.unity.sysroot.base": {
+      "version": "1.1.0",
+      "depth": 1,
+      "source": "registry",
+      "dependencies": {},
       "url": "https://packages.unity.com"
     },
     "com.unity.test-framework": {
@@ -104,33 +121,42 @@
         "com.unity.modules.jsonserialize": "1.0.0"
       }
     },
+    "com.unity.toolchain.linux-x86_64-linux": {
+      "version": "1.1.0",
+      "depth": 0,
+      "source": "registry",
+      "dependencies": {
+        "com.unity.sysroot.base": "1.1.0"
+      },
+      "url": "https://packages.unity.com"
+    },
     "com.unity.modules.accessibility": {
       "version": "1.0.0",
-      "depth": 2,
+      "depth": 3,
       "source": "builtin",
       "dependencies": {}
     },
     "com.unity.modules.animation": {
       "version": "1.0.0",
-      "depth": 2,
+      "depth": 3,
       "source": "builtin",
       "dependencies": {}
     },
     "com.unity.modules.assetbundle": {
       "version": "1.0.0",
-      "depth": 1,
+      "depth": 2,
       "source": "builtin",
       "dependencies": {}
     },
     "com.unity.modules.audio": {
       "version": "1.0.0",
-      "depth": 1,
+      "depth": 2,
       "source": "builtin",
       "dependencies": {}
     },
     "com.unity.modules.hierarchy": {
       "version": "1.0.0",
-      "depth": 1,
+      "depth": 2,
       "source": "builtin",
       "dependencies": {
         "com.unity.modules.hierarchycore": "1.0.0",
@@ -139,13 +165,13 @@
     },
     "com.unity.modules.hierarchycore": {
       "version": "1.0.0",
-      "depth": 2,
+      "depth": 3,
       "source": "builtin",
       "dependencies": {}
     },
     "com.unity.modules.imgui": {
       "version": "1.0.0",
-      "depth": 2,
+      "depth": 3,
       "source": "builtin",
       "dependencies": {}
     },
@@ -157,19 +183,19 @@
     },
     "com.unity.modules.physics": {
       "version": "1.0.0",
-      "depth": 1,
+      "depth": 2,
       "source": "builtin",
       "dependencies": {}
     },
     "com.unity.modules.ui": {
       "version": "1.0.0",
-      "depth": 2,
+      "depth": 3,
       "source": "builtin",
       "dependencies": {}
     },
     "com.unity.modules.uielements": {
       "version": "1.0.0",
-      "depth": 1,
+      "depth": 2,
       "source": "builtin",
       "dependencies": {
         "com.unity.modules.ui": "1.0.0",
@@ -183,7 +209,7 @@
     },
     "com.unity.modules.unityanalytics": {
       "version": "1.0.0",
-      "depth": 1,
+      "depth": 2,
       "source": "builtin",
       "dependencies": {
         "com.unity.modules.unitywebrequest": "1.0.0",
@@ -192,7 +218,7 @@
     },
     "com.unity.modules.unitywebrequest": {
       "version": "1.0.0",
-      "depth": 1,
+      "depth": 2,
       "source": "builtin",
       "dependencies": {}
     }
