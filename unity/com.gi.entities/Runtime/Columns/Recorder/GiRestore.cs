@@ -43,6 +43,9 @@ namespace Gi.Entities
             public sbyte To;
             public int Ticks;
             public int Elapsed;
+            public sbyte Last;
+            public long Tag;
+            public sbyte Applied;
         }
 
         private readonly List<Entry> _entries = new List<Entry>();
@@ -58,9 +61,20 @@ namespace Gi.Entities
             return (sbyte)(from + Math.Sign(delta) * (int)magnitude);
         }
 
-        public void Add(GiWorld.SourceId id, sbyte from, sbyte to, int ticks, int ticksLeft)
+        public void Add(GiWorld.SourceId id, sbyte from, sbyte to, int ticks, int ticksLeft, long tag = -1, sbyte applied = 0)
         {
-            _entries.Add(new Entry { Id = id, From = from, To = to, Ticks = ticks, Elapsed = Math.Max(0, ticks - ticksLeft) });
+            var elapsed = Math.Max(0, ticks - ticksLeft);
+            _entries.Add(new Entry
+            {
+                Id = id, From = from, To = to, Ticks = ticks, Elapsed = elapsed, Last = Staircase(from, to, ticks, elapsed), Tag = tag, Applied = applied,
+            });
+        }
+
+        public void CancelWhere(Func<long, sbyte, bool> changed)
+        {
+            for (var i = _entries.Count - 1; i >= 0; i--)
+                if (_entries[i].Tag >= 0 && changed(_entries[i].Tag, _entries[i].Applied))
+                    _entries.RemoveAt(i);
         }
 
         public void Cancel(GiWorld.SourceId id)
@@ -77,7 +91,23 @@ namespace Gi.Entities
 
         public void Step(byte world)
         {
-            Step(world, (id, gain) => GiWorld.SetGain(world, id, gain) == GiWorld.WriteStatus.Applied);
+            for (var i = _entries.Count - 1; i >= 0; i--)
+            {
+                var entry = _entries[i];
+                if (!GiWorld.TryGetSourceSpec(world, entry.Id, out var spec) || spec.Gain != entry.Last ||
+                    GiWorld.TryGetSchedule(world, entry.Id, out _, out _, out _, out var fadeTicks, out _, out _) && fadeTicks > 0)
+                {
+                    _entries.RemoveAt(i);
+                    continue;
+                }
+
+                entry.Elapsed++;
+                entry.Last = Staircase(entry.From, entry.To, entry.Ticks, entry.Elapsed);
+                if (GiWorld.SetGain(world, entry.Id, entry.Last) != GiWorld.WriteStatus.Applied || entry.Elapsed >= entry.Ticks)
+                    _entries.RemoveAt(i);
+                else
+                    _entries[i] = entry;
+            }
         }
 
         public void Step(byte world, Func<GiWorld.SourceId, sbyte, bool> setGain)
@@ -98,6 +128,28 @@ namespace Gi.Entities
     public static class GiRestore
     {
         public const float HalfAngleStep = (float)(Math.PI / 65536.0);
+
+        public static bool Place(byte world, in GiTables tables, in GiSourceState state, GiRestoreDriver driver, out GiWorld.SourceId id,
+            long tag = -1, sbyte applied = 0)
+        {
+            id = default;
+            if (!tables.TryLayer(new GiLayerKey(state.LayerKey), out var layer) || !tables.TryStamp(new GiStampKey(state.StampKey), out var stamp)) return false;
+
+            id = GiWorld.Place(world, layer, state.X, state.Y, stamp, state.Gain);
+            if (id.Generation == 0u) return false;
+
+            GiWorld.Turn(world, id, state.Heading + HalfAngleStep);
+            GiWorld.Scale(world, id, state.Scale);
+            Schedule(world, id, state, driver, tag, applied);
+            return true;
+        }
+
+        public static void Schedule(byte world, GiWorld.SourceId id, in GiSourceState state, GiRestoreDriver driver, long tag = -1, sbyte applied = 0)
+        {
+            GiWorld.SetGain(world, id, state.Gain);
+            if (state.Expiring) GiWorld.Expire(world, id, state.ExpireTicksLeft);
+            if (state.Fading) driver.Add(id, state.FadeFrom, state.FadeTo, state.FadeTicks, state.FadeTicksLeft, tag, applied);
+        }
 
         public static int Sources(byte world, in GiTables tables, GiSourceState[] sources, Dictionary<GiWorld.SourceId, GiWorld.SourceId> map,
             GiRestoreDriver driver, Action beforeProcess = null)

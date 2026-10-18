@@ -162,6 +162,8 @@ namespace Gi.Entities
     [BurstCompile]
     internal struct GiWriteBackJob : IJob
     {
+        [NativeDisableUnsafePtrRestriction] public GiPulseMirror Mirror;
+        [ReadOnly] public NativeReference<GiReconcileContext> Context;
         [ReadOnly] public NativeList<GiCommand> Commands;
         [ReadOnly] public NativeList<GiCommandResult> Results;
         [ReadOnly] public NativeList<Entity> Owners;
@@ -173,7 +175,11 @@ namespace Gi.Entities
             for (var i = 0; i < Commands.Length; i++)
             {
                 var command = Commands[i];
-                if (command.Owner < 0) continue;
+                if (command.Owner < 0)
+                {
+                    Track(command, i);
+                    continue;
+                }
 
                 var entity = Owners[i];
                 if (!Sources.HasComponent(entity)) continue;
@@ -202,6 +208,16 @@ namespace Gi.Entities
                     Faults.SetComponentEnabled(entity, false);
                 }
             }
+
+            Mirror.Prune(Context.Value.Tick);
+        }
+
+        private void Track(in GiCommand command, int index)
+        {
+            if (command.Kind == GiCommandKind.Place && Results[index].Code == GiFaultCode.None && Results[index].Source.Generation != 0u)
+                Mirror.Place(Results[index].Source);
+            else if (command.Kind == GiCommandKind.Expire && command.Target >= 0 && command.Target < Results.Length)
+                Mirror.Expire(Results[command.Target].Source, Context.Value.Tick + command.Ticks);
         }
     }
 

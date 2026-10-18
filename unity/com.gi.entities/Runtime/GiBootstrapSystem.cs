@@ -21,7 +21,8 @@ namespace Gi.Entities
 
         public void OnCreate(ref SystemState state)
         {
-            _frame = state.EntityManager.CreateEntity(typeof(GiFrame), typeof(GiStats));
+            _frame = state.EntityManager.CreateEntity(typeof(GiFrame), typeof(GiStats), typeof(GiPulseMirror));
+            state.EntityManager.SetComponentData(_frame, new GiPulseMirror { Entries = Unity.Collections.LowLevel.Unsafe.UnsafeList<GiPulseEntry>.Create(16, Unity.Collections.Allocator.Persistent) });
             _profiles = state.GetEntityQuery(ComponentType.ReadOnly<GiProfileReference>());
             _sources = state.GetEntityQuery(ComponentType.ReadWrite<GiSource>());
             _sourceHandle = state.GetComponentTypeHandle<GiSource>();
@@ -32,6 +33,7 @@ namespace Gi.Entities
             GiRuntime.CompleteAll();
             state.EntityManager.CompleteAllTrackedJobs();
             Release(ref state);
+            Unity.Collections.LowLevel.Unsafe.UnsafeList<GiPulseEntry>.Destroy(state.EntityManager.GetComponentData<GiPulseMirror>(_frame).Entries);
         }
 
         public void OnUpdate(ref SystemState state)
@@ -70,6 +72,7 @@ namespace Gi.Entities
             if (frame.Alive) GiWorldBuilder.Release(frame.World, frame.Tables, GiRuntime.Stamps);
             frame.Generation = 0u;
             _builtHash = 0ul;
+            state.EntityManager.GetComponentData<GiPulseMirror>(_frame).Entries->Clear();
 
             var grids = new ReadOnlySpan<GiGridSpec>(blob.Grids.GetUnsafePtr(), blob.Grids.Length);
             var layers = new ReadOnlySpan<GiLayerSpec>(blob.Layers.GetUnsafePtr(), blob.Layers.Length);
@@ -113,6 +116,7 @@ namespace Gi.Entities
             frame.Generation = 0u;
             frame.ProfileHash = 0ul;
             state.EntityManager.SetComponentData(_frame, frame);
+            state.EntityManager.GetComponentData<GiPulseMirror>(_frame).Entries->Clear();
             _builtHash = 0ul;
             _failedHash = 0ul;
             ResetSources(ref state);

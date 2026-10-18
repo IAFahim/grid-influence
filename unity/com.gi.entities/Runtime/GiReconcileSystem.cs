@@ -159,6 +159,8 @@ namespace Gi.Entities
 
             handle = new GiWriteBackJob
             {
+                Mirror = SystemAPI.GetSingleton<GiPulseMirror>(),
+                Context = context,
                 Commands = commands,
                 Results = results,
                 Owners = owners,
