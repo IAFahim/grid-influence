@@ -56,8 +56,26 @@ Rows L1 to L11 of `unity/ROADMAP.md`, filled from this host only. A miss is a mi
 | L4 | Mono, 4 to 10x slower than dotnet net | not applicable: Unity 7 has no Mono |
 | L5 | IL2CPP, 1.5 to 4x slower than dotnet net | pending the final player pass |
 | L6 | 0 B managed allocation per steady tick | 0 B in the editor on every system (V-2); players pending |
-| L7 | Reconcile at 1% churn of 1M sources, 10k places and 10k removes, at most 1.5 ms | 14.0 ms extrapolated from 200,000 sources at 1% churn; the whole reconcile tick minus a quiet tick, so it includes the diff, the structural cleanup and `ApplyBatch` |
+| L7 | Reconcile at 1% churn of 1M sources, 10k places and 10k removes, at most 1.5 ms | MISSED, measured at 1M (not extrapolated): 14.14 ms for 10,000 places and 10,000 removes, 0.707 us per command, a quiet tick 0.37 ms; the same per-command cost as the 200,000-source run (0.699 us), so linear. The whole reconcile tick minus a quiet tick: the diff, the structural cleanup, `ApplyBatch` (about 0.15 us per command of it) and the `Process` re-bake. Hand-edited row, source `unity/perf-1m.json` |
 | L8 | Mirror upload of 512 changed tiles at most 0.5 ms | 0.009 ms |
 | L9 | Tier D suite at most 60 s | see `unity/ROADMAP.md` |
-| L10 | Profile edit with 1M sources at most 250 ms | 142 ms with 200,000 sources |
+| L10 | Profile edit with 1M sources at most 250 ms | MISSED, measured at 1M: 710 ms (142 ms with 200,000 sources; linear). Hand-edited row, source `unity/perf-1m.json` |
 | L11 | Idle cost at most 20 us per tick | 15.4 us after V-3b (splat early-out, prepare fold, reconcile empty fast path; 19 to 7 scheduled jobs per idle tick); hand-edited row, not `perf.sh`: median of three editor runs (17.1, 15.4, 15.4) on a host that was also running CI, against 29.4 us for the parent commit the same hour and the 27.7 us V-3 recorded on a quieter host |
+
+## One million sources, editor (CoreCLR)
+
+Recorded by hand from `GI_PERF_ENTITIES=1000000 GI_PERF_SOURCES=1000000 unity/validate.sh perf` on the same host (the values are in `unity/perf-1m.json`; `perf.sh` still records the 200,000-entity table above).
+
+| Quantity | Measured |
+|---|---|
+| Frame B1 exact, p50 | 525.3 ms |
+| Frame C cell, p50 | 22.1 ms |
+| Frame W cell, p50 | 31.8 ms |
+| Idle tick | 18.8 us |
+| Quiet tick with 1,000,000 placed sources | 0.37 ms |
+| Reconcile, 10,000 places and 10,000 removes | 14.14 ms (0.707 us per command) |
+| Profile edit: free, rebuild and re-place 1,000,000 sources | 710 ms |
+| Mirror upload of 512 changed tiles | 0.010 ms |
+| ECS frame, serial: wall / Gi time (markers) / ECS share of Gi time | 64.2 ms / 36.2 ms / 77% |
+| ECS frame with default job workers: wall | 5.45 ms |
+

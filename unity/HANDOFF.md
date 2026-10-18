@@ -1,6 +1,6 @@
 # Handoff: Gi for Unity Entities
 
-Rewritten 2026-10-18 during the fourth session's wrap-up. Read this first, then `AGENTS.md` and `unity/ROADMAP.md` (§0, §1, §4, the board in §5, Appendix F). Everything is in the repository; nothing lives only in a chat.
+Rewritten 2026-10-18 at the end of the fifth session. Read this first, then `AGENTS.md` and `unity/ROADMAP.md` (§0, §1, §4, the board in §5, Appendix F). Everything is in the repository; nothing lives only in a chat.
 
 ## 1. What this project is
 
@@ -12,7 +12,7 @@ Rules that never change (`AGENTS.md`): Gi stays standalone and gains no Unity de
 
 - Fast loop: `unity/compile.sh` (the editor compiles the whole host project, about 25 s, must print `errors: 0`), `unity/lint.sh`, and the dotnet tests.
 - **`unity test` runs are allowed** (the owner said so): `unity/validate.sh editmode`, `playmode` and `perf` use it. Run them freely.
-- **Player builds are for the very end**: `unity/validate.sh coreclr` and `il2cpp` build Linux players and are slow. The owner wants them last, once everything else is done.
+- **Player builds are dropped.** The owner said "we don't care of build" (2026-10-18): do not run `unity/validate.sh coreclr` or `il2cpp`. The rows that need a player (L5, the player perf columns, "samples on IL2CPP") are closed as dropped.
 - The `unity` CLI has no connected editor (the host project has no Pipeline package), so `unity recompile` and `unity status` do not work; `compile.sh` launches the editor itself.
 
 ## 3. State of the repository
@@ -26,43 +26,39 @@ Rules that never change (`AGENTS.md`): Gi stays standalone and gains no Unity de
 | #99 O-U9 compile tier · #101 U-4 · #102 U-5b (Unity half) · #103 V-2 · #104 V-1 (Unity half) | session 3 | stacked |
 | #105 A-1 · #106 A-2 · #107 P-1 (GPU half) · #108 E-6 · #109 E-3 · #110 E-4 · #111 E-1 · #112 E-2 · #113 V-3 | session 3 | stacked |
 | #114 D-1 (docs, samples) | session 4 | stacked |
-| #117 V-3b (idle-tick quick wins) | session 4, after #114 | stacked |
-| #115 jb sweep (12 test-only fixes) | session 4, into `unity/v-3-performance` | hygiene |
-| #116 CI SDK pin (`unity.yml`) | session 4, into `unity/main` | separate lane |
 | #95 G-6 · #98 G-7 · #100 G-4 | Gi core, into `main` | separate lane |
 
-Nothing is merged. Merge order: #86 → #113 as numbered, #114, #117, then #115 (or fold it in when its base merges), #116, plus the Gi lane #95/#98/#100. When the branch line and #116 both land in `unity/main`, `unity.yml` hits an add/add conflict — keep #116's version (it carries the SDK isolation and guards) or the runner-image shadowing returns.
+`hygiene/jb-sweep-2026-10-18` (session 4's below-WARNING jb sweep, 12 test-only fixes) is pushed with no PR; the owner merges it or drops it.
 
 Fix commits found by the first real Unity run were merged **upward** (non-destructively, no force pushes). If you add a fix to a lower branch, merge that branch into the ones above it (`git merge --no-edit <lower>`), do not rebase.
 
 ### What is verified, and where
 
-On the head of the stack (`unity/perf-idle-quickwins`, PR #117): everything below plus the V-3b receipts — dotnet 157 + 1198, `lint.sh` ok, `jb` 0, `compile.sh` `errors: 0`, EditMode 45, PlayMode 85, perf 6, `build-plugins.sh --check` ok; idle tick 29.4 → 15.4 us (19 → 7 jobs, L11 met; `perf.md` idle/L11 rows hand-marked, re-run `perf.sh` on the recording host in the final pass). On `unity/d-1-docs` (PR #114), in the editor (CoreCLR 7000.0.0a9): everything session 3 verified on `unity/v-3-performance` (EditMode 45, PlayMode 85, perf 6 — see the roadmap session state) plus the D-1 receipts: `compile.sh` `errors: 0` with the samples imported at `Assets/Samples/com.gi.entities/0.1.0`, the 4-test sample smoke green on the imported copies, `lint.sh` ok, dotnet 157 + 1198 pass, `jb` 0, `build-plugins.sh --check` ok.
+On the head of the stack (`unity/v-3c-million`), in the editor (CoreCLR 7000.0.0a9, a real GPU): Columns 192, EditMode 72 (77 with `unity/netcode-setup.sh install`, which adds the netcode tests), PlayMode 85, perf 6, `jb` 0, `lint.sh` ok, Compat build ok, `build-plugins.sh --check` ok, `unity/quickstart.sh` ok (the README quick start from a clean project with only the two pins), `unity/export-check.sh` ok (an exported recorder range runs unedited in `tests/Gi.Tests`).
 
-**Not yet run anywhere: the Linux player suites (`coreclr`, `il2cpp`)**, and so the ledger rows that need them (L5, the player columns of `unity/perf.md`).
+**Not run, and not wanted:** the Linux player suites (`coreclr`, `il2cpp`). The owner dropped them, so L5 and the player perf columns are closed as dropped.
 
 ### Board
 
-Done or in review: F-1, F-2, U-0, U-1, U-2, U-3, U-4, U-5, U-5b, U-6, V-1, V-2, V-3, A-1, A-2, P-1, E-1, E-2, E-3, E-4, E-6, D-1 (U-pending), G-0a, G-1 to G-7 (G-6, G-7, G-4 in review). Each row in `unity/ROADMAP.md` says which receipts ran.
-Still open: the optional cards **E-5, E-7, N-1, N-2, S-1, G-8**, **V-0 flip** and **G-0** (blocked: Unity must enable the net10 API level; Appendix B), the perf follow-up cards from session 4's investigation (sense revision-gating, entity-level touched list, Gi-core incremental deposit, L3/L7 measurement rework — see the roadmap session state; the quick wins themselves landed as #117), and the final player pass.
+Done or in review: every card except V-0's flip and G-0 (blocked: Unity must enable the net10 API level; rechecked on 2026-10-19, 7000.0.0a10 is the newest alpha and unchanged, Appendix B). G-8 is closed without code because its gate is not met. Each row in `unity/ROADMAP.md` says which receipts ran.
 
 ## 4. What to do next, in order
 
-1. **The final player pass** (the owner wants it last, and everything else on the critical path is done): `unity/validate.sh coreclr`, then `il2cpp`; then perf for players (set `GI_PERF_OUT`, run the perf suite in a player, merge with `GI_PERF_JSON=<file> unity/perf.sh none`). Clear every `U-pending` row on the board (D-1's two [U] items included: the README quick start from an empty project, and the samples running in the players — import them from the Package Manager first) and update Appendix A.
-2. Session 4's perf investigation is condensed in the roadmap's fourth-session state. The three L11 quick wins **landed as #117** (idle 29.4 → 15.4 us). Still open from the investigation, each a card of its own when the owner wants it: the sense revision-gating card (L3's real cause), the entity-level touched list for the diff (L7, U-2 territory), the Gi-core incremental-deposit G-card (L7's re-bake half, from `main` with the full gate), and the measurement reworks (record L3 on an ECS frame-C scenario with workers; split L7 into apply-only vs full-tick at a stated density).
-3. The owner's **ISystem directive**: new systems are ISystem, not SystemBase (the samples comply). Whether to convert the adapter's own systems — SystemBase today because Gi is called only from managed jobs, D-U3 — is the owner's decision; if they say yes, it is a card of its own touching every runtime system.
-4. Optional cards if the owner still wants them, cheapest first: E-5 (explain cell and entity inspector), E-7 (flight recorder), then N-1/N-2/S-1/G-8. Ask the owner first; two ideas from them are on record: the roughly 1,700 engine-neutral lines in `Runtime/Columns` could become a reusable adapter package, and a thinner quick-start layer so using Gi in Unity takes a few lines.
+1. **Wait for the owner to merge** the stack in the order of the table above (the Gi lane #95, #98, #100 into `main` too), then merge `unity/main` upward only if asked. Do not start new cards on top of an unmerged stack unless the owner says so.
+2. **Re-check V-0/G-0** whenever a newer Unity 7 alpha appears (`https://services.api.unity.com/unity/editor/release/v1/releases?version=7000`): if `ApiCompatibilityLevel.NET` is enabled, follow Appendix B item 11 and rerun V-1, V-2, V-3.
+3. The owner's **ISystem directive**: new systems are ISystem (all of this session\'s are). Converting the adapter\'s SystemBase systems (`GiSenseSystem` holds managed binding tables, `GiCountersSystem`, `GiInspectorSystem`) is the owner\'s decision under D-U3; it is a card of its own.
+4. Optional perf cards that need the owner\'s pick, none on the board: sense revision-gating (L3\'s real cause), an entity-level touched list for the reconcile diff (L7), a Gi-core incremental deposit (L7\'s re-bake half, from `main` with the full gate), and L2 on frame C with workers. Two ideas from the owner are on record: the roughly 1,700 engine-neutral lines in `Runtime/Columns` could become a reusable adapter package, and a thinner quick-start layer.
 5. Owner decisions O-U1 to O-U8 each have a default in the roadmap; use the default and say so in the PR.
 
 ## 5. Known gaps and honest caveats (do not hide these)
 
-- Misses in the prediction ledger (see `unity/perf.md`): L3 (ECS time is 78% of Gi time on the probe scene) and L7 (14 ms for 10k+10k, predicted 1.5 ms) — both largely measurement-shape per the session-4 investigation, rework recorded as cards. L11 was met by #117 (15.4 us). L10 was measured at 200k sources, not 1M. L2 was not measured on frame C.
-- E-2: the Scene overlay draws the footprints of every emitter in the Gi world (selected-GameObject-to-entity mapping is not wired) and the reach-disc toggle has no drawing.
-- P-1: the heatmap is a compute kernel into a `RenderTexture`; the owner's screenshots in Built-in, URP and HDRP, and ledger row L8 in a real scene, are not done.
-- E1 and E6 are pinned and pass (E6: the fixed-step group and the Gi group do run in an Editor world).
+- Misses in the prediction ledger (`unity/perf.md`): L3 (ECS time is 77-78% of Gi time on the probe scene, which is not frame C), L7 (14.14 ms for 10k+10k at 1M sources, measured, predicted 1.5 ms) and L10 (710 ms at 1M, predicted 250 ms). L11 was met by V-3b (15.4 us). L2 was not measured on frame C.
+- P-1: the heatmap is a compute kernel into a `RenderTexture`; screenshots in Built-in, URP and HDRP, and ledger row L8 in a real scene, were not taken. No by-eye look at the new windows (Field, Explain, Flight Recorder, Stamp Studio, Profile editor) or at the reach discs.
+- Netcode: the package is not in the committed manifest. The 7000.0.0a9 alpha cannot compile one file of `com.unity.netcode` (6.7.0, 7.0.0, 7.1.0 alike), so `unity/netcode-setup.sh install` embeds 6.7.0 with that class removed; without it the Gi netcode assemblies and tests are simply absent. `unity/netcode-setup.sh remove` restores `packages-lock.json`; never commit the lock while the package is embedded. Appendix A 37 lists the other netcode deviations.
+- E-7: a recorder started mid-run cannot know pulses in flight or the transient layers\' contents, and says so; the export cannot hold raster stamps or single-input `Sum` layers.
+- S-1: the Savanna save system is not in the pinned BovineLabs Core (only its attributes); the tests copy the saved components by hand. `GiSave.Prepare` and `Release` bracket the game\'s save.
 - The Gi plugin Unity loads is the scalar netstandard2.1 build, about 2.06x slower than the net10 vector build on B1. Recovering it needs Unity to enable the net10 API level (V-0/G-0).
-- The owner directed (session 4): **new systems are ISystem, not SystemBase**. The samples comply; the adapter's systems are SystemBase by the D-U3 managed-jobs decision and were left alone.
-- The samples' `.meta` files ship inside `Samples~` so scene-to-script references survive import; regenerate scenes only through an editor (a transient generator wrote them; it is not committed).
+- The samples\' `.meta` files ship inside `Samples~` so scene-to-script references survive import; regenerate scenes only through an editor.
 
 ## 6. Traps (each cost time; most were found by actually running the tests)
 
@@ -84,6 +80,14 @@ Still open: the optional cards **E-5, E-7, N-1, N-2, S-1, G-8**, **V-0 flip** an
 - Inside `namespace Gi.Entities.*` the bare `World`/`Grid`/`Layer`/`Stamp` are Gi's handles (R-5): write `Unity.Entities.World.DefaultGameObjectInjectionWorld`, not `World.DefaultGameObjectInjectionWorld`, in samples and tests too.
 - Batch play-mode pumps frames at about 2000 fps, so waiting N frames waits almost no time: wait on `GiFrame.Tick` with a wall-clock timeout — and capture the frame's `Generation` first, because a stale frame from the previous scene satisfies any tick threshold. Scene-based tests also need `EditorBuildSettings.scenes` set (Unity 7 refuses `LoadSceneAsync` otherwise), a TearDown that destroys runtime-spawned entities and leftover baked emitters, and rebuilds of the default world break editor subscene hooks — clean entities instead.
 - A `ComponentLookup` used for enabled-bit reads in a parallel `IJobEntity` must be declared `[ReadOnly]` or the job scheduled serially; the safety system calls enabled-bit access a write.
+- A lambda that captures a local makes C# allocate its closure at method entry, so a per-tick `OnUpdate` that merely contains one allocates every tick. Keep such code in a separate method taken only when needed.
+- `NetCodeTestWorld.Bootstrap` takes an explicit system list: include `GiSystemGroup`, every Gi system and the generated `*RpcCommandRequestSystem`, or the Gi code does not run and a test comparing two empty worlds passes. Assert `GiFrame.Alive` and live-source counts, not only hashes. Create the ghost collection before `CreateWorlds`.
+- `Assert.Fail` in `NetCodeTestWorld.Dispose` hides the original exception; wrap the test body and log it.
+- `Turn` truncates its angle, and `TryGetSourceSpec` returns the quantum\'s lower edge, so a restored heading needs `+ pi / 65536`.
+- A restore that re-drives a fade must drop its entry when the owner\'s applied gain changes: a new `Fade` onto the current gain leaves no trace in Gi.
+- Adding a `GiFaultKind` means bumping `GiFaults.KindCount`.
+- `EntityManager.GetComponentDataRawRO`, `BakingUtility`, `EntitySelectionProxy` and `PropertyInspector<T>` are internal to the Entities packages; the code reaches them by reflection (`GiEntitySelection`, the test `GiBaking`) or through public handles (`GiBindingRead`).
+
 
 ## 7. How to check your work
 
@@ -94,6 +98,9 @@ dotnet build unity/tests/Gi.Entities.Columns.Compat -c Release  # C# 9 / netstan
 unity/build-plugins.sh --check                                  # plugin DLLs, Gi.Corpus.dll, GiBenchmarks.dll match their sources
 unity/compile.sh                                                # errors: 0
 unity/validate.sh editmode                                      # then playmode, perf
+unity/quickstart.sh                                             # README quick start from a clean project
+unity/export-check.sh                                           # an exported recorder range runs in tests/Gi.Tests
+unity/netcode-setup.sh install                                  # optional: embed netcode, then validate.sh editmode runs its tests; remove when done
 jb inspectcode Gi.slnx --severity=WARNING --build --output=/tmp/inspect.sarif --format=Sarif   # 0 findings
 ```
 
