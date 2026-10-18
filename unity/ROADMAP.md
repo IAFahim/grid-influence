@@ -1170,7 +1170,9 @@ Recorded 2026-10-18 so later sessions start from verified facts, not assumptions
 17. Hand-written plugin `.meta` files with the old list-form `platformData` are ignored by Unity 7 without a message, so the DLL silently vanishes from the precompiled set (this was lesson 8). Let the `PluginImporter` API write them (`unity/project/Assets/Editor/GiPluginSetup.cs`).
 18. A heading recovered from a quaternion (`atan2`) is a ulp off the angle it came from. Gi quantizes angles to 16 bits, so an angle that sits exactly on a quantization boundary can fall into the neighbouring cell. Scenario headings are therefore offset a quarter of a quantum (`GiScenarioOp.HeadingBiasRadians`); production lockstep code must supply headings from deterministic state instead of deriving them from rotations (plan §5.8).
 
-### Session state (2026-10-18, second session)
+### Session state (2026-10-18, handed off)
+
+The previous agent's session ended; **`unity/HANDOFF.md` is the current state and the instructions for what to do next.** It lists the pull request stack (#86 to #92, all green), the checkpoint branch `unity/u-5-bindings`, the validation commands, the traps, and the order of the remaining cards.
 
 Merged earlier: #78 (F-1), #79 (U-0, Tier D), #80 (inspection hygiene), #81 (G-1), #82 (G-3), #83 (G-5), #84 (G-2), #85 (gate baseline). This session unblocked Tier U (A.15, Appendix F): editor 7000.0.0a9, BovineLabs Core pre.6 from GitLab `82be2794`, all four `validate.sh` suites green (EditMode, PlayMode, CoreCLR player, IL2CPP player).
 
