@@ -5,6 +5,7 @@
         "BovineLabs.Core",
         "Gi.Entities",
         "Gi.Entities.Authoring",
+        "Gi.Entities.Presentation",
         "Gi.Entities.Tests.Authored",
         "Gi.Entities.Tests.Support",
         "Unity.Burst",
