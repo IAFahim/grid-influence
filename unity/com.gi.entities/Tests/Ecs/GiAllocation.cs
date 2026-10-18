@@ -1,7 +1,9 @@
 using System;
+using Unity.Scripting.LifecycleManagement;
 
 namespace Gi.Entities.Tests
 {
+    [NoAutoStaticsCleanup]
     public static class GiAllocation
     {
         private static readonly Func<bool, long> Counter = Bind();

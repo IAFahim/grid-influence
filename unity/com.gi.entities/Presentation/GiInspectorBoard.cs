@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Unity.Scripting.LifecycleManagement;
 
 namespace Gi.Entities.Presentation
 {
@@ -30,6 +31,7 @@ namespace Gi.Entities.Presentation
         public int LayerCount;
     }
 
+    [NoAutoStaticsCleanup]
     public static partial class GiInspectorBoard
     {
         private const int ResultLimit = 256;

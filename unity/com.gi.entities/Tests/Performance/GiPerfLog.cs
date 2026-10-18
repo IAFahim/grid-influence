@@ -5,6 +5,7 @@ using System.IO;
 using System.Text;
 using NUnit.Framework;
 using UnityEngine;
+using Unity.Scripting.LifecycleManagement;
 
 namespace Gi.Entities.Performance
 {
@@ -18,6 +19,7 @@ namespace Gi.Entities.Performance
         }
     }
 
+    [NoAutoStaticsCleanup]
     public static class GiPerfLog
     {
         private static readonly SortedDictionary<string, double> Values = new SortedDictionary<string, double>(StringComparer.Ordinal);

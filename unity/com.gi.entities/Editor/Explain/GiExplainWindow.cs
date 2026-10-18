@@ -84,7 +84,7 @@ namespace Gi.Entities.Editor
         public void Tick()
         {
             _model.Poll();
-            Show();
+            Present();
             Selected();
         }
 
@@ -153,7 +153,7 @@ namespace Gi.Entities.Editor
             _model.Inspect(world.Name, entity);
         }
 
-        private void Show()
+        private void Present()
         {
             if (_model.Report != _shownReport)
             {
