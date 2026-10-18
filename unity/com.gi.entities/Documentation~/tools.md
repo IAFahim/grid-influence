@@ -8,7 +8,28 @@ gradient, area, max and nearest; pinned probes with sparklines; and a runtime pa
 plugin and code path, CPU features, live worlds, stamps of 255, and the memory read-outs or n/a).
 
 The window never calls Gi itself — the inspector system serves it, and closing it frees the GPU
-mirror.
+mirror. Clicking a cell opens the Explain window at that cell.
+
+## Explain cell and entity inspector (Gi ▸ Explain Cell)
+
+Pick a world, a layer and a cell (or click one in the Field window) to see where the value comes
+from: each source's contribution, computed as the cell's value minus its value with that source
+excluded, sorted by size, with a button that selects the source's entity. For stamps whose cells are
+integers (box, raster, disk, cone, dome) the contributions add up to the value exactly. Tent and bell
+stamps round their summed kernel once per cell, so their leave-one-out shares can differ from the
+value by up to one per contributing source; the window shows the difference as `unattributed`. A
+cell whose value sits at the 32,767 limit shows `saturated`, and then the shares understate what the
+sources add.
+
+A derived layer (`Sum`, `Min`, `Max`, `Mask`) shows its recipe evaluated at the cell, one line per
+step with the input values, the weighted sum before the shift where there is one, and the result
+beside the value the world holds. Select any entity with a `GiEmitter` or `GiSource` — in the
+Entities Hierarchy or from a contribution — and the window lists its desired state, its applied
+state, the live Gi source (position, heading, scale, gain, layer, stamp), its fault, and the field
+value and gradient under it in every layer.
+
+Requests are answered by the inspector system on the main thread after it completes the Gi jobs,
+so a click costs one pass over the sources of the world and nothing while the window is idle.
 
 ## Scene overlay (Gi ▸ Toggle Scene Overlay Heatmap)
 

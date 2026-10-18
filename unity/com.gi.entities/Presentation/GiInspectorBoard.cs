@@ -28,7 +28,7 @@ namespace Gi.Entities.Presentation
         public int LayerCount;
     }
 
-    public static class GiInspectorBoard
+    public static partial class GiInspectorBoard
     {
         private const int ResultLimit = 256;
 
@@ -137,6 +137,8 @@ namespace Gi.Entities.Presentation
             for (var i = Requests.Count - 1; i >= 0; i--)
                 if (Requests[i].World == ecsWorld)
                     Requests.RemoveAt(i);
+
+            RetireRequests(ecsWorld);
 
             for (var i = Worlds.Count - 1; i >= 0; i--)
             {

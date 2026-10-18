@@ -50,6 +50,7 @@ namespace Gi.Entities.Editor
             _heatmap.style.width = 512;
             _heatmap.style.height = 512;
             _heatmap.RegisterCallback<PointerMoveEvent>(OnPointerMove);
+            _heatmap.RegisterCallback<PointerDownEvent>(OnPointerDown);
             _tiles = new Image { scaleMode = ScaleMode.ScaleToFit, pickingMode = PickingMode.Ignore };
             _tiles.style.position = Position.Absolute;
             _tiles.style.width = 512;
@@ -144,13 +145,27 @@ namespace Gi.Entities.Editor
 
         private void OnPointerMove(PointerMoveEvent move)
         {
+            if (TryWorld(move.localPosition, out var world)) _model.Hover(world);
+        }
+
+        private void OnPointerDown(PointerDownEvent down)
+        {
+            if (down.button != 0 || !TryWorld(down.localPosition, out var world)) return;
+
+            GiExplainWindow.ExplainAt(_model.EcsWorld, _model.LayerKey, world);
+        }
+
+        private bool TryWorld(Vector2 local, out Vector2 world)
+        {
+            world = default;
             var view = _model.View;
-            if (view == null || view.Mirror == null) return;
+            if (view == null || view.Mirror == null) return false;
 
             var size = _heatmap.contentRect;
-            var cell = new Vector2(view.Region.x + move.localPosition.x / size.width * view.Region.width,
-                view.Region.y + (1f - move.localPosition.y / size.height) * view.Region.height);
-            _model.Hover(_model.CellToWorld(cell));
+            var cell = new Vector2(view.Region.x + local.x / size.width * view.Region.width,
+                view.Region.y + (1f - local.y / size.height) * view.Region.height);
+            world = _model.CellToWorld(cell);
+            return true;
         }
 
         private void Paint()
