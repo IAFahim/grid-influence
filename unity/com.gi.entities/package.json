@@ -12,5 +12,27 @@
         "com.unity.collections": "6.7.0",
         "com.unity.entities": "6.7.0",
         "com.unity.mathematics": "1.4.0"
-    }
+    },
+    "samples": [
+        {
+            "displayName": "Crowd",
+            "description": "Agents that splat noise and steer up the gradient of a derived layer toward goals.",
+            "path": "Samples~/Crowd"
+        },
+        {
+            "displayName": "Territory",
+            "description": "Two teams of persistent emitters, a Mask layer for the contested border, banner probes.",
+            "path": "Samples~/Territory"
+        },
+        {
+            "displayName": "Stealth",
+            "description": "Vision-cone guards, a noisy player, run pulses, and a Nearest binding that wakes them.",
+            "path": "Samples~/Stealth"
+        },
+        {
+            "displayName": "Read",
+            "description": "A game job reading the field directly through GiFrame behind the read fence.",
+            "path": "Samples~/Read"
+        }
+    ]
 }

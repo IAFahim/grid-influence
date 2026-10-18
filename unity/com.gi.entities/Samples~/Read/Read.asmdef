@@ -1,0 +1,23 @@
+{
+    "name": "Gi.Entities.Samples.Read",
+    "rootNamespace": "Gi.Entities.Samples.Read",
+    "references": [
+        "BovineLabs.Core",
+        "Gi.Entities",
+        "Gi.Entities.Authoring",
+        "Unity.Collections",
+        "Unity.Entities",
+        "Unity.Entities.Hybrid",
+        "Unity.Mathematics",
+        "Unity.Transforms"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

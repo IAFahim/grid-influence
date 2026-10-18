@@ -1,0 +1,55 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a58d95727fc2e186fba15d0a95140cbe, type: 3}
+  m_Name: TerritoryProfile
+  m_EditorClassIdentifier: Gi.Entities.Authoring::Gi.Entities.Authoring.GiProfile
+  Axes: 0
+  Origin: {x: 0, y: 0}
+  Grids:
+  - Power: 6
+    Origin: {x: -32, y: -32}
+    Size: 64
+  Layers:
+  - {fileID: 11400000, guid: 79eccc088ca919f8bb7fa99e296181f7, type: 2}
+  - {fileID: 11400000, guid: 17bbffabbaadbb78abf71a93eb4a20ac, type: 2}
+  Stamps:
+  - {fileID: 11400000, guid: b19cd5c6883d3e06ab8507f305060606, type: 2}
+  - {fileID: 11400000, guid: 36d8e3444c7b32c75ba98b81980dcc78, type: 2}
+  Bindings:
+  - Kind: 0
+    Layer: {fileID: 11400000, guid: 79eccc088ca919f8bb7fa99e296181f7, type: 2}
+    ExcludeSelf: 0
+    Period: 0
+    Since: 0
+    Reach: 0
+    Threshold: 0
+    Value:
+      Type: Gi.Entities.Samples.Territory.TerritoryBanner, Gi.Entities.Samples.Territory, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+      Field: Strength
+    Gradient:
+      Type: 
+      Field: 
+    Total:
+      Type: 
+      Field: 
+    Position:
+      Type: 
+      Field: 
+    Coverage:
+      Type: Gi.Entities.Samples.Territory.TerritoryHeld, Gi.Entities.Samples.Territory, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+      Field: 
+    ReachField:
+      Type: 
+      Field: 
+    ThresholdField:
+      Type: 
+      Field: 
