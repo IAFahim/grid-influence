@@ -36,6 +36,7 @@ namespace Gi.Entities
 
         public void OnUpdate(ref SystemState state)
         {
+            DrainGuard(ref state);
             if (_profiles.IsEmptyIgnoreFilter)
             {
                 if (_builtHash != 0ul) Release(ref state);
@@ -49,6 +50,16 @@ namespace Gi.Entities
             if (blob.Hash == _builtHash || blob.Hash == _failedHash) return;
 
             Rebuild(ref state, ref blob);
+        }
+
+        private void DrainGuard(ref SystemState state)
+        {
+            if (!GiGuard.TryTake(out var report)) return;
+
+            var frame = state.EntityManager.GetComponentData<GiFrame>(_frame);
+            frame.Faults.Raise(GiFaultKind.Overlap, frame.Tick);
+            state.EntityManager.SetComponentData(_frame, frame);
+            BLGlobalLogger.LogErrorString(GiGuard.Describe(report));
         }
 
         private void Rebuild(ref SystemState state, ref GiProfileBlob blob)

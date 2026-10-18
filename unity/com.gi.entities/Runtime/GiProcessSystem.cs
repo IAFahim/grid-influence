@@ -36,6 +36,7 @@ namespace Gi.Entities
                 var frame = Frames[Frame];
                 if (!frame.Alive) return;
 
+                GiGuard.Begin(frame.World, GiGuard.Process, true);
                 var status = GiWorld.Process(frame.Token);
                 if (status == GiWorld.BatchStatus.StaleRevision)
                 {
@@ -48,6 +49,7 @@ namespace Gi.Entities
                     frame.Faults.Raise(GiFaultKind.Adapter, frame.Tick);
 
                 frame.Tick = GiWorld.Tick(frame.World);
+                GiGuard.End(frame.World, true);
                 Frames[Frame] = frame;
             }
         }

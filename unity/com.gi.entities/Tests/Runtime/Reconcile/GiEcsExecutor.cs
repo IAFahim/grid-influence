@@ -43,6 +43,13 @@ namespace Gi.Entities.Tests
 
         public ulong[] Step(int tick)
         {
+            Queue(tick);
+            Fixture.Tick();
+            return Hashes();
+        }
+
+        public void Queue(int tick)
+        {
             var manager = Fixture.Manager;
             foreach (var splat in _splats) manager.DestroyEntity(splat);
             _splats.Clear();
@@ -55,9 +62,6 @@ namespace Gi.Entities.Tests
                 var writer = singleton.CreateThreadStream();
                 foreach (var pulse in pulses) writer.Write(pulse);
             }
-
-            Fixture.Tick();
-            return Hashes();
         }
 
         public ulong[] Hashes()

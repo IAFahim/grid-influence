@@ -226,7 +226,7 @@ Plan §12's S1–S5 apply, plus:
 | V-1 | Gi parity on Unity backends | verification | P0 | U-0, F-1 | D, U | 2 | active | #96 carries the Tier D receipts (corpus DLL deterministic, dotnet tests unchanged); the Unity replay waits out the owner's pause of build runs. Gi.Corpus needs InternalsVisibleTo (see #96) — a public live-count read-out would remove it |
 | G-3 | Tooling read-outs | core | P1 | — | G | 2 | done | #82. `World.Memory(world, out storeBytes, out liveTiles, out pages, out kernelEntries, out liveSources)`; E-1/E-4/E-6 consume it |
 | U-2 | Reconcile, emitters, pulses | runtime | P0 | U-1, F-2 | D, U | 3 | done | stacked after #89 |
-| U-4 | Fences, guard, cross-world writers | runtime | P0 | U-1 | U | 3 | todo | |
+| U-4 | Fences, guard, cross-world writers | runtime | P0 | U-1 | U | 3 | U-pending | Stacked after #99. Tier D: `GuardTests` (12) in the Columns suite, 111 pass. Tier C: `compile.sh` `errors: 0`, `lint.sh` ok. [U] receipts (two ECS worlds 1000 ticks, misordered system trips the guard, three fixed ticks in one frame, E1, E6) are written in `Tests/Runtime/Concurrency/` and wait for the final pass (O-U9) |
 | U-6 | Splat | runtime | P0 | U-1, F-2 | D, U | 3 | done | stacked after #91 |
 | A-2 | Bakers, builders, live baking | authoring | P0 | A-1, U-1 | U | 3 | todo | |
 | P-1 | GPU mirror and heatmap | presentation | P1 | U-1, F-2 | D, U | 3 | active | #97 carries the Columns slice (GiPageTable, Tier D receipts); the GraphicsBuffer/uploader/shader half and Tier U receipts wait out the owner's pause of build runs |
@@ -247,7 +247,7 @@ Plan §12's S1–S5 apply, plus:
 | E-7 | Flight recorder | editor | P2 | U-6, E-1 | D, U | 6 | todo | |
 | N-1 | Server-authoritative fields | netcode | P2 | V-2 | U | 6 | todo | |
 | S-1 | Save | save | P2 | V-2 | U | 6 | todo | |
-| G-4 | Cross-world `Process` | core | P2 | — | G | 6 | todo | |
+| G-4 | Cross-world `Process` | core | P2 | — | G | 6 | review | #100. `NativeHeap.Calls` atomic, stage timers per world; two worlds on two threads for 10k ticks equal the sequential run; gate pass; inspect 0. Conflicts with #95 only in `NativeHeap.cs` (mechanical). Owner merges; then `GiRuntime.Writers` can be retired once the plugins are rebuilt |
 | G-5 | Schedule read-back | core | P2 | — | G | 6 | done | #83. `World.TryGetSchedule` (gain, fade ends/duration/ticks-left, expiry ticks-left); save/continue equals uninterrupted, proven |
 | G-6 | Allocator hook | core | P2 | — | G | 6 | review | #95, accepted in review (8/8 CI green; allocator==frees over a full lifecycle; warm frames make 0 hook calls, no gate needed). Owner merges |
 | N-2 | Lockstep checks | netcode | P2 | N-1 | U | 7 | todo | |
@@ -1052,6 +1052,8 @@ This roadmap changes the plan in the ways listed here. The coordinator folds the
 28. **The coverage tag of a `ValueGradient` binding means "the gradient is computable"** (Gi needs the neighbouring cells), so at a grid edge an entity can carry a value while its tag is clear; a `Value` binding's tag is that value's own coverage. Tests pin both meanings.
 29. **Per-binding queries ask for a coverage-tag component with `Present`, not `All`,** so an entity whose tag is disabled still matches the query and the scatter can switch the tag on.
 30. **Coverage tags are written through `ArchetypeChunk.SetComponentEnabled`,** which performs the card's `GetEnabledBitsRW` + `UpdateChunkDisabledCount` work for the entity's own chunk.
+31. **The guard registers every party and the second one reports.** `GiGuardTable.Begin` always adds its party (a reader adds one, a writer adds `WriterBit`) and `End` always removes it, so there is no ticket to carry through a job and no undo after a conflict. Tags are fixed constants per system (`GiGuard.Process`, `Reconcile`, `Sync`, `Splat`, `Sense`) plus `GiGuard.Register` for others; the report is drained by `GiBootstrapSystem` at the start of the next group update, which raises `GiFaultKind.Overlap` on the frame and logs the message naming both systems. The calls are `[Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]`, so release builds contain none.
+32. **The fence API moved to `GiRuntime.Fences.cs` and uses two `SharedStatic<JobHandle>`s** (`Writers`, `All`), as the card says; U-1 had plain statics. The code-load hook resets both.
 
 New open decisions:
 

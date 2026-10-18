@@ -11,11 +11,12 @@ namespace Gi.Entities
         Adapter = 4,
         Capacity = 8,
         Reclaimed = 16,
+        Overlap = 32,
     }
 
     public unsafe struct GiFaults
     {
-        public const int KindCount = 5;
+        public const int KindCount = 6;
 
         public ushort Raised;
         private fixed int _firstTick[KindCount];

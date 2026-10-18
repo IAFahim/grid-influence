@@ -96,8 +96,10 @@ namespace Gi.Entities
             if (frame.Alive && Xs.Length > 0)
             {
                 var meta = (int*)Meta.GetUnsafeReadOnlyPtr();
+                GiGuard.Begin(frame.World, GiGuard.Splat, true);
                 applied = GiSplatPass.Apply(frame.World, frame.Tables, meta, meta + GiSplatPass.Layers, (float*)Xs.GetUnsafePtr(),
                     (float*)Ys.GetUnsafePtr(), (byte*)Stamps.GetUnsafePtr(), (sbyte*)Gains.GetUnsafePtr());
+                GiGuard.End(frame.World, true);
             }
 
             var stats = Stats[Frame];
