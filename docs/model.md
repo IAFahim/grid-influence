@@ -59,7 +59,20 @@ The rest of this file derives from seven statements.
   cache's occupied entries out of 32 and the sources whose alive bit is set. It reads only
   existing counters, allocates nothing, throws nothing, and returns all zeros for a dead or
   never-allocated handle; `Clear` empties the live counts while the slab bytes stay (regions are
-  retained, free lists grow), and `Free` returns everything to zero. `World.Revision(world)` returns an `int`
+  retained, free lists grow), and `Free` returns everything to zero. `World.LayerHash(world,
+grid, layer)` is the incremental content hash: an XOR, over every 32×32 tile of that grid and
+layer, of a per-tile hash of the tile's published page — FNV-1a 64 (offset
+`0xcbf29ce484222325`, prime `0x100000001b3`) seeded with the tile index and folded over the
+2,048 page bytes as 256 little-endian 64-bit words — where a tile whose published page is all
+zero contributes nothing, so an empty or absent (grid, layer) hashes to 0. `Process` maintains
+the XOR incrementally: after each dirty tile publishes (base, transient, and derived passes
+alike, drops included) Gi replaces that tile's stored contribution with a fresh hash of the
+final page, so the cost follows changed tiles, never grid area, and a full recompute — the XOR
+of the same per-tile function over a `QueryRegion` read-back of every tile — equals it after
+every tick (a fuzz-stream test pins this; the stored hash and the read-back read the same page
+bytes, and the word order is fixed as little-endian so any two little-endian hosts agree). The
+page-hash work runs in `Process` on the owning thread after publish; `Clear` returns the hash to
+0 with everything else. `World.Revision(world)` returns an `int`
   that changes whenever queued work could be stale — `World.New` assigns it a fresh value,
   and `Clear`, `Rewind`, `Free`, and slot reuse bump it; mutations, `Process`, and `ProcessAll`
   leave it alone. `World.Capture(world)` seals the id and that revision into a `World.Token`
@@ -1038,7 +1051,10 @@ digits. Concurrency: single thread.
   reads "nothing deposited" (`Clear` zeroes it); and per (grid, layer) the layer's directory, its
   `PlaneStore` slabs, its tile-set slab, the dirty flags and tile epochs (allocated together by
   the layer's first marked tile on that grid and kept until `World.Free`), the dirty list with
-  its parallel rectangle list, the changed list, and two pyramids built on one generic layout
+  its parallel rectangle list, the changed list, the per-tile hash table (one zeroed `ulong` per
+  tile with the layer's running XOR, allocated by the layer's first refreshed tile — which is
+  its first published dirty tile, so every earlier tile contributes zero — kept until
+  `World.Free`, zeroed by `World.Clear` with the running hash), and two pyramids built on one generic layout
   (`Pyramid<T, TOp>`: a flat slot array plus per-level offset and side tables, each node an 8×8
   block of its children's maxima, with the combiner a `struct` type argument so the library still
   targets netstandard): the max pyramid (`int16`, allocated zeroed by the layer's first
@@ -1324,7 +1340,12 @@ digits. Concurrency: single thread.
   planes only on the owning thread, never concurrently with publish. Publish runs sequentially:
   tiles that publish to zero perform their own directory drop and slab give-back and leave the
   dirty list inside the same pass, and the dirty lists are then walked again, on the owning
-  thread alone, to fold each tile's page max into its max pyramid. Warm `Process` and warm reads
+  thread alone, to fold each tile's page max into its max pyramid. The layer hash rides the same
+  pass on the same thread: each dirty tile's contribution is replaced immediately after its
+  publish-or-drop decision, reading the final page through the layer's own directory before any
+  later tile can recycle the freed units, so no tile's stored hash is ever read against another
+  tile's page, and `World.LayerHash` is a plain read of the running `ulong` under the same
+  serial-per-world rule as `World.Memory`. Warm `Process` and warm reads
   make no `NativeHeap` calls at all: slabs, directories, and every list are sized by grow-to-max
   before steady state, and the hook counter (`NativeHeap.Calls`) is asserted flat by a test
   across warm frames that move and read. Kernel-cache builds run on the owning world's thread
