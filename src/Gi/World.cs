@@ -239,6 +239,7 @@ internal unsafe struct WorldCtx
     public int RecordTick;
     public byte Recording;
     public KernelCache Kernels;
+    public StageTicks Stages;
 }
 
 public static unsafe partial class World
@@ -917,11 +918,11 @@ public static unsafe partial class World
         SweepChanged(w);
         w->MarkEpoch++;
         w->Pending.Resize(0);
-        ProcessStages.Measure(ref ProcessStages.PrepareTicks, stamp);
+        ProcessStages.Measure(ref w->Stages.Prepare, stamp);
 
         stamp = ProcessStages.Mark();
         PublishDirty(w);
-        ProcessStages.Measure(ref ProcessStages.ApplyTicks, stamp);
+        ProcessStages.Measure(ref w->Stages.Apply, stamp);
 
         if (w->DerivedCount != 0) Derive(w);
         for (var gi = 0; gi < w->GridCount; gi++)
