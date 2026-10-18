@@ -25,8 +25,77 @@ namespace Gi.Entities.Editor
         }
     }
 
+    public readonly struct GiReachDraw
+    {
+        public readonly Entity Entity;
+        public readonly Vector2 Center;
+        public readonly float Radius;
+        public readonly GiBindingKind Kind;
+        public readonly int Binding;
+
+        public GiReachDraw(Entity entity, Vector2 center, float radius, GiBindingKind kind, int binding)
+        {
+            Entity = entity;
+            Center = center;
+            Radius = radius;
+            Kind = kind;
+            Binding = binding;
+        }
+    }
+
     public static class GiOverlayModel
     {
+        public static List<GiReachDraw> Reaches(EcsWorld world, ICollection<Entity> selection)
+        {
+            var draws = new List<GiReachDraw>();
+            var manager = world.EntityManager;
+            using var frames = manager.CreateEntityQuery(ComponentType.ReadOnly<GiFrame>());
+            using var profiles = manager.CreateEntityQuery(ComponentType.ReadOnly<GiProfileReference>());
+            if (frames.IsEmptyIgnoreFilter || profiles.IsEmptyIgnoreFilter) return draws;
+
+            var frame = manager.GetComponentData<GiFrame>(frames.GetSingletonEntity());
+            var blob = profiles.GetSingleton<GiProfileReference>().Value;
+            if (!frame.Alive || !blob.IsCreated) return draws;
+
+            ref var profile = ref blob.Value;
+            foreach (var entity in selection)
+            {
+                if (!manager.Exists(entity) || !Pose(manager, entity, frame.Plane, out var position, out _, out _)) continue;
+
+                for (var i = 0; i < profile.Bindings.Length; i++)
+                {
+                    var binding = profile.Bindings[i];
+                    if (binding.Kind != GiBindingKind.Area && binding.Kind != GiBindingKind.Max && binding.Kind != GiBindingKind.Nearest &&
+                        binding.Kind != GiBindingKind.Changed)
+                        continue;
+
+                    if (!Applies(manager, entity, binding)) continue;
+
+                    var radius = binding.Reach;
+                    if (binding.ReachField.TypeHash != 0ul && !GiBindingRead.TryFloat(manager, entity, binding.ReachField, out radius)) continue;
+                    if (!(radius > 0f) || float.IsInfinity(radius)) continue;
+
+                    draws.Add(new GiReachDraw(entity, position, radius, binding.Kind, i));
+                }
+            }
+
+            return draws;
+        }
+
+        public static bool Applies(EntityManager manager, Entity entity, in GiBindingSpec binding)
+        {
+            var any = false;
+            foreach (var field in new[] { binding.Value, binding.Gradient, binding.Total, binding.Position, binding.Coverage })
+            {
+                if (field.TypeHash == 0ul) continue;
+
+                any = true;
+                if (GiBindingRead.Has(manager, entity, field)) return true;
+            }
+
+            return !any;
+        }
+
         public static List<GiFootprintDraw> Footprints(EcsWorld world, GiProfileSpec profile, ICollection<Entity> selection)
         {
             var draws = new List<GiFootprintDraw>();

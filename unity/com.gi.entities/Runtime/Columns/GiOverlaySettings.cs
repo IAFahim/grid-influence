@@ -7,6 +7,7 @@ namespace Gi.Entities
     {
         public bool Heatmap = true;
         public bool Footprints = true;
+        public bool AllFootprints;
         public bool ReachDiscs;
         public bool GridBounds = true;
         public int Grid;
@@ -17,6 +18,7 @@ namespace Gi.Entities
         {
             var text = new StringBuilder();
             text.Append("{\n");
+            text.Append("  \"allFootprints\": ").Append(Bool(AllFootprints)).Append(",\n");
             text.Append("  \"footprints\": ").Append(Bool(Footprints)).Append(",\n");
             text.Append("  \"grid\": ").Append(Grid.ToString(CultureInfo.InvariantCulture)).Append(",\n");
             text.Append("  \"gridBounds\": ").Append(Bool(GridBounds)).Append(",\n");
@@ -43,6 +45,7 @@ namespace Gi.Entities
                 var value = line.Substring(colon + 1).Trim();
                 switch (key)
                 {
+                    case "allFootprints": settings.AllFootprints = value == "true"; break;
                     case "footprints": settings.Footprints = value == "true"; break;
                     case "gridBounds": settings.GridBounds = value == "true"; break;
                     case "heatmap": settings.Heatmap = value == "true"; break;

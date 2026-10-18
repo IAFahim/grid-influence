@@ -8,10 +8,10 @@ public sealed class OverlaySettingsTests
     [Fact]
     public void TheJsonIsSortedInvariantAndStable()
     {
-        var settings = new GiOverlaySettings { Heatmap = false, Footprints = true, ReachDiscs = true, GridBounds = false, Grid = 2, Layer = 5, ValueScale = 12.5f };
+        var settings = new GiOverlaySettings { Heatmap = false, Footprints = true, AllFootprints = true, ReachDiscs = true, GridBounds = false, Grid = 2, Layer = 5, ValueScale = 12.5f };
         var json = settings.ToJson();
         Assert.Equal(
-            "{\n  \"footprints\": true,\n  \"grid\": 2,\n  \"gridBounds\": false,\n  \"heatmap\": false,\n  \"layer\": 5,\n  \"reachDiscs\": true,\n  \"valueScale\": 12.5\n}\n",
+            "{\n  \"allFootprints\": true,\n  \"footprints\": true,\n  \"grid\": 2,\n  \"gridBounds\": false,\n  \"heatmap\": false,\n  \"layer\": 5,\n  \"reachDiscs\": true,\n  \"valueScale\": 12.5\n}\n",
             json);
         Assert.Equal(json, settings.ToJson());
         Assert.DoesNotContain("\r", json);

@@ -26,6 +26,22 @@ namespace Gi.Entities.Editor
             GiOverlaySettingsStore.Save(Settings);
         }
 
+        [MenuItem("Gi/Toggle Scene Overlay Reach Discs")]
+        private static void ToggleReach()
+        {
+            Settings.ReachDiscs = !Settings.ReachDiscs;
+            Save();
+            SceneView.RepaintAll();
+        }
+
+        [MenuItem("Gi/Toggle Scene Overlay All Footprints")]
+        private static void ToggleAllFootprints()
+        {
+            Settings.AllFootprints = !Settings.AllFootprints;
+            Save();
+            SceneView.RepaintAll();
+        }
+
         [MenuItem("Gi/Toggle Scene Overlay Heatmap")]
         private static void ToggleHeatmap()
         {
@@ -46,7 +62,8 @@ namespace Gi.Entities.Editor
 
                 if (settings.GridBounds) DrawGrids(info);
                 if (settings.Heatmap) DrawHeatmap(info, grid, settings);
-                if (settings.Footprints) DrawFootprints(info);
+                if (settings.Footprints) DrawFootprints(info, settings);
+                if (settings.ReachDiscs) DrawReaches(info);
             }
         }
 
@@ -109,7 +126,32 @@ namespace Gi.Entities.Editor
             return value;
         }
 
-        private static void DrawFootprints(GiWorldInfo info)
+        private static void DrawReaches(GiWorldInfo info)
+        {
+            var world = GiOverlayWorld(info);
+            if (world == null) return;
+
+            var axes = Axes(info);
+            var normal = axes == GiPlaneAxes.Xz ? Vector3.up : Vector3.forward;
+            foreach (var draw in GiOverlayModel.Reaches(world, GiOverlaySelection.Entities(world)))
+            {
+                Handles.color = ReachColor(draw.Kind);
+                Handles.DrawWireDisc(Embed(draw.Center, axes), normal, draw.Radius);
+            }
+        }
+
+        public static Color ReachColor(GiBindingKind kind)
+        {
+            switch (kind)
+            {
+                case GiBindingKind.Area: return new Color(0.0f, 0.62f, 0.45f, 0.9f);
+                case GiBindingKind.Max: return new Color(0.94f, 0.89f, 0.26f, 0.9f);
+                case GiBindingKind.Nearest: return new Color(0.80f, 0.47f, 0.65f, 0.9f);
+                default: return new Color(0.34f, 0.71f, 0.91f, 0.9f);
+            }
+        }
+
+        private static void DrawFootprints(GiWorldInfo info, GiOverlaySettings settings)
         {
             var world = GiOverlayWorld(info);
             if (world == null) return;
@@ -117,10 +159,19 @@ namespace Gi.Entities.Editor
             var profile = FindProfile();
             if (profile == null) return;
 
-            var selected = new List<Entity>();
-            using var query = world.EntityManager.CreateEntityQuery(ComponentType.ReadOnly<GiEmitter>());
-            using var entities = query.ToEntityArray(Unity.Collections.Allocator.Temp);
-            foreach (var entity in entities) selected.Add(entity);
+            List<Entity> selected;
+            if (settings.AllFootprints)
+            {
+                selected = new List<Entity>();
+                using var query = world.EntityManager.CreateEntityQuery(ComponentType.ReadOnly<GiEmitter>());
+                using var entities = query.ToEntityArray(Unity.Collections.Allocator.Temp);
+                foreach (var entity in entities) selected.Add(entity);
+            }
+            else
+            {
+                selected = GiOverlaySelection.Entities(world);
+            }
+
             var axes = Axes(info);
             Handles.color = new Color(0.9f, 0.2f, 0.2f, 0.9f);
             foreach (var draw in GiOverlayModel.Footprints(world, profile.ToSpec(), selected))
