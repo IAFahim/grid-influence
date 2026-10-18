@@ -61,17 +61,17 @@ public sealed unsafe class BindingTests
     [Fact]
     public void ASecondWriterToTheSameFieldIsRefusedAndOverlapsCount()
     {
-        var statuses = Check(GiBindingSupport.All, Value(5, 0), Value(5, 0));
+        var statuses = Check(GiBindingSupport.All, Value(5), Value(5));
         Assert.Equal(GiBindingStatus.Valid, statuses[0]);
         Assert.Equal(GiBindingStatus.DuplicateWriter, statuses[1]);
 
-        var overlapping = Check(GiBindingSupport.All, Value(5, 0), Value(5, 1));
+        var overlapping = Check(GiBindingSupport.All, Value(5), Value(5, 1));
         Assert.Equal(GiBindingStatus.DuplicateWriter, overlapping[1]);
 
-        var adjacent = Check(GiBindingSupport.All, Value(5, 0), Value(5, 2));
+        var adjacent = Check(GiBindingSupport.All, Value(5), Value(5, 2));
         Assert.Equal(new[] { GiBindingStatus.Valid, GiBindingStatus.Valid }, adjacent);
 
-        var otherType = Check(GiBindingSupport.All, Value(5, 0), Value(6, 0));
+        var otherType = Check(GiBindingSupport.All, Value(5), Value(6));
         Assert.Equal(new[] { GiBindingStatus.Valid, GiBindingStatus.Valid }, otherType);
 
         var tags = Check(GiBindingSupport.All,

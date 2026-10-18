@@ -1043,6 +1043,10 @@ This roadmap changes the plan in the ways listed here. The coordinator folds the
 26. **Layer residency is part of `GiTables`** (`TransientMask`), because `World.Splat` returns 0 for a non-transient layer without saying why. The splat pass maps an unknown layer key to `InvalidLayer`, a persistent or derived layer to `WrongResidency`, and an unknown stamp key to `InvalidStamp`, and skips the entity.
 27. **Splats are not change-filtered**: a transient layer is cleared by every `Process`, so every enabled `GiSplat` is read and splatted every tick. The sort is a stable counting sort by layer (chunk order, then entity order) and a layer whose stamps and gains all agree uses the single-stamp overload.
 
+28. **The coverage tag of a `ValueGradient` binding means "the gradient is computable"** (Gi needs the neighbouring cells), so at a grid edge an entity can carry a value while its tag is clear; a `Value` binding's tag is that value's own coverage. Tests pin both meanings.
+29. **Per-binding queries ask for a coverage-tag component with `Present`, not `All`,** so an entity whose tag is disabled still matches the query and the scatter can switch the tag on.
+30. **Coverage tags are written through `ArchetypeChunk.SetComponentEnabled`,** which performs the card's `GetEnabledBitsRW` + `UpdateChunkDisabledCount` work for the entity's own chunk.
+
 New open decisions:
 
 | ID | Question | Default |
