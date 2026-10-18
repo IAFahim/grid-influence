@@ -17,6 +17,7 @@ namespace Gi.Entities.Tests
         public readonly SystemHandle Reconcile;
         public readonly SystemHandle Sync;
         public readonly SystemHandle Splat;
+        public readonly GiSenseSystem Sense;
         public readonly SystemHandle Process;
         private BlobAssetReference<GiProfileBlob> _profile;
         private Entity _profileEntity;
@@ -36,11 +37,13 @@ namespace Gi.Entities.Tests
             Reconcile = World.GetOrCreateSystem<GiReconcileSystem>();
             Sync = World.GetOrCreateSystem<GiSyncSystem>();
             Splat = World.GetOrCreateSystem<GiSplatSystem>();
+            Sense = World.GetOrCreateSystemManaged<GiSenseSystem>();
             Process = World.GetOrCreateSystem<GiProcessSystem>();
             Group.AddSystemToUpdateList(Bootstrap);
             Group.AddSystemToUpdateList(Reconcile);
             Group.AddSystemToUpdateList(Sync);
             Group.AddSystemToUpdateList(Splat);
+            Group.AddSystemToUpdateList(Sense);
             Group.AddSystemToUpdateList(Process);
             Group.SortSystems();
             FixedStep.SortSystems();
@@ -94,6 +97,13 @@ namespace Gi.Entities.Tests
         public void SetStandardProfile()
         {
             SetProfile(GiScenarioProfile.Standard().ToSpec());
+        }
+
+        public void SetProfileWith(params GiBindingSpec[] bindings)
+        {
+            var spec = GiScenarioProfile.Standard().ToSpec();
+            spec.Bindings = bindings;
+            SetProfile(spec);
         }
 
         public Entity CreateEmitter(byte layer, byte stamp, sbyte gain, float x, float z, ushort ramp = 0)
