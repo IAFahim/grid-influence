@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+using System.Threading;
 using Gi.Entities.Tests.Support;
 using Xunit;
 
@@ -163,7 +166,7 @@ public sealed unsafe class GiContractTests : IDisposable
         for (uint seed = 0; seed < 200; seed++) C04Seed(seed);
     }
 
-    private void C04Seed(uint seed)
+    private static void C04Seed(uint seed)
     {
         var rng = new Rng(seed * 2 + 1);
         var stamps = new byte[4];
@@ -425,7 +428,7 @@ public sealed unsafe class GiContractTests : IDisposable
             C05One(precision, rng);
     }
 
-    private void C05One(Layer.Precision precision, Rng rng)
+    private static void C05One(Layer.Precision precision, Rng rng)
     {
         var a = World.New();
         var b = World.New();
@@ -965,7 +968,7 @@ public sealed unsafe class GiContractTests : IDisposable
             Assert.Equal(0f, pny[2]);
         }
 
-        values.AsSpan().Fill(0);
+        values.AsSpan().Clear();
         nearX.AsSpan().Fill(1f);
         nearY.AsSpan().Fill(1f);
         found[0] = ulong.MaxValue;
@@ -1360,7 +1363,7 @@ public sealed unsafe class GiContractTests : IDisposable
         var id = World.Place(world, layer, 20f, 20f, stamp, 4);
         World.Process(world);
         var token = World.Capture(world);
-        Exception? thrown = null;
+        Exception thrown = null;
         try
         {
             Assert.Equal((short)0, World.Query(world, 200, layer, 1, 1));
@@ -1402,7 +1405,7 @@ public sealed unsafe class GiContractTests : IDisposable
             Assert.False(World.Capture(200).IsValid);
             Assert.Equal(World.BatchStatus.InvalidWorld, World.ApplyBatch(200, [], []));
             Assert.Equal(World.BatchStatus.Applied, World.ApplyBatch(token, [], []));
-            var shortResults = new World.SourceResult[0];
+            var shortResults = Array.Empty<World.SourceResult>();
             var one = new[] { World.SourceCommand.SetGain(World.SourceTarget.Existing(id), 4) };
             Assert.Equal(World.BatchStatus.InsufficientResults, World.ApplyBatch(token, one, shortResults));
             World.Sync(200, null, null, null, 0);

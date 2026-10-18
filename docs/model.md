@@ -38,6 +38,18 @@ The rest of this file derives from seven statements.
   allocated world in id order on the calling thread. `World.Teardown()` returns the process-wide
   pools to the OS once no world is live: it returns `false` and changes nothing while any world
   is live, and `true` once it has freed everything (the pools paragraph states the full contract).
+  `World.SetAllocator(allocate, free)` routes every native allocation and free Gi performs through
+  two unmanaged function pointers, so a host can account Gi's memory under its own allocator and
+  labels. `allocate(bytes, alignment)` receives the byte count and an alignment of 0 (default,
+  pointer-sized) or 64 (SIMD buffers) and returns memory of at least that alignment with
+  undefined contents — Gi zeroes the blocks that must start zeroed; `free(pointer)` receives
+  exactly the pointers `allocate` returned, whichever alignment they were asked for. The pair is
+  installed before the first allocation or after a `World.Teardown` has returned Gi to a pristine
+  process: `SetAllocator` returns `false` and changes nothing while Gi holds native memory, a
+  call naming exactly one null pointer throws `ArgumentException`, and passing two null pointers
+  restores the default allocator under the same rule. An install survives teardowns — it is
+  restored only by an explicit two-null call — and `NativeHeap.Calls` counts hook calls like
+  default calls, so the teardown receipt (calls back to zero) holds under a hook too.
   `World.Memory(world, out storeBytes,
   out liveTiles, out pages, out kernelEntries, out liveSources)` is the tooling read-out: it
   sums, over every (grid, layer) of the world, the retained capacity of the four plane slabs
@@ -47,7 +59,20 @@ The rest of this file derives from seven statements.
   cache's occupied entries out of 32 and the sources whose alive bit is set. It reads only
   existing counters, allocates nothing, throws nothing, and returns all zeros for a dead or
   never-allocated handle; `Clear` empties the live counts while the slab bytes stay (regions are
-  retained, free lists grow), and `Free` returns everything to zero. `World.Revision(world)` returns an `int`
+  retained, free lists grow), and `Free` returns everything to zero. `World.LayerHash(world,
+grid, layer)` is the incremental content hash: an XOR, over every 32×32 tile of that grid and
+layer, of a per-tile hash of the tile's published page — FNV-1a 64 (offset
+`0xcbf29ce484222325`, prime `0x100000001b3`) seeded with the tile index and folded over the
+2,048 page bytes as 256 little-endian 64-bit words — where a tile whose published page is all
+zero contributes nothing, so an empty or absent (grid, layer) hashes to 0. `Process` maintains
+the XOR incrementally: after each dirty tile publishes (base, transient, and derived passes
+alike, drops included) Gi replaces that tile's stored contribution with a fresh hash of the
+final page, so the cost follows changed tiles, never grid area, and a full recompute — the XOR
+of the same per-tile function over a `QueryRegion` read-back of every tile — equals it after
+every tick (a fuzz-stream test pins this; the stored hash and the read-back read the same page
+bytes, and the word order is fixed as little-endian so any two little-endian hosts agree). The
+page-hash work runs in `Process` on the owning thread after publish; `Clear` returns the hash to
+0 with everything else. `World.Revision(world)` returns an `int`
   that changes whenever queued work could be stale — `World.New` assigns it a fresh value,
   and `Clear`, `Rewind`, `Free`, and slot reuse bump it; mutations, `Process`, and `ProcessAll`
   leave it alone. `World.Capture(world)` seals the id and that revision into a `World.Token`
@@ -1026,7 +1051,10 @@ digits. Concurrency: single thread.
   reads "nothing deposited" (`Clear` zeroes it); and per (grid, layer) the layer's directory, its
   `PlaneStore` slabs, its tile-set slab, the dirty flags and tile epochs (allocated together by
   the layer's first marked tile on that grid and kept until `World.Free`), the dirty list with
-  its parallel rectangle list, the changed list, and two pyramids built on one generic layout
+  its parallel rectangle list, the changed list, the per-tile hash table (one zeroed `ulong` per
+  tile with the layer's running XOR, allocated by the layer's first refreshed tile — which is
+  its first published dirty tile, so every earlier tile contributes zero — kept until
+  `World.Free`, zeroed by `World.Clear` with the running hash), and two pyramids built on one generic layout
   (`Pyramid<T, TOp>`: a flat slot array plus per-level offset and side tables, each node an 8×8
   block of its children's maxima, with the combiner a `struct` type argument so the library still
   targets netstandard): the max pyramid (`int16`, allocated zeroed by the layer's first
@@ -1087,6 +1115,25 @@ digits. Concurrency: single thread.
   the context; a context without a grid array is not a world, so `GetContext` returns null for it
   and every handle-taking call reads a freed handle as absent. No pointer escapes an owner: handles
   are bytes and source ids carry a generation.
+- **Allocator hook**: `World.SetAllocator` stores the two unmanaged pointers in `NativeHeap`'s
+  statics; every allocation and free site already funnels through `NativeHeap`, so the hook sees
+  each block exactly once on the allocating thread. *Lifetime*: the pointers are process-lifetime
+  and never invoked after a two-null restore; installation is gated on `Runtime.Worlds == null`,
+  which is exactly "no `NativeHeap` block is live" — pools, stamp payloads, and the zero page are
+  allocated after the gate and freed before it reopens, so no block can be allocated by one
+  allocator and freed by another. *Aliasing*: Gi hands the hook only pointers it received from the
+  same hook (or, by default, only pointers `NativeMemory`/`Marshal` returned), one free per
+  allocation, never a block interior — `SourceColumns` chunks, slab regions, and buffers are freed
+  at their base and exactly once by the same owner that grew them. *Alignment*: `allocate` is
+  called with alignment 0 or 64; a hook may return over-aligned memory for the 0 case freely
+  (every Gi access is at most naturally aligned), and the default path is byte-identical to the
+  unhooked build — `NativeMemory.AllocZeroed`/`Free` and `AlignedAlloc(64)`/`AlignedFree` on .NET,
+  `Marshal.AllocHGlobal` with platform-natural alignment on netstandard2.1. *Concurrency*: the
+  hook is installed or restored before the first allocation or after a full teardown, both
+  process-wide serialized points (below), so the pointer fields are never written while any Gi
+  call runs; afterwards the fields are read-only. The hook itself runs on the calling thread of
+  each cold-path allocation (creation, growth, teardown) and must be safe to call from any thread
+  Gi runs on; warm paths never allocate, so no synchronization is added anywhere.
 - **Source columns**: the hot columns (x, y, stamp, layer, gain, angle, scale, liveness,
   generation, mark) live in 16,384-slot chunks. *Lifetime*: each column owns an array of up to 1,024
   chunk pointers, allocated zeroed when the first chunk is added and freed exactly once by
@@ -1266,7 +1313,7 @@ digits. Concurrency: single thread.
   the allocated ids, ascending, on the calling thread — it adds no parallelism claim, it only
   packages the loop, and freed slots read as absent to it exactly as they do to `Process`.
   World creation, `World.Free`, `World.CopyWorldIds` (which reads the world count and each
-  slot's `Grids` pointer), `World.ProcessAll`, `World.Teardown`, and stamp catalog mutation (`Stamp` creation
+  slot's `Grids` pointer), `World.ProcessAll`, `World.Teardown`, `World.SetAllocator`, and stamp catalog mutation (`Stamp` creation
   and `Stamp.Free`, which scans every world for references) are process-wide scans:
   serialize them with one another; `World.Teardown` frees the arenas every one of those scans
   walks, so it must not overlap any other Gi call at all — its precondition, no live world,
@@ -1293,7 +1340,12 @@ digits. Concurrency: single thread.
   planes only on the owning thread, never concurrently with publish. Publish runs sequentially:
   tiles that publish to zero perform their own directory drop and slab give-back and leave the
   dirty list inside the same pass, and the dirty lists are then walked again, on the owning
-  thread alone, to fold each tile's page max into its max pyramid. Warm `Process` and warm reads
+  thread alone, to fold each tile's page max into its max pyramid. The layer hash rides the same
+  pass on the same thread: each dirty tile's contribution is replaced immediately after its
+  publish-or-drop decision, reading the final page through the layer's own directory before any
+  later tile can recycle the freed units, so no tile's stored hash is ever read against another
+  tile's page, and `World.LayerHash` is a plain read of the running `ulong` under the same
+  serial-per-world rule as `World.Memory`. Warm `Process` and warm reads
   make no `NativeHeap` calls at all: slabs, directories, and every list are sized by grow-to-max
   before steady state, and the hook counter (`NativeHeap.Calls`) is asserted flat by a test
   across warm frames that move and read. Kernel-cache builds run on the owning world's thread
@@ -1538,26 +1590,131 @@ serializer reflection is disabled in the tool project.
 
 ## Unity boundary
 
+Gi stays a standalone .NET library; the Unity adapter (`unity/com.gi.entities`) is a consumer, not
+a fork. Its compiled surface ships as committed plugin DLLs (`Plugins/Gi`, provenance-checked by
+`unity/build-plugins.sh`), and today that is the scalar netstandard2.1 build, because Unity's
+script assemblies cannot yet reference the net10 TFM the vector build targets. Every hand-off of
+unmanaged memory between the two sides lives in the adapter code named below; each heading states
+its lifetime, aliasing, alignment and concurrency in this section's voice, following the proof
+template of "Unsafe proof" above. Two adapter-wide rules frame them: all Gi calls from ECS run in
+managed jobs (never Burst, D-U3), and every writer or reader of a Gi world chains through the
+process-wide fences in `GiRuntime.Fences.cs`, so the headings below describe the fences' clients,
+not the fences themselves.
+
 ### U-1
 
-Pending.
+The unsafe code in the frame and bootstrap is three things: the fixed buffers in `GiTables` and `GiFaults`, the spans over blob arrays in `GiBootstrapSystem`, and the managed `ProcessJob` that calls `Process`.
+
+- **Lifetime.**
+  - `GiTables` and `GiFaults` are plain value fields of `GiFrame`. They live in the singleton's chunk, are copied by value into jobs and back, and hold no pointer to anything.
+  - The spans in `GiBootstrapSystem.Rebuild` cover `BlobArray` storage of the profile blob. The blob is held by the `GiProfileReference` component for the whole call, and `Rebuild` runs on the main thread, where nothing can dispose or replace the blob. The spans do not escape the method; `GiWorldBuilder` copies every value it keeps (grid, layer and stamp ids go into `GiTables`).
+  - `ProcessJob` holds only an `Entity` and a `ComponentLookup`. The Gi world and its token are read from `GiFrame` when the job runs.
+- **Aliasing.**
+  - The blob spans are read-only and nothing in the call writes to blob memory.
+  - `ProcessJob` is the only job that writes `GiFrame` while it runs, because it takes `GiRuntime.BeginWrite`; every other system reads or writes `GiFrame` on the main thread after the fences or through the ECS dependency on the same component.
+- **Alignment.** The fixed buffers are byte arrays, so they need no alignment beyond the struct's own. `BlobArray<T>` storage is aligned for `T` by the blob builder, and the spec structs are blittable with natural alignment, so the span reads are aligned.
+- **Concurrency.**
+  - `GiFrame` is written by `GiBootstrapSystem` only after `GiRuntime.CompleteAll()` and `CompleteAllTrackedJobs()`, so no job is running when the world is built, released or replaced.
+  - `Process` mutates the Gi world, so `ProcessJob` is scheduled behind `BeginWrite` and registered with `EndWrite`; any later Gi writer or reader depends on it through the same fences.
+  - `GiStampRegistry` is plain managed state touched only from the main thread (`GiBootstrapSystem`, `GiOrphans`, the lifecycle callbacks).
 
 ### U-2
 
-Pending.
+The unsafe code in reconcile is the pointer access to the command and owner lists in `GiReconcileView.Visit`, the `Span` views of the lists in `GiApplyJob`, and the managed apply job itself.
+
+- **Lifetime.** Every list and array is allocated from `state.WorldUpdateAllocator`, which stays valid for the whole world update and rewinds only when the next update begins. All jobs that touch them are in one dependency chain returned as `state.Dependency`, so none is still running when the allocator rewinds. The `EntityCommandBuffer` is created with `Allocator.TempJob`, played back and disposed at the start of the next update, after `state.Dependency.Complete()`. The spans in `GiApplyJob` cover list storage that outlives the call and are not stored.
+- **Aliasing.**
+  - The count pass only reads. The write pass writes disjoint ranges: chunk `c` owns `[Offsets[c], Offsets[c] + Counts[c])`, which are disjoint by the prefix sum, and the count and write passes make the same decision because they run `Visit` with identical inputs. The pulse commands occupy `[entityTotal, total)`, written by the prefix job before the write pass starts, so they never overlap an entity range.
+  - The apply job reads the commands and writes three other lists (`Results`, `Scratch`, `BatchResults`). The write-back job reads commands, results and owners and writes component data only through `ComponentLookup`.
+- **Alignment.** All element types are blittable structs with natural alignment, and list and array storage is allocated with at least that alignment, so the pointers and spans are aligned.
+- **Concurrency.** Only the count and write passes run in parallel, and they work on distinct chunks, so they touch distinct ranges and distinct component arrays; the `GiFault` write for an entity happens in the chunk that owns it. `GiApplyJob` is the only job that calls into Gi, and it runs behind `GiRuntime.BeginWrite` and `EndWrite`. The write-back job is serial.
 
 ### U-3
 
-Pending.
+The unsafe code in sync is the raw column pointers handed to `World.SyncTransforms` in `GiSyncPass.Apply` (a `stackalloc` array of `TransformRange`), the pointer arithmetic over the `Meta` array, and the `NativeArray` writes in the write pass.
+
+- **Lifetime.** The column lists and the `Invalid` list come from `state.WorldUpdateAllocator` and stay valid for the update. `SyncTransforms` reads and writes them only inside the call (`src/Gi/World.SyncTransforms.cs`: validation, mask clear, then `ApplyTransformRanges`, which keeps no pointer), and the `TransformRange` array is on the stack of that call, so nothing outlives it.
+- **Aliasing.** Each column is its own list and each category is a disjoint slice of every column; each category's mask occupies its own word range in `Invalid`. Gi rejects overlapping buffers with `OverlappingBuffers` before touching anything, and the tests pass real data, so the rule is checked on every run.
+- **Alignment.** `SourceId`, `float` and `ulong` columns are naturally aligned list storage. Category slices start at element boundaries.
+- **Concurrency.** The write pass runs in parallel over chunks; chunk `c` writes the rows `[Offsets[c*4+k], Offsets[c*4+k] + Counts[c*4+k])` of its single category `k`, which are disjoint by the prefix sum. `GiSyncApplyJob` is the only Gi writer here and runs behind `GiRuntime.BeginWrite` and `EndWrite`. The scatter pass reads the finished columns and mask and writes only `GiFault` data and enabled bits of its own chunk.
+
+### U-4
+
+The unsafe code in the guard is the pointer access to one `GiGuardTable` in persistent native memory and the `ref *word` arguments to `Interlocked` and `Volatile`.
+
+- **Lifetime.** `GiGuard.Create` allocates one cleared, 64-byte aligned table with `Allocator.Persistent` when code loads or at the first `Register`; `GiGuard.Destroy` frees it in `GiRuntime.Unload`, after `CompleteAll`, so no job holding the pointer outlives it. Jobs read the static pointer and never keep it past `Execute`. When the table is absent `Begin`, `End` and `TryTake` do nothing.
+- **Aliasing.** The table holds 256 state words and 256 holder words, indexed by the Gi world id (a `byte`), and one report slot. Every access to a state or holder word is an `Interlocked` or `Volatile` operation. The report fields are written only by the thread that moved the slot from free to filling and read only after it is ready, so the slot has one writer at a time.
+- **Alignment.** Every field is an `int` at a 4-byte offset inside a 64-byte aligned block.
+- **Concurrency.** `Begin` always registers its party (a reader adds one, a writer adds `WriterBit`), and `End` always removes it, so the word balances even after a conflict. The party that enters second sees the conflict: a reader finds the writer bit set, a writer finds anything other than its own bit. The first conflict since the last `TryTake` keeps its details (world, both tags, whether the intruder writes) and later ones only add to the total. The guard reads and writes no Gi state, so it can report an overlap but cannot cause or hide one. `ENABLE_UNITY_COLLECTIONS_CHECKS` gates the calls with `[Conditional]`, so release builds contain none.
+
+The fences in `GiRuntime.Fences.cs` are two `SharedStatic<JobHandle>` values written only on the main thread, in system `OnUpdate`, and reset when code loads. `GuardTests` in `unity/tests/Gi.Entities.Columns.Tests` pins the table against single-thread sequences and eight-thread stress; `Tests/Runtime/Concurrency` pins the fences, the Editor world and the two-world run.
 
 ### U-5
 
-Pending.
+The unsafe code in sense is the raw pointers `GiSenseReadJob` hands to `GiSensePass.ReadBatch`, the `byte*` component access and `ulong*` word reads in `GiSenseScatterJob`, and the span over the profile blob's binding array in `GiSenseSystem.Rebuild`.
+
+- **Lifetime.**
+  - Every list, array and the `NativeReference<GiReconcileContext>` is allocated from `state.WorldUpdateAllocator` (lists directly, arrays through `CollectionHelper.CreateNativeArray`), so all of it is valid for the whole world update; the update's jobs form one chain stored in `state.Dependency`, so none is still running when the allocator rewinds.
+  - The read job takes its pointers from `NativeList` storage inside `Execute`, for one batch, and stores none of them; the scatter job takes its chunk's component array pointer the same way.
+  - The span in `Rebuild` covers the profile blob's `BlobArray<GiBindingSpec>`; `Rebuild` runs on the main thread while the `GiProfileReference` component holds the blob, and the span does not escape — the bindings copy every value they keep.
+- **Aliasing.**
+  - The count pass only reads. The write pass writes the rows `[Offsets[c], Offsets[c] + Counts[c])` of `Xs` and `Ys`, disjoint by the prefix sum, and the count and write passes make the same decision because they run the same `GiSenseView` over the same query with nothing between them in the chain that changes it.
+  - Read batches are disjoint: batch `b` reads `Xs` and `Ys` read-only and writes the rows `[b·batch, min((b+1)·batch, rows))` of the outputs and the words from `b·batch / 64` of `Whole`; the batch size is a multiple of 64 (`GiSensePass.Batch`), so no `Whole` word straddles two batches.
+  - Each scatter job writes only its own chunk's component bytes, at `i·TypeSize + Offset` for offsets already validated to lie inside the component, and there is one scatter job per output type, so two scatter jobs never write the same component type; `GiBindingTable` has rejected a second writer to the same field before the binding exists. `Whole` is read-only here.
+- **Alignment.** `short`, `float` and `ulong` list storage is naturally aligned, and every batch starts at a multiple of 64 rows, so each `whole + (start >> 6)` word is aligned. Component arrays are aligned for their type, `i·TypeSize` preserves that alignment, and the field offsets arrive from the authoring path's `GetFieldOffset` over real component layouts, so they are naturally aligned; `Resolve` rejects any offset whose field leaves its component.
+- **Concurrency.**
+  - `GiSenseReadJob` is the only job that touches Gi. It is scheduled behind `GiRuntime.BeginRead` and registered with `EndRead`, and its reads are the pure column reads of C8 (`Sense*Column` with null excludes), so its batches run in parallel and any Gi writer waits for them through the same fences.
+  - The scatter jobs write the game's own components through `state.Dependency` on the binding's query, each chunk writing only its entities, and the coverage tag's enabled-bit write happens in the chunk that owns the entity.
+  - `Rebuild`, `Resolve` and `Report` run on the main thread and touch managed ECS state only — queries, `TypeManager` lookups, and the frame's fault word through the EntityManager; no pointer into Gi or blob storage survives them.
 
 ### U-6
 
-Pending.
+The unsafe code in splat is the pointer access in `GiSplatView.Visit`, the `stackalloc` cursor array in the write pass, and the `Span` views `GiSplatPass.Apply` builds over the finished columns.
+
+- **Lifetime.** The column lists and the count and offset arrays come from `state.WorldUpdateAllocator` and outlive every job in the chain. `Apply` builds its spans over list storage that is not resized while it runs and does not keep them; `World.Splat` reads the spans inside the call. The `stackalloc` cursor array lives for one `Execute`.
+- **Aliasing.** Layer `k` owns the slice `[Meta[k], Meta[k] + Meta[32 + k])` of every column. Chunk `c` writes rows from its own cursor, which starts at `Offsets[c * 32 + k]` and advances once per entity of layer `k` that the count pass counted, so chunks write disjoint rows. The count pass only reads.
+- **Alignment.** `float`, `byte` and `sbyte` columns are naturally aligned list storage; slices start at element boundaries.
+- **Concurrency.** The count and write passes are parallel over chunks and use identical decisions (`GiSplatPass.Check` on identical inputs), so the cursor never passes the counted end of its slice. `GiSplatApplyJob` is the only Gi writer here and runs behind `GiRuntime.BeginWrite` and `EndWrite`; the faults are written by the chunk that owns the entity.
 
 ### P-1
 
-Pending.
+The unsafe code in the mirror is two pointer hand-offs to Gi from `Presentation/GiMirror.cs`: `ChangedTiles` into a persistent `NativeArray<int>`, and `QueryRegion` into a persistent `NativeArray<int>` read as `short`. Everything else (the page table, the pending queue, the budget) is managed code in `Runtime/Columns` with no pointers.
+
+- **Lifetime.** The two arrays and the one-element entry array are allocated with `Allocator.Persistent` in the constructor and freed in `Dispose`; Gi writes into them only during the call that receives the pointer, and the mirror keeps no pointer between calls. The `GraphicsBuffer`s are owned by the mirror, created in the constructor (the pool again when it grows) and disposed with it. Growth copies the old pool into the new one on the GPU, then disposes the old.
+- **Aliasing.** `ChangedTiles` writes at most one `int` per tile of the grid into an array that holds exactly that many. `QueryRegion` writes one 32 x 32 tile, 1,024 `short` values, into an array of 512 `int` values (2,048 bytes); the tile is read whole before the next call reuses the array. No other reference to either array exists while Gi writes.
+- **Alignment.** Both arrays come from `NativeArray` with at least 4-byte alignment, which satisfies `short` and `int` access. Two `short` values share one `int` word of the pool, the lower index in the low half; the compute kernel sign-extends each half.
+- **Concurrency.** The mirror is main-thread only and reads Gi, so the caller must hold a window in which no Gi write job runs (`GiRuntime.CompleteAll`, or the inspector system's completed `GiFrame` dependency). The mirror takes no fence itself and writes no Gi state.
+
+A tile that reads back all zero returns its pool slot and clears its table entry, so the pool holds only tiles with content. `gi.mirror.budget` caps the tiles uploaded per frame; the rest wait in a queue that keeps first-in order and holds each tile at most once, and the queue drains in `ceil(pending / budget)` frames once changes stop (`MirrorPlannerTests` pins the planner under 100 random schedules). The compute decode and the heatmap are the same function of the table and pool, so the test that compares the decode with `QueryRegion` over 50 seeds also covers what the heatmap draws.
+
+### E-7
+
+The unsafe code in the flight recorder is four small things: the three tap calls from the Gi jobs into `GiRecorderGate`, the `fixed` blocks in `GiTileHashes` and `GiReplay`, and the compression calls in `GiLz4Codec`. The recorder, the ring, the keyframes and the export are managed code in `Runtime/Columns/Recorder` with no pointers of their own.
+
+- **Lifetime.** A tap receives pointers into the job's own columns (the sync rows, the splat rows) for the length of the call and copies every row into managed arrays before it returns; nothing keeps the pointer. `GiTileHashes` pins its own managed `int[]` and `short[]` for the duration of one `ChangedTiles` or `QueryRegion` call. `GiReplay` pins a decoded record's arrays only around the call into the sync or splat pass. `GiLz4Codec` pins the source and destination arrays around one compress or decompress call.
+- **Aliasing.** `ChangedTiles` writes at most one `int` per tile into an array sized to the largest grid's tile count; `QueryRegion` writes one 32 x 32 tile, 1,024 `short` values, into an array of exactly that size. The replay world is its own Gi world with its own stamps (a separate `GiStampRegistry`), so nothing the replay writes aliases the live world.
+- **Alignment.** Every pinned array is a managed `float[]`, `short[]`, `int[]`, `ulong[]` or `byte[]`, aligned for its element type.
+- **Concurrency.** The taps run inside the reconcile, sync, splat and process jobs, behind the fences those jobs already hold (`GiRuntime.BeginWrite` and `EndWrite`), one world at a time on one thread; the recorder is touched by those jobs and by nothing else while they run. `GiRecorderSystem` creates and detaches recorders on the main thread after `GiRuntime.CompleteAll`, and editor code reads a recorder only after `GiRuntime.CompleteAll`. With recording off, a tap is one read of a static field.
+
+A keyframe stores the live sources (layer, stamp, effective gain, position, heading, scale), the schedule read-back of each (fade ends, ticks and ticks left; ticks left to expiry) and the splat columns of its tick, because a transient layer still holds them after `Process`. Restoring places the sources and the splats, calls `Process`, then reinstates expiries with `Expire(ticksLeft)` and re-drives each fade in flight with `SetGain` at the staircase value of the next elapsed tick (`from + sign(delta) * floor((|delta| * k + floor(ticks / 2)) / ticks)`), cancelling an entry when a recorded `SetGain`, `Fade` or `Remove` reaches its source, which is the exactness G-5's read-back was added for. A restored heading is biased by half a quantum (`pi / 65536`) because `Turn` truncates and the read-back is the quantum's lower edge. `RecorderTests` and `RestoreTests` pin the restore at every elapsed tick of several fades, the heading over 300 values, and 10,000 ticks of a steady crowd.
+
+### S-1
+
+The unsafe code in save is one thing: `GiPulseMirror` holds a pointer to an `UnsafeList<GiPulseEntry>` that the reconcile write-back job appends to and prunes. Everything else (the saved components, `GiSave`, the restore driver and the two restore systems) is managed code or plain component data.
+
+- **Lifetime.** The list is created with `Allocator.Persistent` in `GiBootstrapSystem.OnCreate`, stored on the frame entity, and destroyed in `OnDestroy`; it is cleared whenever the Gi world is rebuilt or released. The job copies the component (a pointer) and never keeps it past `Execute`.
+- **Aliasing.** The list is written by one job, `GiWriteBackJob`, which runs once per tick behind `GiApplyJob` in the reconcile chain; main-thread code reads it only after `GiRuntime.CompleteAll` and `CompleteAllTrackedJobs` (`GiSave.Prepare`, the restore system), which join that chain first.
+- **Alignment.** `UnsafeList<T>` allocates with the alignment of `GiPulseEntry` (a `SourceId` of two `uint` and an `int`), at least 4 bytes.
+- **Concurrency.** One writer at a time, ordered by the job dependency; the entries are pruned in the same job when more than 64 exist and their end tick has passed, so the list stays proportional to the pulses in flight.
+
+Save and load follow the plan's split. `GiEmitter`, `GiSplat`, `GiGainRamp`, `GiOriented` and `GiScaled` carry `[Save]`; `GiSource`, a cleanup component, does not. `GiSave.Prepare` runs before the game saves: for every placed source whose entity has a ramp it writes `GiSavedSource` (layer and stamp keys, the applied target gain, the effective gain, the pose, the fade ends, ticks and ticks left, ticks left to expiry), and it writes one `GiSavedPulse` buffer element per live pulse on the `GiSaveHolder` entity. `GiSave.Release` removes them again. On load `GiSaveRestoreSystem`, before reconcile in the first tick of a Gi world, places each saved source and pulse at its effective gain, sets `Expire(ticksLeft)`, adds the `GiSource` back with the applied target gain (so the next reconcile diff behaves as in an uninterrupted run), and hands every fade in flight to `GiRestoreDriver`; `GiRestoreStepSystem`, after reconcile, writes the next staircase step with `SetGain` before `Process`. A driver entry is dropped when its source is gone, when Gi shows a fade or a gain the driver did not write, or when the owner entity's applied gain changed (a new ramp request that lands on the current gain leaves no trace in Gi). Ticks are not restored: the new world counts from zero and every schedule is relative. `since` has nothing to reset: bindings read `Tick - Since`, and the mirror and the Field window re-attach when the world generation changes. `SaveTests` pins the restore over 40 seeds with the driver, the discriminating restart case, and the guard; `GiSaveTests` saves and loads 36 combinations of seed and tick through the real systems and compares every field hash on every following tick.
+### E-8
+
+The unsafe code in the runtime field draw is four pointer hand-offs from `Presentation/GiFieldDrawSystem.cs`: `ChangedTiles` into the persistent `_changed` list, `QueryRegion` into a slot of the persistent `_cells` list, the `byte*` view of a binding's dynamic component in `GiFieldDrawBindingsJob`, and the `MemCpy` out of `_cells` in `TryReadTile`.
+
+- **Lifetime.** The five mirrors (`_slotOf`, `_keys`, `_cells`, `_maxes`, `_changed`) are `Allocator.Persistent` and disposed in `OnDestroy` after `state.Dependency.Complete()`. Gi writes into `_changed` and `_cells` only inside the call that receives the pointer; no pointer survives the call. The binding pointer is valid for one `Execute` and covers chunk storage the job does not keep. `TryReadTile` copies out under `fixed` and keeps nothing.
+- **Aliasing.** A tile owns `[_slotOf[key] * 1024, + 1024)` shorts of `_cells` and the parallel entries of `_keys` and `_maxes`; the refresh job is the single serial writer, and the draw jobs read the same storage only through `[ReadOnly]` handles after the refresh job in the chain. Removal moves the last slot's cells into the freed slot with `MemCpy` sized exactly 2,048 bytes and then shrinks the list, so no two slots overlap. The binding pointer reads `i * TypeSize + Offset .. + 8`, which `GiBindingTable` validation plus the rebuild's own `Offset + 8 <= TypeSize` check keep inside one component instance.
+- **Alignment.** `_cells` and `_maxes` are `short` element lists, so every slot starts 2-byte aligned and `QueryRegion` writes whole `short` cells. `_changed` is an `int` list, matching `ChangedTiles`. The dynamic component view is `byte`-granular by construction; the two floats read at the binding offset are 4-byte aligned because the profile validator only accepts fields at their natural offsets.
+- **Concurrency.** The refresh job is a Gi reader and runs between `GiRuntime.BeginRead` and `EndRead`, after the main thread has completed the `GiFrame` writers through `EntityManager.GetComponentData` (the E-1 discipline); it writes no Gi state. The draw jobs only read ECS components and Quill's atomic-write-only stream, whose main-thread `AsReader` in `DrawSystem.OnUpdate` completes them before playback. `TryReadTile` is main-thread only and expects the caller to have completed the world's jobs.
+
+The mirror keys a tile as `gridId << 20 | tile`; the core's power bound of 14 keeps a grid at most 512 x 512 tiles, so the key cannot collide. `GiFieldDrawStats` on the frame entity carries the receipts: `UpdatedTiles` follows `ChangedTiles`, `MirrorTiles` is the live tile count, and `VisibleTiles`/`DrawnSources`/`DrawnBindings` are the post-cull counts the culling test pins.

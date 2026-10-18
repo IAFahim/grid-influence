@@ -1,7 +1,9 @@
 {
     "name": "Gi.Entities.Tests.Support",
     "rootNamespace": "Gi.Entities.Tests.Support",
-    "references": [],
+    "references": [
+        "Gi.Entities"
+    ],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": true,

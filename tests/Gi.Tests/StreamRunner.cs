@@ -9,7 +9,7 @@ internal sealed unsafe class StreamRunner
     private readonly StreamSetup _setup;
     private readonly List<StreamCommand> _commands;
     private readonly BugInjection? _bug;
-    private readonly Action<int, byte, byte, short[]>? _onPage;
+    private readonly Action<byte, int, byte, byte, short[]>? _onPage;
     private readonly (long I, long Q40)? _fold;
     private readonly bool _uncached;
     private readonly long _convolveCost;
@@ -41,7 +41,7 @@ internal sealed unsafe class StreamRunner
         StreamSetup setup,
         List<StreamCommand> commands,
         BugInjection? bug,
-        Action<int, byte, byte, short[]>? onPage,
+        Action<byte, int, byte, byte, short[]>? onPage,
         (long I, long Q40)? fold,
         bool uncached,
         long convolveCost)
@@ -59,7 +59,7 @@ internal sealed unsafe class StreamRunner
         StreamSetup setup,
         List<StreamCommand> commands,
         BugInjection? bug = null,
-        Action<int, byte, byte, short[]>? onPage = null,
+        Action<byte, int, byte, byte, short[]>? onPage = null,
         (long I, long Q40)? fold = null,
         bool uncached = false,
         long convolveCost = 0)
@@ -71,7 +71,7 @@ internal sealed unsafe class StreamRunner
         StreamSetup setup,
         List<StreamCommand> commands,
         BugInjection? bug = null,
-        Action<int, byte, byte, short[]>? onPage = null,
+        Action<byte, int, byte, byte, short[]>? onPage = null,
         (long I, long Q40)? fold = null,
         bool uncached = false,
         long convolveCost = 0)
@@ -306,7 +306,7 @@ internal sealed unsafe class StreamRunner
                     _rw.QueryRegion((byte)g, (byte)l, 0, 0, size, size, pExpected);
                 }
 
-                _onPage?.Invoke(_frames, (byte)g, (byte)l, _expectedPage);
+                _onPage?.Invoke(_world, _frames, (byte)g, (byte)l, _expectedPage);
                 if (_bug is { } bug && bug.AfterProcess == _frames && bug.Grid == g && bug.Layer == l &&
                     _expectedPage[bug.Cell] != 0)
                     _expectedPage[bug.Cell] += bug.Delta;
@@ -752,5 +752,26 @@ internal sealed unsafe class StreamRunner
         for (var i = 0; i < s->Count; i++)
             if (s->Alive[i] != 0 && s->Gain[i] != 0 && s->Layer[i] == layer) count++;
         return count;
+    }
+}
+
+internal struct BugInjection
+{
+    public int AfterProcess;
+    public byte Grid;
+    public byte Layer;
+    public int Cell;
+    public short Delta;
+}
+
+internal sealed class StreamMismatch : Exception
+{
+    public int CommandIndex;
+    public int OpIndex;
+
+    public StreamMismatch(string detail, int commandIndex, int opIndex) : base(detail)
+    {
+        CommandIndex = commandIndex;
+        OpIndex = opIndex;
     }
 }

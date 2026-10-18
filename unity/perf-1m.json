@@ -1,0 +1,33 @@
+{
+  "backend": "editor-coreclr",
+  "host": "Intel(R) Core(TM) i9-14900K",
+  "values": {
+    "ecs.serial.ecs_share_of_gi": 0.771958,
+    "ecs.serial.gi_ms": 36.239000,
+    "ecs.serial.sources": 1000000.000000,
+    "ecs.serial.wall_ms": 64.214000,
+    "ecs.workers.ecs_share_of_gi": -0.917326,
+    "ecs.workers.gi_ms": 65.980818,
+    "ecs.workers.sources": 1000000.000000,
+    "ecs.workers.wall_ms": 5.454900,
+    "frame.B1.exact.entities": 1000000.000000,
+    "frame.B1.exact.p50_ms": 525.294727,
+    "frame.B1.exact.p99_ms": 565.743912,
+    "frame.C.cell.entities": 1000000.000000,
+    "frame.C.cell.p50_ms": 22.099098,
+    "frame.C.cell.p99_ms": 22.737456,
+    "frame.W.cell.entities": 1000000.000000,
+    "frame.W.cell.p50_ms": 31.762049,
+    "frame.W.cell.p99_ms": 34.830482,
+    "idle.us_per_tick": 18.757450,
+    "mirror.upload_512_tiles_ms": 0.010000,
+    "profile_edit.ms": 710.472700,
+    "profile_edit.sources": 1000000.000000,
+    "reconcile.churn_each_way": 10000.000000,
+    "reconcile.frame_ms": 14.509100,
+    "reconcile.ms_for_10k_each_way": 14.139400,
+    "reconcile.quiet_ms": 0.369700,
+    "reconcile.sources": 1000000.000000,
+    "reconcile.us_per_command": 0.706970
+  }
+}

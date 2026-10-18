@@ -3,17 +3,22 @@
     "rootNamespace": "Gi.Entities.Presentation",
     "references": [
         "BovineLabs.Core",
+        "BovineLabs.Quill",
         "Gi.Entities",
         "Unity.Burst",
         "Unity.Collections",
         "Unity.Entities",
-        "Unity.Mathematics"
+        "Unity.Mathematics",
+        "Unity.Mathematics.Extensions",
+        "Unity.Transforms"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
-    "allowUnsafeCode": false,
-    "overrideReferences": false,
-    "precompiledReferences": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "Gi.dll"
+    ],
     "autoReferenced": true,
     "defineConstraints": [],
     "versionDefines": [],

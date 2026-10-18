@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsPackable>false</IsPackable>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <AssemblyName>GiBenchmarks</AssemblyName>
+    <RootNamespace>Gi.Frames</RootNamespace>
+    <FramesGenerated>$(MSBuildProjectDirectory)/obj/frames</FramesGenerated>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Gi\Gi.csproj" />
+  </ItemGroup>
+
+  <Target Name="LinkFrames" BeforeTargets="CoreCompile">
+    <MakeDir Directories="$(FramesGenerated)" />
+    <Exec Command="for f in FrameScenarios FrameSupport FrameHarness FrameDriver FrameReceipts; do sed -e 's/\(System\.Runtime\.CompilerServices\.\)\?MethodImplOptions\.AggressiveOptimization/(System.Runtime.CompilerServices.MethodImplOptions)512/g' -e '/^using System\.Runtime\.Intrinsics/d' -e 's/Stopwatch\.GetElapsedTime/GiStopwatch.GetElapsedTime/g' -e 's/Vector128\.IsHardwareAccelerated/false/g' -e 's/Avx2\.IsSupported/false/g' &quot;$(MSBuildProjectDirectory)/../../../benchmarks/$f.cs&quot; &gt; &quot;$(FramesGenerated)/$f.cs&quot;; done" />
+    <ItemGroup>
+      <Compile Include="$(FramesGenerated)/*.cs" />
+    </ItemGroup>
+  </Target>
+
+</Project>

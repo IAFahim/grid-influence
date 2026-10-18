@@ -194,7 +194,7 @@ public class StreamDifferentialTests
     private static (int Process, byte Grid, byte Layer, int Cell)? FindNonzeroCell(StreamSetup setup)
     {
         (int Process, byte Grid, byte Layer, int Cell)? found = null;
-        StreamRunner.Run(setup, setup.Commands, null, (process, grid, layer, page) =>
+        StreamRunner.Run(setup, setup.Commands, null, (_, process, grid, layer, page) =>
         {
             if (found != null) return;
             for (var cell = 0; cell < page.Length; cell++)

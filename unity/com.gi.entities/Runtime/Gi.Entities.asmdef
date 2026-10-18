@@ -7,14 +7,18 @@
         "Unity.Collections",
         "Unity.Entities",
         "Unity.Mathematics",
+        "Unity.Profiling.Core",
         "Unity.Transforms"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": true,
-    "overrideReferences": false,
-    "precompiledReferences": [],
-    "autoReferenced": true,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "Gi.dll",
+        "Gi.Validation.dll"
+    ],
+    "autoReferenced": false,
     "defineConstraints": [],
     "versionDefines": [],
     "noEngineReferences": false

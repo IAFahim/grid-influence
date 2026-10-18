@@ -141,7 +141,7 @@ public sealed class PlaneLimitTests
 
         Assert.True(World.TrySenseArea(world, layers[0], px, py, 4f, excluded, out var excludedArea));
         Assert.True(World.TrySenseArea(twin, layers[1], px, py, 4f, out var removedArea));
-        Assert.True(removedArea != 0);
+        Assert.NotEqual(0L, removedArea);
         Assert.Equal(removedArea, excludedArea);
 
         World.Free(world);
