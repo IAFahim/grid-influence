@@ -243,7 +243,7 @@ Plan §12's S1–S5 apply, plus:
 | S-1 | Save | save | P2 | V-2 | U | 6 | todo | |
 | G-4 | Cross-world `Process` | core | P2 | — | G | 6 | todo | |
 | G-5 | Schedule read-back | core | P2 | — | G | 6 | done | #83. `World.TryGetSchedule` (gain, fade ends/duration/ticks-left, expiry ticks-left); save/continue equals uninterrupted, proven |
-| G-6 | Allocator hook | core | P2 | — | G | 6 | todo | |
+| G-6 | Allocator hook | core | P2 | — | G | 6 | review | #95, accepted in review (8/8 CI green; allocator==frees over a full lifecycle; warm frames make 0 hook calls, no gate needed). Owner merges |
 | N-2 | Lockstep checks | netcode | P2 | N-1 | U | 7 | todo | |
 | G-8 | Parallel splat | core | P3 | V-3 | G | 7 | todo | |
 | V-0 | CoreCLR day 0 | verification | P0 | V-1, V-2, a CoreCLR build | U | day 0 | active | Preview answers in Appendix B (items 1-5, 7); the flip (item 11) waits for Unity's net10 API level |
