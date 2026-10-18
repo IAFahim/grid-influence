@@ -5,13 +5,18 @@
         "BovineLabs.Core",
         "Gi.Entities",
         "Gi.Entities.Authoring",
+        "Gi.Entities.Authoring.Bakers",
         "Gi.Entities.Editor",
         "Gi.Entities.Presentation",
         "Gi.Entities.Tests.Authored",
         "Gi.Entities.Tests.Support",
         "Unity.Collections",
         "Unity.Entities",
-        "Unity.Mathematics"
+        "Unity.Entities.Hybrid",
+        "Unity.Mathematics",
+        "Unity.Transforms",
+        "UnityEditor.TestRunner",
+        "UnityEngine.TestRunner"
     ],
     "includePlatforms": [
         "Editor"
