@@ -8,9 +8,11 @@ using Unity.Entities;
 using Unity.Jobs;
 using UnityEngine;
 using UnityEngine.TestTools;
+using Unity.Scripting.LifecycleManagement;
 
 namespace Gi.Entities.Tests
 {
+    [NoAutoStaticsCleanup]
     public static class GiRogueGate
     {
         public static int Armed;

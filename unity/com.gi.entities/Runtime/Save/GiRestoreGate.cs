@@ -1,5 +1,8 @@
+using Unity.Scripting.LifecycleManagement;
+
 namespace Gi.Entities
 {
+    [NoAutoStaticsCleanup]
     public static class GiRestoreGate
     {
         private static readonly GiRestoreDriver[] Drivers = new GiRestoreDriver[256];

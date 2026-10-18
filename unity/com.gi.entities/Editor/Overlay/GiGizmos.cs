@@ -80,6 +80,7 @@ namespace Gi.Entities.Editor
     }
 
     [InitializeOnLoad]
+    [NoAutoStaticsCleanup]
     public static class GiGizmos
     {
         public const string OutsideGridsText = "outside every grid";
@@ -103,7 +104,9 @@ namespace Gi.Entities.Editor
         [NoAutoStaticsCleanup]
         private static readonly StringBuilder ScratchText = new StringBuilder();
 
+        [NoAutoStaticsCleanup]
         private static bool _dirty = true;
+        [NoAutoStaticsCleanup]
         private static int _rescans;
 
         static GiGizmos()
@@ -141,8 +144,8 @@ namespace Gi.Entities.Editor
             _rescans++;
             Marks.Clear();
             Watched.Clear();
-            foreach (var authoring in Object.FindObjectsByType<GiEmitterAuthoring>(FindObjectsSortMode.None)) Build(authoring);
-            foreach (var authoring in Object.FindObjectsByType<GiSplatAuthoring>(FindObjectsSortMode.None)) Build(authoring);
+            foreach (var authoring in Object.FindObjectsByType<GiEmitterAuthoring>()) Build(authoring);
+            foreach (var authoring in Object.FindObjectsByType<GiSplatAuthoring>()) Build(authoring);
         }
 
         private static void ChangesPublished(ref ObjectChangeEventStream stream)

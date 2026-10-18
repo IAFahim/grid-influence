@@ -47,16 +47,7 @@ namespace Gi.Entities
         public const string UnknownShape = "The stamp shape is not one this version of Gi supports.";
         public const string UnknownLayerKind = "The layer kind is not one this version of Gi supports.";
 
-        private static string _precision;
-
-        public static string PrecisionMessage
-        {
-            get
-            {
-                if (_precision == null) _precision = BuildPrecisionMessage();
-                return _precision;
-            }
-        }
+        public static string PrecisionMessage => BuildPrecisionMessage();
 
         public static List<GiProfileIssue> Check(GiProfileSpec spec)
         {

@@ -27,14 +27,17 @@ set -e
 [ -f "$log" ] || { printf 'no log at %s\n' "$log" >&2; exit 2; }
 
 errors=$(grep -cE 'error CS[0-9]+' "$log" || true)
+burst=$(grep -c 'Burst error' "$log" || true)
 built=$(grep -cE 'Tundra build success' "$log" || true)
 
 grep -E 'error CS[0-9]+' "$log" | sort -u | head -40 || true
+grep 'Burst error' "$log" | sort -u | head -40 || true
 printf 'errors:    %s\n' "$errors"
+printf 'burst:     %s\n' "$burst"
 printf 'unity:     %s\n' "$version"
 printf 'head:      %s\n' "$(git -C "$root" rev-parse HEAD)"
 
-if [ "$errors" -ne 0 ]; then
+if [ "$errors" -ne 0 ] || [ "$burst" -ne 0 ]; then
     exit 1
 fi
 if [ "$rc" -ne 0 ] || [ "$built" -eq 0 ]; then
