@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+using System.Threading;
 using Gi.Entities.Tests.Support;
 using Xunit;
 
@@ -1360,7 +1363,7 @@ public sealed unsafe class GiContractTests : IDisposable
         var id = World.Place(world, layer, 20f, 20f, stamp, 4);
         World.Process(world);
         var token = World.Capture(world);
-        Exception? thrown = null;
+        Exception thrown = null;
         try
         {
             Assert.Equal((short)0, World.Query(world, 200, layer, 1, 1));
