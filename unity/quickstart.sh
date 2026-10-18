@@ -25,15 +25,16 @@ cat >"$work/Assets/Editor/QuickStartCheck.asmdef" <<'JSON'
     "autoReferenced": false
 }
 JSON
-pin=$(python3 -I -c "import json,sys; print(json.load(open(sys.argv[1]))['dependencies']['com.bovinelabs.core'])" "$host/Packages/manifest.json")
-cat >"$work/Packages/manifest.json" <<JSON
-{
-  "dependencies": {
-    "com.bovinelabs.core": "$pin",
-    "com.gi.entities": "file:$root/unity/com.gi.entities"
-  }
-}
-JSON
+python3 -I - "$host/Packages/manifest.json" "$work/Packages/manifest.json" "$root/unity/com.gi.entities" <<'PY'
+import json
+import sys
+
+source, target, package = sys.argv[1:4]
+pins = json.load(open(source))["dependencies"]
+dependencies = {name: pins[name] for name in ("com.bovinelabs.anchor", "com.bovinelabs.core", "com.bovinelabs.quill")}
+dependencies["com.gi.entities"] = "file:" + package
+json.dump({"dependencies": dependencies}, open(target, "w"), indent=2)
+PY
 
 log=$work/quickstart.log
 shim=$host/Logs/lib-shim

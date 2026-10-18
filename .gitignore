@@ -36,3 +36,7 @@ scratch/
 unity/project/Packages/com.unity.netcode/
 unity/project/Assets/NetcodeConfig.asset
 unity/project/Assets/NetcodeConfig.asset.meta
+unity/project/Assets/DefaultVolumeProfile.asset
+unity/project/Assets/DefaultVolumeProfile.asset.meta
+unity/project/Assets/UniversalRenderPipelineGlobalSettings.asset
+unity/project/Assets/UniversalRenderPipelineGlobalSettings.asset.meta

@@ -3,6 +3,7 @@
     "rootNamespace": "Gi.Entities.Tests",
     "references": [
         "BovineLabs.Core",
+        "BovineLabs.Quill",
         "Gi.Entities",
         "Gi.Entities.Presentation",
         "Gi.Entities.Tests.Support",
