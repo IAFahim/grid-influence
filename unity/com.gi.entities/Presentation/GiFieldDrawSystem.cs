@@ -437,7 +437,6 @@ namespace Gi.Entities.Presentation
         }
 #endif
 
-        [BurstCompile]
         private struct GiFieldDrawRefreshJob : IJob
         {
             public byte World;
@@ -547,7 +546,6 @@ namespace Gi.Entities.Presentation
             }
         }
 
-        [BurstCompile]
         private struct GiFieldDrawBoundsJob : IJob
         {
             public Drawer Drawer;
@@ -591,7 +589,6 @@ namespace Gi.Entities.Presentation
             }
         }
 
-        [BurstCompile]
         private struct GiFieldDrawSourcesJob : IJobChunk
         {
             public Drawer Drawer;
