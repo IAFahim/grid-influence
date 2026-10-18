@@ -97,8 +97,10 @@ namespace Gi.Entities
             {
                 var meta = (int*)Meta.GetUnsafeReadOnlyPtr();
                 GiGuard.Begin(frame.World, GiGuard.Splat, true);
+                var scope = GiMarkers.Splat.Auto();
                 applied = GiSplatPass.Apply(frame.World, frame.Tables, meta, meta + GiSplatPass.Layers, (float*)Xs.GetUnsafePtr(),
                     (float*)Ys.GetUnsafePtr(), (byte*)Stamps.GetUnsafePtr(), (sbyte*)Gains.GetUnsafePtr());
+                scope.Dispose();
                 GiGuard.End(frame.World, true);
             }
 

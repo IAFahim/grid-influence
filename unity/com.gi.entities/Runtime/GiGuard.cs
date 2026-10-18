@@ -58,13 +58,13 @@ namespace Gi.Entities
         [Conditional(Checks)]
         public static void Begin(byte world, int tag, bool write)
         {
-            if (_table != null) _table->Begin(world, tag, write);
+            if (_table != null && GiDebugConfig.Guard.Data) _table->Begin(world, tag, write);
         }
 
         [Conditional(Checks)]
         public static void End(byte world, bool write)
         {
-            if (_table != null) _table->End(world, write);
+            if (_table != null && GiDebugConfig.Guard.Data) _table->End(world, write);
         }
 
         public static int Violations => _table != null ? _table->Total() : 0;

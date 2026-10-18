@@ -134,9 +134,11 @@ namespace Gi.Entities
             var token = frame.Token;
             var starts = (int*)Meta.GetUnsafeReadOnlyPtr();
             GiGuard.Begin(frame.World, GiGuard.Sync, true);
+            var scope = GiMarkers.Sync.Auto();
             var status = GiSyncPass.Apply(ref token, frame.World, (GiWorld.SourceId*)Sources.GetUnsafePtr(), (float*)Xs.GetUnsafePtr(),
                 (float*)Ys.GetUnsafePtr(), (float*)Headings.GetUnsafePtr(), (float*)Scales.GetUnsafePtr(), (ulong*)Invalid.GetUnsafePtr(),
                 starts, starts + GiSyncPass.Categories, starts + 2 * GiSyncPass.Categories);
+            scope.Dispose();
             GiGuard.End(frame.World, true);
 
             frame.Token = token;

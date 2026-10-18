@@ -14,6 +14,7 @@
         "Unity.Entities",
         "Unity.Entities.Hybrid",
         "Unity.Mathematics",
+        "Unity.Profiling.Core",
         "Unity.Transforms",
         "UnityEditor.TestRunner",
         "UnityEngine.TestRunner"
