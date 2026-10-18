@@ -23,6 +23,13 @@ unity/project/Obj/
 unity/project/obj/
 unity/project/UserSettings/
 unity/project/Build/
+unity/project/ProjectSettings/*
+!unity/project/ProjectSettings/ProjectSettings.asset
+!unity/project/ProjectSettings/ProjectVersion.txt
+unity/project/Assets/Settings/
+unity/project/Assets/Settings.meta
+unity/project/Assets/SceneDependencyCache/
+unity/project/Assets/SceneDependencyCache.meta
 unity/project/*.csproj
 unity/project/*.sln
 scratch/

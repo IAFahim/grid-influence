@@ -211,7 +211,7 @@ Plan §12's S1–S5 apply, plus:
 | Card | Title | Lane | Pri | Needs | Tier | Wave | State | PR |
 |---|---|---|---|---|---|---|---|---|
 | F-1 | Contract pins and dotnet harness | foundation | P0 | — | D | 1 | done | #78 |
-| U-0 | Package skeleton, plugins, host project | runtime | P0 | — | D, U | 1 | blocked | D receipts green, merged via #79. Tier U editmode blocked externally: com.bovinelabs.core 2.0.0-pre.1 needs internal collections types on every editor installable today (walls proven on 7000.0.0a8 and 6000.7.0b4/b5 — see A.15 and Appendix F). Exits: 6000.7.0f1+ with a published BovineLabs build, or the owner revisits O-U6 |
+| U-0 | Package skeleton, plugins, host project | runtime | P0 | — | D, U | 1 | done | #79 (D) and the Tier U unblock PR (U): editor 7000.0.0a9 + BovineLabs Core pre.6 at GitLab 82be2794. `validate.sh` editmode, playmode, coreclr (player) and il2cpp (player) each pass the smoke test. See A.15 and Appendix F |
 | G-0a | TFM dry run | core | P0 | — | G | 1 | done | scratch, not merged |
 | G-1 | Pure exclusion reads | core | P1 | — | G | 1 | done | #81. Exclusion-row gate deltas (+8–16%) are the accepted price of pure reads; baseline untouched, quiet-host re-run pending |
 | F-2 | Scenarios, reference executor, lint, CI | foundation | P0 | F-1, U-0 | D | 2 | todo | |
@@ -1025,6 +1025,8 @@ This roadmap changes the plan in the ways listed here. The coordinator folds the
 14. **Card ids.** This file's cards replace plan §10 and §11. Plan §12's ledger continues here as §2.
 15. **The editor baseline follows O-U2** (minimum Unity = whatever the supplied BovineLabs.Core targets) — **attempted and refuted on 2026-10-18**: the 6000.7 repin hits the same wall as the Unity 7 alphas, because on 6000.7 the builtin Collections is a type-forwarding shim into the engine's `UnityEngine.ManagedKernelModule.dll`, where `HashMapHelper`, `Pair`, `UnsafeParallelHashMapData` and `UntypedUnsafeList` are internal with a Unity-only friend list, and the public registry serves no standalone 6.x Collections to pin instead. BovineLabs 2.0.0-pre.1 is the newest published build (its main branch is an unpublished pre.2 evidently built against a 6000.7 newer than b5). **The host project keeps the 7000.0.0a8 pin.** U-0 is `blocked` (Tier D accepted); the exits are a published BovineLabs build against a 6000.7.0f1+/Unity 7 installable editor, or the owner revisiting O-U6. Editors 6000.7.0b4 and b5 stay installed for the retry.
 
+    **Superseded 2026-10-18 (later the same day): the refutation tested the wrong BovineLabs build.** It repinned to `com.bovinelabs.core` 2.0.0-pre.1, the only version on OpenUPM, which targets the 6000.x registry line. BovineLabs' own registry (`upm.bovinelabs.com`) serves up to 2.0.0-pre.5 (built for 7000.0.0a7), and the public GitLab `main` is 2.0.0-pre.6 with `"unity": "7000.0", "unityRelease": "0a9"`. The host project is now pinned to editor 7000.0.0a9 and to `com.bovinelabs.core` at GitLab commit `82be2794cf7535f6fb598bb704527f41629a8f64` (pre.6). It compiles, and the EditMode, PlayMode, CoreCLR-player and IL2CPP-player suites run (Appendix F). U-0's Tier U items are unblocked.
+
 New open decisions:
 
 | ID | Question | Default |
@@ -1095,12 +1097,25 @@ Recorded 2026-10-18 so later sessions start from verified facts, not assumptions
 ### Environment (verified on this host)
 
 - `unity` CLI 1.0.0-beta.13 at `~/.local/bin/unity`. Official documentation: github.com/Unity-Technologies/skills, skill `unity-cli` (with references for editors-install, build-run-test, auth-license-cloud, integration-advanced). Clone it fresh if `/tmp/unity-skills` is gone.
-- License: Unity Personal (Assigned), active via OAuth; batchmode entitlement resolved on every launch (~10 verified runs). Personal licenses are machine-and-account bound: a service account **cannot** activate one, so a CI lane (O-U3) needs serial or floating licensing.
-- Editors installed under `~/Unity/Hub/Editor`: 7000.0.0a8 (the pin) and 7000.0.0a9, plus 6000.7.0b4 and b5 (the refuted repin attempt, A.15; keep for the retry when a f-stream or a BovineLabs pre.2 lands). The alpha stream needs no special entitlement. The `linux-il2cpp` module for a8 is a 236 MB install (`unity install-modules -e 7000.0.0a8 -m linux-il2cpp --yes`, about a minute) — installed.
-- Tier U EditMode is proven end to end on this host by a control project: 1/1 passed, exit 0. Receipt command shape:
-  `unity test <project> --editor-version 7000.0.0a8 --mode EditMode --report-format junit --output <xml> --timeout 600`
-  Exit contract: `0` pass, `8` tests ran and failed (terminal — never retry), anything else (with `errors[0].code` `TEST_RUN_ERROR`/`TEST_TIMED_OUT`) infrastructure, safe to retry once. `validate.sh` is written against this contract.
+- License: Unity Personal (Assigned), active via OAuth; batchmode entitlement resolved on every launch. Personal licenses are machine-and-account bound: a service account **cannot** activate one, so a CI lane (O-U3) needs serial or floating licensing.
+- The pinned editor is **7000.0.0a9** (`~/Unity/Hub/Editor`). Editors 7000.0.0a8, 6000.7.0b4 and 6000.7.0b5 stay installed from the earlier attempts; 7000.0.0a10 exists and is not installed. Modules installed for a9: `linux-il2cpp` (`unity install-modules -e 7000.0.0a9 -m linux-il2cpp --yes --accept-eula`).
+- **Unity 7 scripting runtimes.** a9 has two: **CoreCLR** (the default; the editor itself runs on it, its assemblies are compiled with `ENABLE_CORECLR`; the bundled runtime is .NET 10.0.10, `System.Private.CoreLib` 10.0.10-dev, under `Data/PlaybackEngines/LinuxStandaloneSupport/Variations/CoreCLRShared`) and **IL2CPP**. There is no Mono backend left. `ScriptingImplementation` is `Mono2x, IL2CPP, WinRTDotNET, CoreCLR`. Modules `windows-coreclr`, `mac-coreclr` and `mac-server-coreclr` exist, so the CoreCLR transition is already testable on this host.
+- **Backend selection.** `scriptingBackend:` in `ProjectSettings.asset` is keyed by build-target name and the existing `Linux64` key is ignored. `unity/project/Assets/Editor/GiHostBackend.cs` reads `GI_SCRIPTING_BACKEND` (`il2cpp` or `coreclr`) and calls `PlayerSettings.SetScriptingBackend(NamedBuildTarget.Standalone, …)`. `validate.sh` sets it and restores `ProjectSettings.asset` afterwards.
+- **Suites** (all through `unity/validate.sh <suite>`, each prints the fixed summary block and exits `1` on failures, `2` on infrastructure errors or **zero tests**):
+
+  | Suite | Runs | Command underneath |
+  |---|---|---|
+  | `editmode` | `Tests/Editor` in the editor (CoreCLR) | `unity test --mode EditMode` |
+  | `playmode` | `Tests/Runtime` in the editor (CoreCLR) | `unity test --mode PlayMode` |
+  | `coreclr` | `Tests/Runtime` in a Linux CoreCLR player | editor `-runTests -testPlatform StandaloneLinux64` |
+  | `il2cpp` | `Tests/Runtime` in a Linux IL2CPP player | the same, with IL2CPP selected |
+  | `perf` | `Tests/Performance` in the editor | `unity test --mode PlayMode --filter Gi.Entities.Performance` |
+
+  `unity test --mode` only accepts `EditMode` and `PlayMode`; the player platforms need the editor's own `-testPlatform`, which `unity test` reserves.
+- **IL2CPP on this host.** The host project depends on `com.unity.toolchain.linux-x86_64` 2.0.11 (sysroot and clang; the library package does not). Unity's bundled `clang++` and `ld.lld` need `libncurses.so.6` and `libxml2.so.2`, which this distro (Arch-based) ships as `libncursesw.so.6` and `libxml2.so.16`. `validate.sh il2cpp` creates symlinks in `unity/project/Logs/lib-shim` and prepends it to `LD_LIBRARY_PATH`. A cold IL2CPP build is about two minutes wall and 38 minutes of CPU; warm reruns relink only (about 30 s).
+- Receipt exit contract for `unity test`: `0` pass, `8` tests ran and failed (terminal, never retry), anything else is infrastructure and safe to retry once. For the direct editor runs: `0` pass, `2` tests failed, `3` run error.
 - A running editor is controllable headlessly: `unity pipeline install` (com.unity.pipeline, Unity 6.0+), launch the editor with `-batchmode -nographics` and no `-quit`, then `unity command eval '<C#>'` (about 40 ms round trip) and `unity close`. The editor-tooling cards (E-*) should drive editors this way instead of hand-authored UI harnesses. Safe Mode caveat: a project that boots with compile errors never loads the pipeline — fix the code and restart; `unity pipeline list` confirms.
+- BovineLabs sources: the public upstream is `https://gitlab.com/tertle/com.bovinelabs.core.git` (the host project pins commit `82be2794`, 2026-10-15, version 2.0.0-pre.6). The registry `upm.bovinelabs.com` serves up to pre.5; OpenUPM serves only pre.1 (stale; do not use). A local mirror of the BovineLabs monorepo exists at `~/GitHub/tertle-monorepo` (private; paid-tier content, never copy from it into this repository).
 
 ### Lessons — mistakes not to repeat
 
@@ -1115,13 +1130,14 @@ Recorded 2026-10-18 so later sessions start from verified facts, not assumptions
 9. The gate harness mis-spawns children under `dotnet run` (Environment.ProcessPath is the apphost, so children fall through to the verify suite and the host string parses empty). Run gates against the built DLL — `taskset -c 0 dotnet benchmarks/bin/Release/net10.0/GiBenchmarks.dll --gate` — which is how the baseline was recorded. A harness fix (spawn via the dotnet host explicitly) is a queued chore.
 10. The 6000.7 registry line has the same builtin wall as the Unity 7 alphas (A.15): builtin Collections is a shim into engine internals with a Unity-only InternalsVisibleTo list, and no standalone 6.x Collections exists on the public registry. Verify a dependency's internals usage against the *builtin* modules of the exact editor before pinning anything to a beta line.
 11. Coordinator merge discipline: after resolving a conflicted merge locally, `git add` every file the fix touched before committing — an unstaged fix rides the working tree while the push goes out without it (caught by CI on #83; cost one extra CI cycle).
+12. A dependency "wall" was declared after testing only the newest build on one registry. The BovineLabs build that matched the editor (pre.6, 2026-10-15) lived on the upstream GitLab `main` and its own registry, not on OpenUPM. Before refuting a pin, list every source of the dependency (registries, the upstream repository, local mirrors on the host) and read the target Unity version in its `package.json`. The refutation in A.15 was wrong for this reason.
+13. A green exit with zero tests proves nothing: the first `validate.sh il2cpp` printed `passed: 0` with exit 0 because it only entered PlayMode in the editor and found no PlayMode tests. `validate.sh` now exits `2` when no tests ran, and the player suites use the editor's own `-testPlatform`.
+14. The editor deletes `Temp/` at every launch. Keep launch-time shims in `Logs/`.
+15. `set -o pipefail` plus an early-exiting `awk` in a pipeline turns the upstream command into SIGPIPE (exit 141) and aborts the script under `set -e`. Capture the producer's output in a variable first.
+16. Unity 7 alphas: pin one exact alpha for the host project and the package (`unityRelease`), and bump them together. The package's `package.json` now says `"unity": "7000.0", "unityRelease": "0a9"` and depends on the builtin module versions (entities and collections 6.7.0, burst 2.0.0, mathematics 1.4.0).
 
-### Session state (stop at 25%, 2026-10-18)
+### Session state (2026-10-18, second session)
 
-Merged into `main`: #78 (F-1), #80 (inspection hygiene), #81 (G-1), #82 (G-3), #83 (G-5), #84 (G-2), #85 (gate baseline refresh + teardown RSS re-anchor). Into `unity/main`: the main syncs plus the ROADMAP commits through this one. PR #79 (U-0) is merged with D accepted; Tier U is `blocked` per the board. The gate baseline now records G-1's pure-read cost (5 rows, +6.7–16.3%); every other row measured neutral on the quiet host.
+Merged earlier: #78 (F-1), #79 (U-0, Tier D), #80 (inspection hygiene), #81 (G-1), #82 (G-3), #83 (G-5), #84 (G-2), #85 (gate baseline). This session unblocked Tier U (A.15, Appendix F): editor 7000.0.0a9, BovineLabs Core pre.6 from GitLab `82be2794`, all four `validate.sh` suites green (EditMode, PlayMode, CoreCLR player, IL2CPP player).
 
-Next session, in order:
-1. Check the BovineLabs exits: a published build for 6000.7.0f1+ or a Unity 7 installable (`unity releases`); if one exists, redo the U-0 repin against it and take the editmode receipt. If not, the Unity track stays parked and the dotnet-side cards are the work.
-2. Launch wave 2 (F-2, U-1, V-1) — their Needs (F-1, U-0) are met (#79 merged), with the U-0 Tier U items staying `blocked`, not `U-pending` (R-13 does not count `blocked`).
-3. Run the gate-harness chore, then G-7 and G-4 (both need their own pinned gate; serialize the gates).
-4. G-5's S-1 note and G-2's `malloc_trim` note are recorded on their cards/PRs.
+Next, in order: F-2 (scenarios, reference executor, lint, CI), then wave 2 (U-1, A-1, V-1), then the rest of the board. V-0 can start now: CoreCLR is the a9 default, so the Appendix A checklist is answerable today.
