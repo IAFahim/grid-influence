@@ -1,0 +1,56 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a58d95727fc2e186fba15d0a95140cbe, type: 3}
+  m_Name: CrowdProfile
+  m_EditorClassIdentifier: Gi.Entities.Authoring::Gi.Entities.Authoring.GiProfile
+  Axes: 0
+  Origin: {x: 0, y: 0}
+  Grids:
+  - Power: 7
+    Origin: {x: -64, y: -64}
+    Size: 128
+  Layers:
+  - {fileID: 11400000, guid: bef04e90cbfc5911589a504c59cf212a, type: 2}
+  - {fileID: 11400000, guid: 305219ab7273d78198da24366735e9c5, type: 2}
+  - {fileID: 11400000, guid: f045d0e5fbfd49b4a94a1d58b024fbff, type: 2}
+  Stamps:
+  - {fileID: 11400000, guid: 6c5a37d9ba634e52999506a11b23c629, type: 2}
+  - {fileID: 11400000, guid: bd404aca73621903495a6d6abcaecf2b, type: 2}
+  Bindings:
+  - Kind: 1
+    Layer: {fileID: 11400000, guid: f045d0e5fbfd49b4a94a1d58b024fbff, type: 2}
+    ExcludeSelf: 0
+    Period: 0
+    Since: 0
+    Reach: 0
+    Threshold: 0
+    Value:
+      Type: 
+      Field: 
+    Gradient:
+      Type: Gi.Entities.Samples.Crowd.CrowdSteering, Gi.Entities.Samples.Crowd, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+      Field: Gradient
+    Total:
+      Type: 
+      Field: 
+    Position:
+      Type: 
+      Field: 
+    Coverage:
+      Type: 
+      Field: 
+    ReachField:
+      Type: 
+      Field: 
+    ThresholdField:
+      Type: 
+      Field: 

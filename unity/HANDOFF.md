@@ -1,6 +1,6 @@
 # Handoff: Gi for Unity Entities
 
-Rewritten 2026-10-18 at the end of the third session. Read this first, then `AGENTS.md` and `unity/ROADMAP.md` (§0, §1, §4, the board in §5, Appendix F). Everything is in the repository; nothing lives only in a chat.
+Rewritten 2026-10-18 during the fourth session's wrap-up. Read this first, then `AGENTS.md` and `unity/ROADMAP.md` (§0, §1, §4, the board in §5, Appendix F). Everything is in the repository; nothing lives only in a chat.
 
 ## 1. What this project is
 
@@ -25,27 +25,31 @@ Rules that never change (`AGENTS.md`): Gi stays standalone and gains no Unity de
 | #93 U-5 · #94 U-5b (Columns half) · #96 V-1 (Tier D half) · #97 P-1 (page table) | session 2 | stacked |
 | #99 O-U9 compile tier · #101 U-4 · #102 U-5b (Unity half) · #103 V-2 · #104 V-1 (Unity half) | session 3 | stacked |
 | #105 A-1 · #106 A-2 · #107 P-1 (GPU half) · #108 E-6 · #109 E-3 · #110 E-4 · #111 E-1 · #112 E-2 · #113 V-3 | session 3 | stacked |
+| #114 D-1 (docs, samples) | session 4 | stacked |
 | #95 G-6 · #98 G-7 · #100 G-4 | Gi core, into `main` | separate lane |
+
+`hygiene/jb-sweep-2026-10-18` (session 4's below-WARNING jb sweep, 12 test-only fixes) is pushed with no PR; the owner merges it or drops it.
 
 Fix commits found by the first real Unity run were merged **upward** (non-destructively, no force pushes). If you add a fix to a lower branch, merge that branch into the ones above it (`git merge --no-edit <lower>`), do not rebase.
 
 ### What is verified, and where
 
-On the head of the stack (`unity/v-3-performance`), in the editor (CoreCLR 7000.0.0a9, a real GPU): `validate.sh editmode` and `playmode` are green (see the end-of-session numbers in `unity/ROADMAP.md` "Session state"), `validate.sh perf` 6 of 6. Dotnet: `dotnet test unity/tests/Gi.Entities.Columns.Tests -c Release` 157 pass; `jb inspectcode Gi.slnx --severity=WARNING --build` 0 findings; `unity/build-plugins.sh --check` ok.
+On the head of the stack (`unity/d-1-docs`, PR #114), in the editor (CoreCLR 7000.0.0a9): everything session 3 verified on `unity/v-3-performance` (EditMode 45, PlayMode 85, perf 6 — see the roadmap session state) plus the D-1 receipts: `compile.sh` `errors: 0` with the samples imported at `Assets/Samples/com.gi.entities/0.1.0`, the 4-test sample smoke green on the imported copies, `lint.sh` ok, dotnet 157 + 1198 pass, `jb` 0, `build-plugins.sh --check` ok.
 
 **Not yet run anywhere: the Linux player suites (`coreclr`, `il2cpp`)**, and so the ledger rows that need them (L5, the player columns of `unity/perf.md`).
 
 ### Board
 
-Done or in review: F-1, F-2, U-0, U-1, U-2, U-3, U-4, U-5, U-5b, U-6, V-1, V-2, V-3, A-1, A-2, P-1, E-1, E-2, E-3, E-4, E-6, G-0a, G-1 to G-7 (G-6, G-7, G-4 in review). Each row in `unity/ROADMAP.md` says which receipts ran.
-Still open: **D-1** (docs and samples), the optional cards **E-5, E-7, N-1, N-2, S-1, G-8**, **V-0 flip** and **G-0** (blocked: Unity must enable the net10 API level; Appendix B), and the final player pass.
+Done or in review: F-1, F-2, U-0, U-1, U-2, U-3, U-4, U-5, U-5b, U-6, V-1, V-2, V-3, A-1, A-2, P-1, E-1, E-2, E-3, E-4, E-6, D-1 (U-pending), G-0a, G-1 to G-7 (G-6, G-7, G-4 in review). Each row in `unity/ROADMAP.md` says which receipts ran.
+Still open: the optional cards **E-5, E-7, N-1, N-2, S-1, G-8**, **V-0 flip** and **G-0** (blocked: Unity must enable the net10 API level; Appendix B), the perf findings from session 4's investigation agent (see the roadmap session state), and the final player pass.
 
 ## 4. What to do next, in order
 
-1. **D-1 docs and samples** (card in `unity/ROADMAP.md`). Needs U-5, U-6, A-2, all done. Use the shipped pieces: authoring (`GiProfile`, bakers), `GiEmitterBuilder`/`GiSplatBuilder` for runtime spawning, bindings, the Field window, `unity/perf.md`. Verify every code sample compiles through `compile.sh`.
-2. Optional cards if the owner still wants them, cheapest first: E-5 (explain cell and entity inspector), E-7 (flight recorder), then N-1/N-2/S-1/G-8. Ask the owner first; two ideas from them are on record: the roughly 1,700 engine-neutral lines in `Runtime/Columns` could become a reusable adapter package, and a thinner quick-start layer so using Gi in Unity takes a few lines.
-3. **The final player pass** (the owner wants it last): `unity/validate.sh coreclr`, then `il2cpp`; then perf for players (set `GI_PERF_OUT`, run the perf suite in a player, merge with `GI_PERF_JSON=<file> unity/perf.sh none`). Clear every `U-pending` row on the board and update Appendix A.
-4. Owner decisions O-U1 to O-U8 each have a default in the roadmap; use the default and say so in the PR.
+1. **The final player pass** (the owner wants it last, and everything else on the critical path is done): `unity/validate.sh coreclr`, then `il2cpp`; then perf for players (set `GI_PERF_OUT`, run the perf suite in a player, merge with `GI_PERF_JSON=<file> unity/perf.sh none`). Clear every `U-pending` row on the board (D-1's two [U] items included: the README quick start from an empty project, and the samples running in the players — import them from the Package Manager first) and update Appendix A.
+2. Session 4's perf investigation into the L3/L7/L11 misses is recorded (condensed) in the roadmap's fourth-session state: two of the three misses are largely measurement-shape (record them on an ECS frame-C scenario with workers, and split L7 into apply-only vs full-tick at a stated density), and there are three low-risk quick wins for the idle tick (splat early-out, folded prepare jobs, empty-reconcile fast path). Take the fixes the owner picks — each is a change to reviewed runtime code, so one card per fix, from the right base, with the full receipts.
+3. The owner's **ISystem directive**: new systems are ISystem, not SystemBase (the samples comply). Whether to convert the adapter's own systems — SystemBase today because Gi is called only from managed jobs, D-U3 — is the owner's decision; if they say yes, it is a card of its own touching every runtime system.
+4. Optional cards if the owner still wants them, cheapest first: E-5 (explain cell and entity inspector), E-7 (flight recorder), then N-1/N-2/S-1/G-8. Ask the owner first; two ideas from them are on record: the roughly 1,700 engine-neutral lines in `Runtime/Columns` could become a reusable adapter package, and a thinner quick-start layer so using Gi in Unity takes a few lines.
+5. Owner decisions O-U1 to O-U8 each have a default in the roadmap; use the default and say so in the PR.
 
 ## 5. Known gaps and honest caveats (do not hide these)
 
@@ -54,6 +58,8 @@ Still open: **D-1** (docs and samples), the optional cards **E-5, E-7, N-1, N-2,
 - P-1: the heatmap is a compute kernel into a `RenderTexture`; the owner's screenshots in Built-in, URP and HDRP, and ledger row L8 in a real scene, are not done.
 - E1 and E6 are pinned and pass (E6: the fixed-step group and the Gi group do run in an Editor world).
 - The Gi plugin Unity loads is the scalar netstandard2.1 build, about 2.06x slower than the net10 vector build on B1. Recovering it needs Unity to enable the net10 API level (V-0/G-0).
+- The owner directed (session 4): **new systems are ISystem, not SystemBase**. The samples comply; the adapter's systems are SystemBase by the D-U3 managed-jobs decision and were left alone.
+- The samples' `.meta` files ship inside `Samples~` so scene-to-script references survive import; regenerate scenes only through an editor (a transient generator wrote them; it is not committed).
 
 ## 6. Traps (each cost time; most were found by actually running the tests)
 
@@ -70,6 +76,11 @@ Still open: **D-1** (docs and samples), the optional cards **E-5, E-7, N-1, N-2,
 - Never edit files under `unity/com.gi.entities` while a Unity run is compiling; it reads the sources.
 - Unity wipes `unity/project/Temp` on launch; keep helper files in `Logs/`.
 - `[OnCodeLoaded]` needs a `partial` class; `CollectionHelper.CreateNativeArray` for `WorldUpdateAllocator`; add `using Unity.Jobs;` or `Schedule` resolves to the wrong overload; `IJobParallelForDefer` needs the list as a job-struct field; zero-sized components have `TypeInfo.IsZeroSized`.
+- On this Entities build `Baker<T>` needs an `Unity.Entities.Hybrid` asmdef reference, and `SubScene` lives in `Unity.Scenes` (namespace and assembly) with its GUID wired through the editor-only `SceneAsset` property.
+- `state.WorldUpdateAllocator` is already an `Allocator` (no `.ToAllocator()`), and `NativeThreadStream.Writer` is not `IDisposable` — write and drop it.
+- Inside `namespace Gi.Entities.*` the bare `World`/`Grid`/`Layer`/`Stamp` are Gi's handles (R-5): write `Unity.Entities.World.DefaultGameObjectInjectionWorld`, not `World.DefaultGameObjectInjectionWorld`, in samples and tests too.
+- Batch play-mode pumps frames at about 2000 fps, so waiting N frames waits almost no time: wait on `GiFrame.Tick` with a wall-clock timeout — and capture the frame's `Generation` first, because a stale frame from the previous scene satisfies any tick threshold. Scene-based tests also need `EditorBuildSettings.scenes` set (Unity 7 refuses `LoadSceneAsync` otherwise), a TearDown that destroys runtime-spawned entities and leftover baked emitters, and rebuilds of the default world break editor subscene hooks — clean entities instead.
+- A `ComponentLookup` used for enabled-bit reads in a parallel `IJobEntity` must be declared `[ReadOnly]` or the job scheduled serially; the safety system calls enabled-bit access a write.
 
 ## 7. How to check your work
 

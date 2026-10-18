@@ -1538,6 +1538,17 @@ serializer reflection is disabled in the tool project.
 
 ## Unity boundary
 
+Gi stays a standalone .NET library; the Unity adapter (`unity/com.gi.entities`) is a consumer, not
+a fork. Its compiled surface ships as committed plugin DLLs (`Plugins/Gi`, provenance-checked by
+`unity/build-plugins.sh`), and today that is the scalar netstandard2.1 build, because Unity's
+script assemblies cannot yet reference the net10 TFM the vector build targets. Every hand-off of
+unmanaged memory between the two sides lives in the adapter code named below; each heading states
+its lifetime, aliasing, alignment and concurrency in this section's voice, following the proof
+template of "Unsafe proof" above. Two adapter-wide rules frame them: all Gi calls from ECS run in
+managed jobs (never Burst, D-U3), and every writer or reader of a Gi world chains through the
+process-wide fences in `GiRuntime.Fences.cs`, so the headings below describe the fences' clients,
+not the fences themselves.
+
 ### U-1
 
 The unsafe code in the frame and bootstrap is three things: the fixed buffers in `GiTables` and `GiFaults`, the spans over blob arrays in `GiBootstrapSystem`, and the managed `ProcessJob` that calls `Process`.
