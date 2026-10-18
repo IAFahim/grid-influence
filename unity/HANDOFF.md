@@ -17,7 +17,9 @@ Rules that never change (`AGENTS.md`): Gi stays standalone and gains no Unity de
 
 ## 3. State of the repository
 
-### The pull-request stack (all unmerged; the owner merges in this order)
+### The pull-request stack (history — everything is merged, 2026-10-19)
+
+**Merged state:** `unity/main` contains #86–#118, #120–#128, #116 (CI SDK pin) and #131 (U-7, the ISystem conversion); `main` contains the Gi lane (G-6 #129, G-7 #130, G-4 #100). #119/#122–#124 were closed as superseded (their commits landed via the fold, #128). The table below is the historical stack; new work branches off `unity/main` directly.
 
 | PR | Card | Base |
 |---|---|---|
@@ -44,12 +46,11 @@ Done or in review: every card (including A-3 #122, E-9 #123 and E-8 #124 from th
 
 ## 4. What to do next, in order
 
-1. **Merge order.** #86 to #113, #114, #117, #118 as before. After that there are two lines that both touch ROADMAP, HANDOFF, `docs/model.md`, `.gitignore`, `GiDebugConfig` and the Presentation asmdef: the parallel session's (#119, then #122/#123/#124) and mine (#120, #121, #125, #126, V-3c). `unity/fold-prototype-cards` has the conflicts already resolved and the combined result verified; merge my line, then the fold PR, and the parallel PRs (#119, #122-124) become redundant (their commits arrive through the fold). Merging the parallel line first also works, but then my line conflicts in those files.
-2. **Wait for the owner to merge** the stack in the order of the table above (the Gi lane #95, #98, #100 into `main` too), then merge `unity/main` upward only if asked. Do not start new cards on top of an unmerged stack unless the owner says so.
-3. **Re-check V-0/G-0** whenever a newer Unity 7 alpha appears (`https://services.api.unity.com/unity/editor/release/v1/releases?version=7000`): if `ApiCompatibilityLevel.NET` is enabled, follow Appendix B item 11 and rerun V-1, V-2, V-3.
-4. The owner's **ISystem directive**: every system in the adapter is ISystem now. New systems were ISystem from the start, and the owner reopened D-U3 on 2026-10-19 ("Unity says use managed code in ISystem, not SystemBase at all"); U-7 (`unity/u-7-isystem`) converted the last three — `GiSenseSystem`, `GiCountersSystem`, `GiInspectorSystem`. Managed state rides `GCHandle` roots (Sense's binding table, the inspector's `GiWorldInfo`) because this Entities build stores system structs in unmanaged memory and rejects managed fields at creation.
-5. Optional perf cards that need the owner's pick, none on the board: sense revision-gating (L3's real cause), an entity-level touched list for the reconcile diff (L7), a Gi-core incremental deposit (L7's re-bake half, from `main` with the full gate), and L2 on frame C with workers. Two ideas from the owner are on record: the roughly 1,700 engine-neutral lines in `Runtime/Columns` could become a reusable adapter package, and a thinner quick-start layer.
-6. Owner decisions O-U1 to O-U8 each have a default in the roadmap; use the default and say so in the PR.
+1. **The stack is merged (2026-10-19), without the player builds (owner-dropped).** One incident, resolved: during the bulk merge, #95 and #98 (the Gi lane, destined for `main`) were mistakenly merged into `unity/main` — content-compatible, but `main` still needed them, so G-6 and G-7 were re-issued as #129 and #130 and merged into `main`; the G-7 src drift this left in unity/main's committed `Gi.dll` was repaired by #131's plugin refresh. #100 (G-4) needed a hand-built NativeHeap union (its atomic counters with G-6's allocator hook), validated by the full dotnet suite (1209/0) before merging.
+2. **Re-check V-0/G-0** whenever a newer Unity 7 alpha appears (`https://services.api.unity.com/unity/editor/release/v1/releases?version=7000`): if `ApiCompatibilityLevel.NET` is enabled, follow Appendix B item 11 and rerun V-1, V-2, V-3.
+3. The owner's **ISystem directive**: every system in the adapter is ISystem now. New systems were ISystem from the start, and the owner reopened D-U3 on 2026-10-19 ("Unity says use managed code in ISystem, not SystemBase at all"); U-7 (`unity/u-7-isystem`) converted the last three — `GiSenseSystem`, `GiCountersSystem`, `GiInspectorSystem`. Managed state rides `GCHandle` roots (Sense's binding table, the inspector's `GiWorldInfo`) because this Entities build stores system structs in unmanaged memory and rejects managed fields at creation.
+4. Optional perf cards that need the owner's pick, none on the board: sense revision-gating (L3's real cause), an entity-level touched list for the reconcile diff (L7), a Gi-core incremental deposit (L7's re-bake half, from `main` with the full gate), and L2 on frame C with workers. Two ideas from the owner are on record: the roughly 1,700 engine-neutral lines in `Runtime/Columns` could become a reusable adapter package, and a thinner quick-start layer.
+5. Owner decisions O-U1 to O-U8 each have a default in the roadmap; use the default and say so in the PR.
 
 ## 5. Known gaps and honest caveats (do not hide these)
 
