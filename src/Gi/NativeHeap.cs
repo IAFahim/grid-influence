@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Threading;
 
 namespace Gi;
 
@@ -14,7 +15,7 @@ internal static unsafe class NativeHeap
 #if NET
     public static void* AllocZeroed(nuint bytes)
     {
-        Calls++;
+        Interlocked.Increment(ref Calls);
         var hook = HookAllocate;
         if (hook == null) return NativeMemory.AllocZeroed(bytes);
         var pointer = hook(bytes, DefaultAlignment);
@@ -24,7 +25,7 @@ internal static unsafe class NativeHeap
 
     public static void Free(void* pointer)
     {
-        Calls++;
+        Interlocked.Increment(ref Calls);
         var hook = HookFree;
         if (hook == null) NativeMemory.Free(pointer);
         else hook(pointer);
@@ -32,14 +33,14 @@ internal static unsafe class NativeHeap
 
     public static void* AlignedAlloc(nuint bytes)
     {
-        Calls++;
+        Interlocked.Increment(ref Calls);
         var hook = HookAllocate;
         return hook == null ? NativeMemory.AlignedAlloc(bytes, VectorAlignment) : hook(bytes, VectorAlignment);
     }
 
     public static void AlignedFree(void* pointer)
     {
-        Calls++;
+        Interlocked.Increment(ref Calls);
         var hook = HookFree;
         if (hook == null) NativeMemory.AlignedFree(pointer);
         else hook(pointer);
@@ -47,7 +48,7 @@ internal static unsafe class NativeHeap
 #else
     public static void* AllocZeroed(nuint bytes)
     {
-        Calls++;
+        Interlocked.Increment(ref Calls);
         var hook = HookAllocate;
         if (hook == null)
         {
@@ -63,7 +64,7 @@ internal static unsafe class NativeHeap
 
     public static void Free(void* pointer)
     {
-        Calls++;
+        Interlocked.Increment(ref Calls);
         var hook = HookFree;
         if (hook == null) Marshal.FreeHGlobal((nint)pointer);
         else hook(pointer);
@@ -71,7 +72,7 @@ internal static unsafe class NativeHeap
 
     public static void* AlignedAlloc(nuint bytes)
     {
-        Calls++;
+        Interlocked.Increment(ref Calls);
         var hook = HookAllocate;
         if (hook == null) return (void*)Marshal.AllocHGlobal((nint)bytes);
         return hook(bytes, VectorAlignment);
@@ -79,7 +80,7 @@ internal static unsafe class NativeHeap
 
     public static void AlignedFree(void* pointer)
     {
-        Calls++;
+        Interlocked.Increment(ref Calls);
         var hook = HookFree;
         if (hook == null) Marshal.FreeHGlobal((nint)pointer);
         else hook(pointer);

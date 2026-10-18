@@ -1359,7 +1359,7 @@ digits. Concurrency: single thread.
   Determinism is unaffected: tiles are
   independent, arithmetic is integer-exact, the dead set is a pure function of page content, and
   the order of removals has no observable effect on map contents. Warm `Process`
-  allocates 0 B: every buffer it touches is sized by grow-to-max before steady state. World creation, `World.Free`, and stamp catalog mutation (creation and `Stamp.Free`, which
+  allocates 0 B: every buffer it touches is sized by grow-to-max before steady state. `Process` on different worlds shares no mutable state: the kernel cache and canvas belong to the world, the stage timers (`ProcessStages`) accumulate in the `Stages` field of the `WorldCtx` that ran the stage and are summed only when a benchmark reads them, and `NativeHeap.Calls` is advanced with `Interlocked.Increment`, so first-growth allocations on two threads leave it exact. `ProcessStages.Measuring` is written only while no `Process` runs. `CrossWorldProcessTests` drives two worlds on two threads for 10,000 ticks of place, move, gain and remove traffic and requires the same layer hashes and the same heap-call count as the same two worlds run one after the other. World creation, `World.Free`, and stamp catalog mutation (creation and `Stamp.Free`, which
   scans every world's source columns, pending snapshots, and journal) are also serialized
   across worlds because their arenas and counts are process-wide, `Stamp.Free` must not
   overlap any world's mutation or `Process`, and `World.Free` must not overlap any call that
