@@ -21,7 +21,7 @@ namespace Gi.Entities
 
         public void OnCreate(ref SystemState state)
         {
-            _frame = state.EntityManager.CreateEntity(typeof(GiFrame));
+            _frame = state.EntityManager.CreateEntity(typeof(GiFrame), typeof(GiStats));
             _profiles = state.GetEntityQuery(ComponentType.ReadOnly<GiProfileReference>());
             _sources = state.GetEntityQuery(ComponentType.ReadWrite<GiSource>());
             _sourceHandle = state.GetComponentTypeHandle<GiSource>();

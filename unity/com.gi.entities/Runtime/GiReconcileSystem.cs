@@ -49,6 +49,7 @@ namespace Gi.Entities
                 Disabled = state.GetComponentTypeHandle<Disabled>(true),
                 Transforms = state.GetComponentTypeHandle<LocalTransform>(true),
                 Matrices = state.GetComponentTypeHandle<LocalToWorld>(true),
+                Parents = state.GetComponentTypeHandle<Parent>(true),
                 Faults = state.GetComponentTypeHandle<GiFault>(),
             };
             _frames = state.GetComponentLookup<GiFrame>();
@@ -86,6 +87,7 @@ namespace Gi.Entities
             _view.Disabled.Update(ref state);
             _view.Transforms.Update(ref state);
             _view.Matrices.Update(ref state);
+            _view.Parents.Update(ref state);
             _view.Faults.Update(ref state);
             _frames.Update(ref state);
             _sourceLookup.Update(ref state);
