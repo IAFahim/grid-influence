@@ -58,6 +58,12 @@ YAML; every edit is undoable.
   Emitters belong on persistent layers.
 - **Gi Splat Authoring** — the same fields for transient layers; a splat deposits every tick it is
   enabled.
+- **Gi Sensor Authoring** — one component for read bindings: a profile and the layer it senses, and
+  per-kind toggles (value, gradient, area, max, nearest) with the reach, threshold and exclude-self
+  fields each kind supports. Baking adds the matching `GiSensor*` output components — reach and
+  threshold sit beside the outputs, so a binding can read them per entity through `ReachField` and
+  `ThresholdField` — and the nearest found tag `GiSensorFound`, parked disabled until the sense pass
+  finds a hit; a miss disables it again on the next tick.
 
 ## Bindings
 
@@ -77,7 +83,8 @@ enableable component.
 
 `ExcludeSelf` subtracts the entity's own source (persistent layers only). `Period` n senses the
 entity once every n ticks and keeps its last outputs between. Reach and threshold can come per
-entity from a `float`/`short` field (`ReachField`, `ThresholdField`) instead of constants.
+entity from a `float`/`short` field (`ReachField`, `ThresholdField`) instead of constants; the
+`GiSensor*` components carry both, so **Gi Sensor Authoring** and the binding rows meet on them.
 
 Binding-size errors surface in the inspector before any bake.
 
