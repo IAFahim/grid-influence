@@ -128,6 +128,8 @@ internal unsafe struct LayerData
     public byte Derived;
     public int* InDirty;
     public int* Epochs;
+    public ulong* TileHashes;
+    public ulong Hash;
     public NativeBuffer<int> Dirty;
     public NativeBuffer<int> Changed;
     public NativeBuffer<int> Stale;
@@ -471,6 +473,9 @@ public static unsafe partial class World
         ld->LivePages = 0;
         NativeHeap.Free(ld->InDirty);
         NativeHeap.Free(ld->Epochs);
+        NativeHeap.Free(ld->TileHashes);
+        ld->TileHashes = null;
+        ld->Hash = 0;
         if (ld->Hist != null)
         {
             ld->Hist->Release(g->TileCount);
@@ -703,6 +708,8 @@ public static unsafe partial class World
                     }
 
                 ld->Max.Reset();
+                ld->Hash = 0;
+                if (ld->TileHashes != null) new Span<ulong>(ld->TileHashes, g->TileCount).Clear();
             }
         }
     }
