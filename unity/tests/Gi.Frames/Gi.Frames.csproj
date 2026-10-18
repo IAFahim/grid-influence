@@ -7,6 +7,7 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <IsPackable>false</IsPackable>
+    <RepositoryUrl>https://github.com/IAFahim/grid-influence</RepositoryUrl>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <AssemblyName>GiBenchmarks</AssemblyName>
     <RootNamespace>Gi.Frames</RootNamespace>
