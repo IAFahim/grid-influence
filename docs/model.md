@@ -1540,7 +1540,20 @@ serializer reflection is disabled in the tool project.
 
 ### U-1
 
-Pending.
+The unsafe code in the frame and bootstrap is three things: the fixed buffers in `GiTables` and `GiFaults`, the spans over blob arrays in `GiBootstrapSystem`, and the managed `ProcessJob` that calls `Process`.
+
+- **Lifetime.**
+  - `GiTables` and `GiFaults` are plain value fields of `GiFrame`. They live in the singleton's chunk, are copied by value into jobs and back, and hold no pointer to anything.
+  - The spans in `GiBootstrapSystem.Rebuild` cover `BlobArray` storage of the profile blob. The blob is held by the `GiProfileReference` component for the whole call, and `Rebuild` runs on the main thread, where nothing can dispose or replace the blob. The spans do not escape the method; `GiWorldBuilder` copies every value it keeps (grid, layer and stamp ids go into `GiTables`).
+  - `ProcessJob` holds only an `Entity` and a `ComponentLookup`. The Gi world and its token are read from `GiFrame` when the job runs.
+- **Aliasing.**
+  - The blob spans are read-only and nothing in the call writes to blob memory.
+  - `ProcessJob` is the only job that writes `GiFrame` while it runs, because it takes `GiRuntime.BeginWrite`; every other system reads or writes `GiFrame` on the main thread after the fences or through the ECS dependency on the same component.
+- **Alignment.** The fixed buffers are byte arrays, so they need no alignment beyond the struct's own. `BlobArray<T>` storage is aligned for `T` by the blob builder, and the spec structs are blittable with natural alignment, so the span reads are aligned.
+- **Concurrency.**
+  - `GiFrame` is written by `GiBootstrapSystem` only after `GiRuntime.CompleteAll()` and `CompleteAllTrackedJobs()`, so no job is running when the world is built, released or replaced.
+  - `Process` mutates the Gi world, so `ProcessJob` is scheduled behind `BeginWrite` and registered with `EndWrite`; any later Gi writer or reader depends on it through the same fences.
+  - `GiStampRegistry` is plain managed state touched only from the main thread (`GiBootstrapSystem`, `GiOrphans`, the lifecycle callbacks).
 
 ### U-2
 
