@@ -4,13 +4,16 @@
     "references": [
         "BovineLabs.Core",
         "Gi.Entities",
+        "Gi.Entities.Presentation",
+        "Gi.Entities.Tests.Ecs",
         "Gi.Entities.Tests.Support",
         "Unity.Burst",
         "Unity.Collections",
         "Unity.Entities",
         "Unity.Mathematics",
         "Unity.PerformanceTesting",
-        "Unity.Transforms"
+        "Unity.Transforms",
+        "UnityEngine.TestRunner"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
@@ -19,6 +22,7 @@
     "precompiledReferences": [
         "Gi.Validation.dll",
         "Gi.dll",
+        "GiBenchmarks.dll",
         "nunit.framework.dll"
     ],
     "autoReferenced": false,

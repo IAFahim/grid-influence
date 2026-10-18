@@ -62,6 +62,18 @@ else
     cp -- "$corpus_dll" "$corpus_stage/Gi.Corpus.dll"
 fi
 
+frames_project=$root/unity/tests/Gi.Frames/Gi.Frames.csproj
+frames_stage=$root/unity/com.gi.entities/Tests/Performance
+dotnet build "$frames_project" -c Release -f netstandard2.1 -t:Rebuild -m:1 -nodeReuse:false -p:Deterministic=true -p:ContinuousIntegrationBuild=true -p:IncludeSourceRevisionInInformationalVersion=false -p:DebugType=none -p:EnableSourceLink=false -p:EmbedAllSources=false
+frames_dll=$root/unity/tests/Gi.Frames/bin/Release/netstandard2.1/GiBenchmarks.dll
+[ -f "$frames_dll" ] || { printf 'missing %s\n' "$frames_dll" >&2; exit 2; }
+printf 'frames GiBenchmarks.dll %s\n' "$(sha256sum "$frames_dll" | cut -d' ' -f1)" >>"$manifest"
+if $check; then
+    cmp -s "$frames_dll" "$frames_stage/GiBenchmarks.dll" || { printf 'changed Tests/Performance/GiBenchmarks.dll\n' >&2; status=1; }
+else
+    cp -- "$frames_dll" "$frames_stage/GiBenchmarks.dll"
+fi
+
 if $check; then
     cmp -s "$manifest" "$plugins/manifest.txt" || { printf 'manifest differs\n' >&2; status=1; }
 else
