@@ -221,7 +221,7 @@ Plan §12's S1–S5 apply, plus:
 | G-3 | Tooling read-outs | core | P1 | — | G | 2 | done | #82. `World.Memory(world, out storeBytes, out liveTiles, out pages, out kernelEntries, out liveSources)`; E-1/E-4/E-6 consume it |
 | U-2 | Reconcile, emitters, pulses | runtime | P0 | U-1, F-2 | D, U | 3 | done | stacked after #89 |
 | U-4 | Fences, guard, cross-world writers | runtime | P0 | U-1 | U | 3 | todo | |
-| U-6 | Splat | runtime | P0 | U-1, F-2 | D, U | 3 | todo | |
+| U-6 | Splat | runtime | P0 | U-1, F-2 | D, U | 3 | done | stacked after #91 |
 | A-2 | Bakers, builders, live baking | authoring | P0 | A-1, U-1 | U | 3 | todo | |
 | P-1 | GPU mirror and heatmap | presentation | P1 | U-1, F-2 | D, U | 3 | todo | |
 | E-3 | Stamp Studio | editor | P1 | A-1, U-1 | U | 3 | todo | |
@@ -1039,6 +1039,9 @@ This roadmap changes the plan in the ways listed here. The coordinator folds the
 23. **Sync is one `SyncTransforms` call over up to four row categories** (none, oriented, scaled, both), because the call accepts null heading and scale columns and reports rejected rows through the `Invalid` mask. The plan's separate `Sync` call for position-only rows is not needed. Gi clears and fills the mask itself.
 24. **A parented emitter's pose comes from `LocalToWorld`** (a chunk with `Parent`, or without `LocalTransform`), and a root's from `LocalTransform`; both reconcile and sync use `GiPose`.
 25. **`GiStats` is a component on the frame entity** (commands, pulses, sync rows, splats, sensed, changed tiles). Jobs write it; the profiler module (E-6) and tests read it.
+
+26. **Layer residency is part of `GiTables`** (`TransientMask`), because `World.Splat` returns 0 for a non-transient layer without saying why. The splat pass maps an unknown layer key to `InvalidLayer`, a persistent or derived layer to `WrongResidency`, and an unknown stamp key to `InvalidStamp`, and skips the entity.
+27. **Splats are not change-filtered**: a transient layer is cleared by every `Process`, so every enabled `GiSplat` is read and splatted every tick. The sort is a stable counting sort by layer (chunk order, then entity order) and a layer whose stamps and gains all agree uses the single-stamp overload.
 
 New open decisions:
 

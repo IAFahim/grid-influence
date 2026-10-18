@@ -17,6 +17,7 @@ namespace Gi.Entities.Tests
         public readonly Entity[] Entities;
         private readonly EntityArchetype[] _archetypes = new EntityArchetype[8];
         private readonly bool[] _spawned;
+        private readonly List<Entity> _splats = new List<Entity>();
         private readonly EntityQuery _pulses;
 
         public GiEcsExecutor(GiScenario scenario, string name = "GiExecutor")
@@ -43,6 +44,8 @@ namespace Gi.Entities.Tests
         public ulong[] Step(int tick)
         {
             var manager = Fixture.Manager;
+            foreach (var splat in _splats) manager.DestroyEntity(splat);
+            _splats.Clear();
             var pulses = new List<GiPulse>();
             foreach (var op in Scenario.Ticks[tick].Ops) Apply(manager, op, pulses);
 
@@ -119,6 +122,9 @@ namespace Gi.Entities.Tests
                     target.Layer = new GiLayerKey((byte)op.Layer);
                     target.Stamp = new GiStampKey((byte)op.Stamp);
                     manager.SetComponentData(Entities[op.Entity], target);
+                    break;
+                case GiScenarioOpKind.Splat:
+                    _splats.Add(Fixture.CreateSplat((byte)op.Layer, (byte)op.Stamp, (sbyte)op.Gain, op.X, op.Y));
                     break;
                 case GiScenarioOpKind.Pulse:
                     pulses.Add(new GiPulse

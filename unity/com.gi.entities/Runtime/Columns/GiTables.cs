@@ -9,6 +9,7 @@ namespace Gi.Entities
         public byte GridCount;
         public byte LayerCount;
         public byte StampCount;
+        public uint TransientMask;
         private fixed byte _grids[MaxGrids];
         private fixed byte _layers[MaxLayers];
         private fixed byte _stamps[MaxStamps];
@@ -45,6 +46,17 @@ namespace Gi.Entities
         public void AddLayer(byte layer)
         {
             _layers[LayerCount++] = layer;
+        }
+
+        public void AddLayer(byte layer, bool transient)
+        {
+            if (transient) TransientMask |= 1u << LayerCount;
+            AddLayer(layer);
+        }
+
+        public readonly bool IsTransient(GiLayerKey key)
+        {
+            return key.Index < LayerCount && (TransientMask >> key.Index & 1u) != 0u;
         }
 
         public void AddStamp(byte stamp)

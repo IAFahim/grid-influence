@@ -1581,7 +1581,12 @@ Pending.
 
 ### U-6
 
-Pending.
+The unsafe code in splat is the pointer access in `GiSplatView.Visit`, the `stackalloc` cursor array in the write pass, and the `Span` views `GiSplatPass.Apply` builds over the finished columns.
+
+- **Lifetime.** The column lists and the count and offset arrays come from `state.WorldUpdateAllocator` and outlive every job in the chain. `Apply` builds its spans over list storage that is not resized while it runs and does not keep them; `World.Splat` reads the spans inside the call. The `stackalloc` cursor array lives for one `Execute`.
+- **Aliasing.** Layer `k` owns the slice `[Meta[k], Meta[k] + Meta[32 + k])` of every column. Chunk `c` writes rows from its own cursor, which starts at `Offsets[c * 32 + k]` and advances once per entity of layer `k` that the count pass counted, so chunks write disjoint rows. The count pass only reads.
+- **Alignment.** `float`, `byte` and `sbyte` columns are naturally aligned list storage; slices start at element boundaries.
+- **Concurrency.** The count and write passes are parallel over chunks and use identical decisions (`GiSplatPass.Check` on identical inputs), so the cursor never passes the counted end of its slice. `GiSplatApplyJob` is the only Gi writer here and runs behind `GiRuntime.BeginWrite` and `EndWrite`; the faults are written by the chunk that owns the entity.
 
 ### P-1
 
