@@ -230,7 +230,7 @@ Plan §12's S1–S5 apply, plus:
 | G-2 | Runtime teardown | core | P1 | — | G | 3 | done | #84. `World.Teardown()`; revision floor keeps pre-teardown tokens refused; RSS-flat over 1000 cycles |
 | G-7 | Incremental layer hash | core | P1 | — | G | 3 | todo | |
 | U-3 | Sync | runtime | P0 | U-2 | D, U | 4 | done | stacked after #90 |
-| U-5 | Read bindings: value and gradient | runtime | P0 | U-2 | D, U | 4 | todo | |
+| U-5 | Read bindings: value and gradient | runtime | P0 | U-2 | D, U | 4 | done | stacked after #93. CoreCLR and IL2CPP players 49/49 at c6723dc; editmode and a fresh PlayMode editor run deferred by the owner |
 | V-2 | ECS determinism and allocation | verification | P0 | U-3, U-4, U-5, U-6 | U | 5 | todo | |
 | U-5b | Read bindings: area, max, nearest, changed | runtime | P1 | U-3, U-5 | D, U | 5 | todo | |
 | E-1 | Field window | editor | P1 | P-1 | U | 5 | todo | |
