@@ -66,8 +66,7 @@ namespace Gi.Entities
             var allocator = World.UpdateAllocator.ToAllocator;
             var batch = GiSensePass.Batch(GiSenseConfig.Batch.Data);
             var context = new NativeReference<GiReconcileContext>(allocator);
-            var handle = new GiPrepareJob { Frame = frame, Frames = _frames, Context = context }.Schedule(Dependency);
-            handle = new GiSenseBeginJob { Stats = frame, Lookup = _stats }.Schedule(handle);
+            var handle = new GiSenseBeginJob { Stats = frame, Lookup = _stats, Frame = frame, Frames = _frames, Context = context }.Schedule(Dependency);
 
             for (var b = 0; b < _bindings.Length; b++)
                 handle = Schedule(_bindings[b], frame, context, batch, allocator, handle);

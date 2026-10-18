@@ -11,27 +11,17 @@ using GiWorld = Gi.World;
 namespace Gi.Entities
 {
     [BurstCompile]
-    internal struct GiPrepareJob : IJob
+    internal unsafe struct GiDrainPulsesJob : IJob
     {
         public Entity Frame;
         [ReadOnly] public ComponentLookup<GiFrame> Frames;
         public NativeReference<GiReconcileContext> Context;
-
-        public void Execute()
-        {
-            var frame = Frames[Frame];
-            Context.Value = new GiReconcileContext { Alive = frame.Alive, World = frame.World, Tick = frame.Tick, Plane = frame.Plane, Tables = frame.Tables };
-        }
-    }
-
-    [BurstCompile]
-    internal unsafe struct GiDrainPulsesJob : IJob
-    {
         [ReadOnly] public UnsafeList<NativeThreadStream>.ReadOnly Streams;
         public NativeList<GiPulse> Pulses;
 
         public void Execute()
         {
+            Context.Value = GiReconcileContext.Of(Frames[Frame]);
             for (var s = 0; s < Streams.Length; s++)
             {
                 var reader = Streams.Ptr[s].AsReader();

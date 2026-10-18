@@ -35,16 +35,22 @@ namespace Gi.Entities
 
         public void OnUpdate(ref SystemState state)
         {
+            _stats.Update(ref state);
+            var frameEntity = SystemAPI.GetSingletonEntity<GiFrame>();
+            if (_splats.IsEmpty)
+            {
+                state.Dependency = new GiSplatIdleJob { Frame = frameEntity, Stats = _stats }.Schedule(state.Dependency);
+                return;
+            }
+
             _view.Splats.Update(ref state);
             _view.Transforms.Update(ref state);
             _view.Matrices.Update(ref state);
             _view.Parents.Update(ref state);
             _view.Faults.Update(ref state);
             _frames.Update(ref state);
-            _stats.Update(ref state);
 
             var allocator = state.WorldUpdateAllocator;
-            var frameEntity = SystemAPI.GetSingletonEntity<GiFrame>();
             var chunkCount = _splats.CalculateChunkCountWithoutFiltering();
             var context = new NativeReference<GiReconcileContext>(allocator);
             var counts = CollectionHelper.CreateNativeArray<int>(chunkCount * GiSplatPass.Layers, allocator);
@@ -55,10 +61,20 @@ namespace Gi.Entities
             var stamps = new NativeList<byte>(allocator);
             var gains = new NativeList<sbyte>(allocator);
 
-            var handle = new GiPrepareJob { Frame = frameEntity, Frames = _frames, Context = context }.Schedule(state.Dependency);
-            handle = new GiSplatCountJob { View = _view, Context = context, Counts = counts }.ScheduleParallel(_splats, handle);
-            handle = new GiSplatPrefixJob { Counts = counts, Offsets = offsets, Meta = meta, Xs = xs, Ys = ys, Stamps = stamps, Gains = gains }
-                .Schedule(handle);
+            var handle = new GiSplatCountJob { View = _view, Frame = frameEntity, Frames = _frames, Counts = counts }.ScheduleParallel(_splats, state.Dependency);
+            handle = new GiSplatPrefixJob
+            {
+                Frame = frameEntity,
+                Frames = _frames,
+                Context = context,
+                Counts = counts,
+                Offsets = offsets,
+                Meta = meta,
+                Xs = xs,
+                Ys = ys,
+                Stamps = stamps,
+                Gains = gains,
+            }.Schedule(handle);
             handle = new GiSplatWriteJob
             {
                 View = _view,

@@ -13,12 +13,13 @@ namespace Gi.Entities
     {
         public GiSyncView View;
         public uint LastVersion;
-        [ReadOnly] public NativeReference<GiReconcileContext> Context;
+        public Entity Frame;
+        [ReadOnly] public ComponentLookup<GiFrame> Frames;
         [NativeDisableParallelForRestriction] public NativeArray<int> Counts;
 
         public void Execute(in ArchetypeChunk chunk, int unfilteredChunkIndex, bool useEnabledMask, in v128 chunkEnabledMask)
         {
-            if (!Context.Value.Alive || !View.Needs(chunk, LastVersion)) return;
+            if (!Frames[Frame].Alive || !View.Needs(chunk, LastVersion)) return;
             Counts[unfilteredChunkIndex * GiSyncPass.Categories + View.Category(chunk)] = View.Placed(chunk);
         }
     }
@@ -26,6 +27,9 @@ namespace Gi.Entities
     [BurstCompile]
     internal unsafe struct GiSyncPrefixJob : IJob
     {
+        public Entity Frame;
+        [ReadOnly] public ComponentLookup<GiFrame> Frames;
+        public NativeReference<GiReconcileContext> Context;
         [ReadOnly] public NativeArray<int> Counts;
         public NativeArray<int> Offsets;
         public NativeArray<int> Meta;
@@ -38,6 +42,7 @@ namespace Gi.Entities
 
         public void Execute()
         {
+            Context.Value = GiReconcileContext.Of(Frames[Frame]);
             var chunks = Counts.Length / GiSyncPass.Categories;
             var total = 0;
             var words = 0;

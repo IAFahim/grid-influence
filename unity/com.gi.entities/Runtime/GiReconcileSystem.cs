@@ -76,7 +76,14 @@ namespace Gi.Entities
                 _playback = false;
             }
 
-            if (!_added.IsEmptyIgnoreFilter) state.EntityManager.AddComponent<GiSource>(_added);
+            var added = !_added.IsEmptyIgnoreFilter;
+            if (!added && _all.IsEmptyIgnoreFilter && _pulses.Containers.Length == 0)
+            {
+                _pulses.ClearRewind(state.Dependency);
+                return;
+            }
+
+            if (added) state.EntityManager.AddComponent<GiSource>(_added);
 
             _view.Entities.Update(ref state);
             _view.Sources.Update(ref state);
@@ -107,9 +114,14 @@ namespace Gi.Entities
             var scratch = new NativeList<GiWorld.SourceCommand>(allocator);
             var batchResults = new NativeList<GiWorld.SourceResult>(allocator);
 
-            var handle = new GiPrepareJob { Frame = SystemAPI.GetSingletonEntity<GiFrame>(), Frames = _frames, Context = context }
-                .Schedule(state.Dependency);
-            handle = new GiDrainPulsesJob { Streams = _pulses.Containers, Pulses = pulses }.Schedule(handle);
+            var handle = new GiDrainPulsesJob
+            {
+                Frame = SystemAPI.GetSingletonEntity<GiFrame>(),
+                Frames = _frames,
+                Context = context,
+                Streams = _pulses.Containers,
+                Pulses = pulses,
+            }.Schedule(state.Dependency);
             handle = new GiCountJob { View = _view, Context = context, LastVersion = state.LastSystemVersion, Counts = counts }
                 .ScheduleParallel(_all, handle);
             handle = new GiPrefixJob
