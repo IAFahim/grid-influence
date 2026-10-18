@@ -1118,7 +1118,7 @@ Recorded 2026-10-18 so later sessions start from verified facts, not assumptions
 
 ### Session state (stop at 25%, 2026-10-18)
 
-Merged into `main`: #78 (F-1), #80 (inspection hygiene), #81 (G-1), #82 (G-3), #83 (G-5), #84 (G-2). Into `unity/main`: the main syncs plus the ROADMAP commits through this one. PR #79 (U-0) is merged with D accepted; Tier U is `blocked` per the board.
+Merged into `main`: #78 (F-1), #80 (inspection hygiene), #81 (G-1), #82 (G-3), #83 (G-5), #84 (G-2), #85 (gate baseline refresh + teardown RSS re-anchor). Into `unity/main`: the main syncs plus the ROADMAP commits through this one. PR #79 (U-0) is merged with D accepted; Tier U is `blocked` per the board. The gate baseline now records G-1's pure-read cost (5 rows, +6.7–16.3%); every other row measured neutral on the quiet host.
 
 Next session, in order:
 1. Check the BovineLabs exits: a published build for 6000.7.0f1+ or a Unity 7 installable (`unity releases`); if one exists, redo the U-0 repin against it and take the editmode receipt. If not, the Unity track stays parked and the dotnet-side cards are the work.
