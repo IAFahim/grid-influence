@@ -354,7 +354,7 @@ internal sealed unsafe class CorpusRunner
                 var count = 1 + rng.NextInt(0, MaxColumn);
                 StreamOperands.ColumnPositions(ref rng, _setup.Grids[command.Grid], _columnXs, _columnYs, count);
                 int hits;
-                Array.Clear(_words);
+                Array.Clear(_words, 0, _words.Length);
                 fixed (float* pXs = _columnXs, pYs = _columnYs)
                 fixed (ulong* pWords = _words)
                 {
@@ -375,7 +375,7 @@ internal sealed unsafe class CorpusRunner
                     for (var i = 0; i < count; i++)
                         _columnExcludes[i] = i == 0 ? exclude : default;
                 bool complete;
-                Array.Clear(_words);
+                Array.Clear(_words, 0, _words.Length);
                 fixed (float* pXs = _columnXs, pYs = _columnYs)
                 fixed (World.SourceId* pExcludes = _columnExcludes)
                 fixed (short* pValues = _columnValues)
@@ -397,7 +397,7 @@ internal sealed unsafe class CorpusRunner
                 var count = 1 + rng.NextInt(0, MaxColumn);
                 StreamOperands.ColumnPositions(ref rng, _setup.Grids[command.Grid], _columnXs, _columnYs, count);
                 bool complete;
-                Array.Clear(_words);
+                Array.Clear(_words, 0, _words.Length);
                 fixed (float* pXs = _columnXs, pYs = _columnYs)
                 fixed (float* pGx = _gradientXs, pGy = _gradientYs)
                 fixed (ulong* pWords = _words)
