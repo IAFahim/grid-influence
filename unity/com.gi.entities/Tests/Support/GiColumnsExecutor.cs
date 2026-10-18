@@ -15,7 +15,7 @@ namespace Gi.Entities.Tests.Support
         {
             using (var setup = GiScenarioWorld.Create(scenario.Profile))
             {
-                var tables = TablesOf(setup);
+                var tables = TablesOf(setup, scenario.Profile);
                 var token = GiWorld.Capture(setup.World);
                 var desired = new GiDesired[scenario.EntityCount];
                 var exists = new bool[scenario.EntityCount];
@@ -52,7 +52,7 @@ namespace Gi.Entities.Tests.Support
                     var rejected = Sync(setup.World, ref token, desired, applied);
                     if (rejected != 0) throw new InvalidOperationException("sync rejected " + rejected);
 
-                    EmitSplats(setup, scenario.Profile, splats);
+                    EmitSplats(setup, tables, splats);
                     GiWorld.Process(setup.World);
                     var hashes = new ulong[setup.Layers.Length];
                     for (var l = 0; l < hashes.Length; l++) hashes[l] = GiFieldHash.OfLayer(setup.World, setup.Layers[l]);
@@ -121,11 +121,11 @@ namespace Gi.Entities.Tests.Support
             }
         }
 
-        public static GiTables TablesOf(GiScenarioWorld setup)
+        public static GiTables TablesOf(GiScenarioWorld setup, GiScenarioProfile profile)
         {
             var tables = default(GiTables);
             foreach (var grid in setup.Grids) tables.AddGrid(grid);
-            foreach (var layer in setup.Layers) tables.AddLayer(layer);
+            for (var l = 0; l < setup.Layers.Length; l++) tables.AddLayer(setup.Layers[l], profile.Layers[l].Kind == GiScenarioLayerKind.Transient);
             foreach (var stamp in setup.Stamps) tables.AddStamp(stamp);
             return tables;
         }
@@ -203,25 +203,49 @@ namespace Gi.Entities.Tests.Support
             }
         }
 
-        private static void EmitSplats(GiScenarioWorld setup, GiScenarioProfile profile, List<GiScenarioOp> splats)
+        private static void EmitSplats(GiScenarioWorld setup, GiTables tables, List<GiScenarioOp> splats)
         {
-            for (var layer = 0; layer < profile.Layers.Length; layer++)
+            var counts = new int[GiSplatPass.Layers];
+            var valid = new List<GiScenarioOp>();
+            foreach (var splat in splats)
             {
-                var xs = new List<float>();
-                var ys = new List<float>();
-                var stamps = new List<byte>();
-                var gains = new List<sbyte>();
-                foreach (var splat in splats)
-                {
-                    if (splat.Layer != layer) continue;
-                    xs.Add(splat.X);
-                    ys.Add(splat.Y);
-                    stamps.Add(setup.Stamps[splat.Stamp]);
-                    gains.Add((sbyte)splat.Gain);
-                }
+                if (GiSplatPass.Check(tables, new GiLayerKey((byte)splat.Layer), new GiStampKey((byte)splat.Stamp), out _) != GiFaultCode.None)
+                    throw new InvalidOperationException("splat layer " + splat.Layer);
+                valid.Add(splat);
+                counts[splat.Layer]++;
+            }
 
-                if (xs.Count == 0) continue;
-                GiWorld.Splat(setup.World, setup.Layers[layer], xs.ToArray(), ys.ToArray(), stamps.ToArray(), gains.ToArray());
+            var starts = new int[GiSplatPass.Layers];
+            var total = 0;
+            for (var k = 0; k < GiSplatPass.Layers; k++)
+            {
+                starts[k] = total;
+                total += counts[k];
+            }
+
+            if (total == 0) return;
+
+            var xs = new float[total];
+            var ys = new float[total];
+            var stamps = new byte[total];
+            var gains = new sbyte[total];
+            var cursor = (int[])starts.Clone();
+            foreach (var splat in valid)
+            {
+                var row = cursor[splat.Layer]++;
+                xs[row] = splat.X;
+                ys[row] = splat.Y;
+                stamps[row] = setup.Stamps[splat.Stamp];
+                gains[row] = (sbyte)splat.Gain;
+            }
+
+            fixed (float* x = xs, y = ys)
+            fixed (byte* st = stamps)
+            fixed (sbyte* g = gains)
+            fixed (int* s = starts, c = counts)
+            {
+                var applied = GiSplatPass.Apply(setup.World, tables, s, c, x, y, st, g);
+                if (applied != total) throw new InvalidOperationException("splat accepted " + applied + " of " + total);
             }
         }
     }

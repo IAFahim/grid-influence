@@ -16,6 +16,7 @@ namespace Gi.Entities.Tests
         public readonly SystemHandle Bootstrap;
         public readonly SystemHandle Reconcile;
         public readonly SystemHandle Sync;
+        public readonly SystemHandle Splat;
         public readonly SystemHandle Process;
         private BlobAssetReference<GiProfileBlob> _profile;
         private Entity _profileEntity;
@@ -34,10 +35,12 @@ namespace Gi.Entities.Tests
             Bootstrap = World.GetOrCreateSystem<GiBootstrapSystem>();
             Reconcile = World.GetOrCreateSystem<GiReconcileSystem>();
             Sync = World.GetOrCreateSystem<GiSyncSystem>();
+            Splat = World.GetOrCreateSystem<GiSplatSystem>();
             Process = World.GetOrCreateSystem<GiProcessSystem>();
             Group.AddSystemToUpdateList(Bootstrap);
             Group.AddSystemToUpdateList(Reconcile);
             Group.AddSystemToUpdateList(Sync);
+            Group.AddSystemToUpdateList(Splat);
             Group.AddSystemToUpdateList(Process);
             Group.SortSystems();
             FixedStep.SortSystems();
@@ -107,6 +110,15 @@ namespace Gi.Entities.Tests
             Manager.SetComponentData(entity, LocalTransform.FromPosition(x, 0f, z));
             Manager.SetComponentEnabled<GiFault>(entity, false);
             if (ramp > 0) Manager.SetComponentData(entity, new GiGainRamp { Ticks = ramp });
+            return entity;
+        }
+
+        public Entity CreateSplat(byte layer, byte stamp, sbyte gain, float x, float z)
+        {
+            var entity = Manager.CreateEntity(typeof(GiSplat), typeof(GiFault), typeof(LocalTransform));
+            Manager.SetComponentData(entity, new GiSplat { Layer = new GiLayerKey(layer), Stamp = new GiStampKey(stamp), Gain = gain });
+            Manager.SetComponentData(entity, LocalTransform.FromPosition(x, 0f, z));
+            Manager.SetComponentEnabled<GiFault>(entity, false);
             return entity;
         }
 

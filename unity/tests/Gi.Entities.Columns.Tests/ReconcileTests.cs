@@ -205,7 +205,7 @@ public sealed class ReconcileTests
     public void TheApplyPassRetriesOnceAfterAStaleToken()
     {
         using var setup = GiScenarioWorld.Create(GiScenarioProfile.Standard());
-        var tables = GiColumnsExecutor.TablesOf(setup);
+        var tables = GiColumnsExecutor.TablesOf(setup, GiScenarioProfile.Standard());
         var token = GiWorld.Capture(setup.World);
         GiWorld.Clear(setup.World);
 

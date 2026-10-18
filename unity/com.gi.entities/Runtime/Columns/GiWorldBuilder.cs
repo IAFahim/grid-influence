@@ -67,7 +67,7 @@ namespace Gi.Entities
                 haveWorld = true;
                 var built = default(GiTables);
                 foreach (var grid in grids) built.AddGrid(GiGrid.New(created, grid.Power, grid.X, grid.Y, grid.Size));
-                for (var i = 0; i < layers.Length; i++) built.AddLayer(NewLayer(created, layers[i], built));
+                for (var i = 0; i < layers.Length; i++) built.AddLayer(NewLayer(created, layers[i], built), layers[i].Kind == GiLayerKind.Transient);
                 foreach (var stamp in stamps)
                 {
                     if (!registry.TryAcquire(stamp, cells, out var id))
