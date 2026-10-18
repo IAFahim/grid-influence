@@ -33,3 +33,7 @@ unity/project/Assets/SceneDependencyCache.meta
 unity/project/*.csproj
 unity/project/*.sln
 scratch/
+unity/project/Assets/DefaultVolumeProfile.asset
+unity/project/Assets/DefaultVolumeProfile.asset.meta
+unity/project/Assets/UniversalRenderPipelineGlobalSettings.asset
+unity/project/Assets/UniversalRenderPipelineGlobalSettings.asset.meta

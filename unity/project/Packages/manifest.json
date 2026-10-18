@@ -1,6 +1,8 @@
 {
   "dependencies": {
+    "com.bovinelabs.anchor": "https://github.com/vex-studio/tertle-monorepo.git?path=/com.bovinelabs.anchor#eb83b43db8845cf28b14bec4d3170a4e5ace2a51",
     "com.bovinelabs.core": "https://gitlab.com/tertle/com.bovinelabs.core.git#82be2794cf7535f6fb598bb704527f41629a8f64",
+    "com.bovinelabs.quill": "https://github.com/vex-studio/tertle-monorepo.git?path=/com.bovinelabs.quill#eb83b43db8845cf28b14bec4d3170a4e5ace2a51",
     "com.gi.entities": "file:../../com.gi.entities",
     "com.unity.sdk.linux-x86_64": "1.1.0",
     "com.unity.test-framework": "1.4.6",

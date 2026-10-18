@@ -70,6 +70,20 @@ namespace Gi.Entities.Tests
             Simulation.SortSystems();
         }
 
+        public SystemHandle AddFieldDraw()
+        {
+            var presentation = World.GetOrCreateSystemManaged<PresentationSystemGroup>();
+            Simulation.AddSystemToUpdateList(presentation);
+            var debug = World.GetOrCreateSystemManaged<BovineLabs.Core.DebugSystemGroup>();
+            presentation.AddSystemToUpdateList(debug);
+            debug.AddSystemToUpdateList(World.GetOrCreateSystem<BovineLabs.Quill.DrawSystem>());
+            var draw = World.GetOrCreateSystem<Presentation.GiFieldDrawSystem>();
+            debug.AddSystemToUpdateList(draw);
+            presentation.SortSystems();
+            Simulation.SortSystems();
+            return draw;
+        }
+
         public void AddTransformSystems()
         {
             var transforms = World.GetOrCreateSystemManaged<TransformSystemGroup>();

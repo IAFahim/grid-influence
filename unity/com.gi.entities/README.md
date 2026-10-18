@@ -13,6 +13,10 @@ The public surface is four handles — `World`, `Grid`, `Layer`, `Stamp` — and
 - Unity **7000.0.0a9** (CoreCLR editor or IL2CPP; there is no Mono in Unity 7).
 - The builtin Entities, Collections, Burst and Mathematics modules of that editor.
 - [BovineLabs Core](https://gitlab.com/tertle/com.bovinelabs.core) **2.0.0-pre.6**, pinned by commit.
+- [BovineLabs Quill](https://github.com/vex-studio/tertle-monorepo) **2.0.0-pre.5** with BovineLabs Anchor
+  **2.0.0-pre.6**, both pinned by commit from the same mirror (Quill itself is subscriber software;
+  the mirror commit `eb83b43db8845cf28b14bec4d3170a4e5ace2a51` is the sync that pairs with Core
+  2.0.0-pre.6 on Unity 7000.0.0a9).
 
 ## Install
 
@@ -22,7 +26,9 @@ served by the upstream GitLab repository, not by OpenUPM (its copy is stale):
 ```json
 {
   "dependencies": {
+    "com.bovinelabs.anchor": "https://github.com/vex-studio/tertle-monorepo.git?path=/com.bovinelabs.anchor#eb83b43db8845cf28b14bec4d3170a4e5ace2a51",
     "com.bovinelabs.core": "https://gitlab.com/tertle/com.bovinelabs.core.git#82be2794cf7535f6fb598bb704527f41629a8f64",
+    "com.bovinelabs.quill": "https://github.com/vex-studio/tertle-monorepo.git?path=/com.bovinelabs.quill#eb83b43db8845cf28b14bec4d3170a4e5ace2a51",
     "com.gi.entities": "https://github.com/IAFahim/grid-influence.git?path=/unity/com.gi.entities"
   }
 }
