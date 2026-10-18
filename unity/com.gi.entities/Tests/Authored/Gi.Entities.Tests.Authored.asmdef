@@ -1,0 +1,20 @@
+{
+    "name": "Gi.Entities.Tests.Authored",
+    "rootNamespace": "Gi.Entities.Tests.Authored",
+    "references": [
+        "Gi.Entities",
+        "Gi.Entities.Authoring",
+        "Gi.Entities.Tests.Support"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
