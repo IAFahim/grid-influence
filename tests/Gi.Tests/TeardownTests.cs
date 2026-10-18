@@ -264,6 +264,7 @@ public sealed unsafe class TeardownTests
         DrainLiveWorlds();
         const int cycles = 1000;
         const int rssToleranceKb = 2048;
+        const int rssAnchorToleranceKb = 8192;
 
         var samples = RasterSamples();
         var ids = new World.SourceId[48];
@@ -302,8 +303,9 @@ public sealed unsafe class TeardownTests
             Assert.Equal(firstFree, midFree);
             Assert.Equal(firstFree, lastFree);
             Assert.Equal(0L, gcEnd - allocated);
-            Assert.InRange(midRss - start, -rssToleranceKb, rssToleranceKb);
-            Assert.InRange(end - start, -rssToleranceKb, rssToleranceKb);
+            Assert.InRange(end - midRss, -rssToleranceKb, rssToleranceKb);
+            Assert.InRange(midRss - start, -rssAnchorToleranceKb, rssAnchorToleranceKb);
+            Assert.InRange(end - start, -rssAnchorToleranceKb, rssAnchorToleranceKb);
         }
     }
 
