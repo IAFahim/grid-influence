@@ -14,22 +14,26 @@ namespace Gi.Entities.Tests
     public static class GiRogueGate
     {
         public static int Armed;
+        public static int Held;
         public static int Baseline;
-        public static int Tag;
+        public static int HolderTag;
+        public static int IntruderTag;
+        public static byte World;
+        public static JobHandle Holder;
+        public static JobHandle Intruder;
     }
 
     [WorldSystemFilter(Worlds.SimulationEditor)]
     [UpdateInGroup(typeof(GiSystemGroup))]
     [UpdateAfter(typeof(GiBootstrapSystem))]
     [UpdateBefore(typeof(GiReconcileSystem))]
-    public partial struct GiRogueSystem : ISystem
+    public partial struct GiRogueHolderSystem : ISystem
     {
         public void OnUpdate(ref SystemState state)
         {
             if (Volatile.Read(ref GiRogueGate.Armed) == 0) return;
-            if (!SystemAPI.TryGetSingleton<GiFrame>(out var frame) || !frame.Alive) return;
 
-            state.Dependency = new HoldJob { World = frame.World, Tag = GiRogueGate.Tag, Baseline = GiRogueGate.Baseline }.Schedule(state.Dependency);
+            GiRogueGate.Holder = new HoldJob { World = GiRogueGate.World, Tag = GiRogueGate.HolderTag, Baseline = GiRogueGate.Baseline }.Schedule();
         }
 
         private struct HoldJob : IJob
@@ -41,8 +45,37 @@ namespace Gi.Entities.Tests
             public void Execute()
             {
                 GiGuard.Begin(World, Tag, true);
+                Volatile.Write(ref GiRogueGate.Held, 1);
                 var timer = Stopwatch.StartNew();
                 while (GiGuard.Violations == Baseline && timer.ElapsedMilliseconds < 5000) Thread.SpinWait(200);
+                GiGuard.End(World, true);
+            }
+        }
+    }
+
+    [WorldSystemFilter(Worlds.SimulationEditor)]
+    [UpdateInGroup(typeof(GiSystemGroup))]
+    [UpdateAfter(typeof(GiBootstrapSystem))]
+    [UpdateBefore(typeof(GiReconcileSystem))]
+    public partial struct GiRogueIntruderSystem : ISystem
+    {
+        public void OnUpdate(ref SystemState state)
+        {
+            if (Volatile.Read(ref GiRogueGate.Armed) == 0) return;
+
+            GiRogueGate.Intruder = new IntrudeJob { World = GiRogueGate.World, Tag = GiRogueGate.IntruderTag }.Schedule();
+        }
+
+        private struct IntrudeJob : IJob
+        {
+            public byte World;
+            public int Tag;
+
+            public void Execute()
+            {
+                var timer = Stopwatch.StartNew();
+                while (Volatile.Read(ref GiRogueGate.Held) == 0 && timer.ElapsedMilliseconds < 5000) Thread.SpinWait(200);
+                GiGuard.Begin(World, Tag, true);
                 GiGuard.End(World, true);
             }
         }
@@ -96,21 +129,27 @@ namespace Gi.Entities.Tests
             using var fixture = new GiEcsFixture();
             fixture.SetStandardProfile();
             fixture.Tick();
-            var rogue = fixture.World.GetOrCreateSystem<GiRogueSystem>();
-            fixture.Group.AddSystemToUpdateList(rogue);
+            fixture.Group.AddSystemToUpdateList(fixture.World.GetOrCreateSystem<GiRogueHolderSystem>());
+            fixture.Group.AddSystemToUpdateList(fixture.World.GetOrCreateSystem<GiRogueIntruderSystem>());
             fixture.Group.SortSystems();
 
             var before = GiGuard.Violations;
-            GiRogueGate.Tag = GiGuard.Register("GiRogueSystem");
+            GiRogueGate.HolderTag = GiGuard.Register("GiRogueHolderSystem");
+            GiRogueGate.IntruderTag = GiGuard.Register("GiRogueIntruderSystem");
             GiRogueGate.Baseline = before;
+            GiRogueGate.World = fixture.Frame.World;
+            Volatile.Write(ref GiRogueGate.Held, 0);
             Volatile.Write(ref GiRogueGate.Armed, 1);
             fixture.Tick();
             Volatile.Write(ref GiRogueGate.Armed, 0);
+            JobHandle.ScheduleBatchedJobs();
+            GiRogueGate.Holder.Complete();
+            GiRogueGate.Intruder.Complete();
             fixture.Complete();
 
             Assert.That(GiGuard.Violations, Is.GreaterThan(before), "the guard saw no overlap");
 
-            LogAssert.Expect(LogType.Error, new Regex("(?=.*GiRogueSystem)(?=.*GiProcessSystem)Gi guard"));
+            LogAssert.Expect(LogType.Error, new Regex("(?=.*GiRogueHolderSystem)(?=.*GiRogueIntruderSystem)Gi guard"));
             fixture.Tick();
             fixture.Complete();
             Assert.That(fixture.Frame.Faults.Has(GiFaultKind.Overlap), Is.True);
