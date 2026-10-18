@@ -223,7 +223,7 @@ Plan §12's S1–S5 apply, plus:
 | U-4 | Fences, guard, cross-world writers | runtime | P0 | U-1 | U | 3 | todo | |
 | U-6 | Splat | runtime | P0 | U-1, F-2 | D, U | 3 | done | stacked after #91 |
 | A-2 | Bakers, builders, live baking | authoring | P0 | A-1, U-1 | U | 3 | todo | |
-| P-1 | GPU mirror and heatmap | presentation | P1 | U-1, F-2 | D, U | 3 | todo | |
+| P-1 | GPU mirror and heatmap | presentation | P1 | U-1, F-2 | D, U | 3 | active | #97 carries the Columns slice (GiPageTable, Tier D receipts); the GraphicsBuffer/uploader/shader half and Tier U receipts wait out the owner's pause of build runs |
 | E-3 | Stamp Studio | editor | P1 | A-1, U-1 | U | 3 | todo | |
 | E-4 | Profile editor | editor | P1 | A-1 | U | 3 | todo | |
 | E-6 | Profiler module and ConfigVars | editor | P1 | U-1 | U | 3 | todo | |
