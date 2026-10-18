@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using BovineLabs.Core;
 using Unity.Collections;
 using Unity.Entities;
@@ -9,38 +10,42 @@ namespace Gi.Entities
     [WorldSystemFilter(Worlds.SimulationEditor)]
     [UpdateInGroup(typeof(GiSystemGroup))]
     [UpdateAfter(typeof(GiProcessSystem))]
-    public unsafe partial class GiSenseSystem : SystemBase
+    public unsafe partial struct GiSenseSystem : ISystem
     {
         private EntityQuery _profiles;
-        private GiSenseBinding[] _bindings = System.Array.Empty<GiSenseBinding>();
+        private EntityQuery _frames;
+        private GCHandle _bindings;
         private GiSenseView _view;
-        private ComponentLookup<GiFrame> _frames;
+        private ComponentLookup<GiFrame> _frameData;
         private ComponentLookup<GiStats> _stats;
         private ulong _builtHash;
 
-        protected override void OnCreate()
+        private GiSenseBinding[] Table => _bindings.IsAllocated ? (GiSenseBinding[])_bindings.Target : null;
+
+        public void OnCreate(ref SystemState state)
         {
-            RequireForUpdate<GiFrame>();
-            _profiles = GetEntityQuery(ComponentType.ReadOnly<GiProfileReference>());
+            state.RequireForUpdate<GiFrame>();
+            _profiles = state.GetEntityQuery(ComponentType.ReadOnly<GiProfileReference>());
+            _frames = state.GetEntityQuery(ComponentType.ReadOnly<GiFrame>());
             _view = new GiSenseView
             {
-                Transforms = GetComponentTypeHandle<LocalTransform>(true),
-                Matrices = GetComponentTypeHandle<LocalToWorld>(true),
-                Parents = GetComponentTypeHandle<Parent>(true),
-                Sources = GetComponentTypeHandle<GiSource>(true),
-                Entities = GetEntityTypeHandle(),
+                Transforms = state.GetComponentTypeHandle<LocalTransform>(true),
+                Matrices = state.GetComponentTypeHandle<LocalToWorld>(true),
+                Parents = state.GetComponentTypeHandle<Parent>(true),
+                Sources = state.GetComponentTypeHandle<GiSource>(true),
+                Entities = state.GetEntityTypeHandle(),
             };
-            _frames = GetComponentLookup<GiFrame>();
-            _stats = GetComponentLookup<GiStats>();
+            _frameData = state.GetComponentLookup<GiFrame>();
+            _stats = state.GetComponentLookup<GiStats>();
         }
 
-        protected override void OnDestroy()
+        public void OnDestroy(ref SystemState state)
         {
-            Dependency.Complete();
+            state.Dependency.Complete();
             Dispose();
         }
 
-        protected override void OnUpdate()
+        public void OnUpdate(ref SystemState state)
         {
             if (_profiles.IsEmptyIgnoreFilter)
             {
@@ -51,30 +56,31 @@ namespace Gi.Entities
             var reference = _profiles.GetSingleton<GiProfileReference>();
             if (!reference.Value.IsCreated) return;
 
-            if (reference.Value.Value.Hash != _builtHash) Rebuild(ref reference.Value.Value);
-            if (_bindings.Length == 0) return;
+            if (reference.Value.Value.Hash != _builtHash) Rebuild(ref state, ref reference.Value.Value);
+            var table = Table;
+            if (table == null || table.Length == 0) return;
 
-            _view.Transforms.Update(this);
-            _view.Matrices.Update(this);
-            _view.Parents.Update(this);
-            _view.Sources.Update(this);
-            _view.Entities.Update(this);
-            _frames.Update(this);
-            _stats.Update(this);
+            _view.Transforms.Update(ref state);
+            _view.Matrices.Update(ref state);
+            _view.Parents.Update(ref state);
+            _view.Sources.Update(ref state);
+            _view.Entities.Update(ref state);
+            _frameData.Update(ref state);
+            _stats.Update(ref state);
 
             var frame = SystemAPI.GetSingletonEntity<GiFrame>();
-            var allocator = World.UpdateAllocator.ToAllocator;
+            var allocator = state.WorldUpdateAllocator;
             var batch = GiSensePass.Batch(GiSenseConfig.Batch.Data);
             var context = new NativeReference<GiReconcileContext>(allocator);
-            var handle = new GiSenseBeginJob { Stats = frame, Lookup = _stats, Frame = frame, Frames = _frames, Context = context }.Schedule(Dependency);
+            var handle = new GiSenseBeginJob { Stats = frame, Lookup = _stats, Frame = frame, Frames = _frameData, Context = context }.Schedule(state.Dependency);
 
-            for (var b = 0; b < _bindings.Length; b++)
-                handle = Schedule(_bindings[b], frame, context, batch, allocator, handle);
+            for (var b = 0; b < table.Length; b++)
+                handle = Schedule(ref state, table[b], frame, context, batch, allocator, handle);
 
-            Dependency = handle;
+            state.Dependency = handle;
         }
 
-        private void Rebuild(ref GiProfileBlob blob)
+        private void Rebuild(ref SystemState state, ref GiProfileBlob blob)
         {
             Dispose();
             _builtHash = blob.Hash;
@@ -87,30 +93,33 @@ namespace Gi.Entities
             {
                 if (statuses[i] != GiBindingStatus.Valid)
                 {
-                    Report(i, GiBindingTable.Describe(statuses[i]));
+                    Report(ref state, i, GiBindingTable.Describe(statuses[i]));
                     continue;
                 }
 
-                var binding = Resolve(i, specs[i]);
+                var binding = Resolve(ref state, i, specs[i]);
                 if (binding != null) list.Add(binding);
             }
 
-            _bindings = list.ToArray();
+            if (list.Count > 0) _bindings = GCHandle.Alloc(list.ToArray());
         }
 
-        private void Report(int index, string reason)
+        private void Report(ref SystemState state, int index, string reason)
         {
             BLGlobalLogger.LogErrorString("Gi binding " + index + " rejected: " + reason);
-            var frame = SystemAPI.GetSingletonEntity<GiFrame>();
-            var data = EntityManager.GetComponentData<GiFrame>(frame);
+            var frame = _frames.GetSingletonEntity();
+            var data = state.EntityManager.GetComponentData<GiFrame>(frame);
             data.Faults.Raise(GiFaultKind.Profile, data.Tick);
-            EntityManager.SetComponentData(frame, data);
+            state.EntityManager.SetComponentData(frame, data);
         }
 
         private void Dispose()
         {
-            foreach (var binding in _bindings) binding.Query.Dispose();
-            _bindings = System.Array.Empty<GiSenseBinding>();
+            var table = Table;
+            if (table != null)
+                foreach (var binding in table) binding.Query.Dispose();
+            if (_bindings.IsAllocated) _bindings.Free();
+            _bindings = default;
             _builtHash = 0ul;
         }
     }

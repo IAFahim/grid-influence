@@ -5,10 +5,10 @@ using GiWorld = Gi.World;
 
 namespace Gi.Entities
 {
-    public unsafe partial class GiSenseSystem
+    public unsafe partial struct GiSenseSystem
     {
-        private JobHandle Schedule(GiSenseBinding binding, Entity frame, NativeReference<GiReconcileContext> context, int batch,
-            Allocator allocator, JobHandle handle)
+        private JobHandle Schedule(ref SystemState state, GiSenseBinding binding, Entity frame, NativeReference<GiReconcileContext> context,
+            int batch, Allocator allocator, JobHandle handle)
         {
             var spec = binding.Spec;
             var chunkCount = binding.Query.CalculateChunkCountWithoutFiltering();
@@ -72,7 +72,7 @@ namespace Gi.Entities
                 var type = binding.Types[t];
                 if (!type.HasInput) continue;
 
-                type.Handle.Update(this);
+                type.Handle.Update(ref state);
                 if (type.Reach.Active)
                     handle = Gather(binding, type, type.Reach, false, context, offsets, reaches, thresholds, handle);
                 if (type.Threshold.Active)
@@ -107,7 +107,7 @@ namespace Gi.Entities
                 var type = binding.Types[t];
                 if (!type.HasOutput && !type.Coverage.Active) continue;
 
-                type.Handle.Update(this);
+                type.Handle.Update(ref state);
                 handle = new GiSenseScatterJob
                 {
                     View = _view,
@@ -152,13 +152,13 @@ namespace Gi.Entities
             }.ScheduleParallel(binding.Query, handle);
         }
 
-        private GiSenseBinding Resolve(int index, in GiBindingSpec spec)
+        private GiSenseBinding Resolve(ref SystemState state, int index, in GiBindingSpec spec)
         {
             var types = new System.Collections.Generic.List<GiSenseType>();
-            if (!Bind(index, types, spec.Value, GiSenseSlot.Value) || !Bind(index, types, spec.Gradient, GiSenseSlot.Gradient) ||
-                !Bind(index, types, spec.Total, GiSenseSlot.Total) || !Bind(index, types, spec.Position, GiSenseSlot.Position) ||
-                !Bind(index, types, spec.Coverage, GiSenseSlot.Coverage) || !Bind(index, types, spec.ReachField, GiSenseSlot.Reach) ||
-                !Bind(index, types, spec.ThresholdField, GiSenseSlot.Threshold))
+            if (!Bind(ref state, index, types, spec.Value, GiSenseSlot.Value) || !Bind(ref state, index, types, spec.Gradient, GiSenseSlot.Gradient) ||
+                !Bind(ref state, index, types, spec.Total, GiSenseSlot.Total) || !Bind(ref state, index, types, spec.Position, GiSenseSlot.Position) ||
+                !Bind(ref state, index, types, spec.Coverage, GiSenseSlot.Coverage) || !Bind(ref state, index, types, spec.ReachField, GiSenseSlot.Reach) ||
+                !Bind(ref state, index, types, spec.ThresholdField, GiSenseSlot.Threshold))
                 return null;
 
             var all = new System.Collections.Generic.List<ComponentType>();
@@ -169,23 +169,23 @@ namespace Gi.Entities
                 if (readWrite)
                 {
                     all.Add(ComponentType.ReadWrite(type.Index));
-                    type.Handle = GetDynamicComponentTypeHandle(ComponentType.ReadWrite(type.Index));
+                    type.Handle = state.EntityManager.GetDynamicComponentTypeHandle(ComponentType.ReadWrite(type.Index));
                 }
                 else if (type.Coverage.Active)
                 {
                     present.Add(ComponentType.ReadWrite(type.Index));
-                    type.Handle = GetDynamicComponentTypeHandle(ComponentType.ReadWrite(type.Index));
+                    type.Handle = state.EntityManager.GetDynamicComponentTypeHandle(ComponentType.ReadWrite(type.Index));
                 }
                 else
                 {
                     all.Add(ComponentType.ReadOnly(type.Index));
-                    type.Handle = GetDynamicComponentTypeHandle(ComponentType.ReadOnly(type.Index));
+                    type.Handle = state.EntityManager.GetDynamicComponentTypeHandle(ComponentType.ReadOnly(type.Index));
                 }
             }
 
             if ((spec.Flags & GiBindingSpec.ExcludeSelf) != 0) all.Add(ComponentType.ReadOnly<GiSource>());
 
-            var query = EntityManager.CreateEntityQuery(new EntityQueryDesc { All = all.ToArray(), Present = present.ToArray() });
+            var query = state.EntityManager.CreateEntityQuery(new EntityQueryDesc { All = all.ToArray(), Present = present.ToArray() });
             return new GiSenseBinding
             {
                 Spec = spec,
@@ -196,14 +196,14 @@ namespace Gi.Entities
             };
         }
 
-        private bool Bind(int index, System.Collections.Generic.List<GiSenseType> types, in GiBindingField field, GiSenseSlot slot)
+        private bool Bind(ref SystemState state, int index, System.Collections.Generic.List<GiSenseType> types, in GiBindingField field, GiSenseSlot slot)
         {
             if (field.TypeHash == 0ul) return true;
 
             var typeIndex = TypeManager.GetTypeIndexFromStableTypeHash(field.TypeHash);
             if (typeIndex == TypeIndex.Null)
             {
-                Report(index, "An output field names a component type that is not in this build.");
+                Report(ref state, index, "An output field names a component type that is not in this build.");
                 return false;
             }
 
@@ -211,7 +211,7 @@ namespace Gi.Entities
             var size = info.IsZeroSized ? 0 : info.TypeSize;
             if (field.Offset + field.Size > size)
             {
-                Report(index, "An output field lies outside its component.");
+                Report(ref state, index, "An output field lies outside its component.");
                 return false;
             }
 

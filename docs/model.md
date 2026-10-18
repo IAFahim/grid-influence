@@ -1597,7 +1597,10 @@ script assemblies cannot yet reference the net10 TFM the vector build targets. E
 unmanaged memory between the two sides lives in the adapter code named below; each heading states
 its lifetime, aliasing, alignment and concurrency in this section's voice, following the proof
 template of "Unsafe proof" above. Two adapter-wide rules frame them: all Gi calls from ECS run in
-managed jobs (never Burst, D-U3), and every writer or reader of a Gi world chains through the
+managed code on the main thread or in managed jobs (never Burst, D-U3; the adapter's systems are
+`ISystem` structs, managed where managed code runs because this Entities build stores system
+structs in unmanaged memory, so their managed tables sit behind `GCHandle` roots), and every
+writer or reader of a Gi world chains through the
 process-wide fences in `GiRuntime.Fences.cs`, so the headings below describe the fences' clients,
 not the fences themselves.
 
