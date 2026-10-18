@@ -2,7 +2,7 @@ using GiWorld = Gi.World;
 
 namespace Gi.Entities
 {
-    public static unsafe class GiSensePass
+    public static unsafe partial class GiSensePass
     {
         public const int WordRows = 64;
 
