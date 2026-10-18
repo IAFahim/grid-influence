@@ -232,7 +232,7 @@ Plan §12's S1–S5 apply, plus:
 | U-3 | Sync | runtime | P0 | U-2 | D, U | 4 | done | stacked after #90 |
 | U-5 | Read bindings: value and gradient | runtime | P0 | U-2 | D, U | 4 | done | stacked after #93. CoreCLR and IL2CPP players 49/49 at c6723dc; editmode and a fresh PlayMode editor run deferred by the owner |
 | V-2 | ECS determinism and allocation | verification | P0 | U-3, U-4, U-5, U-6 | U | 5 | todo | |
-| U-5b | Read bindings: area, max, nearest, changed | runtime | P1 | U-3, U-5 | D, U | 5 | todo | |
+| U-5b | Read bindings: area, max, nearest, changed | runtime | P1 | U-3, U-5 | D, U | 5 | active | #94 carries the Columns half (Tier D receipts); the Unity half and Tier U receipts wait out the owner's pause of build runs |
 | E-1 | Field window | editor | P1 | P-1 | U | 5 | todo | |
 | E-2 | Scene overlay and live edit | editor | P1 | P-1, A-2, U-4 | U | 5 | todo | |
 | V-3 | Performance | verification | P0 | V-2 | D, U | 6 | todo | |
