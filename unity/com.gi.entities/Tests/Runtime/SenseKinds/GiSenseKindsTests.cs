@@ -16,7 +16,7 @@ namespace Gi.Entities.Tests
         private const short Threshold = 3;
         private const int Probes = 240;
 
-        private static readonly GiBindingSpec Area = new GiBindingSpec
+        internal static readonly GiBindingSpec Area = new GiBindingSpec
         {
             Kind = GiBindingKind.Area,
             Layer = 3,
@@ -24,7 +24,7 @@ namespace Gi.Entities.Tests
             Total = GiBindingFields.Of<KindArea>("Total"),
         };
 
-        private static readonly GiBindingSpec Max = new GiBindingSpec
+        internal static readonly GiBindingSpec Max = new GiBindingSpec
         {
             Kind = GiBindingKind.Max,
             Layer = 4,
@@ -33,7 +33,7 @@ namespace Gi.Entities.Tests
             Position = GiBindingFields.Of<KindMax>("Position"),
         };
 
-        private static readonly GiBindingSpec Nearest = new GiBindingSpec
+        internal static readonly GiBindingSpec Nearest = new GiBindingSpec
         {
             Kind = GiBindingKind.Nearest,
             Layer = 1,
@@ -44,7 +44,7 @@ namespace Gi.Entities.Tests
             Coverage = GiBindingFields.Tag<KindFound>(),
         };
 
-        private static readonly GiBindingSpec Changed = new GiBindingSpec
+        internal static readonly GiBindingSpec Changed = new GiBindingSpec
         {
             Kind = GiBindingKind.Changed,
             Layer = 1,

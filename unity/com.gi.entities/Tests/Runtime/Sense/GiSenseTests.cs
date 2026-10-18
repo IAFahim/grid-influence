@@ -13,7 +13,7 @@ namespace Gi.Entities.Tests
 {
     public sealed class GiSenseTests
     {
-        private static readonly GiBindingSpec Sampled = new GiBindingSpec
+        internal static readonly GiBindingSpec Sampled = new GiBindingSpec
         {
             Kind = GiBindingKind.ValueGradient,
             Layer = 3,
@@ -22,7 +22,7 @@ namespace Gi.Entities.Tests
             Coverage = GiBindingFields.Tag<ProbeCovered>(),
         };
 
-        private static readonly GiBindingSpec Gated = new GiBindingSpec
+        internal static readonly GiBindingSpec Gated = new GiBindingSpec
         {
             Kind = GiBindingKind.Value,
             Layer = 1,
