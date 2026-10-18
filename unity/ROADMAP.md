@@ -229,6 +229,7 @@ Plan §12's S1–S5 apply, plus:
 | U-4 | Fences, guard, cross-world writers | runtime | P0 | U-1 | U | 3 | U-pending | Stacked after #99. Tier D: `GuardTests` (12) in the Columns suite, 111 pass. Tier C: `compile.sh` `errors: 0`, `lint.sh` ok. [U] receipts (two ECS worlds 1000 ticks, misordered system trips the guard, three fixed ticks in one frame, E1, E6) are written in `Tests/Runtime/Concurrency/` and ran green in the editor at the end of session 3 (EditMode 45 and PlayMode 85 pass on the stack head); the player runs wait for the final pass (O-U9) |
 | U-6 | Splat | runtime | P0 | U-1, F-2 | D, U | 3 | done | stacked after #91 |
 | A-2 | Bakers, builders, live baking | authoring | P0 | A-1, U-1 | U | 3 | U-pending | Stacked after #105. Tier D: `GiSourceCheck` (emitter on a persistent layer, splat on a transient layer, gain range, `Gi.Validation` text) in the Columns suite. Tier C: `compile.sh` `errors: 0`, `lint.sh` ok, `jb` 0. [U] receipts: `Tests/Editor/Baking/` (baking twice gives identical blob bytes and hash, a broken profile logs every issue naming the authoring object, emitter and splat bakers go through the shared builders, a static emitter bakes without `LocalTransform`, every baker error names its object) and `Tests/Runtime/Builders/` (a `LocalToWorld`-only emitter is placed, editing a layer rebuilds the world, re-places every source and leaks no world or stamp). Baking in tests goes through `BakingUtility` by reflection because Entities keeps it internal. Wait for the final pass (O-U9) |
+| A-3 | Sensor authoring surface | authoring | P2 | A-1, A-2, U-5b | D, U | 4 | todo | |
 | P-1 | GPU mirror and heatmap | presentation | P1 | U-1, F-2 | D, U | 3 | U-pending | #97 carries `GiPageTable`; the GPU half is stacked after #106. Tier D: `GiMirrorPlanner` (dedupe, first-in order, budget, carry-over, slot reuse, upload cost) with 137 Columns tests passing, the carry-over draining under 100 random schedules. Tier C: `compile.sh` `errors: 0`. [U] receipts in `Tests/Runtime/Mirror/` need a GPU (the suite ignores itself loudly without compute shaders): decode equals `QueryRegion` over 50 seeds on two grids and five layers, uploaded tiles equal the changed tiles, the budget drains, steady frames allocate 0 B. Not done: the owner's screenshots in Built-in, URP and HDRP, and L8. The heatmap is a compute kernel into a `RenderTexture` (palette: blue, white, orange), so it is pipeline-neutral; a ground-plane material comes with E-2 |
 | E-3 | Stamp Studio | editor | P1 | A-1, U-1 | U | 3 | review | Stacked after #108. `GiStampPreview` (Unity-free: a scratch Gi world, one temporary stamp through a private `GiStampRegistry`, exact and cell layers) is proven under dotnet: its hash equals an independent world placing the same stamp over 50 seeds, at most one temporary stamp ever exists, disposing frees the world and the stamp, an invalid stamp reports the `Gi.Validation` text, the scaled footprint uses `TryFootprint`, raster import is deterministic. The window and `GiStampImport` (texture to signed cells through a linear blit) ran in EditMode: 6 Studio tests pass (27 EditMode in all). Columns suite 144 pass, `jb` 0 |
 | E-4 | Profile editor | editor | P1 | A-1 | U | 3 | review | Stacked after #109. Unity-free cores, proven under dotnet: `GiGridCoverage` (replicates Gi's Q8 containment; agrees with `World.Covers` at every point of a ~230k-point lattice over four grid layouts plus the edge cases; `Finest` and `Map` name the finest grid), `GiProfileEstimate` (an upper bound per grid and layer, `262,144 B + 24,576 B per live tile`, fitted to 600 random worlds and held over 250 more checked against G-3's `World.Memory`, at most 6x the measured store), `GiProfileThumbnails` (builds the profile in a scratch world, places sources on persistent layers, reads every layer back). The inspector gains an overview (coverage map, estimate, one thumbnail per layer) and a field picker (`GiFieldRefDrawer`, `GiFieldCatalog`). EditMode: 5 new tests pass (32 in all), including a binding-size error showing in the inspector before any bake. Columns 150 pass, `jb` 0 |
@@ -245,6 +246,8 @@ Plan §12's S1–S5 apply, plus:
 | D-1 | Docs and samples | docs | P0 | U-5, U-6, A-2 | D, U | 6 | U-pending | Stacked after #113. Tier D/C: package README (quick start, install pins), `Documentation~` (manual, authoring, runtime, tools), four `Samples~` (Crowd, Territory, Stealth, Read; editor-generated assets and scenes, `.meta` files shipped so scene references survive import) and the `samples` array in `package.json` (R-3 deviation, flagged). Every sample system is an ISystem (owner directive, 2026-10-18). Receipts: `compile.sh` `errors: 0` with the samples imported through the Package Manager path (`Assets/Samples/com.gi.entities/0.1.0`), a 4-test PlayMode smoke (transient, not committed) runs each scene to 12 ticks with expected entity, source, splat and sense counts and no faults — green on staging and on the imported copies; `lint.sh` ok; dotnet 157 + 1198 pass; `build-plugins.sh --check` ok; `jb` 0. The `docs/model.md` § Unity boundary introduction is written and no heading says Pending. [U] items (README quick start from an empty project, samples in the players) wait for the final pass (O-U9) |
 | E-5 | Explain cell and entity inspector | editor | P2 | E-1, U-2 | U | 6 | todo | |
 | E-7 | Flight recorder | editor | P2 | U-6, E-1 | D, U | 6 | todo | |
+| E-8 | Runtime field draw | editor | P2 | E-1, E-6 | U | 6 | todo | |
+| E-9 | Authoring gizmos | editor | P2 | E-2 | D | 3 | todo | |
 | N-1 | Server-authoritative fields | netcode | P2 | V-2 | U | 6 | todo | |
 | S-1 | Save | save | P2 | V-2 | U | 6 | todo | |
 | G-4 | Cross-world `Process` | core | P2 | — | G | 6 | review | #100. `NativeHeap.Calls` atomic, stage timers per world; two worlds on two threads for 10k ticks equal the sequential run; gate pass; inspect 0. Conflicts with #95 only in `NativeHeap.cs` (mechanical). Owner merges; then `GiRuntime.Writers` can be retired once the plugins are rebuilt |
@@ -252,6 +255,7 @@ Plan §12's S1–S5 apply, plus:
 | G-6 | Allocator hook | core | P2 | — | G | 6 | review | #95, accepted in review (8/8 CI green; allocator==frees over a full lifecycle; warm frames make 0 hook calls, no gate needed). Owner merges |
 | N-2 | Lockstep checks | netcode | P2 | N-1 | U | 7 | todo | |
 | G-8 | Parallel splat | core | P3 | V-3 | G | 7 | todo | |
+| G-9 | Column batch entry points | core | P2 | G-1 | G | 8 | todo | |
 | V-0 | CoreCLR day 0 | verification | P0 | V-1, V-2, a CoreCLR build | U | day 0 | active | Preview answers in Appendix B (items 1-5, 7); the flip (item 11) waits for Unity's net10 API level |
 | G-0 | Build for Unity's CoreCLR TFM | core | P0 | G-0a, V-0 step 1 | G | day 0 | blocked | The TFM is net10.0 (already built); it cannot be referenced until Unity enables the net10 API level (Appendix B item 3) |
 
@@ -798,6 +802,19 @@ Done when:
 - [U] Every baker error names its authoring object as context.
 - [U] Static emitters bake without `LocalTransform` and are still placed (E7).
 
+#### A-3 · Sensor authoring surface
+
+P2 · Tier D and U · Needs: A-1, A-2, U-5b
+
+From the owner's `com.iafahim.giinfluence` prototype (2026-10-18): one authoring surface for read bindings instead of per-binding components — per-binding toggles with reach and threshold fields beside them, and a nearest binding that bakes disabled and is enabled by the sense pass on a hit (an enableable found bit; today a miss writes a zero value and a game cannot tell "nothing found" from "found at zero"). Exclude-self already ships (U-5b, G-1), so the card is the found bit plus the authoring shape.
+
+Owns: `Authoring/GiSensor*`, the nearest binding in `Runtime/Sense/**`; tests in `Tests/Editor/Baking/` and `Tests/Runtime/Sense/`.
+
+Done when:
+- [D] The found bit equals `TrySenseNearest`'s success over 100 seeds, including thresholds that exclude every source.
+- [U] One authoring component bakes every enabled binding kind with its reach, threshold and exclude-self fields.
+- [U] A nearest binding that stops being found disables the component on the next tick.
+
 ### Presentation
 
 #### P-1 · GPU mirror and heatmap
@@ -924,6 +941,32 @@ Done when:
 - [U] An exported range runs as a test in `tests/Gi.Tests` without edits.
 - [U] A diff view highlights the tiles where the live run and the replay differ.
 
+#### E-8 · Runtime field draw
+
+P2 · Tier U · Needs: E-1, E-6
+
+From the owner's `com.iafahim.giinfluence` prototype (2026-10-18): the field draws in the game view, not only in the editor — heat tiles in tile and per-cell modes with value labels and an auto-normalised scale, grid bounds with a per-grid lift so overlapping grids do not z-fight, source markers with rings, and live binding results (gradient arrows, a line to the max binding's best cell, the nearest binding's link and reach circle). Everything is frustum-culled against the game camera and, in the editor, the Scene view camera; the tile mirror refreshes from `ChangedTiles` with a periodic full resync, and the toggles and colours are `gi.draw.*` ConfigVars beside E-6's. Drawing goes through a Burst-friendly immediate-mode API; whether that is BovineLabs.Quill (the prototype's choice, a new dependency — owner decision) or the existing mirror path is the card's first call.
+
+Owns: `Presentation/GiFieldDraw*`; tests in `Tests/Editor/FieldDraw/`.
+
+Done when:
+- [U] With the draw on, steady ticks still allocate 0 B and the frame cost is proportional to the visible tiles, not the grid (profiler markers, 200k-source scene).
+- [U] A culling test proves tiles, sources and binding results outside both cameras draw nothing.
+- [U] The drawn heat equals the Field window's heatmap on the same layer and tick.
+
+#### E-9 · Authoring gizmos
+
+P2 · Tier D · Needs: E-2
+
+From the owner's `com.iafahim.giinfluence` prototype (2026-10-18); fills E-2's recorded gaps. Selection-aware drawing: unselected emitters and sensors dim, selected ones carry labels (layer, reach, gain, coverage). Stamp-shape footprints instead of a box for everything: a cuboid for rect shapes, an arc with spokes for cones and disks, honouring heading and scale. A warning mark and label on any emitter or sensor that sits outside every grid. Rescans happen only on hierarchy, undo and transform-change events (`ObjectChangeEvents`), not per editor frame.
+
+Owns: `Editor/Overlay/GiGizmos.cs` (beside E-2's overlay); tests in `Tests/Editor/Overlay/`.
+
+Done when:
+- [D] Footprint drawing reuses `GiFootprint` (E-2): the drawn shape contains the same nonzero bounds over E-2's 12-round seed set.
+- [D] An emitter dragged outside every grid shows the warning within one editor frame; dragging it back clears it.
+- [D] Touching an unrelated GameObject triggers no rescan (a counter in tests).
+
 ### Netcode, save, docs
 
 #### N-1 · Server-authoritative fields
@@ -999,6 +1042,7 @@ Plan §9 gives each card's change, reason and Done-when.
 | G-6 | P2 | 6 | Until it lands, Unity's memory profiler cannot see Gi's memory. |
 | G-7 | P1 | 3 | Until it lands, hashes scan whole grids. That is fine in tests but too slow for live desync checks. |
 | G-8 | P3 | 7 | Until it lands, splat runs on one core. The card starts only if V-3 shows splat dominating the frame. |
+| G-9 | P2 | 8 | Column batch entry points on the existing handles (a sense column per layer bucket; one transform-sync range), so the adapter pays one native call per bucket instead of managed batching. The public surface stays `World`/`Grid`/`Layer`/`Stamp` (the calls live on `World`); `docs/model.md` needs the lifetime, aliasing and concurrency proof for the borrowed buffers. Fallback: the sense pass keeps its current batching; the L3 follow-up does not depend on it. |
 
 ## Appendix A: Changes to plan.md
 
@@ -1211,4 +1255,5 @@ D-1 is done to Tier D/C and is PR #114, stacked after #113. The owner's new stan
 - **D-1 receipts:** `compile.sh` `errors: 0` and the 4-test sample smoke green on the samples imported through `Assets/Samples/com.gi.entities/0.1.0`; lint, dotnet (157 + 1198), `build-plugins.sh --check`, `jb` 0. The smoke tests and the sample generator are transient and not committed; re-import the samples (Package Manager, or copy `Samples~` into `Assets/Samples/com.gi.entities/0.1.0/`) and set `EditorBuildSettings.scenes` to the four main scenes to re-run them.
 - **Not run, still:** the Linux player suites, L5, 1M-source perf, the owner's screenshots, a by-eye pass at the new windows — and now also the README quick start from an empty project (a final-pass [U] item under O-U9).
 - **Wrap-up PRs (all open, none merged):** #115 jb fixes (into unity/v-3-performance); **#116 CI SDK pin** (into unity/main) — the intermittent `plugins`/`manifest differs` across #113/#114 was the runner image's preinstalled dotnet shadowing setup-dotnet's pinned 10.0.401 (part of the pool carries 10.0.402); the fix installs the manifest SDK into `runner.temp`/dotnet and adds loud guards, receipt in the job log `dotnet 10.0.401, manifest sdk 10.0.401`; #116's own red `plugins`/`columns` are pre-existing unity/main gaps (plugin DLLs drifted since U-0, `unity/lint.sh` absent) and go green when the branch line lands — when it does, `unity.yml` hits an add/add conflict: keep #116's version; **#117 V-3b quick wins** (into unity/d-1-docs) — idle 29.4 → 15.4 us, 19 → 7 jobs, L11 met, all receipts green.
+- **Cards taken from the owner's prototype (2026-10-18, evening):** the owner shared `com.iafahim.giinfluence`, a compact main-thread adapter on a column-batch core API. Four cards take its good parts: **E-8** (runtime field draw), **E-9** (authoring gizmos, E-2's gaps), **A-3** (sensor authoring surface with a nearest found bit) and **G-9** (column batch entry points, serving the L3 follow-up). Not taken: its main-thread sync-point design (ours scales behind fences), its baker partial-continue on errors (ours rejects wholesale), and its same-tick place-then-destroy remove skip (a leak; our destroy path is receipt-verified). Its zero-job idle is faster than ours idle-only — accepted as the price of parallelism.
 - The next AI reads `unity/HANDOFF.md` first.
