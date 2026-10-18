@@ -259,6 +259,166 @@ public sealed unsafe class BindingKindTests
     }
 
     [Fact]
+    public void ValueAndGradientExcludesMatchTheScalarCallsOverTwoHundredSeeds()
+    {
+        for (ulong seed = 1; seed <= 200; seed++)
+        {
+            using var setup = GiScenarioWorld.Create(GiScenarioProfile.Standard());
+            Scene(seed, setup, out _, out var xs, out var ys);
+            var rows = xs.Length;
+            var layer = setup.Layers[0];
+            var ids = new GiWorld.SourceId[rows];
+            for (var i = 0; i < rows; i++)
+                ids[i] = i % 3 == 0
+                    ? GiWorld.Place(setup.World, setup.Layers[0], xs[i], ys[i], setup.Stamps[1], 6)
+                    : default;
+            GiWorld.Process(setup.World);
+
+            var values = new short[rows];
+            var gradientValues = new short[rows];
+            var gx = new float[rows];
+            var gy = new float[rows];
+            var vx = new float[rows];
+            var vy = new float[rows];
+            var valueWhole = new ulong[GiSensePass.Words(rows)];
+            var gradientWhole = new ulong[GiSensePass.Words(rows)];
+            var bothWhole = new ulong[GiSensePass.Words(rows)];
+            fixed (float* x = xs, y = ys, px = gx, py = gy, qx = vx, qy = vy)
+            fixed (short* v = values, g = gradientValues)
+            fixed (GiWorld.SourceId* e = ids)
+            fixed (ulong* w1 = valueWhole, w2 = gradientWhole, w3 = bothWhole)
+            {
+                for (var b = 0; b < GiSensePass.Batches(rows, 192); b++)
+                {
+                    GiSensePass.ReadBatch(GiBindingKind.Value, setup.World, layer, x, y, e, rows, 192, b, v, null, null, w1);
+                    GiSensePass.ReadBatch(GiBindingKind.Gradient, setup.World, layer, x, y, e, rows, 192, b, null, px, py, w2);
+                    GiSensePass.ReadBatch(GiBindingKind.ValueGradient, setup.World, layer, x, y, e, rows, 192, b, g, qx, qy, w3);
+                }
+            }
+
+            for (var i = 0; i < rows; i++)
+            {
+                var excluded = ids[i].Generation != 0;
+                var okValue = excluded
+                    ? GiWorld.TrySense(setup.World, layer, xs[i], ys[i], ids[i], out var value)
+                    : GiWorld.TrySense(setup.World, layer, xs[i], ys[i], out value);
+                var okGradient = excluded
+                    ? GiWorld.TrySenseGradient(setup.World, layer, xs[i], ys[i], ids[i], out var ex, out var ey)
+                    : GiWorld.TrySenseGradient(setup.World, layer, xs[i], ys[i], out ex, out ey);
+                Assert.True(okValue == ((valueWhole[i >> 6] >> (i & 63) & 1ul) != 0ul), $"seed {seed} row {i} value coverage");
+                Assert.Equal(value, values[i]);
+                Assert.True(okGradient == ((gradientWhole[i >> 6] >> (i & 63) & 1ul) != 0ul), $"seed {seed} row {i} gradient coverage");
+                Assert.Equal(ex, gx[i]);
+                Assert.Equal(ey, gy[i]);
+                Assert.Equal(value, gradientValues[i]);
+                Assert.Equal(ex, vx[i]);
+                Assert.Equal(ey, vy[i]);
+                Assert.Equal(gradientWhole[i >> 6] >> (i & 63) & 1ul, bothWhole[i >> 6] >> (i & 63) & 1ul);
+            }
+        }
+    }
+
+    [Fact]
+    public void TheDispatcherEqualsTheSeparateBatchCallsForEveryKind()
+    {
+        var kinds = new[]
+        {
+            GiBindingKind.Value, GiBindingKind.Gradient, GiBindingKind.ValueGradient, GiBindingKind.Area, GiBindingKind.Max,
+            GiBindingKind.Nearest, GiBindingKind.Changed,
+        };
+        foreach (var kind in kinds)
+        {
+            for (ulong seed = 1; seed <= 60; seed++)
+            {
+                using var setup = GiScenarioWorld.Create(GiScenarioProfile.Standard());
+                Scene(seed, setup, out var rng, out var xs, out var ys);
+                var rows = xs.Length;
+                var layer = setup.Layers[kind == GiBindingKind.Area || kind == GiBindingKind.Max ? 3 : 1];
+                var reaches = Reaches(rng, rows);
+                var thresholds = new short[rows];
+                for (var i = 0; i < rows; i++) thresholds[i] = (short)(1 + rng.Next(6));
+
+                var viaDispatcher = new Outputs(rows);
+                var viaDirect = new Outputs(rows);
+                fixed (float* x = xs, y = ys, r = reaches)
+                fixed (short* th = thresholds)
+                {
+                    Run(kind, setup.World, layer, x, y, r, th, rows, viaDispatcher, true);
+                    Run(kind, setup.World, layer, x, y, r, th, rows, viaDirect, false);
+                }
+
+                Assert.Equal(viaDirect.Values, viaDispatcher.Values);
+                Assert.Equal(viaDirect.VectorXs, viaDispatcher.VectorXs);
+                Assert.Equal(viaDirect.VectorYs, viaDispatcher.VectorYs);
+                Assert.Equal(viaDirect.Totals, viaDispatcher.Totals);
+                Assert.Equal(viaDirect.Whole, viaDispatcher.Whole);
+            }
+        }
+    }
+
+    private sealed class Outputs
+    {
+        public readonly short[] Values;
+        public readonly float[] VectorXs;
+        public readonly float[] VectorYs;
+        public readonly long[] Totals;
+        public readonly ulong[] Whole;
+
+        public Outputs(int rows)
+        {
+            Values = new short[rows];
+            VectorXs = new float[rows];
+            VectorYs = new float[rows];
+            Totals = new long[rows];
+            Whole = new ulong[GiSensePass.Words(rows)];
+        }
+    }
+
+    private static void Run(GiBindingKind kind, byte world, byte layer, float* x, float* y, float* r, short* th, int rows,
+        Outputs outputs, bool dispatcher)
+    {
+        fixed (short* v = outputs.Values)
+        fixed (float* ox = outputs.VectorXs, oy = outputs.VectorYs)
+        fixed (long* t = outputs.Totals)
+        fixed (ulong* w = outputs.Whole)
+        {
+            var columns = new GiSenseColumns
+            {
+                Xs = x, Ys = y, Reaches = r, Thresholds = th, Values = v, VectorXs = ox, VectorYs = oy, Totals = t, Whole = w, Rows = rows,
+            };
+            for (var b = 0; b < GiSensePass.Batches(rows, 192); b++)
+            {
+                if (dispatcher)
+                {
+                    GiSensePass.ReadColumns(kind, world, layer, columns, 17f, 1, 192, b);
+                    continue;
+                }
+
+                switch (kind)
+                {
+                    case GiBindingKind.Area:
+                        GiSensePass.ReadAreaBatch(world, layer, x, y, r, null, rows, 192, b, t, w);
+                        break;
+                    case GiBindingKind.Max:
+                        GiSensePass.ReadMaxBatch(world, layer, x, y, r, rows, 192, b, v, ox, oy, w);
+                        break;
+                    case GiBindingKind.Nearest:
+                        GiSensePass.ReadNearestBatch(world, layer, x, y, r, th, rows, 192, b, v, ox, oy, w);
+                        break;
+                    case GiBindingKind.Changed:
+                        GiSensePass.ReadChangedBatch(world, layer, x, y, 17f, 1, rows, 192, b, w);
+                        break;
+                    default:
+                        GiSensePass.ReadBatch(kind, world, layer, x, y, rows, 192, b,
+                            kind == GiBindingKind.Gradient ? null : v, kind == GiBindingKind.Value ? null : ox,
+                            kind == GiBindingKind.Value ? null : oy, w);
+                        break;
+                }
+            }
+        }
+    }
+
+    [Fact]
     public void NearestWithNothingInReachWritesMinValueAndClearsFound()
     {
         using var setup = GiScenarioWorld.Create(GiScenarioProfile.Standard());

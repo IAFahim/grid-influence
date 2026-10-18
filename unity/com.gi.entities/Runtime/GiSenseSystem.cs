@@ -27,6 +27,8 @@ namespace Gi.Entities
                 Transforms = GetComponentTypeHandle<LocalTransform>(true),
                 Matrices = GetComponentTypeHandle<LocalToWorld>(true),
                 Parents = GetComponentTypeHandle<Parent>(true),
+                Sources = GetComponentTypeHandle<GiSource>(true),
+                Entities = GetEntityTypeHandle(),
             };
             _frames = GetComponentLookup<GiFrame>();
             _stats = GetComponentLookup<GiStats>();
@@ -55,6 +57,8 @@ namespace Gi.Entities
             _view.Transforms.Update(this);
             _view.Matrices.Update(this);
             _view.Parents.Update(this);
+            _view.Sources.Update(this);
+            _view.Entities.Update(this);
             _frames.Update(this);
             _stats.Update(this);
 
@@ -71,103 +75,15 @@ namespace Gi.Entities
             Dependency = handle;
         }
 
-        private JobHandle Schedule(GiSenseBinding binding, Entity frame, NativeReference<GiReconcileContext> context, int batch,
-            Allocator allocator, JobHandle handle)
-        {
-            var spec = binding.Spec;
-            var chunkCount = binding.Query.CalculateChunkCountWithoutFiltering();
-            var counts = CollectionHelper.CreateNativeArray<int>(chunkCount, allocator);
-            var offsets = CollectionHelper.CreateNativeArray<int>(chunkCount, allocator);
-            var rows = CollectionHelper.CreateNativeArray<int>(2, allocator);
-            var xs = new NativeList<float>(allocator);
-            var ys = new NativeList<float>(allocator);
-            var values = new NativeList<short>(allocator);
-            var gradientXs = new NativeList<float>(allocator);
-            var gradientYs = new NativeList<float>(allocator);
-            var whole = new NativeList<ulong>(allocator);
-            var batches = new NativeList<int>(allocator);
-            var wantsValue = spec.Kind != GiBindingKind.Gradient;
-            var wantsGradient = spec.Kind != GiBindingKind.Value;
-
-            handle = new GiSenseCountJob { View = _view, Context = context, Counts = counts }.ScheduleParallel(binding.Query, handle);
-            handle = new GiSensePrefixJob
-            {
-                Layer = new GiLayerKey(spec.Layer),
-                Context = context,
-                Stats = frame,
-                Lookup = _stats,
-                NeedsValue = (byte)(wantsValue ? 1 : 0),
-                NeedsGradient = (byte)(wantsGradient ? 1 : 0),
-                Counts = counts,
-                Offsets = offsets,
-                Rows = rows,
-                Xs = xs,
-                Ys = ys,
-                Values = values,
-                GradientXs = gradientXs,
-                GradientYs = gradientYs,
-                Whole = whole,
-                Batches = batches,
-                Batch = batch,
-            }.Schedule(handle);
-            handle = new GiSenseWriteJob
-            {
-                View = _view,
-                Context = context,
-                Offsets = offsets,
-                Xs = xs.AsDeferredJobArray(),
-                Ys = ys.AsDeferredJobArray(),
-            }.ScheduleParallel(binding.Query, handle);
-
-            handle = new GiSenseReadJob
-            {
-                Kind = spec.Kind,
-                Layer = new GiLayerKey(spec.Layer),
-                Batch = batch,
-                Batches = batches,
-                Context = context,
-                Rows = rows,
-                Xs = xs.AsDeferredJobArray(),
-                Ys = ys.AsDeferredJobArray(),
-                Values = values.AsDeferredJobArray(),
-                GradientXs = gradientXs.AsDeferredJobArray(),
-                GradientYs = gradientYs.AsDeferredJobArray(),
-                Whole = whole.AsDeferredJobArray(),
-            }.Schedule(batches, 1, GiRuntime.BeginRead(handle));
-            GiRuntime.EndRead(handle);
-
-            for (var t = 0; t < binding.Types.Length; t++)
-            {
-                var type = binding.Types[t];
-                type.Handle.Update(this);
-                handle = new GiSenseScatterJob
-                {
-                    View = _view,
-                    Handle = type.Handle,
-                    TypeSize = type.Size,
-                    Value = type.Value,
-                    Gradient = type.Gradient,
-                    Coverage = type.Coverage,
-                    Rows = rows,
-                    Offsets = offsets,
-                    Values = values,
-                    GradientXs = gradientXs,
-                    GradientYs = gradientYs,
-                    Whole = whole,
-                }.ScheduleParallel(binding.Query, handle);
-            }
-
-            return handle;
-        }
-
         private void Rebuild(ref GiProfileBlob blob)
         {
             Dispose();
             _builtHash = blob.Hash;
             var list = new System.Collections.Generic.List<GiSenseBinding>();
             var specs = new System.ReadOnlySpan<GiBindingSpec>(blob.Bindings.GetUnsafePtr(), blob.Bindings.Length);
+            var layers = new System.ReadOnlySpan<GiLayerSpec>(blob.Layers.GetUnsafePtr(), blob.Layers.Length);
             var statuses = new GiBindingStatus[specs.Length];
-            GiBindingTable.Validate(specs, blob.Layers.Length, GiBindingSupport.Basic, statuses);
+            GiBindingTable.Validate(specs, layers, GiBindingSupport.All, statuses);
             for (var i = 0; i < specs.Length; i++)
             {
                 if (statuses[i] != GiBindingStatus.Valid)
@@ -181,72 +97,6 @@ namespace Gi.Entities
             }
 
             _bindings = list.ToArray();
-        }
-
-        private GiSenseBinding Resolve(int index, in GiBindingSpec spec)
-        {
-            var types = new System.Collections.Generic.List<GiSenseType>();
-            var all = new System.Collections.Generic.List<ComponentType>();
-            var present = new System.Collections.Generic.List<ComponentType>();
-            if (!Bind(index, types, spec.Value, GiSenseSlot.Value) || !Bind(index, types, spec.Gradient, GiSenseSlot.Gradient) ||
-                !Bind(index, types, spec.Coverage, GiSenseSlot.Coverage))
-                return null;
-
-            foreach (var type in types)
-            {
-                var kindIsCoverage = type.Coverage.Active && !type.Value.Active && !type.Gradient.Active;
-                (kindIsCoverage ? present : all).Add(ComponentType.ReadWrite(type.Index));
-                type.Handle = GetDynamicComponentTypeHandle(ComponentType.ReadWrite(type.Index));
-            }
-
-            var query = EntityManager.CreateEntityQuery(new EntityQueryDesc { All = all.ToArray(), Present = present.ToArray() });
-            return new GiSenseBinding { Spec = spec, Query = query, Types = types.ToArray() };
-        }
-
-        private bool Bind(int index, System.Collections.Generic.List<GiSenseType> types, in GiBindingField field, GiSenseSlot slot)
-        {
-            if (field.TypeHash == 0ul) return true;
-
-            var typeIndex = TypeManager.GetTypeIndexFromStableTypeHash(field.TypeHash);
-            if (typeIndex == TypeIndex.Null)
-            {
-                Report(index, "An output field names a component type that is not in this build.");
-                return false;
-            }
-
-            var info = TypeManager.GetTypeInfo(typeIndex);
-            var size = info.IsZeroSized ? 0 : info.TypeSize;
-            if (field.Offset + field.Size > size)
-            {
-                Report(index, "An output field lies outside its component.");
-                return false;
-            }
-
-            GiSenseType type = null;
-            foreach (var candidate in types)
-                if (candidate.Index == typeIndex)
-                    type = candidate;
-            if (type == null)
-            {
-                type = new GiSenseType { Index = typeIndex, Size = size };
-                types.Add(type);
-            }
-
-            var target = new GiSenseField { Active = true, Offset = field.Offset, Size = field.Size };
-            switch (slot)
-            {
-                case GiSenseSlot.Value:
-                    type.Value = target;
-                    break;
-                case GiSenseSlot.Gradient:
-                    type.Gradient = target;
-                    break;
-                default:
-                    type.Coverage = target;
-                    break;
-            }
-
-            return true;
         }
 
         private void Report(int index, string reason)
@@ -263,13 +113,6 @@ namespace Gi.Entities
             foreach (var binding in _bindings) binding.Query.Dispose();
             _bindings = System.Array.Empty<GiSenseBinding>();
             _builtHash = 0ul;
-        }
-
-        private enum GiSenseSlot : byte
-        {
-            Value,
-            Gradient,
-            Coverage,
         }
     }
 }

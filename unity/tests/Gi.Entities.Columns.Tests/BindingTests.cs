@@ -75,9 +75,128 @@ public sealed unsafe class BindingTests
         Assert.Equal(new[] { GiBindingStatus.Valid, GiBindingStatus.Valid }, otherType);
 
         var tags = Check(GiBindingSupport.All,
-            new GiBindingSpec { Kind = GiBindingKind.Changed, Coverage = Field(8, 0, 0) },
-            new GiBindingSpec { Kind = GiBindingKind.Changed, Coverage = Field(8, 0, 0) });
+            new GiBindingSpec { Kind = GiBindingKind.Changed, Reach = 8f, Coverage = Field(8, 0, 0) },
+            new GiBindingSpec { Kind = GiBindingKind.Changed, Reach = 8f, Coverage = Field(8, 0, 0) });
         Assert.Equal(GiBindingStatus.DuplicateWriter, tags[1]);
+    }
+
+    [Fact]
+    public void ExtendedKindsNeedAReachAndTheirInputFieldsHaveFixedSizes()
+    {
+        var area = new GiBindingSpec { Kind = GiBindingKind.Area, Total = Field(2, 0, 8) };
+        Assert.Equal(GiBindingStatus.InvalidReach, Check(GiBindingSupport.All, area)[0]);
+
+        area.Reach = float.NaN;
+        Assert.Equal(GiBindingStatus.InvalidReach, Check(GiBindingSupport.All, area)[0]);
+
+        area.Reach = 6f;
+        Assert.Equal(GiBindingStatus.Valid, Check(GiBindingSupport.All, area)[0]);
+
+        area.Reach = 0f;
+        area.ReachField = Field(3, 0, 4);
+        Assert.Equal(GiBindingStatus.Valid, Check(GiBindingSupport.All, area)[0]);
+
+        area.ReachField = Field(3, 0, 8);
+        Assert.Equal(GiBindingStatus.WrongFieldSize, Check(GiBindingSupport.All, area)[0]);
+
+        var value = Value();
+        value.ReachField = Field(3, 0, 4);
+        Assert.Equal(GiBindingStatus.UnexpectedField, Check(GiBindingSupport.All, value)[0]);
+
+        var nearest = new GiBindingSpec
+        {
+            Kind = GiBindingKind.Nearest, Reach = 5f, Value = Field(1, 0, 2), Position = Field(1, 8, 8), ThresholdField = Field(4, 0, 2),
+        };
+        Assert.Equal(GiBindingStatus.Valid, Check(GiBindingSupport.All, nearest)[0]);
+
+        nearest.ThresholdField = Field(4, 0, 4);
+        Assert.Equal(GiBindingStatus.WrongFieldSize, Check(GiBindingSupport.All, nearest)[0]);
+
+        area.ReachField = Field(3, 0, 4);
+        area.ThresholdField = Field(4, 0, 2);
+        Assert.Equal(GiBindingStatus.UnexpectedField, Check(GiBindingSupport.All, area)[0]);
+    }
+
+    [Fact]
+    public void ChangedTakesOneConstantReachForTheWholeBinding()
+    {
+        var changed = new GiBindingSpec { Kind = GiBindingKind.Changed, Reach = 8f, Coverage = Field(8, 0, 0) };
+        Assert.Equal(GiBindingStatus.Valid, Check(GiBindingSupport.All, changed)[0]);
+
+        changed.ReachField = Field(3, 0, 4);
+        Assert.Equal(GiBindingStatus.UnexpectedField, Check(GiBindingSupport.All, changed)[0]);
+    }
+
+    [Fact]
+    public void EachKindNamesTheBuffersItNeeds()
+    {
+        GiSenseNeeds Of(GiBindingKind kind, byte flags = 0)
+        {
+            return GiBindingTable.NeedsOf(new GiBindingSpec { Kind = kind, Flags = flags });
+        }
+
+        Assert.Equal(GiSenseNeeds.Value, Of(GiBindingKind.Value));
+        Assert.Equal(GiSenseNeeds.Vector, Of(GiBindingKind.Gradient));
+        Assert.Equal(GiSenseNeeds.Value | GiSenseNeeds.Vector | GiSenseNeeds.Exclude, Of(GiBindingKind.ValueGradient, GiBindingSpec.ExcludeSelf));
+        Assert.Equal(GiSenseNeeds.Total | GiSenseNeeds.Reach, Of(GiBindingKind.Area));
+        Assert.Equal(GiSenseNeeds.Total | GiSenseNeeds.Reach | GiSenseNeeds.Exclude, Of(GiBindingKind.Area, GiBindingSpec.ExcludeSelf));
+        Assert.Equal(GiSenseNeeds.Value | GiSenseNeeds.Vector | GiSenseNeeds.Reach, Of(GiBindingKind.Max));
+        Assert.Equal(GiSenseNeeds.Value | GiSenseNeeds.Vector | GiSenseNeeds.Reach | GiSenseNeeds.Threshold, Of(GiBindingKind.Nearest));
+        Assert.Equal(GiSenseNeeds.None, Of(GiBindingKind.Changed));
+        Assert.True(GiBindingTable.ReachPerRow(GiBindingKind.Area));
+        Assert.False(GiBindingTable.ReachPerRow(GiBindingKind.Changed));
+    }
+
+    [Fact]
+    public void ExcludingOnATransientLayerIsRefusedButPersistentAndDerivedLayersAreFine()
+    {
+        var layers = new[]
+        {
+            new GiLayerSpec { Kind = GiLayerKind.Persistent },
+            new GiLayerSpec { Kind = GiLayerKind.Transient },
+            new GiLayerSpec { Kind = GiLayerKind.Sum },
+        };
+        var persistent = Value();
+        persistent.Flags = GiBindingSpec.ExcludeSelf;
+        var transient = Value(2);
+        transient.Layer = 1;
+        transient.Flags = GiBindingSpec.ExcludeSelf;
+        var derived = Value(3);
+        derived.Layer = 2;
+        derived.Flags = GiBindingSpec.ExcludeSelf;
+        var plain = Value(4);
+        plain.Layer = 1;
+
+        var bindings = new[] { persistent, transient, derived, plain };
+        var statuses = new GiBindingStatus[bindings.Length];
+        var invalid = GiBindingTable.Validate(bindings, layers, GiBindingSupport.All, statuses);
+
+        Assert.Equal(1, invalid);
+        Assert.Equal(
+            new[] { GiBindingStatus.Valid, GiBindingStatus.ExcludeOnTransient, GiBindingStatus.Valid, GiBindingStatus.Valid },
+            statuses);
+        Assert.False(string.IsNullOrEmpty(GiBindingTable.Describe(GiBindingStatus.ExcludeOnTransient)));
+        Assert.False(string.IsNullOrEmpty(GiBindingTable.Describe(GiBindingStatus.InvalidReach)));
+    }
+
+    [Fact]
+    public void AnEntityIsDueExactlyOncePerPeriod()
+    {
+        for (var period = 1; period <= 9; period++)
+        for (var index = 0; index < 40; index++)
+        {
+            var due = 0;
+            for (var tick = 100; tick < 100 + period; tick++)
+                if (GiSensePass.Due(index, period, tick))
+                    due++;
+            Assert.Equal(1, due);
+        }
+
+        Assert.True(GiSensePass.Due(5, 0, 7));
+        Assert.Equal(1, GiSensePass.Periods(0));
+        Assert.Equal(4, GiSensePass.Periods(4));
+        Assert.Equal(9, GiSensePass.SinceTick(10, 0));
+        Assert.Equal(7, GiSensePass.SinceTick(10, 3));
     }
 
     [Fact]
@@ -88,7 +207,7 @@ public sealed unsafe class BindingTests
         Assert.Equal(GiBindingStatus.Unsupported, Check(GiBindingSupport.Basic, exclude)[0]);
         Assert.Equal(GiBindingStatus.Valid, Check(GiBindingSupport.Basic | GiBindingSupport.Exclusion, exclude)[0]);
 
-        var nearest = new GiBindingSpec { Kind = GiBindingKind.Nearest, Value = Field(1, 0, 2), Position = Field(1, 8, 8), Flags = GiBindingSpec.ExcludeSelf };
+        var nearest = new GiBindingSpec { Kind = GiBindingKind.Nearest, Reach = 5f, Value = Field(1, 0, 2), Position = Field(1, 8, 8), Flags = GiBindingSpec.ExcludeSelf };
         Assert.Equal(GiBindingStatus.ExcludeUnavailable, Check(GiBindingSupport.All, nearest)[0]);
         nearest.Flags = 0;
         Assert.Equal(GiBindingStatus.Unsupported, Check(GiBindingSupport.Basic, nearest)[0]);
