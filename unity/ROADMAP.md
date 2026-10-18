@@ -123,7 +123,7 @@ The card named in each row pins its fact (Tier U).
 | L6 | Managed allocation per steady tick, on every backend | 0 B | axiom 8 | V-2 | |
 | L7 | Reconcile at 1% churn of 1M sources: 10k places and 10k removes | ≤ 1.5 ms | per-command cost of `ApplyBatch` | V-3 | |
 | L8 | Mirror upload of 512 changed tiles | ≤ 0.5 ms on the main thread | about 1 MB uploaded | P-1 | |
-| L9 | Tier D suite for the Unity projects | ≤ 60 s wall time | agents run it on every change | F-2 | |
+| L9 | Tier D suite for the Unity projects | ≤ 60 s wall time | agents run it on every change | F-2 | 5.4 s warm (lint, two builds, 35 tests, plugin provenance check; i9-14900K, 2026-10-18) |
 | L10 | Profile edit in play mode with 1M sources: free, rebuild, re-place | ≤ 250 ms | must stay interactive | V-3 | |
 | L11 | Idle cost: a profile and no entities | ≤ 20 µs per tick | seven systems, each a few µs to schedule | V-3 | |
 
@@ -214,7 +214,7 @@ Plan §12's S1–S5 apply, plus:
 | U-0 | Package skeleton, plugins, host project | runtime | P0 | — | D, U | 1 | done | #79 (D) and the Tier U unblock PR (U): editor 7000.0.0a9 + BovineLabs Core pre.6 at GitLab 82be2794. `validate.sh` editmode, playmode, coreclr (player) and il2cpp (player) each pass the smoke test. See A.15 and Appendix F |
 | G-0a | TFM dry run | core | P0 | — | G | 1 | done | scratch, not merged |
 | G-1 | Pure exclusion reads | core | P1 | — | G | 1 | done | #81. Exclusion-row gate deltas (+8–16%) are the accepted price of pure reads; baseline untouched, quiet-host re-run pending |
-| F-2 | Scenarios, reference executor, lint, CI | foundation | P0 | F-1, U-0 | D | 2 | todo | |
+| F-2 | Scenarios, reference executor, lint, CI | foundation | P0 | F-1, U-0 | D | 2 | done | stacked on #86 |
 | U-1 | Frame, bootstrap, group, process | runtime | P0 | U-0, F-1 | D, U | 2 | todo | |
 | A-1 | Assets and inspectors | authoring | P0 | U-0 | U | 2 | todo | |
 | V-1 | Gi parity on Unity backends | verification | P0 | U-0, F-1 | D, U | 2 | todo | |
