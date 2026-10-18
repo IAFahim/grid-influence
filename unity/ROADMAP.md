@@ -246,8 +246,8 @@ Plan §12's S1–S5 apply, plus:
 | G-6 | Allocator hook | core | P2 | — | G | 6 | todo | |
 | N-2 | Lockstep checks | netcode | P2 | N-1 | U | 7 | todo | |
 | G-8 | Parallel splat | core | P3 | V-3 | G | 7 | todo | |
-| V-0 | CoreCLR day 0 | verification | P0 | V-1, V-2, a CoreCLR build | U | day 0 | todo | |
-| G-0 | Build for Unity's CoreCLR TFM | core | P0 | G-0a, V-0 step 1 | G | day 0 | todo | |
+| V-0 | CoreCLR day 0 | verification | P0 | V-1, V-2, a CoreCLR build | U | day 0 | active | Preview answers in Appendix B (items 1-5, 7); the flip (item 11) waits for Unity's net10 API level |
+| G-0 | Build for Unity's CoreCLR TFM | core | P0 | G-0a, V-0 step 1 | G | day 0 | blocked | The TFM is net10.0 (already built); it cannot be referenced until Unity enables the net10 API level (Appendix B item 3) |
 
 ### Waves
 
@@ -1036,7 +1036,23 @@ New open decisions:
 
 ## Appendix B: CoreCLR checklist
 
-The checklist is plan Appendix A. V-0 runs it, and the coordinator records the answers there.
+The questions are plan Appendix A. V-0 runs them and records the answers here. Results below are from the **7000.0.0a9** alpha (2026-10-18, i9-14900K, Linux); the release build still has to be run again.
+
+| # | Question | Answer on 7000.0.0a9 |
+|---|---|---|
+| 1 | Runtime | CoreCLR, **.NET 10.0.10-dev** (`System.Private.CoreLib`, no `Mono.Runtime`) in the editor and in the Linux player. `ScriptingImplementation` is `Mono2x, IL2CPP, WinRTDotNET, CoreCLR`. Script assemblies still compile against netstandard / .NET 4.8 reference assemblies: `ApiCompatibilityLevel.NET` (net10) exists but is marked "still a work in progress and is disabled for now", and `EditorAssembliesCompatibilityLevel` has only Default, NET_Unity_4_8 and NET_Standard. |
+| 2 | Define | `ENABLE_CORECLR` (editor and CoreCLR player, set per assembly by Bee). IL2CPP player: `ENABLE_IL2CPP`. `ENABLE_MONO` is never defined. Plugin define constraints do evaluate `ENABLE_CORECLR`. |
+| 3 | Load | The netstandard2.1 `Gi.dll` loads and runs in all three: editor, CoreCLR player, IL2CPP player. A `net10.0` `Gi.dll` is selected correctly by a define-constrained importer but **cannot be referenced by script assemblies**: CS1705 (`Gi` uses `System.Runtime 10.0.0.0`, higher than the referenced assembly). It stays unusable until the net10 API level is enabled. |
+| 4 | Intrinsics | CoreCLR editor and player: `Vector128`/`Vector256` accelerated; SSE4.1, AVX2, BMI2, POPCNT supported; AVX-512 absent on this CPU. IL2CPP player: nothing usable (`Avx2` type missing, `Vector128.IsHardwareAccelerated` false, `Sse41` and `Popcnt` report false). So IL2CPP must keep the scalar build. |
+| 5 | JIT | `DOTNET_TieredCompilation`, `DOTNET_TieredPGO`, `DOTNET_EnableHWIntrinsic` unset by default; GC is workstation, latency Interactive (CoreCLR) or Batch (IL2CPP). Warm-up and environment-variable behaviour: V-3. |
+| 6 | Reload | Not yet tested (U-1 covers code unload and orphan reclaim). |
+| 7 | Jobs | 31 job workers on this host. Managed job from a managed `ISystem`: E9, U-1. |
+| 8 | Burst | Burst 2.0.0 is a builtin module and the package compiles with it. `BurstTrampoline`: not yet exercised. |
+| 9 | Parity | V-1. |
+| 10 | Numbers | V-3. |
+| 11 | Flip | **Blocked by item 3**, not by the plugin machinery. When Unity enables the net10 API level: build the `coreclr:net10.0` variant (the variant→TFM mapping already exists in `build-plugins.sh`; add it to `variants`), write both importers' define constraints with `GiPluginSetup` (`GI_PLUGIN_VARIANT`, `GI_PLUGIN_CONSTRAINT`), and rerun V-1, V-2, V-3. |
+
+Importer metas: Unity 7 writes `platformData` as a mapping (`Any:`, `Editor:`). A hand-written meta using the older list form (`- first:` / `second:`) is silently ignored, which is what lesson 8 saw. Always let `GiPluginSetup` (the `PluginImporter` API) write the meta.
 
 ## Appendix C: Report format
 
@@ -1135,6 +1151,7 @@ Recorded 2026-10-18 so later sessions start from verified facts, not assumptions
 14. The editor deletes `Temp/` at every launch. Keep launch-time shims in `Logs/`.
 15. `set -o pipefail` plus an early-exiting `awk` in a pipeline turns the upstream command into SIGPIPE (exit 141) and aborts the script under `set -e`. Capture the producer's output in a variable first.
 16. Unity 7 alphas: pin one exact alpha for the host project and the package (`unityRelease`), and bump them together. The package's `package.json` now says `"unity": "7000.0", "unityRelease": "0a9"` and depends on the builtin module versions (entities and collections 6.7.0, burst 2.0.0, mathematics 1.4.0).
+17. Hand-written plugin `.meta` files with the old list-form `platformData` are ignored by Unity 7 without a message, so the DLL silently vanishes from the precompiled set (this was lesson 8). Let the `PluginImporter` API write them (`unity/project/Assets/Editor/GiPluginSetup.cs`).
 
 ### Session state (2026-10-18, second session)
 
