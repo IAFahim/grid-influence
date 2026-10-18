@@ -8,7 +8,7 @@ export DOTNET_NOLOGO=1
 
 root=$(cd -- "$(dirname -- "$0")/.." && pwd)
 plugins=$root/unity/com.gi.entities/Plugins/Gi
-variants="netstandard2.1"
+variants="netstandard2.1:netstandard2.1"
 projects="Gi Gi.Validation"
 check=false
 
@@ -30,10 +30,13 @@ printf 'sdk %s\n' "$sdk" >"$manifest"
 
 status=0
 
-for variant in $variants; do
+for entry in $variants; do
+    variant=${entry%%:*}
+    tfm=${entry#*:}
+    mkdir -p "$plugins/$variant"
     for project in $projects; do
-        dotnet build "$root/src/$project/$project.csproj" -c Release -f "$variant" -t:Rebuild -m:1 -nodeReuse:false -p:Deterministic=true -p:ContinuousIntegrationBuild=true -p:IncludeSourceRevisionInInformationalVersion=false -p:DebugType=none -p:EnableSourceLink=false -p:EmbedAllSources=false
-        dll=$root/src/$project/bin/Release/$variant/$project.dll
+        dotnet build "$root/src/$project/$project.csproj" -c Release -f "$tfm" -t:Rebuild -m:1 -nodeReuse:false -p:Deterministic=true -p:ContinuousIntegrationBuild=true -p:IncludeSourceRevisionInInformationalVersion=false -p:DebugType=none -p:EnableSourceLink=false -p:EmbedAllSources=false
+        dll=$root/src/$project/bin/Release/$tfm/$project.dll
         [ -f "$dll" ] || { printf 'missing %s\n' "$dll" >&2; exit 2; }
         sha=$(sha256sum "$dll" | cut -d' ' -f1)
         printf '%s %s %s\n' "$variant" "$project.dll" "$sha" >>"$manifest"
