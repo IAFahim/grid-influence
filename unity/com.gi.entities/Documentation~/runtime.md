@@ -111,3 +111,15 @@ What entity data cannot say is what was in flight: a gain ramp half way up, and 
 
 Gi's tick counter starts again from zero in a loaded world. Nothing the adapter keeps depends on it.
 
+## Netcode
+
+Netcode for Entities is optional. The `Gi.Entities.Netcode` assembly compiles only when `com.unity.netcode` is installed (it defines `UNITY_NETCODE` through a version define), so a project without it never sees the code.
+
+**What replicates.** Server and client each run their own Gi world from the replicated desired state; gameplay that matters reads the server's field and clients read theirs for presentation. `GiEmitter` and `GiSplat` are not ghost-serialised directly (their key types would need ghost variants); put `GiGhostEmitterAuthoring` (or `GiGhostSplatAuthoring`) beside `GhostAuthoringComponent` and your emitter authoring, and `GiGhostServerSystem` copies layer, stamp, gain and the enabled bit into a `[GhostField]` mirror that `GiGhostClientSystem` copies back into `GiEmitter` / `GiSplat` before the Gi group runs. Positions travel with the ghost's `LocalTransform`. Pulses are local to the world that emits them: emit them from replicated events on both sides.
+
+**Profile check.** After a connection is up the server sends its profile hash once (`GiProfileHashRpc`). A client whose profile hash differs creates a `GiSuppress` entity: `GiBootstrapSystem` releases its Gi world, refuses to build one, and raises the `Profile` fault until the entity goes away. Add `GiSuppress` yourself to keep Gi off for any other reason.
+
+**Lockstep check.** For games whose clients run the same inputs as the server, set the `gi.net.check` ConfigVar to a number of ticks *k* (0 is off). Every Gi world then keeps one incremental hash per layer per tick (a main-thread sync point each tick, so leave it off in production unless you want the check), the server sends `(tick, layer, hash)` every *k* ticks, and a client that holds a different hash for that tick raises the `Desync` fault, logs it once and shows it in the Field window's runtime panel. A desync that starts at tick *t* is reported against the first multiple of *k* after *t*. Start the check only after the field has settled; hashes of a field still being replicated differ legitimately.
+
+**Building and testing here.** The Unity 7000.0.0a9 alpha cannot compile one editor file of the registry package, so `unity/netcode-setup.sh install` downloads `com.unity.netcode` 6.7.0 into `unity/project/Packages` (git-ignored), removes that file's incompatible half, drops the package's own editor tests and lets the Gi netcode tests reach its test-world helpers. `unity/netcode-setup.sh remove` takes it out again and restores `packages-lock.json`. With the package embedded, `unity/validate.sh editmode` also runs the netcode tests (two real server and client worlds over the loopback).
+

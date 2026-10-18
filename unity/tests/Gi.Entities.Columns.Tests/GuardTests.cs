@@ -277,6 +277,10 @@ public sealed unsafe class GuardTests
         Assert.True(faults.Has(GiFaultKind.Overlap));
         Assert.Equal(9, faults.FirstTick(GiFaultKind.Overlap));
         Assert.False(faults.Has(GiFaultKind.Reclaimed));
-        Assert.Equal(6, GiFaults.KindCount);
+        Assert.Equal(7, GiFaults.KindCount);
+        Assert.True(faults.Raise(GiFaultKind.Desync, 11));
+        Assert.Equal(11, faults.FirstTick(GiFaultKind.Desync));
+        Assert.Equal(9, faults.FirstTick(GiFaultKind.Overlap));
+        Assert.False(faults.Raise(GiFaultKind.Desync, 12));
     }
 }

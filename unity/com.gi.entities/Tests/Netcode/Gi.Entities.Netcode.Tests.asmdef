@@ -1,0 +1,46 @@
+{
+    "name": "Gi.Entities.Netcode.Tests",
+    "rootNamespace": "Gi.Entities.Netcode.Tests",
+    "references": [
+        "BovineLabs.Core",
+        "Gi.Entities",
+        "Gi.Entities.Netcode",
+        "Gi.Entities.Tests.Ecs",
+        "Gi.Entities.Tests.Support",
+        "Unity.Burst",
+        "Unity.Collections",
+        "Unity.Entities",
+        "Unity.Entities.Hybrid",
+        "Unity.Mathematics",
+        "Unity.NetCode",
+        "Unity.NetCode.Authoring.Hybrid",
+        "Unity.NetCode.TestsUtils.Runtime.Tests",
+        "Unity.Networking.Transport",
+        "Unity.Transforms",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "Gi.dll",
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS",
+        "UNITY_NETCODE"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.unity.netcode",
+            "expression": "6.7.0",
+            "define": "UNITY_NETCODE"
+        }
+    ],
+    "noEngineReferences": false
+}

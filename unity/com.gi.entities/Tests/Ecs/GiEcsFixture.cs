@@ -25,6 +25,7 @@ namespace Gi.Entities.Tests
         public readonly SystemHandle Recorder;
         public readonly SystemHandle Restore;
         public readonly SystemHandle RestoreStep;
+        public readonly SystemHandle Lockstep;
         private BlobAssetReference<GiProfileBlob> _profile;
         private Entity _profileEntity;
         private bool _disposed;
@@ -50,10 +51,12 @@ namespace Gi.Entities.Tests
             Recorder = World.GetOrCreateSystem<GiRecorderSystem>();
             Restore = World.GetOrCreateSystem<GiSaveRestoreSystem>();
             RestoreStep = World.GetOrCreateSystem<GiRestoreStepSystem>();
+            Lockstep = World.GetOrCreateSystem<GiLockstepSystem>();
             Group.AddSystemToUpdateList(Bootstrap);
             Group.AddSystemToUpdateList(Recorder);
             Group.AddSystemToUpdateList(Restore);
             Group.AddSystemToUpdateList(RestoreStep);
+            Group.AddSystemToUpdateList(Lockstep);
             Group.AddSystemToUpdateList(Reconcile);
             Group.AddSystemToUpdateList(Sync);
             Group.AddSystemToUpdateList(Splat);

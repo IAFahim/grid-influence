@@ -24,6 +24,8 @@ namespace Gi.Entities.Presentation
         public bool Alive;
         public uint Generation;
         public int Tick;
+        public ushort Faults;
+        public int DesyncTick = -1;
         public GiGridInfo[] Grids = Array.Empty<GiGridInfo>();
         public int LayerCount;
     }

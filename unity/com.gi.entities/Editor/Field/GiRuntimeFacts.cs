@@ -29,10 +29,12 @@ namespace Gi.Entities.Editor
             };
             if (selected == null || !selected.Alive)
             {
-                foreach (var name in new[] { "Store bytes", "Live tiles", "Pages", "Kernel cache entries", "Live sources" }) rows.Add(Row(name, NotAvailable));
+                foreach (var name in new[] { "Faults", "Desync", "Store bytes", "Live tiles", "Pages", "Kernel cache entries", "Live sources" }) rows.Add(Row(name, NotAvailable));
                 return rows;
             }
 
+            rows.Add(Row("Faults", Faults(selected.Faults)));
+            rows.Add(Row("Desync", selected.DesyncTick < 0 ? "none" : "first at tick " + selected.DesyncTick.ToString(CultureInfo.InvariantCulture)));
             GiWorld.Memory(selected.GiWorld, out var bytes, out var tiles, out var pages, out var kernels, out var sources);
             rows.Add(Row("Store bytes", bytes.ToString(CultureInfo.InvariantCulture)));
             rows.Add(Row("Live tiles", tiles.ToString(CultureInfo.InvariantCulture)));
@@ -40,6 +42,17 @@ namespace Gi.Entities.Editor
             rows.Add(Row("Kernel cache entries", kernels.ToString(CultureInfo.InvariantCulture)));
             rows.Add(Row("Live sources", sources.ToString(CultureInfo.InvariantCulture)));
             return rows;
+        }
+
+        public static string Faults(ushort raised)
+        {
+            if (raised == 0) return "none";
+
+            var names = new List<string>();
+            foreach (GiFaultKind kind in System.Enum.GetValues(typeof(GiFaultKind)))
+                if (kind != GiFaultKind.None && (raised & (ushort)kind) != 0)
+                    names.Add(kind.ToString());
+            return string.Join(", ", names);
         }
 
         public static int DefinedStamps()
