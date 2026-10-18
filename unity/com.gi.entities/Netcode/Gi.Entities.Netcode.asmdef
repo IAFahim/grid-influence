@@ -1,0 +1,35 @@
+{
+    "name": "Gi.Entities.Netcode",
+    "rootNamespace": "Gi.Entities.Netcode",
+    "references": [
+        "BovineLabs.Core",
+        "Gi.Entities",
+        "Unity.Burst",
+        "Unity.Collections",
+        "Unity.Entities",
+        "Unity.Entities.Hybrid",
+        "Unity.Mathematics",
+        "Unity.NetCode",
+        "Unity.Networking.Transport",
+        "Unity.Transforms"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "Gi.dll"
+    ],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "UNITY_NETCODE"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.unity.netcode",
+            "expression": "6.7.0",
+            "define": "UNITY_NETCODE"
+        }
+    ],
+    "noEngineReferences": false
+}

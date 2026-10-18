@@ -18,4 +18,9 @@
     <Project Path="tools/fuzz/Gi.Fuzz.csproj" />
     <Project Path="tools/stats/Gi.Stats.csproj" />
   </Folder>
+  <Folder Name="/unity/">
+    <Project Path="unity/tests/Gi.Entities.Columns.Tests/Gi.Entities.Columns.Tests.csproj" />
+    <Project Path="unity/tests/Gi.Entities.Columns.Compat/Gi.Entities.Columns.Compat.csproj" />
+    <Project Path="unity/tests/Gi.Corpus/Gi.Corpus.csproj" />
+  </Folder>
 </Solution>

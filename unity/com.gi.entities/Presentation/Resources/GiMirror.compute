@@ -1,0 +1,67 @@
+#pragma kernel Decode
+#pragma kernel Heatmap
+#pragma kernel Grow
+
+StructuredBuffer<int> _Table;
+StructuredBuffer<int> _Pool;
+RWStructuredBuffer<int> _Out;
+RWTexture2D<float4> _Result;
+StructuredBuffer<int> _Source;
+RWStructuredBuffer<int> _Target;
+
+uint _TilesPerSide;
+int4 _Region;
+float _Scale;
+float _Opacity;
+uint _Count;
+
+int CellValue(int x, int y)
+{
+    if (x < 0 || y < 0)
+        return 0;
+
+    uint tx = (uint)x >> 5;
+    uint ty = (uint)y >> 5;
+    if (tx >= _TilesPerSide || ty >= _TilesPerSide)
+        return 0;
+
+    int entry = _Table[ty * _TilesPerSide + tx];
+    if (entry == 0)
+        return 0;
+
+    uint slot = (uint)(entry - 1);
+    uint cell = (((uint)y & 31u) << 5) | ((uint)x & 31u);
+    int word = _Pool[slot * 512u + (cell >> 1)];
+    return (cell & 1u) != 0u ? (word >> 16) : ((word << 16) >> 16);
+}
+
+[numthreads(8, 8, 1)]
+void Decode(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _Region.z || (int)id.y >= _Region.w)
+        return;
+
+    _Out[id.y * (uint)_Region.z + id.x] = CellValue(_Region.x + (int)id.x, _Region.y + (int)id.y);
+}
+
+[numthreads(8, 8, 1)]
+void Heatmap(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _Region.z || (int)id.y >= _Region.w)
+        return;
+
+    float t = clamp((float)CellValue(_Region.x + (int)id.x, _Region.y + (int)id.y) / max(_Scale, 1.0), -1.0, 1.0);
+    float3 warm = float3(0.90, 0.45, 0.05);
+    float3 cool = float3(0.05, 0.35, 0.75);
+    float3 color = t >= 0.0 ? lerp(float3(1.0, 1.0, 1.0), warm, t) : lerp(float3(1.0, 1.0, 1.0), cool, -t);
+    _Result[id.xy] = float4(color, abs(t) > 0.0 ? _Opacity : 0.0);
+}
+
+[numthreads(64, 1, 1)]
+void Grow(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Count)
+        return;
+
+    _Target[id.x] = _Source[id.x];
+}
