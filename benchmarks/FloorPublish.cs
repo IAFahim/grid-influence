@@ -20,13 +20,16 @@ internal unsafe struct FloorPublishPlanes
 
 internal static unsafe class FloorPublishKernel
 {
-    public const int Rows = FloorShape.TileSize;
-    public const int RowCells = FloorShape.TileSize;
-    public const int TileCells = FloorShape.TileCells;
+    private const int Rows = FloorShape.TileSize;
+    private const int RowCells = FloorShape.TileSize;
+    private const int TileCells = FloorShape.TileCells;
     private const long Half = 1L << 39;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static int RoundQ40(long value) => (int)((value + Half + (value >> 63)) >> 40);
+    private static int RoundQ40(long value)
+    {
+        return (int)((value + Half + (value >> 63)) >> 40);
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public static void Scalar(in FloorPublishPlanes p, int tiles)
@@ -107,7 +110,8 @@ internal static unsafe class FloorPublishKernel
             var row = BitOperations.TrailingZeroCount(rowMask);
             var cells = p.New + at + row * RowCells;
             var columnMask = Vector256.Equals(Vector256.Load(cells), target).ExtractMostSignificantBits()
-                             | (Vector256.Equals(Vector256.Load(cells + 16), target).ExtractMostSignificantBits() << 16);
+                             | (Vector256.Equals(Vector256.Load(cells + 16), target).ExtractMostSignificantBits() <<
+                                16);
             p.Max[tile] = best;
             p.Argmax[tile] = row * RowCells + BitOperations.TrailingZeroCount(columnMask);
         }
@@ -173,7 +177,8 @@ internal static unsafe class FloorPublishKernel
             {
                 var n = tile * TileCells + i;
                 var total = p.Exact[n] + Rounded(p.Tent[n]) + Rounded(p.Bell[n]);
-                values[i] = (short)(total > short.MaxValue ? short.MaxValue : total < short.MinValue ? short.MinValue : total);
+                values[i] = (short)(total > short.MaxValue ? short.MaxValue :
+                    total < short.MinValue ? short.MinValue : total);
                 p.New[n] = values[i];
             }
 
@@ -199,7 +204,9 @@ internal static unsafe class FloorPublishKernel
     }
 
     private static long Rounded(long value)
-        => value >= 0 ? (value + Half) >> 40 : -((-value + Half) >> 40);
+    {
+        return value >= 0 ? (value + Half) >> 40 : -((-value + Half) >> 40);
+    }
 }
 
 internal sealed unsafe class FloorPublishSuite : FloorSuite
@@ -208,10 +215,10 @@ internal sealed unsafe class FloorPublishSuite : FloorSuite
     private const int Cells = FloorShape.Cells;
     private const int BlockTiles = 32;
     private const int Blocks = Tiles / BlockTiles;
+    private readonly FloorCase[] _cases;
+    private readonly FloorPublishPlanes _expected;
 
     private readonly FloorPublishPlanes _planes;
-    private readonly FloorPublishPlanes _expected;
-    private readonly FloorCase[] _cases;
 
     public FloorPublishSuite()
     {
@@ -252,7 +259,7 @@ internal sealed unsafe class FloorPublishSuite : FloorSuite
                     Clear(_planes);
                     FloorPublishKernel.Run(_planes, BlockTiles);
                     return Hash(_planes);
-                }),
+                })
         ];
     }
 
@@ -266,7 +273,9 @@ internal sealed unsafe class FloorPublishSuite : FloorSuite
         for (var tile = 0; tile < Tiles; tile++) changedTiles += _expected.Changed[tile];
         receipts.Check("floor-p5-reference-has-changed-and-unchanged-tiles", changedTiles == Tiles / 2);
         var saturated = 0;
-        for (var i = 0; i < Cells; i++) if (_expected.New[i] == short.MaxValue || _expected.New[i] == short.MinValue) saturated++;
+        for (var i = 0; i < Cells; i++)
+            if (_expected.New[i] == short.MaxValue || _expected.New[i] == short.MinValue)
+                saturated++;
         receipts.Check("floor-p5-reference-saturates-both-signs", saturated > 0);
 
         Clear(_planes);
@@ -278,36 +287,49 @@ internal sealed unsafe class FloorPublishSuite : FloorSuite
             FloorPublishKernel.Vector(_planes, Tiles);
             receipts.Check("floor-p5-vector-matches-reference", Same(_planes, _expected));
         }
-        else receipts.Skip("floor-p5-vector-matches-reference", "avx2 unavailable");
+        else
+        {
+            receipts.Skip("floor-p5-vector-matches-reference", "avx2 unavailable");
+        }
 
         Clear(_planes);
         FloorPublishKernel.Run(_planes, BlockTiles);
         var cellsInBlock = BlockTiles * FloorShape.TileCells;
         var rowsInBlock = BlockTiles * FloorShape.TileSize;
         receipts.Check("floor-p5-block-matches-leading-tiles",
-            new ReadOnlySpan<short>(_planes.New, cellsInBlock).SequenceEqual(new ReadOnlySpan<short>(_expected.New, cellsInBlock))
-            && new ReadOnlySpan<long>(_planes.Sum, BlockTiles).SequenceEqual(new ReadOnlySpan<long>(_expected.Sum, BlockTiles))
-            && new ReadOnlySpan<short>(_planes.Max, BlockTiles).SequenceEqual(new ReadOnlySpan<short>(_expected.Max, BlockTiles))
-            && new ReadOnlySpan<int>(_planes.Argmax, BlockTiles).SequenceEqual(new ReadOnlySpan<int>(_expected.Argmax, BlockTiles))
-            && new ReadOnlySpan<int>(_planes.RowSum, rowsInBlock).SequenceEqual(new ReadOnlySpan<int>(_expected.RowSum, rowsInBlock))
-            && new ReadOnlySpan<short>(_planes.RowMax, rowsInBlock).SequenceEqual(new ReadOnlySpan<short>(_expected.RowMax, rowsInBlock))
-            && new ReadOnlySpan<byte>(_planes.Changed, BlockTiles).SequenceEqual(new ReadOnlySpan<byte>(_expected.Changed, BlockTiles)));
+            new ReadOnlySpan<short>(_planes.New, cellsInBlock).SequenceEqual(
+                new ReadOnlySpan<short>(_expected.New, cellsInBlock))
+            && new ReadOnlySpan<long>(_planes.Sum, BlockTiles).SequenceEqual(
+                new ReadOnlySpan<long>(_expected.Sum, BlockTiles))
+            && new ReadOnlySpan<short>(_planes.Max, BlockTiles).SequenceEqual(
+                new ReadOnlySpan<short>(_expected.Max, BlockTiles))
+            && new ReadOnlySpan<int>(_planes.Argmax, BlockTiles).SequenceEqual(
+                new ReadOnlySpan<int>(_expected.Argmax, BlockTiles))
+            && new ReadOnlySpan<int>(_planes.RowSum, rowsInBlock).SequenceEqual(
+                new ReadOnlySpan<int>(_expected.RowSum, rowsInBlock))
+            && new ReadOnlySpan<short>(_planes.RowMax, rowsInBlock).SequenceEqual(
+                new ReadOnlySpan<short>(_expected.RowMax, rowsInBlock))
+            && new ReadOnlySpan<byte>(_planes.Changed, BlockTiles).SequenceEqual(
+                new ReadOnlySpan<byte>(_expected.Changed, BlockTiles)));
     }
 
-    private FloorPublishPlanes Allocate() => new()
+    private FloorPublishPlanes Allocate()
     {
-        Exact = Arena.Alloc<int>(Cells),
-        Tent = Arena.Alloc<long>(Cells),
-        Bell = Arena.Alloc<long>(Cells),
-        Old = Arena.Alloc<short>(Cells),
-        New = Arena.Alloc<short>(Cells),
-        Sum = Arena.Alloc<long>(Tiles),
-        Max = Arena.Alloc<short>(Tiles),
-        Argmax = Arena.Alloc<int>(Tiles),
-        RowSum = Arena.Alloc<int>(Tiles * FloorShape.TileSize),
-        RowMax = Arena.Alloc<short>(Tiles * FloorShape.TileSize),
-        Changed = Arena.Alloc<byte>(Tiles),
-    };
+        return new FloorPublishPlanes
+        {
+            Exact = Arena.Alloc<int>(Cells),
+            Tent = Arena.Alloc<long>(Cells),
+            Bell = Arena.Alloc<long>(Cells),
+            Old = Arena.Alloc<short>(Cells),
+            New = Arena.Alloc<short>(Cells),
+            Sum = Arena.Alloc<long>(Tiles),
+            Max = Arena.Alloc<short>(Tiles),
+            Argmax = Arena.Alloc<int>(Tiles),
+            RowSum = Arena.Alloc<int>(Tiles * FloorShape.TileSize),
+            RowMax = Arena.Alloc<short>(Tiles * FloorShape.TileSize),
+            Changed = Arena.Alloc<byte>(Tiles)
+        };
+    }
 
     private void Fill()
     {
@@ -343,7 +365,7 @@ internal sealed unsafe class FloorPublishSuite : FloorSuite
             1 => int.MinValue + rng.Below(1000),
             2 => (1 << 30) + rng.Below(1 << 20),
             3 => -(1 << 30) - rng.Below(1 << 20),
-            _ => rng.Below(6000) - 1500,
+            _ => rng.Below(6000) - 1500
         };
     }
 
@@ -359,7 +381,7 @@ internal sealed unsafe class FloorPublishSuite : FloorSuite
             3 => -((long)rng.Below(2000) << 40) - (1L << 39),
             4 => limit,
             5 => -limit,
-            _ => ((long)(rng.Below(4000) - 2000) << 40) + (long)(rng.Next() & ((1UL << 40) - 1)) - (1L << 39),
+            _ => ((long)(rng.Below(4000) - 2000) << 40) + (long)(rng.Next() & ((1UL << 40) - 1)) - (1L << 39)
         };
     }
 
@@ -375,13 +397,17 @@ internal sealed unsafe class FloorPublishSuite : FloorSuite
     }
 
     private static bool Same(in FloorPublishPlanes a, in FloorPublishPlanes b)
-        => new ReadOnlySpan<short>(a.New, Cells).SequenceEqual(new ReadOnlySpan<short>(b.New, Cells))
-           && new ReadOnlySpan<long>(a.Sum, Tiles).SequenceEqual(new ReadOnlySpan<long>(b.Sum, Tiles))
-           && new ReadOnlySpan<short>(a.Max, Tiles).SequenceEqual(new ReadOnlySpan<short>(b.Max, Tiles))
-           && new ReadOnlySpan<int>(a.Argmax, Tiles).SequenceEqual(new ReadOnlySpan<int>(b.Argmax, Tiles))
-           && new ReadOnlySpan<int>(a.RowSum, Tiles * FloorShape.TileSize).SequenceEqual(new ReadOnlySpan<int>(b.RowSum, Tiles * FloorShape.TileSize))
-           && new ReadOnlySpan<short>(a.RowMax, Tiles * FloorShape.TileSize).SequenceEqual(new ReadOnlySpan<short>(b.RowMax, Tiles * FloorShape.TileSize))
-           && new ReadOnlySpan<byte>(a.Changed, Tiles).SequenceEqual(new ReadOnlySpan<byte>(b.Changed, Tiles));
+    {
+        return new ReadOnlySpan<short>(a.New, Cells).SequenceEqual(new ReadOnlySpan<short>(b.New, Cells))
+               && new ReadOnlySpan<long>(a.Sum, Tiles).SequenceEqual(new ReadOnlySpan<long>(b.Sum, Tiles))
+               && new ReadOnlySpan<short>(a.Max, Tiles).SequenceEqual(new ReadOnlySpan<short>(b.Max, Tiles))
+               && new ReadOnlySpan<int>(a.Argmax, Tiles).SequenceEqual(new ReadOnlySpan<int>(b.Argmax, Tiles))
+               && new ReadOnlySpan<int>(a.RowSum, Tiles * FloorShape.TileSize).SequenceEqual(
+                   new ReadOnlySpan<int>(b.RowSum, Tiles * FloorShape.TileSize))
+               && new ReadOnlySpan<short>(a.RowMax, Tiles * FloorShape.TileSize).SequenceEqual(
+                   new ReadOnlySpan<short>(b.RowMax, Tiles * FloorShape.TileSize))
+               && new ReadOnlySpan<byte>(a.Changed, Tiles).SequenceEqual(new ReadOnlySpan<byte>(b.Changed, Tiles));
+    }
 
     private static ulong Hash(in FloorPublishPlanes p)
     {

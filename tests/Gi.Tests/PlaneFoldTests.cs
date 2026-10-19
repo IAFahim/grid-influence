@@ -24,7 +24,8 @@ public unsafe class PlaneFoldTests
 
             for (var i = 0; i < negative; i++) World.Place(world, layer, X, Y, stamp, 16);
             World.Process(world);
-            Assert.Equal((short)Math.Clamp((positive - negative) * 2048L, short.MinValue, short.MaxValue), World.Query(world, grid, layer, 128, 64));
+            Assert.Equal((short)Math.Clamp((positive - negative) * 2048L, short.MinValue, short.MaxValue),
+                World.Query(world, grid, layer, 128, 64));
         }
         finally
         {
@@ -51,7 +52,8 @@ public unsafe class PlaneFoldTests
 
             for (var i = 0; i < ids.Length - 1; i++) World.Remove(world, ids[i]);
             World.Process(world);
-            Assert.Equal((short)Math.Clamp(2048L, short.MinValue, short.MaxValue), World.Query(world, grid, layer, 128, 64));
+            Assert.Equal((short)Math.Clamp(2048L, short.MinValue, short.MaxValue),
+                World.Query(world, grid, layer, 128, 64));
         }
         finally
         {
@@ -76,7 +78,9 @@ public class RoundWideTests
         for (var i = 0; i < 2_000_000; i++)
         {
             var value = rng.NextInt64(-(1L << 61), 1L << 61);
-            if (i % 5 == 0) value = (rng.NextInt64(-1000, 1000) << 40) + rng.Next(-2, 3) + (rng.Next(2) == 0 ? 1L << 39 : -(1L << 39));
+            if (i % 5 == 0)
+                value = (rng.NextInt64(-1000, 1000) << 40) + rng.Next(-2, 3) +
+                        (rng.Next(2) == 0 ? 1L << 39 : -(1L << 39));
             var expected = TileBake.RoundQ40(value);
             Assert.Equal(expected, TileBake.RoundWide(0, value));
             var high = value >> 40;

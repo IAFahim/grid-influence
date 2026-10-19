@@ -34,9 +34,11 @@ public class GoldenCorpusTests
         for (var i = 0; i < count; i++)
         {
             if (string.Equals(committedLines[i], regeneratedLines[i], StringComparison.Ordinal)) continue;
-            return $"corpus differs at line {i + 1}:\ncommitted:    {committedLines[i]}\nregenerated:  {regeneratedLines[i]}";
+            return
+                $"corpus differs at line {i + 1}:\ncommitted:    {committedLines[i]}\nregenerated:  {regeneratedLines[i]}";
         }
 
-        return $"corpus length differs: committed {committedLines.Length} lines, regenerated {regeneratedLines.Length} lines";
+        return
+            $"corpus length differs: committed {committedLines.Length} lines, regenerated {regeneratedLines.Length} lines";
     }
 }

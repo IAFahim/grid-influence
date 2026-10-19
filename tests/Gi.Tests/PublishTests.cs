@@ -9,42 +9,42 @@ public enum PublishPath
     Dispatch,
     Scalar,
     Vector128,
-    Vector256,
+    Vector256
 }
 
 public sealed unsafe class PublishTests
 {
+    public enum Regime
+    {
+        Small,
+        NearBound,
+        FullInt32,
+        MixedEdges
+    }
+
     private const int Size = TileBake.TileSize;
     private const int Cells = Size * Size;
 
     private static readonly int[] EdgeInts =
     {
         int.MinValue, int.MaxValue, 1 << 29, -(1 << 29), (1 << 29) - 1, -(1 << 29) - 1,
-        1 << 30, -(1 << 30), 0, 1, -1, 17,
+        1 << 30, -(1 << 30), 0, 1, -1, 17
     };
 
     private static readonly long[] EdgeLongs =
     {
         long.MinValue, long.MaxValue, 0, 1, -1, 1L << 40, -(1L << 40), 2L << 40,
-        (1L << 51) - 1, -(1L << 51), 1L << 62, -(1L << 62),
+        (1L << 51) - 1, -(1L << 51), 1L << 62, -(1L << 62)
     };
-
-    public enum Regime
-    {
-        Small,
-        NearBound,
-        FullInt32,
-        MixedEdges,
-    }
 
     public static TheoryData<Regime, int, bool, bool, PublishPath> RandomPlanes()
     {
         var data = new TheoryData<Regime, int, bool, bool, PublishPath>();
-        foreach (Regime regime in Enum.GetValues<Regime>())
+        foreach (var regime in Enum.GetValues<Regime>())
         foreach (var seed in new[] { 1, 2, 3 })
         foreach (var tent in new[] { false, true })
         foreach (var bell in new[] { false, true })
-        foreach (PublishPath path in Enum.GetValues<PublishPath>())
+        foreach (var path in Enum.GetValues<PublishPath>())
             data.Add(regime, seed, tent, bell, path);
         return data;
     }
@@ -59,26 +59,14 @@ public sealed unsafe class PublishTests
         return data;
     }
 
-    private static bool Supported(PublishPath path) => path switch
+    private static bool Supported(PublishPath path)
     {
-        PublishPath.Vector128 => Sse2.IsSupported || AdvSimd.IsSupported,
-        PublishPath.Vector256 => Avx2.IsSupported,
-        _ => true,
-    };
-
-    private sealed class Model
-    {
-        public int[] I = new int[Cells];
-        public long[]? T;
-        public long[]? B;
-        public short[] Page = new short[Cells];
-        public long Sum;
-        public short Max;
-        public short ArgMaxX;
-        public short ArgMaxY;
-        public int Epoch;
-        public int[] RowSums = new int[Size];
-        public short[] RowMaxima = new short[Size];
+        return path switch
+        {
+            PublishPath.Vector128 => Sse2.IsSupported || AdvSimd.IsSupported,
+            PublishPath.Vector256 => Avx2.IsSupported,
+            _ => true
+        };
     }
 
     private static (bool Changed, bool Any) Apply(Model m, int x0, int y0, int x1, int y1, int tick)
@@ -99,8 +87,8 @@ public sealed unsafe class PublishTests
             {
                 var i = y * Size + x;
                 var total = (long)m.I[i]
-                    + (m.T != null ? TileBake.RoundQ40(m.T[i]) : 0)
-                    + (m.B != null ? TileBake.RoundQ40(m.B[i]) : 0);
+                            + (m.T != null ? TileBake.RoundQ40(m.T[i]) : 0)
+                            + (m.B != null ? TileBake.RoundQ40(m.B[i]) : 0);
                 var cell = (short)Math.Clamp(total, short.MinValue, short.MaxValue);
                 if (cell != m.Page[i]) changed = true;
                 m.Page[i] = cell;
@@ -143,46 +131,6 @@ public sealed unsafe class PublishTests
         return (changed, any);
     }
 
-    private sealed class Tile
-    {
-        public PlaneStore Store;
-        public TilePlanes Plane;
-
-        public static Tile Of(Model m)
-        {
-            var tile = new Tile();
-            tile.Plane = tile.Store.Take();
-            tile.Sync(m);
-            return tile;
-        }
-
-        public void Sync(Model m)
-        {
-            var cells = Store.Cells(Plane);
-            fixed (int* source = m.I)
-                Buffer.MemoryCopy(source, cells.I, PlaneStore.Int32Unit, PlaneStore.Int32Unit);
-            if (m.T != null)
-            {
-                var tent = Store.EnsureT(ref Plane);
-                fixed (long* source = m.T)
-                    Buffer.MemoryCopy(source, tent, PlaneStore.Int64Unit, PlaneStore.Int64Unit);
-            }
-
-            if (m.B != null)
-            {
-                var bell = Store.EnsureB(ref Plane);
-                fixed (long* source = m.B)
-                    Buffer.MemoryCopy(source, bell, PlaneStore.Int64Unit, PlaneStore.Int64Unit);
-            }
-        }
-
-        public void Release()
-        {
-            Store.Give(Plane);
-            Store.Reset();
-        }
-    }
-
     private static ResolveOutcome Invoke(PublishPath path, Tile tile, int x0, int y0, int x1, int y1, int tick)
     {
         fixed (TilePlanes* planes = &tile.Plane)
@@ -195,7 +143,7 @@ public sealed unsafe class PublishTests
                 PublishPath.Vector128 => TileBake.Publish128(store->Cells(*planes), x0, y0, x1, y1, tick),
 #endif
                 PublishPath.Scalar => TileBake.PublishScalar(store->Cells(*planes), x0, y0, x1, y1, tick),
-                _ => TileBake.Publish(store, planes, x0, y0, x1, y1, tick),
+                _ => TileBake.Publish(store, planes, x0, y0, x1, y1, tick)
             };
         }
     }
@@ -236,25 +184,32 @@ public sealed unsafe class PublishTests
         }
     }
 
-    private static int NextInt(Random random, Regime regime) => regime switch
+    private static int NextInt(Random random, Regime regime)
     {
-        Regime.Small => random.Next(-1000, 1001),
-        Regime.NearBound => random.Next(-(1 << 29), (1 << 29) + 1),
-        Regime.FullInt32 => random.Next(int.MinValue, int.MaxValue),
-        _ => EdgeInts[random.Next(EdgeInts.Length)],
-    };
+        return regime switch
+        {
+            Regime.Small => random.Next(-1000, 1001),
+            Regime.NearBound => random.Next(-(1 << 29), (1 << 29) + 1),
+            Regime.FullInt32 => random.Next(int.MinValue, int.MaxValue),
+            _ => EdgeInts[random.Next(EdgeInts.Length)]
+        };
+    }
 
-    private static long NextLong(Random random, Regime regime) => regime switch
+    private static long NextLong(Random random, Regime regime)
     {
-        Regime.Small => random.NextInt64(-(1L << 40), (1L << 40) + 1),
-        Regime.NearBound => random.NextInt64(-(1L << 51), (1L << 51) + 1),
-        Regime.FullInt32 => random.NextInt64(),
-        _ => EdgeLongs[random.Next(EdgeLongs.Length)],
-    };
+        return regime switch
+        {
+            Regime.Small => random.NextInt64(-(1L << 40), (1L << 40) + 1),
+            Regime.NearBound => random.NextInt64(-(1L << 51), (1L << 51) + 1),
+            Regime.FullInt32 => random.NextInt64(),
+            _ => EdgeLongs[random.Next(EdgeLongs.Length)]
+        };
+    }
 
     [Theory]
     [MemberData(nameof(RandomPlanes))]
-    public void FullTileThenConfinedRect_MatchesResolveAndModel(Regime regime, int seed, bool tent, bool bell, PublishPath path)
+    public void FullTileThenConfinedRect_MatchesResolveAndModel(Regime regime, int seed, bool tent, bool bell,
+        PublishPath path)
     {
         if (!Supported(path)) return;
 
@@ -293,7 +248,8 @@ public sealed unsafe class PublishTests
 
     [Theory]
     [MemberData(nameof(RandomPlanes))]
-    public void RandomRectSequences_MatchModel_AcrossPaths(Regime regime, int seed, bool tent, bool bell, PublishPath path)
+    public void RandomRectSequences_MatchModel_AcrossPaths(Regime regime, int seed, bool tent, bool bell,
+        PublishPath path)
     {
         if (!Supported(path)) return;
 
@@ -600,5 +556,67 @@ public sealed unsafe class PublishTests
         AssertMatches(tile, m, outcome, expected);
 
         tile.Release();
+    }
+
+    private sealed class Model
+    {
+        public readonly int[] I = new int[Cells];
+        public readonly short[] Page = new short[Cells];
+        public readonly short[] RowMaxima = new short[Size];
+        public readonly int[] RowSums = new int[Size];
+        public short ArgMaxX;
+        public short ArgMaxY;
+        public long[]? B;
+        public int Epoch;
+        public short Max;
+        public long Sum;
+        public long[]? T;
+    }
+
+    private sealed class Tile
+    {
+        public TilePlanes Plane;
+        public PlaneStore Store;
+
+        public static Tile Of(Model m)
+        {
+            var tile = new Tile();
+            tile.Plane = tile.Store.Take();
+            tile.Sync(m);
+            return tile;
+        }
+
+        public void Sync(Model m)
+        {
+            var cells = Store.Cells(Plane);
+            fixed (int* source = m.I)
+            {
+                Buffer.MemoryCopy(source, cells.I, PlaneStore.Int32Unit, PlaneStore.Int32Unit);
+            }
+
+            if (m.T != null)
+            {
+                var tent = Store.EnsureT(ref Plane);
+                fixed (long* source = m.T)
+                {
+                    Buffer.MemoryCopy(source, tent, PlaneStore.Int64Unit, PlaneStore.Int64Unit);
+                }
+            }
+
+            if (m.B != null)
+            {
+                var bell = Store.EnsureB(ref Plane);
+                fixed (long* source = m.B)
+                {
+                    Buffer.MemoryCopy(source, bell, PlaneStore.Int64Unit, PlaneStore.Int64Unit);
+                }
+            }
+        }
+
+        public void Release()
+        {
+            Store.Give(Plane);
+            Store.Reset();
+        }
     }
 }

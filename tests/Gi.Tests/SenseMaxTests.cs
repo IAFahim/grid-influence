@@ -19,14 +19,18 @@ public class SenseMaxTests
             var twin = Layer.New(world, Layer.Precision.Cell);
             var layer = derived ? Layer.Sum(world, baseLayer, 1, twin, 1) : baseLayer;
             for (var i = 0; i < 260; i++)
-                World.Place(world, rng.Next(2) == 0 ? baseLayer : twin, rng.Next(0, 256) + 0.5f, rng.Next(0, 256) + 0.5f,
+                World.Place(world, rng.Next(2) == 0 ? baseLayer : twin, rng.Next(0, 256) + 0.5f,
+                    rng.Next(0, 256) + 0.5f,
                     stamps[rng.Next(stamps.Length)], (sbyte)rng.Next(-3, 4));
             World.Process(world);
 
             var page = new short[256 * 256];
             unsafe
             {
-                fixed (short* p = page) World.QueryRegion(world, grid, layer, 0, 0, 256, 256, p);
+                fixed (short* p = page)
+                {
+                    World.QueryRegion(world, grid, layer, 0, 0, 256, 256, p);
+                }
             }
 
             for (var trial = 0; trial < 400; trial++)

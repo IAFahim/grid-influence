@@ -1,20 +1,26 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.CompilerServices;
+using Gi;
 
 internal abstract unsafe class FrameScenario : IDisposable
 {
     protected readonly FrameArena Arena = new();
+    protected readonly Layer.Precision LayerPrecision;
     protected readonly ulong Seed;
-    protected readonly Gi.Layer.Precision LayerPrecision;
-    protected byte WorldId;
+
+    public long CrossCell;
+    public long CrossQ8;
     protected byte GridId;
+    public long MoverSamples;
+    protected byte WorldId;
 
     protected FrameScenario(int entities, int power, ulong seed, bool cell = false)
     {
         Entities = entities;
         Power = power;
         Seed = seed;
-        LayerPrecision = cell ? Gi.Layer.Precision.Cell : Gi.Layer.Precision.Exact;
+        LayerPrecision = cell ? Layer.Precision.Cell : Layer.Precision.Exact;
     }
 
     public int Entities { get; }
@@ -22,10 +28,6 @@ internal abstract unsafe class FrameScenario : IDisposable
     public int Power { get; }
 
     public int Size => 1 << Power;
-
-    public long CrossCell;
-    public long CrossQ8;
-    public long MoverSamples;
 
     public byte World => WorldId;
 
@@ -52,6 +54,12 @@ internal abstract unsafe class FrameScenario : IDisposable
     public double CrossingCell => MoverSamples == 0 ? double.NaN : (double)CrossCell / MoverSamples;
 
     public double CrossingQ8 => MoverSamples == 0 ? double.NaN : (double)CrossQ8 / MoverSamples;
+
+    public virtual void Dispose()
+    {
+        Gi.World.Free(WorldId);
+        Arena.Dispose();
+    }
 
     public abstract void Setup();
 
@@ -80,37 +88,36 @@ internal abstract unsafe class FrameScenario : IDisposable
         return FrameHash.Mix(hash, (uint)Gi.World.Tick(WorldId));
     }
 
-    public virtual void Dispose()
+    protected byte NewLayer()
     {
-        Gi.World.Free(WorldId);
-        Arena.Dispose();
+        return Layer.New(WorldId, LayerPrecision);
     }
 
-    protected byte NewLayer() => Gi.Layer.New(WorldId, LayerPrecision);
-
-    protected Gi.World.SourceId Place(byte layer, float x, float y, byte stamp, sbyte gain)
+    protected World.SourceId Place(byte layer, float x, float y, byte stamp, sbyte gain)
     {
         var id = Gi.World.Place(WorldId, layer, x, y, stamp, gain);
         if (id == default) throw new InvalidOperationException("Frame setup could not place a source.");
         return id;
     }
 
-    protected bool SourceAt(Gi.World.SourceId id, float x, float y)
-        => Gi.World.TryGetSourceSpec(WorldId, id, out var spec) &&
-           BitConverter.SingleToInt32Bits(spec.X) == BitConverter.SingleToInt32Bits(x) &&
-           BitConverter.SingleToInt32Bits(spec.Y) == BitConverter.SingleToInt32Bits(y);
+    protected bool SourceAt(World.SourceId id, float x, float y)
+    {
+        return Gi.World.TryGetSourceSpec(WorldId, id, out var spec) &&
+               BitConverter.SingleToInt32Bits(spec.X) == BitConverter.SingleToInt32Bits(x) &&
+               BitConverter.SingleToInt32Bits(spec.Y) == BitConverter.SingleToInt32Bits(y);
+    }
 }
 
 internal abstract unsafe class FrameCanonical : FrameScenario
 {
     protected const int Width = 8;
     protected byte BaseLayer;
-    protected byte BoxStamp;
-    protected Gi.World.SourceId* Ids;
-    protected float* X;
-    protected float* Y;
+    private byte _boxStamp;
+    protected World.SourceId* Ids;
     protected float* NextX;
     protected float* NextY;
+    protected float* X;
+    protected float* Y;
     private long _cellFlips;
     private long _q8Flips;
 
@@ -125,8 +132,8 @@ internal abstract unsafe class FrameCanonical : FrameScenario
         WorldId = Gi.World.New();
         GridId = Gi.Grid.New(WorldId, Power, 0f, 0f, Size);
         BaseLayer = NewLayer();
-        BoxStamp = Gi.Stamp.Box(Width, Width, 16);
-        Ids = Arena.Alloc<Gi.World.SourceId>(Entities);
+        _boxStamp = Stamp.Box(Width, Width, 16);
+        Ids = Arena.Alloc<World.SourceId>(Entities);
         X = Arena.Alloc<float>(Entities);
         Y = Arena.Alloc<float>(Entities);
         NextX = Arena.Alloc<float>(Entities);
@@ -139,9 +146,10 @@ internal abstract unsafe class FrameCanonical : FrameScenario
             Y[i] = Width + 65 + rng.Unit() * span;
             NextX[i] = X[i] + 0.5f;
             NextY[i] = Y[i] + 0.25f;
-            Ids[i] = Place(BaseLayer, X[i], Y[i], BoxStamp, (sbyte)(i % 3 == 0 ? -1 : 1));
+            Ids[i] = Place(BaseLayer, X[i], Y[i], _boxStamp, (sbyte)(i % 3 == 0 ? -1 : 1));
             if ((int)X[i] != (int)NextX[i] || (int)Y[i] != (int)NextY[i]) _cellFlips++;
-            if ((int)(X[i] * 256f) != (int)(NextX[i] * 256f) || (int)(Y[i] * 256f) != (int)(NextY[i] * 256f)) _q8Flips++;
+            if ((int)(X[i] * 256f) != (int)(NextX[i] * 256f) || (int)(Y[i] * 256f) != (int)(NextY[i] * 256f))
+                _q8Flips++;
         }
 
         Gi.World.Process(WorldId);
@@ -157,22 +165,23 @@ internal abstract unsafe class FrameCanonical : FrameScenario
 
     public override void Dispose()
     {
-        Gi.Stamp.Free(BoxStamp);
+        Stamp.Free(_boxStamp);
         base.Dispose();
     }
 }
 
-internal sealed unsafe class FrameLegacy(int entities, int power, ulong seed, bool cell = false) : FrameCanonical(entities, power, seed, cell)
+internal sealed unsafe class FrameLegacy(int entities, int power, ulong seed, bool cell = false)
+    : FrameCanonical(entities, power, seed, cell)
 {
     private static readonly string[] StageNames = ["sync", "process", "point", "gradient", "changed"];
+    private ulong* _changed;
+    private ulong* _gradientWhole;
     private float* _gradientX;
     private float* _gradientY;
-    private short* _values;
-    private ulong* _whole;
-    private ulong* _gradientWhole;
-    private ulong* _changed;
     private long _hits;
     private int _last = -1;
+    private short* _values;
+    private ulong* _whole;
 
     public override string Name => "B1";
 
@@ -206,9 +215,11 @@ internal sealed unsafe class FrameLegacy(int entities, int power, ulong seed, bo
         var since = Gi.World.Tick(WorldId);
         Gi.World.Process(WorldId);
         marks[2] = Stopwatch.GetTimestamp();
-        var ok = (Gi.World.SenseColumn(WorldId, BaseLayer, px, py, Entities, _values, _whole) == Gi.World.ReadStatus.Complete);
+        var ok = Gi.World.SenseColumn(WorldId, BaseLayer, px, py, Entities, _values, _whole) ==
+                 Gi.World.ReadStatus.Complete;
         marks[3] = Stopwatch.GetTimestamp();
-        ok &= (Gi.World.SenseGradientColumn(WorldId, BaseLayer, px, py, null, Entities, _gradientX, _gradientY, _gradientWhole) == Gi.World.ReadStatus.Complete);
+        ok &= Gi.World.SenseGradientColumn(WorldId, BaseLayer, px, py, null, Entities, _gradientX, _gradientY,
+            _gradientWhole) == Gi.World.ReadStatus.Complete;
         marks[4] = Stopwatch.GetTimestamp();
         _hits = Gi.World.ChangedMask(WorldId, BaseLayer, px, py, 0f, since, Entities, _changed);
         marks[5] = Stopwatch.GetTimestamp();
@@ -231,48 +242,50 @@ internal sealed unsafe class FrameLegacy(int entities, int power, ulong seed, bo
         var px = (_last & 1) == 1 ? NextX : X;
         var py = (_last & 1) == 1 ? NextY : Y;
         for (var i = 0; i < Entities; i++)
-            if (!SourceAt(Ids[i], px[i], py[i])) return false;
+            if (!SourceAt(Ids[i], px[i], py[i]))
+                return false;
         return true;
     }
 }
 
-internal sealed unsafe class FrameSparse(int entities, int power, ulong seed, int movers, bool cell = false) : FrameCanonical(entities, power, seed, cell)
+internal sealed unsafe class FrameSparse(int entities, int power, ulong seed, int movers, bool cell = false)
+    : FrameCanonical(entities, power, seed, cell)
 {
     private static readonly string[] StageNames = ["move", "process"];
-    private readonly int _movers = movers;
-    private FrameRandom _rng = new(seed ^ 0x5851F42D4C957F2DUL);
-    private byte* _phase;
-    private Gi.World.SourceId* _moverIds;
+    private World.SourceId* _moverIds;
     private float* _moverX;
     private float* _moverY;
+    private byte* _phase;
+    private FrameRandom _rng = new(seed ^ 0x5851F42D4C957F2DUL);
 
     public override string Name => "B2";
 
-    public override string Variant => "movers=" + _movers.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    public override string Variant => "movers=" + Movers.ToString(CultureInfo.InvariantCulture);
 
-    public override int Movers => _movers;
+    public override int Movers { get; } = movers;
 
     public override string[] Stages => StageNames;
 
-    public override double? TargetMs => _movers <= 1 ? 0.002 : 0.02;
+    public override double? TargetMs => Movers <= 1 ? 0.002 : 0.02;
 
     public override string Layout
-        => $"{Entities} boxes {Width}x{Width} on a {Size}x{Size} grid, {_movers} mover(s) shift 0.5 x 0.25 cells per frame, no reads";
+        =>
+            $"{Entities} boxes {Width}x{Width} on a {Size}x{Size} grid, {Movers} mover(s) shift 0.5 x 0.25 cells per frame, no reads";
 
     public override void Setup()
     {
         base.Setup();
         _phase = Arena.Alloc<byte>(Entities);
-        _moverIds = Arena.Alloc<Gi.World.SourceId>(_movers);
-        _moverX = Arena.Alloc<float>(_movers);
-        _moverY = Arena.Alloc<float>(_movers);
+        _moverIds = Arena.Alloc<World.SourceId>(Movers);
+        _moverX = Arena.Alloc<float>(Movers);
+        _moverY = Arena.Alloc<float>(Movers);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public override void Step(int frame)
     {
         var start = (long)(_rng.Next() % (ulong)Entities);
-        for (var i = 0; i < _movers; i++)
+        for (var i = 0; i < Movers; i++)
         {
             var index = (int)((start + i * 5003L) % Entities);
             var phase = (byte)(_phase[index] ^ 1);
@@ -287,7 +300,7 @@ internal sealed unsafe class FrameSparse(int entities, int power, ulong seed, in
     public override bool Run(int frame, long* marks)
     {
         marks[0] = Stopwatch.GetTimestamp();
-        for (var i = 0; i < _movers; i++) Gi.World.Move(WorldId, _moverIds[i], _moverX[i], _moverY[i]);
+        for (var i = 0; i < Movers; i++) Gi.World.Move(WorldId, _moverIds[i], _moverX[i], _moverY[i]);
         marks[1] = Stopwatch.GetTimestamp();
         Gi.World.Process(WorldId);
         marks[2] = Stopwatch.GetTimestamp();
@@ -297,8 +310,9 @@ internal sealed unsafe class FrameSparse(int entities, int power, ulong seed, in
     public override ulong Consume()
     {
         var hash = FrameHash.Seed;
-        for (var i = 0; i < Math.Min(_movers, 16); i++)
-            hash = FrameHash.Mix(hash, (ushort)Gi.World.Query(WorldId, GridId, BaseLayer, (int)_moverX[i], (int)_moverY[i]));
+        for (var i = 0; i < Math.Min(Movers, 16); i++)
+            hash = FrameHash.Mix(hash,
+                (ushort)Gi.World.Query(WorldId, GridId, BaseLayer, (int)_moverX[i], (int)_moverY[i]));
         return FrameHash.Mix(hash, (uint)Gi.World.Tick(WorldId));
     }
 
@@ -314,7 +328,8 @@ internal sealed unsafe class FrameSparse(int entities, int power, ulong seed, in
     }
 }
 
-internal sealed unsafe class FrameIdle(int entities, int power, ulong seed, bool cell = false) : FrameCanonical(entities, power, seed, cell)
+internal sealed unsafe class FrameIdle(int entities, int power, ulong seed, bool cell = false)
+    : FrameCanonical(entities, power, seed, cell)
 {
     private static readonly string[] StageNames = ["process"];
 
@@ -345,17 +360,22 @@ internal sealed unsafe class FrameIdle(int entities, int power, ulong seed, bool
         return true;
     }
 
-    public override ulong Consume() => FrameHash.Mix(FrameHash.Seed, (uint)Gi.World.Tick(WorldId));
+    public override ulong Consume()
+    {
+        return FrameHash.Mix(FrameHash.Seed, (uint)Gi.World.Tick(WorldId));
+    }
 
     public override bool VerifyState()
     {
         for (var i = 0; i < Entities; i++)
-            if (!SourceAt(Ids[i], X[i], Y[i])) return false;
+            if (!SourceAt(Ids[i], X[i], Y[i]))
+                return false;
         return true;
     }
 }
 
-internal sealed unsafe class FrameCrowd(int entities, int power, ulong seed, bool cell = false) : FrameScenario(entities, power, seed, cell)
+internal sealed unsafe class FrameCrowd(int entities, int power, ulong seed, bool cell = false)
+    : FrameScenario(entities, power, seed, cell)
 {
     private const int Width = 4;
     private const int Interval = 128;
@@ -364,28 +384,28 @@ internal sealed unsafe class FrameCrowd(int entities, int power, ulong seed, boo
     private const float Speed = 0.1f;
     private static readonly string[] StageNames = ["sync", "process", "point", "gradient", "area"];
     private readonly long[] _resorts = new long[64];
-    private int _resortCount;
+    private long _area;
+    private uint* _counts;
+    private ulong* _gradientWhole;
+    private float* _gradientX;
+    private float* _gradientY;
+    private World.SourceId* _ids;
+    private World.SourceId* _idsNext;
     private byte _layer;
+    private ulong* _pairs;
+    private int _resortCount;
+    private ulong* _scratch;
     private byte _stamp;
-    private Gi.World.SourceId* _ids;
-    private Gi.World.SourceId* _idsNext;
-    private float* _x;
-    private float* _xNext;
-    private float* _y;
-    private float* _yNext;
+    private short* _values;
     private float* _vx;
     private float* _vxNext;
     private float* _vy;
     private float* _vyNext;
-    private ulong* _pairs;
-    private ulong* _scratch;
-    private uint* _counts;
-    private float* _gradientX;
-    private float* _gradientY;
-    private short* _values;
     private ulong* _whole;
-    private ulong* _gradientWhole;
-    private long _area;
+    private float* _x;
+    private float* _xNext;
+    private float* _y;
+    private float* _yNext;
 
     public override string Name => "C";
 
@@ -402,18 +422,19 @@ internal sealed unsafe class FrameCrowd(int entities, int power, ulong seed, boo
     public override long[] ResortTicks => _resorts.AsSpan(0, _resortCount).ToArray();
 
     public override string Layout
-        => $"{Entities} agents as persistent boxes {Width}x{Width} on a {Size}x{Size} grid, synced in Morton order every frame " +
-           $"({Speed.ToString(System.Globalization.CultureInfo.InvariantCulture)} cell/frame), re-sorted every {Interval} frames, " +
-           $"value + gradient per agent, {Disks} disk sums at r={Reach.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+        =>
+            $"{Entities} agents as persistent boxes {Width}x{Width} on a {Size}x{Size} grid, synced in Morton order every frame " +
+            $"({Speed.ToString(CultureInfo.InvariantCulture)} cell/frame), re-sorted every {Interval} frames, " +
+            $"value + gradient per agent, {Disks} disk sums at r={Reach.ToString(CultureInfo.InvariantCulture)}";
 
     public override void Setup()
     {
         WorldId = Gi.World.New();
         GridId = Gi.Grid.New(WorldId, Power, 0f, 0f, Size);
-        _layer = ReadMode.Transient ? Gi.Layer.New(WorldId, Gi.Layer.Residency.Transient, LayerPrecision) : NewLayer();
-        _stamp = Gi.Stamp.Box(Width, Width, 8);
-        _ids = Arena.Alloc<Gi.World.SourceId>(Entities);
-        _idsNext = Arena.Alloc<Gi.World.SourceId>(Entities);
+        _layer = ReadMode.Transient ? Layer.New(WorldId, Layer.Residency.Transient, LayerPrecision) : NewLayer();
+        _stamp = Stamp.Box(Width, Width, 8);
+        _ids = Arena.Alloc<World.SourceId>(Entities);
+        _idsNext = Arena.Alloc<World.SourceId>(Entities);
         _x = Arena.Alloc<float>(Entities);
         _xNext = Arena.Alloc<float>(Entities);
         _y = Arena.Alloc<float>(Entities);
@@ -454,7 +475,8 @@ internal sealed unsafe class FrameCrowd(int entities, int power, ulong seed, boo
 
         Reorder();
         if (!ReadMode.Transient)
-            for (var i = 0; i < Entities; i++) _ids[i] = Place(_layer, _x[i], _y[i], _stamp, 1);
+            for (var i = 0; i < Entities; i++)
+                _ids[i] = Place(_layer, _x[i], _y[i], _stamp, 1);
         Gi.World.Process(WorldId);
         ResetCounters();
     }
@@ -477,7 +499,8 @@ internal sealed unsafe class FrameCrowd(int entities, int power, ulong seed, boo
     {
         marks[0] = Stopwatch.GetTimestamp();
         if (ReadMode.Transient)
-            Gi.World.Splat(WorldId, _layer, new ReadOnlySpan<float>(_x, Entities), new ReadOnlySpan<float>(_y, Entities), _stamp, 1);
+            Gi.World.Splat(WorldId, _layer, new ReadOnlySpan<float>(_x, Entities),
+                new ReadOnlySpan<float>(_y, Entities), _stamp, 1);
         else
             Gi.World.Sync(WorldId, _ids, _x, _y, Entities);
         marks[1] = Stopwatch.GetTimestamp();
@@ -492,15 +515,18 @@ internal sealed unsafe class FrameCrowd(int entities, int power, ulong seed, boo
         }
         else if (ReadMode.Fused)
         {
-            ok = (Gi.World.SenseGradientColumn(WorldId, _layer, _x, _y, null, Entities, _values, _gradientX, _gradientY, _whole) == Gi.World.ReadStatus.Complete);
+            ok = Gi.World.SenseGradientColumn(WorldId, _layer, _x, _y, null, Entities, _values, _gradientX, _gradientY,
+                _whole) == Gi.World.ReadStatus.Complete;
             marks[3] = Stopwatch.GetTimestamp();
             marks[4] = marks[3];
         }
         else
         {
-            ok = (Gi.World.SenseColumn(WorldId, _layer, _x, _y, Entities, _values, _whole) == Gi.World.ReadStatus.Complete);
+            ok = Gi.World.SenseColumn(WorldId, _layer, _x, _y, Entities, _values, _whole) ==
+                 Gi.World.ReadStatus.Complete;
             marks[3] = Stopwatch.GetTimestamp();
-            ok &= (Gi.World.SenseGradientColumn(WorldId, _layer, _x, _y, null, Entities, _gradientX, _gradientY, _gradientWhole) == Gi.World.ReadStatus.Complete);
+            ok &= Gi.World.SenseGradientColumn(WorldId, _layer, _x, _y, null, Entities, _gradientX, _gradientY,
+                _gradientWhole) == Gi.World.ReadStatus.Complete;
             marks[4] = Stopwatch.GetTimestamp();
         }
 
@@ -559,13 +585,14 @@ internal sealed unsafe class FrameCrowd(int entities, int power, ulong seed, boo
     {
         if (ReadMode.Transient) return true;
         for (var i = 0; i < Entities; i++)
-            if (!SourceAt(_ids[i], _x[i], _y[i])) return false;
+            if (!SourceAt(_ids[i], _x[i], _y[i]))
+                return false;
         return true;
     }
 
     public override void Dispose()
     {
-        Gi.Stamp.Free(_stamp);
+        Stamp.Free(_stamp);
         base.Dispose();
     }
 
@@ -624,44 +651,44 @@ internal sealed unsafe class FrameCrowd(int entities, int power, ulong seed, boo
     }
 }
 
-internal sealed unsafe class FrameWorld(int entities, int power, ulong seed, bool cell = false) : FrameScenario(entities, power, seed, cell)
+internal sealed unsafe class FrameWorld(int entities, int power, ulong seed, bool cell = false)
+    : FrameScenario(entities, power, seed, cell)
 {
     private const int Lifetime = 100;
     private const float Speed = 0.1f;
     private const int FadeGain = 8;
     private const float Margin = 40f;
     private static readonly string[] StageNames = ["sync", "churn", "process", "point", "gradient", "area"];
-    private readonly int _agents = (entities + 2) / 4;
-    private readonly int _timed = entities / 100 / Lifetime * Lifetime;
     private readonly int _churn = Math.Max(entities / 1000, 1);
-    private FrameRandom _rng = new(seed ^ 0x2545F4914F6CDD1DUL);
-    private byte _boxes;
-    private byte _tents;
-    private byte _derived;
-    private byte _boxStamp;
-    private byte _tentStamp;
-    private int _plain;
-    private int _timedPerFrame;
-    private int _plainPerFrame;
-    private int _cursor;
-    private Gi.World.SourceId* _agentIds;
-    private float* _agentX;
-    private float* _agentY;
+    private readonly int _timed = entities / 100 / Lifetime * Lifetime;
+    private World.SourceId* _agentIds;
     private float* _agentVx;
     private float* _agentVy;
-    private Gi.World.SourceId* _plainIds;
-    private byte* _plainKind;
-    private Gi.World.SourceId* _timedIds;
+    private float* _agentX;
+    private float* _agentY;
+    private long _area;
+    private byte _boxStamp;
+    private byte _boxes;
+    private int _cursor;
+    private byte _derived;
+    private ulong* _gradientWhole;
     private float* _gradientX;
     private float* _gradientY;
+    private int _plain;
+    private World.SourceId* _plainIds;
+    private byte* _plainKind;
+    private int _plainPerFrame;
+    private FrameRandom _rng = new(seed ^ 0x2545F4914F6CDD1DUL);
+    private byte _tentStamp;
+    private byte _tents;
+    private World.SourceId* _timedIds;
+    private int _timedPerFrame;
     private short* _values;
     private ulong* _whole;
-    private ulong* _gradientWhole;
-    private long _area;
 
     public override string Name => "W";
 
-    public override int Movers => _agents;
+    public override int Movers { get; } = (entities + 2) / 4;
 
     public override string[] Stages => StageNames;
 
@@ -673,11 +700,12 @@ internal sealed unsafe class FrameWorld(int entities, int power, ulong seed, boo
     {
         get
         {
-            var c = System.Globalization.CultureInfo.InvariantCulture;
-            return $"{Entities} persistent sources on a {Size}x{Size} grid in Morton slot order: {_agents} agents (box 4x4, " +
-                   $"{Speed.ToString(c)} cell/frame), {_plain} static (box 4x4 / tent 6x6), {_timed} timed (fade + expire, {Lifetime} frames); " +
-                   $"layers: boxes, tents, derived Sum; per frame {_churn} spawns and {_churn} despawns " +
-                   $"({_timedPerFrame} timed), {_agents} point + gradient senses on the derived layer, {_churn} disk sums r=8..32";
+            var c = CultureInfo.InvariantCulture;
+            return
+                $"{Entities} persistent sources on a {Size}x{Size} grid in Morton slot order: {Movers} agents (box 4x4, " +
+                $"{Speed.ToString(c)} cell/frame), {_plain} static (box 4x4 / tent 6x6), {_timed} timed (fade + expire, {Lifetime} frames); " +
+                $"layers: boxes, tents, derived Sum; per frame {_churn} spawns and {_churn} despawns " +
+                $"({_timedPerFrame} timed), {Movers} point + gradient senses on the derived layer, {_churn} disk sums r=8..32";
         }
     }
 
@@ -685,27 +713,27 @@ internal sealed unsafe class FrameWorld(int entities, int power, ulong seed, boo
     {
         _timedPerFrame = _timed / Lifetime;
         _plainPerFrame = _churn - _timedPerFrame;
-        _plain = Entities - _agents - _timed;
+        _plain = Entities - Movers - _timed;
         WorldId = Gi.World.New();
         GridId = Gi.Grid.New(WorldId, Power, 0f, 0f, Size);
         _boxes = NewLayer();
         _tents = NewLayer();
-        _derived = Gi.Layer.Sum(WorldId, _boxes, 1, _tents, 1);
-        _boxStamp = Gi.Stamp.Box(4, 4, 12);
-        _tentStamp = Gi.Stamp.Tent(6, 6, 12);
-        _agentIds = Arena.Alloc<Gi.World.SourceId>(_agents);
-        _agentX = Arena.Alloc<float>(_agents);
-        _agentY = Arena.Alloc<float>(_agents);
-        _agentVx = Arena.Alloc<float>(_agents);
-        _agentVy = Arena.Alloc<float>(_agents);
-        _plainIds = Arena.Alloc<Gi.World.SourceId>(_plain);
+        _derived = Layer.Sum(WorldId, _boxes, 1, _tents, 1);
+        _boxStamp = Stamp.Box(4, 4, 12);
+        _tentStamp = Stamp.Tent(6, 6, 12);
+        _agentIds = Arena.Alloc<World.SourceId>(Movers);
+        _agentX = Arena.Alloc<float>(Movers);
+        _agentY = Arena.Alloc<float>(Movers);
+        _agentVx = Arena.Alloc<float>(Movers);
+        _agentVy = Arena.Alloc<float>(Movers);
+        _plainIds = Arena.Alloc<World.SourceId>(_plain);
         _plainKind = Arena.Alloc<byte>(_plain);
-        _timedIds = Arena.Alloc<Gi.World.SourceId>(_timed);
-        _gradientX = Arena.Alloc<float>(_agents);
-        _gradientY = Arena.Alloc<float>(_agents);
-        _values = Arena.Alloc<short>(_agents);
-        _whole = Arena.Alloc<ulong>((_agents + 63) >> 6);
-        _gradientWhole = Arena.Alloc<ulong>((_agents + 63) >> 6);
+        _timedIds = Arena.Alloc<World.SourceId>(_timed);
+        _gradientX = Arena.Alloc<float>(Movers);
+        _gradientY = Arena.Alloc<float>(Movers);
+        _values = Arena.Alloc<short>(Movers);
+        _whole = Arena.Alloc<ulong>((Movers + 63) >> 6);
+        _gradientWhole = Arena.Alloc<ulong>((Movers + 63) >> 6);
 
         var x = Arena.Alloc<float>(Entities);
         var y = Arena.Alloc<float>(Entities);
@@ -732,8 +760,7 @@ internal sealed unsafe class FrameWorld(int entities, int power, ulong seed, boo
         var plain = 0;
         var timedRank = 0;
         for (var j = 0; j < Entities; j++)
-        {
-            if (j % 4 == 1 && agent < _agents)
+            if (j % 4 == 1 && agent < Movers)
             {
                 var vx = rng.Signed();
                 var vy = rng.Signed();
@@ -767,12 +794,12 @@ internal sealed unsafe class FrameWorld(int entities, int power, ulong seed, boo
             {
                 var tent = ((j >> 2) & 1) == 1;
                 _plainKind[plain] = (byte)(tent ? 1 : 0);
-                _plainIds[plain] = Place(tent ? _tents : _boxes, sortedX[j], sortedY[j], tent ? _tentStamp : _boxStamp, 1);
+                _plainIds[plain] = Place(tent ? _tents : _boxes, sortedX[j], sortedY[j], tent ? _tentStamp : _boxStamp,
+                    1);
                 plain++;
             }
-        }
 
-        if (agent != _agents || plain != _plain || timedRank != _timed)
+        if (agent != Movers || plain != _plain || timedRank != _timed)
             throw new InvalidOperationException("Frame W role assignment does not add up.");
 
         Gi.World.Process(WorldId);
@@ -788,21 +815,24 @@ internal sealed unsafe class FrameWorld(int entities, int power, ulong seed, boo
     public override bool Run(int frame, long* marks)
     {
         marks[0] = Stopwatch.GetTimestamp();
-        Gi.World.Sync(WorldId, _agentIds, _agentX, _agentY, _agents);
+        Gi.World.Sync(WorldId, _agentIds, _agentX, _agentY, Movers);
         marks[1] = Stopwatch.GetTimestamp();
         var ok = Churn(frame);
         marks[2] = Stopwatch.GetTimestamp();
         Gi.World.Process(WorldId);
         marks[3] = Stopwatch.GetTimestamp();
-        ok &= (Gi.World.SenseColumn(WorldId, _derived, _agentX, _agentY, _agents, _values, _whole) == Gi.World.ReadStatus.Complete);
+        ok &= Gi.World.SenseColumn(WorldId, _derived, _agentX, _agentY, Movers, _values, _whole) ==
+              Gi.World.ReadStatus.Complete;
         marks[4] = Stopwatch.GetTimestamp();
-        ok &= (Gi.World.SenseGradientColumn(WorldId, _derived, _agentX, _agentY, null, _agents, _gradientX, _gradientY, _gradientWhole) == Gi.World.ReadStatus.Complete);
+        ok &= Gi.World.SenseGradientColumn(WorldId, _derived, _agentX, _agentY, null, Movers, _gradientX, _gradientY,
+            _gradientWhole) == Gi.World.ReadStatus.Complete;
         marks[5] = Stopwatch.GetTimestamp();
         var area = 0L;
         for (var i = 0; i < _churn; i++)
         {
-            var index = (int)((i * 997L + frame * 13L) % _agents);
-            ok &= Gi.World.TrySenseArea(WorldId, _derived, _agentX[index], _agentY[index], 8f + 8f * (i & 3), out var total);
+            var index = (int)((i * 997L + frame * 13L) % Movers);
+            ok &= Gi.World.TrySenseArea(WorldId, _derived, _agentX[index], _agentY[index], 8f + 8f * (i & 3),
+                out var total);
             area += total;
         }
 
@@ -814,34 +844,36 @@ internal sealed unsafe class FrameWorld(int entities, int power, ulong seed, boo
     public override ulong Consume()
     {
         var hash = FrameHash.Mix(FrameHash.Seed, (ulong)_area);
-        hash = FrameHash.Elements(hash, _values, _agents);
-        hash = FrameHash.Elements(hash, _gradientX, _agents);
-        hash = FrameHash.Elements(hash, _gradientY, _agents);
-        return FrameHash.Elements(hash, _whole, (_agents + 63) >> 6);
+        hash = FrameHash.Elements(hash, _values, Movers);
+        hash = FrameHash.Elements(hash, _gradientX, Movers);
+        hash = FrameHash.Elements(hash, _gradientY, Movers);
+        return FrameHash.Elements(hash, _whole, (Movers + 63) >> 6);
     }
 
     public override bool VerifyState()
     {
-        for (var i = 0; i < _agents; i++)
-            if (!SourceAt(_agentIds[i], _agentX[i], _agentY[i])) return false;
+        for (var i = 0; i < Movers; i++)
+            if (!SourceAt(_agentIds[i], _agentX[i], _agentY[i]))
+                return false;
         return LiveSources() == Entities;
     }
 
-    public int LiveSources()
+    private int LiveSources()
     {
         var context = Gi.World.GetContext(WorldId);
         if (context == null) return -1;
         var sources = &context->Sources;
         var live = 0;
         for (var slot = 0; slot < sources->Count; slot++)
-            if (sources->Alive[slot] != 0) live++;
+            if (sources->Alive[slot] != 0)
+                live++;
         return live;
     }
 
     public override void Dispose()
     {
-        Gi.Stamp.Free(_boxStamp);
-        Gi.Stamp.Free(_tentStamp);
+        Stamp.Free(_boxStamp);
+        Stamp.Free(_tentStamp);
         base.Dispose();
     }
 
@@ -886,7 +918,7 @@ internal sealed unsafe class FrameWorld(int entities, int power, ulong seed, boo
         var low = Margin - 4f;
         var high = Size - low;
         long cell = 0, q8 = 0;
-        for (var i = 0; i < _agents; i++)
+        for (var i = 0; i < Movers; i++)
         {
             var ox = _agentX[i];
             var oy = _agentY[i];
@@ -916,7 +948,7 @@ internal sealed unsafe class FrameWorld(int entities, int power, ulong seed, boo
 
         CrossCell += cell;
         CrossQ8 += q8;
-        MoverSamples += _agents;
+        MoverSamples += Movers;
     }
 
     private static int TimedStride(int count)

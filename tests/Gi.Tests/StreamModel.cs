@@ -17,7 +17,7 @@ internal enum StreamOp : byte
     Clear,
     Process,
     Read,
-    Splat,
+    Splat
 }
 
 internal enum ReadKind : byte
@@ -45,7 +45,7 @@ internal enum ReadKind : byte
     SenseGradientColumn,
     Covers,
     LayerLive,
-    SourceSpec,
+    SourceSpec
 }
 
 internal enum StampKind : byte
@@ -56,7 +56,7 @@ internal enum StampKind : byte
     Disk,
     Cone,
     Dome,
-    Raster,
+    Raster
 }
 
 internal struct StreamCommand
@@ -110,10 +110,10 @@ internal struct StampSpec
 
 internal sealed class StreamSetup
 {
-    public int Seed;
+    public List<StreamCommand> Commands = [];
     public GridSpec[] Grids = [];
     public LayerSpec[] Layers = [];
-    public StampSpec[] Stamps = [];
     public int MaxLive;
-    public List<StreamCommand> Commands = [];
+    public int Seed;
+    public StampSpec[] Stamps = [];
 }

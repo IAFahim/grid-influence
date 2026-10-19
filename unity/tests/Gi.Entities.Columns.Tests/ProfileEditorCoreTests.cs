@@ -10,6 +10,8 @@ namespace Gi.Entities.Columns.Tests;
 
 public sealed class ProfileEditorCoreTests
 {
+
+    private static readonly int[] PhaseBits = new[] { 8, 1, 2, 0 };
     private static GiGridSpec[][] Configurations()
     {
         return new[]
@@ -98,7 +100,7 @@ public sealed class ProfileEditorCoreTests
             try
             {
                 GiGrid.New(world, power, 0f, 0f, 1 << power);
-                GiLayer.Precision.TryCreate(new[] { 8, 1, 2, 0 }[rng.Next(4)], 16, out var precision);
+                GiLayer.Precision.TryCreate(PhaseBits[rng.Next(4)], 16, out var precision);
                 var layer = GiLayer.New(world, GiLayer.Residency.Persistent, precision);
                 var size = 1 << power;
                 var sources = 1 + rng.Next(rng.Next(3) == 0 ? 400 : 60);

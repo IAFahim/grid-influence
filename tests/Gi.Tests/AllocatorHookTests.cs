@@ -34,7 +34,8 @@ public sealed unsafe class AllocatorHookTests
     {
         DrainLiveWorlds();
         for (var id = 1; id < StampCatalog.Count; id++)
-            if (StampCatalog.Get((byte)id)->Live != 0) Stamp.Free((byte)id);
+            if (StampCatalog.Get((byte)id)->Live != 0)
+                Stamp.Free((byte)id);
         World.Teardown();
     }
 
@@ -69,8 +70,8 @@ public sealed unsafe class AllocatorHookTests
         var ys = new float[count];
         for (var i = 0; i < count; i++)
         {
-            xs[i] = (i * 17.3f) % 240f + 12f;
-            ys[i] = (i * 9.1f) % 240f + 12f;
+            xs[i] = i * 17.3f % 240f + 12f;
+            ys[i] = i * 9.1f % 240f + 12f;
             ids[i] = World.Place(world, persistent, xs[i], ys[i], i % 2 == 0 ? box : tent, 3);
         }
 

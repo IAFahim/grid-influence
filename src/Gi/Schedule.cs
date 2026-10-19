@@ -141,7 +141,7 @@ public static unsafe partial class World
             ExpireAt = s->ExpireAt.Pointer[slot],
             Timed = s->Timed.Pointer[slot],
             FadeFrom = s->FadeFrom.Pointer[slot],
-            FadeTo = s->FadeTo.Pointer[slot],
+            FadeTo = s->FadeTo.Pointer[slot]
         };
     }
 

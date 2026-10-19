@@ -123,7 +123,8 @@ public sealed unsafe class StreamLawsTests
         var layer = Field(world, Layer.Precision.Exact);
         for (var i = 0; i < 3; i++)
         {
-            World.Place(world, layer, 8f + rng.NextUnit() * 40, 8f + rng.NextUnit() * 40, box, (sbyte)rng.NextInt(1, 12));
+            World.Place(world, layer, 8f + rng.NextUnit() * 40, 8f + rng.NextUnit() * 40, box,
+                (sbyte)rng.NextInt(1, 12));
             World.Process(world);
         }
 
@@ -324,7 +325,7 @@ public sealed unsafe class StreamLawsTests
         var stamps = new[] { box, tent };
         var precisions = new[]
         {
-            Layer.Precision.Exact, Layer.Precision.Half, Layer.Precision.Quarter, Layer.Precision.Cell,
+            Layer.Precision.Exact, Layer.Precision.Half, Layer.Precision.Quarter, Layer.Precision.Cell
         };
         var rng = new SplitMix64(909_909);
         var page = new short[Cells];

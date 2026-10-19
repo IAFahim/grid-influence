@@ -2,7 +2,12 @@ using System.Diagnostics;
 
 namespace Gi.Stats;
 
-internal readonly record struct Measurement(string Name, long Operations, long ElapsedTicks, long AllocatedBytes, long Checksum)
+internal readonly record struct Measurement(
+    string Name,
+    long Operations,
+    long ElapsedTicks,
+    long AllocatedBytes,
+    long Checksum)
 {
     public double NanosecondsPerOperation => (double)ElapsedTicks * 1_000_000_000 / Stopwatch.Frequency / Operations;
 }
@@ -33,7 +38,8 @@ internal static class Profiler
         ticks = Stopwatch.GetTimestamp() - start;
         allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         if (checksum != expected * options.Iterations) throw new InvalidOperationException("Query checksum changed.");
-        var query = new Measurement("cell-query", (long)options.Iterations * options.Queries, ticks, allocated, checksum);
+        var query = new Measurement("cell-query", (long)options.Iterations * options.Queries, ticks, allocated,
+            checksum);
 
         var even = Mutate(scene, 0);
         var odd = Mutate(scene, 1);

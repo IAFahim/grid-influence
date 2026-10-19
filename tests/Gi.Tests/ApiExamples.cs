@@ -1,3 +1,4 @@
+using System.Numerics;
 using Xunit;
 
 namespace Gi.Tests;
@@ -183,7 +184,7 @@ public sealed class ApiExamples
         var stamps = new[]
         {
             Stamp.Box(16, 16, 90), Stamp.Tent(16, 16, 90), Stamp.Bell(16, 16, 90),
-            Stamp.Disk(8, 90), Stamp.Cone(8, 90), Stamp.Dome(8, 90),
+            Stamp.Disk(8, 90), Stamp.Cone(8, 90), Stamp.Dome(8, 90)
         };
         foreach (var stamp in stamps)
         {
@@ -234,7 +235,7 @@ public sealed class ApiExamples
         Assert.Equal(3 * 50, World.Query(w, g, either, 64, 64));
         Assert.Equal(0, World.Query(w, g, grazing, 64, 64));
 
-        var quartered = Layer.Sum(w, safety, 1, shift: 2);
+        var quartered = Layer.Sum(w, safety, 1, 2);
         World.Process(w);
         Assert.Equal((6 * 50 - 2 * 2 * 50) >> 2, World.Query(w, g, quartered, 64, 64));
     }
@@ -432,7 +433,7 @@ public sealed class ApiExamples
         {
             var values = stackalloc short[128];
             var whole = stackalloc ulong[2];
-            Assert.True((World.SenseColumn(w, threat, xsp, ysp, 128, values, whole) == World.ReadStatus.Complete));
+            Assert.True(World.SenseColumn(w, threat, xsp, ysp, 128, values, whole) == World.ReadStatus.Complete);
             Assert.True(values[0] >= 4 * 40);
             Assert.Equal(1ul << 0, whole[0] & 1ul);
 
@@ -442,7 +443,7 @@ public sealed class ApiExamples
             World.Process(w);
             var woke = World.ChangedMask(w, threat, xsp, ysp, 24f, since, 128, words);
             Assert.True(woke > 0);
-            Assert.Equal(woke, System.Numerics.BitOperations.PopCount(words[0]) + System.Numerics.BitOperations.PopCount(words[1]));
+            Assert.Equal(woke, BitOperations.PopCount(words[0]) + BitOperations.PopCount(words[1]));
             for (var i = 0; i < 128; i++) World.Move(w, ids[i], xs[i], ys[i]);
             World.Process(w);
         }

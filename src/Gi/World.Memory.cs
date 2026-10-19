@@ -23,13 +23,14 @@ public static unsafe partial class World
                 storeBytes += store->Bytes;
                 liveTiles += ld->LivePages;
                 pages += store->Pages.LiveCount + store->Int32Planes.LiveCount +
-                    store->Int64Planes.LiveCount + store->Summaries.LiveCount;
+                         store->Int64Planes.LiveCount + store->Summaries.LiveCount;
             }
         }
 
         kernelEntries = w->Kernels.LiveEntries;
         var s = &w->Sources;
         for (var i = 0; i < s->Count; i++)
-            if (s->Alive[i] != 0) liveSources++;
+            if (s->Alive[i] != 0)
+                liveSources++;
     }
 }

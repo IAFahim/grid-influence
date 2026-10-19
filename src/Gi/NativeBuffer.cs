@@ -6,73 +6,61 @@ namespace Gi;
 [StructLayout(LayoutKind.Sequential)]
 internal unsafe struct NativeBuffer<T> where T : unmanaged
 {
-    private T* _pointer;
-    private int _length;
-    private int _capacity;
+    public int Length { get; private set; }
 
-    public int Length => _length;
+    public int Capacity { get; private set; }
 
-    public readonly int Capacity => _capacity;
+    public Span<T> Span => Pointer == null ? default : new Span<T>(Pointer, Length);
 
-    public Span<T> Span => _pointer == null ? default : new(_pointer, _length);
-
-    public T* Pointer => _pointer;
+    public T* Pointer { get; private set; }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Resize(int length)
     {
-        if (length <= _capacity)
+        if (length <= Capacity)
         {
-            _length = length;
+            Length = length;
             return;
         }
 
-        var oldLength = _length;
+        var oldLength = Length;
         Grow(length);
-        new Span<byte>(_pointer + oldLength, (int)((nuint)(_capacity - oldLength) * (nuint)sizeof(T))).Clear();
+        new Span<byte>(Pointer + oldLength, (int)((nuint)(Capacity - oldLength) * (nuint)sizeof(T))).Clear();
     }
 
     public void ResizeUninitialized(int length)
     {
-        if (length <= _capacity)
+        if (length <= Capacity)
         {
-            _length = length;
+            Length = length;
             return;
         }
 
         Grow(length);
     }
 
-    public void Ensure(int capacity)
-    {
-        if (capacity <= _capacity) return;
-        var length = _length;
-        Resize(capacity);
-        _length = length;
-    }
-
     private void Grow(int length)
     {
-        var capacity = (nuint)Math.Max(length, Math.Max(16, _capacity * 2)) * (nuint)sizeof(T);
+        var capacity = (nuint)Math.Max(length, Math.Max(16, Capacity * 2)) * (nuint)sizeof(T);
         var pointer = (T*)NativeHeap.AlignedAlloc(capacity);
-        if (_pointer != null)
+        if (Pointer != null)
         {
-            Buffer.MemoryCopy(_pointer, pointer, (long)capacity, (long)_length * sizeof(T));
-            NativeHeap.AlignedFree(_pointer);
+            Buffer.MemoryCopy(Pointer, pointer, (long)capacity, (long)Length * sizeof(T));
+            NativeHeap.AlignedFree(Pointer);
         }
 
-        _pointer = pointer;
-        _capacity = (int)(capacity / (nuint)sizeof(T));
-        _length = length;
+        Pointer = pointer;
+        Capacity = (int)(capacity / (nuint)sizeof(T));
+        Length = length;
     }
 
     public void Free()
     {
-        if (_pointer == null) return;
+        if (Pointer == null) return;
 
-        NativeHeap.AlignedFree(_pointer);
-        _pointer = null;
-        _length = 0;
-        _capacity = 0;
+        NativeHeap.AlignedFree(Pointer);
+        Pointer = null;
+        Length = 0;
+        Capacity = 0;
     }
 }

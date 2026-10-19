@@ -8,7 +8,11 @@ internal static unsafe class FloorSweepKernel
     public const int ListPadding = 8;
 
     public static int Run(ulong* current, ulong* deposited, int count, int* list, int* packTable)
-        => Avx2.IsSupported ? Vector(current, deposited, count, list, packTable) : Scalar(current, deposited, count, list);
+    {
+        return Avx2.IsSupported
+            ? Vector(current, deposited, count, list, packTable)
+            : Scalar(current, deposited, count, list);
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public static int Vector(ulong* current, ulong* deposited, int count, int* list, int* packTable)
@@ -66,16 +70,17 @@ internal sealed unsafe class FloorSweepSuite : FloorSuite
     [
         ("sparse-100ppm", 100),
         ("moved-10pct", 100_000),
-        ("moved-all", 1_000_000),
+        ("moved-all", 1_000_000)
     ];
 
-    private readonly ulong* _deposited;
-    private readonly ulong*[] _current = new ulong*[Rates.Length];
-    private readonly int[] _moved = new int[Rates.Length];
-    private readonly int* _list;
-    private readonly int* _scalarList;
-    private readonly int* _packTable;
     private readonly FloorCase[] _cases;
+    private readonly ulong*[] _current = new ulong*[Rates.Length];
+
+    private readonly ulong* _deposited;
+    private readonly int* _list;
+    private readonly int[] _moved = new int[Rates.Length];
+    private readonly int* _packTable;
+    private readonly int* _scalarList;
 
     public FloorSweepSuite()
     {
@@ -103,7 +108,8 @@ internal sealed unsafe class FloorSweepSuite : FloorSuite
         built.Add(new FloorCase("P8", "anchor-sweep-moved-10pct-L2-resident", Block * Repeats,
             () =>
             {
-                for (var r = 0; r < Repeats; r++) FloorSweepKernel.Run(_current[1], _deposited, Block, _list, _packTable);
+                for (var r = 0; r < Repeats; r++)
+                    FloorSweepKernel.Run(_current[1], _deposited, Block, _list, _packTable);
             },
             () =>
             {
@@ -122,12 +128,16 @@ internal sealed unsafe class FloorSweepSuite : FloorSuite
         for (var k = 0; k < Rates.Length; k++)
         {
             var expected = new List<int>();
-            for (var i = 0; i < Count; i++) if (_current[k][i] != _deposited[i]) expected.Add(i);
-            receipts.Check($"floor-p8-{Rates[k].Name}-reference-counts-moved-slots", expected.Count == _moved[k] && expected.Count > 0);
+            for (var i = 0; i < Count; i++)
+                if (_current[k][i] != _deposited[i])
+                    expected.Add(i);
+            receipts.Check($"floor-p8-{Rates[k].Name}-reference-counts-moved-slots",
+                expected.Count == _moved[k] && expected.Count > 0);
 
             var scalarCount = FloorSweepKernel.Scalar(_current[k], _deposited, Count, _scalarList);
             receipts.Check($"floor-p8-{Rates[k].Name}-scalar-matches-reference",
-                scalarCount == expected.Count && new ReadOnlySpan<int>(_scalarList, scalarCount).SequenceEqual(expected.ToArray()));
+                scalarCount == expected.Count &&
+                new ReadOnlySpan<int>(_scalarList, scalarCount).SequenceEqual(expected.ToArray()));
             if (!Avx2.IsSupported)
             {
                 receipts.Skip($"floor-p8-{Rates[k].Name}-vector-matches-reference", "avx2 unavailable");
@@ -136,7 +146,8 @@ internal sealed unsafe class FloorSweepSuite : FloorSuite
 
             var vectorCount = FloorSweepKernel.Vector(_current[k], _deposited, Count, _list, _packTable);
             receipts.Check($"floor-p8-{Rates[k].Name}-vector-matches-reference",
-                vectorCount == expected.Count && new ReadOnlySpan<int>(_list, vectorCount).SequenceEqual(expected.ToArray()));
+                vectorCount == expected.Count &&
+                new ReadOnlySpan<int>(_list, vectorCount).SequenceEqual(expected.ToArray()));
         }
 
         var tailOk = true;
@@ -145,7 +156,9 @@ internal sealed unsafe class FloorSweepSuite : FloorSuite
             {
                 var vectorCount = FloorSweepKernel.Vector(_current[1], _deposited, count, _list, _packTable);
                 var scalarCount = FloorSweepKernel.Scalar(_current[1], _deposited, count, _scalarList);
-                tailOk &= vectorCount == scalarCount && new ReadOnlySpan<int>(_list, vectorCount).SequenceEqual(new ReadOnlySpan<int>(_scalarList, scalarCount));
+                tailOk &= vectorCount == scalarCount &&
+                          new ReadOnlySpan<int>(_list, vectorCount).SequenceEqual(
+                              new ReadOnlySpan<int>(_scalarList, scalarCount));
             }
 
         if (Avx2.IsSupported) receipts.Check("floor-p8-vector-handles-partial-last-block", tailOk);
@@ -153,11 +166,13 @@ internal sealed unsafe class FloorSweepSuite : FloorSuite
     }
 
     private FloorCase Sweeping(int k)
-        => new("P8", $"anchor-sweep-{Rates[k].Name}", Count,
+    {
+        return new FloorCase("P8", $"anchor-sweep-{Rates[k].Name}", Count,
             () => FloorSweepKernel.Run(_current[k], _deposited, Count, _list, _packTable),
             () =>
             {
                 var found = FloorSweepKernel.Run(_current[k], _deposited, Count, _list, _packTable);
                 return FloorHash.Add(FloorHash.Of(_list, found), (ulong)found);
             });
+    }
 }

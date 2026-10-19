@@ -6,7 +6,7 @@ const int sortEvery = 64;
 const float speed = 0.1f;
 
 var world = World.New();
-var grid = Grid.New(world, power: 10, x: 0f, y: 0f, size: 1024f);
+var grid = Grid.New(world, 10, 0f, 0f, 1024f);
 var crowd = Layer.New(world, Layer.Residency.Transient, Layer.Precision.Cell);
 var body = Stamp.Box(4, 4, 1);
 

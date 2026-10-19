@@ -8,10 +8,10 @@ public sealed unsafe class ColumnRejectTests : IDisposable
     private const short StaleShort = 0x2BAD;
     private const long StaleLong = 0x2BAD_2BAD_2BAD;
     private const float StaleFloat = 7777f;
+    private readonly byte _freed;
+    private readonly byte _layer;
 
     private readonly byte _world = World.New();
-    private readonly byte _layer;
-    private readonly byte _freed;
 
     public ColumnRejectTests()
     {
@@ -21,7 +21,10 @@ public sealed unsafe class ColumnRejectTests : IDisposable
         World.Free(_freed);
     }
 
-    public void Dispose() => World.Free(_world);
+    public void Dispose()
+    {
+        World.Free(_world);
+    }
 
     public static TheoryData<int, int> Rejections()
     {
@@ -32,7 +35,10 @@ public sealed unsafe class ColumnRejectTests : IDisposable
         return data;
     }
 
-    private (byte World, byte Layer) Rejected(int kind) => kind == 0 ? (_freed, _layer) : (_world, (byte)200);
+    private (byte World, byte Layer) Rejected(int kind)
+    {
+        return kind == 0 ? (_freed, _layer) : (_world, (byte)200);
+    }
 
     private static void Queries(int count, float[] xs, float[] ys)
     {
@@ -77,8 +83,8 @@ public sealed unsafe class ColumnRejectTests : IDisposable
         fixed (short* vp = values, wp = wide)
         fixed (ulong* mp = whole, wm = wideWhole)
         {
-            Assert.False((World.SenseColumn(world, layer, xp, yp, count, vp, mp) == World.ReadStatus.Complete));
-            Assert.False((World.SenseColumn(world, layer, xp, yp, null, count, wp, wm) == World.ReadStatus.Complete));
+            Assert.False(World.SenseColumn(world, layer, xp, yp, count, vp, mp) == World.ReadStatus.Complete);
+            Assert.False(World.SenseColumn(world, layer, xp, yp, null, count, wp, wm) == World.ReadStatus.Complete);
         }
 
         for (var i = 0; i < count; i++)
@@ -108,7 +114,10 @@ public sealed unsafe class ColumnRejectTests : IDisposable
 
         fixed (float* xp = xs, yp = ys, gxp = gx, gyp = gy)
         fixed (ulong* mp = whole)
-            Assert.False((World.SenseGradientColumn(world, layer, xp, yp, null, count, gxp, gyp, mp) == World.ReadStatus.Complete));
+        {
+            Assert.False(World.SenseGradientColumn(world, layer, xp, yp, null, count, gxp, gyp, mp) ==
+                         World.ReadStatus.Complete);
+        }
 
         for (var i = 0; i < count; i++)
         {
@@ -137,7 +146,10 @@ public sealed unsafe class ColumnRejectTests : IDisposable
         fixed (float* xp = xs, yp = ys, rp = reaches)
         fixed (long* tp = totals)
         fixed (ulong* mp = whole)
-            Assert.False((World.SenseAreaColumn(world, layer, xp, yp, rp, null, count, tp, mp) == World.ReadStatus.Complete));
+        {
+            Assert.False(World.SenseAreaColumn(world, layer, xp, yp, rp, null, count, tp, mp) ==
+                         World.ReadStatus.Complete);
+        }
 
         for (var i = 0; i < count; i++)
         {
@@ -169,7 +181,10 @@ public sealed unsafe class ColumnRejectTests : IDisposable
         fixed (float* xp = xs, yp = ys, rp = reaches, bxp = bx, byp = by)
         fixed (short* vp = values)
         fixed (ulong* mp = whole)
-            Assert.False((World.SenseMaxColumn(world, layer, xp, yp, rp, count, vp, bxp, byp, mp) == World.ReadStatus.Complete));
+        {
+            Assert.False(World.SenseMaxColumn(world, layer, xp, yp, rp, count, vp, bxp, byp, mp) ==
+                         World.ReadStatus.Complete);
+        }
 
         for (var i = 0; i < count; i++)
         {
@@ -204,7 +219,10 @@ public sealed unsafe class ColumnRejectTests : IDisposable
         fixed (float* xp = xs, yp = ys, rp = reaches, nxp = nx, nyp = ny)
         fixed (short* tp = thresholds, vp = values)
         fixed (ulong* mp = found)
-            Assert.False((World.SenseNearestColumn(world, layer, xp, yp, rp, tp, count, vp, nxp, nyp, mp) == World.ReadStatus.Complete));
+        {
+            Assert.False(World.SenseNearestColumn(world, layer, xp, yp, rp, tp, count, vp, nxp, nyp, mp) ==
+                         World.ReadStatus.Complete);
+        }
 
         for (var i = 0; i < count; i++)
         {
@@ -230,7 +248,9 @@ public sealed unsafe class ColumnRejectTests : IDisposable
 
         fixed (float* xp = xs, yp = ys)
         fixed (ulong* wp = words)
+        {
             Assert.Equal(0, World.ChangedMask(world, layer, xp, yp, 3f, 0, count, wp));
+        }
 
         AssertMaskCleared(words, count);
     }
@@ -249,7 +269,9 @@ public sealed unsafe class ColumnRejectTests : IDisposable
         fixed (float* yp = ys)
         fixed (short* vp = values)
         fixed (ulong* mp = whole)
-            Assert.False((World.SenseColumn(_world, _layer, null, yp, null, count, vp, mp) == World.ReadStatus.Complete));
+        {
+            Assert.False(World.SenseColumn(_world, _layer, null, yp, null, count, vp, mp) == World.ReadStatus.Complete);
+        }
 
         Assert.All(values, v => Assert.Equal(0, v));
         AssertMaskCleared(whole, count);
@@ -268,7 +290,10 @@ public sealed unsafe class ColumnRejectTests : IDisposable
 
         fixed (float* xp = xs, yp = ys, gxp = gx)
         fixed (ulong* mp = whole)
-            Assert.False((World.SenseGradientColumn(_world, _layer, xp, yp, null, count, gxp, null, mp) == World.ReadStatus.Complete));
+        {
+            Assert.False(World.SenseGradientColumn(_world, _layer, xp, yp, null, count, gxp, null, mp) ==
+                         World.ReadStatus.Complete);
+        }
 
         Assert.All(gx, v => Assert.Equal(0f, v));
         AssertMaskCleared(whole, count);
@@ -288,7 +313,10 @@ public sealed unsafe class ColumnRejectTests : IDisposable
         fixed (float* xp = xs, yp = ys)
         fixed (long* tp = totals)
         fixed (ulong* mp = whole)
-            Assert.False((World.SenseAreaColumn(_world, _layer, xp, yp, null, null, count, tp, mp) == World.ReadStatus.Complete));
+        {
+            Assert.False(World.SenseAreaColumn(_world, _layer, xp, yp, null, null, count, tp, mp) ==
+                         World.ReadStatus.Complete);
+        }
 
         Assert.All(totals, v => Assert.Equal(0L, v));
         AssertMaskCleared(whole, count);
@@ -312,7 +340,10 @@ public sealed unsafe class ColumnRejectTests : IDisposable
         fixed (float* xp = xs, bxp = bx, byp = by)
         fixed (short* vp = values)
         fixed (ulong* mp = whole)
-            Assert.False((World.SenseMaxColumn(_world, _layer, xp, null, null, count, vp, bxp, byp, mp) == World.ReadStatus.Complete));
+        {
+            Assert.False(World.SenseMaxColumn(_world, _layer, xp, null, null, count, vp, bxp, byp, mp) ==
+                         World.ReadStatus.Complete);
+        }
 
         Assert.All(values, v => Assert.Equal(0, v));
         Assert.All(bx, v => Assert.Equal(0f, v));
@@ -339,7 +370,10 @@ public sealed unsafe class ColumnRejectTests : IDisposable
         fixed (float* xp = xs, yp = ys, rp = reaches, nxp = nx, nyp = ny)
         fixed (short* vp = values)
         fixed (ulong* mp = found)
-            Assert.False((World.SenseNearestColumn(_world, _layer, xp, yp, rp, null, count, vp, nxp, nyp, mp) == World.ReadStatus.Complete));
+        {
+            Assert.False(World.SenseNearestColumn(_world, _layer, xp, yp, rp, null, count, vp, nxp, nyp, mp) ==
+                         World.ReadStatus.Complete);
+        }
 
         Assert.All(values, v => Assert.Equal(short.MinValue, v));
         Assert.All(nx, v => Assert.Equal(0f, v));
@@ -363,12 +397,16 @@ public sealed unsafe class ColumnRejectTests : IDisposable
         {
             foreach (var count in new[] { 0, -1, int.MinValue })
             {
-                Assert.False((World.SenseColumn(_freed, _layer, null, null, count, vp, wp) == World.ReadStatus.Complete));
-                Assert.True((World.SenseColumn(_world, _layer, null, null, count, vp, wp) == World.ReadStatus.Complete));
-                Assert.False((World.SenseColumn(_world, 200, null, null, null, count, vp, wp) == World.ReadStatus.Complete));
-                Assert.True((World.SenseColumn(_world, _layer, null, null, null, count, vp, wp) == World.ReadStatus.Complete));
-                Assert.False((World.SenseGradientColumn(_freed, _layer, null, null, null, count, gp, gp, wp) == World.ReadStatus.Complete));
-                Assert.True((World.SenseGradientColumn(_world, _layer, null, null, null, count, gp, gp, wp) == World.ReadStatus.Complete));
+                Assert.False(World.SenseColumn(_freed, _layer, null, null, count, vp, wp) == World.ReadStatus.Complete);
+                Assert.True(World.SenseColumn(_world, _layer, null, null, count, vp, wp) == World.ReadStatus.Complete);
+                Assert.False(World.SenseColumn(_world, 200, null, null, null, count, vp, wp) ==
+                             World.ReadStatus.Complete);
+                Assert.True(World.SenseColumn(_world, _layer, null, null, null, count, vp, wp) ==
+                            World.ReadStatus.Complete);
+                Assert.False(World.SenseGradientColumn(_freed, _layer, null, null, null, count, gp, gp, wp) ==
+                             World.ReadStatus.Complete);
+                Assert.True(World.SenseGradientColumn(_world, _layer, null, null, null, count, gp, gp, wp) ==
+                            World.ReadStatus.Complete);
                 Assert.Equal(0, World.ChangedMask(_freed, _layer, null, null, 1f, 0, count, wp));
                 Assert.Equal(0, World.ChangedMask(_world, _layer, null, null, 1f, 0, count, wp));
             }
@@ -389,7 +427,9 @@ public sealed unsafe class ColumnRejectTests : IDisposable
 
         fixed (float* xp = xs, yp = ys)
         fixed (ulong* wp = words)
+        {
             Assert.Equal(0, World.ChangedMask(_freed, _layer, xp, yp, 1f, 0, count, wp));
+        }
 
         Assert.Equal(0ul, words[1]);
         Assert.Equal(ulong.MaxValue, words[2]);

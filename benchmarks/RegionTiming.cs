@@ -11,7 +11,8 @@ internal static unsafe class RegionTiming
         var box = Stamp.Box(4, 4, 7);
         var rng = new Random(5);
         for (var i = 0; i < 400_000; i++)
-            World.Place(world, layer, (float)(rng.NextDouble() * 1000.0 + 12.0), (float)(rng.NextDouble() * 1000.0 + 12.0), box, 1);
+            World.Place(world, layer, (float)(rng.NextDouble() * 1000.0 + 12.0),
+                (float)(rng.NextDouble() * 1000.0 + 12.0), box, 1);
         World.Process(world);
 
         var buffer = new short[512 * 512];
@@ -40,14 +41,18 @@ internal static unsafe class RegionTiming
                     }
 
                     var middle = Stopwatch.GetTimestamp();
-                    for (var i = 0; i < xs.Length; i++) guard += World.Query(world, grid, layer, xs[i], ys[i], side, side);
+                    for (var i = 0; i < xs.Length; i++)
+                        guard += World.Query(world, grid, layer, xs[i], ys[i], side, side);
                     var finished = Stopwatch.GetTimestamp();
                     if (pass < 2) continue;
-                    bestRegion = Math.Min(bestRegion, Stopwatch.GetElapsedTime(started, middle).TotalNanoseconds / xs.Length);
-                    bestRect = Math.Min(bestRect, Stopwatch.GetElapsedTime(middle, finished).TotalNanoseconds / xs.Length);
+                    bestRegion = Math.Min(bestRegion,
+                        Stopwatch.GetElapsedTime(started, middle).TotalNanoseconds / xs.Length);
+                    bestRect = Math.Min(bestRect,
+                        Stopwatch.GetElapsedTime(middle, finished).TotalNanoseconds / xs.Length);
                 }
 
-                Console.WriteLine($"region {side,3}x{side,-3}: QueryRegion {bestRegion,8:F0} ns ({bestRegion / (side * side):F3} ns/cell), Query(rect) {bestRect,7:F0} ns ({guard & 1})");
+                Console.WriteLine(
+                    $"region {side,3}x{side,-3}: QueryRegion {bestRegion,8:F0} ns ({bestRegion / (side * side):F3} ns/cell), Query(rect) {bestRect,7:F0} ns ({guard & 1})");
             }
         }
 

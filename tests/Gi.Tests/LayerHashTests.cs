@@ -11,12 +11,12 @@ public sealed unsafe class LayerHashTests
     {
         var any = false;
         for (var y = 0; y < 32 && !any; y++)
-            for (var x = 0; x < 32; x++)
-                if (page[offset + y * stride + x] != 0)
-                {
-                    any = true;
-                    break;
-                }
+        for (var x = 0; x < 32; x++)
+            if (page[offset + y * stride + x] != 0)
+            {
+                any = true;
+                break;
+            }
 
         if (!any) return 0;
 
@@ -25,9 +25,9 @@ public sealed unsafe class LayerHashTests
         for (var x = 0; x < 32; x += 4)
         {
             var row = offset + y * stride + x;
-            var low = (uint)((ushort)page[row] | (ushort)page[row + 1] << 16);
-            var high = (uint)((ushort)page[row + 2] | (ushort)page[row + 3] << 16);
-            var word = low | (ulong)high << 32;
+            var low = (uint)((ushort)page[row] | ((ushort)page[row + 1] << 16));
+            var high = (uint)((ushort)page[row + 2] | ((ushort)page[row + 3] << 16));
+            var word = low | ((ulong)high << 32);
             hash = (hash ^ word) * Prime;
         }
 
@@ -111,7 +111,8 @@ public sealed unsafe class LayerHashTests
                 var size = grid == 0 ? 128 : 64;
                 byte[] layers = [food, threat, derived, transient];
                 foreach (var layer in layers)
-                    Assert.Equal(Recompute(world, (byte)grid, layer, size, page), World.LayerHash(world, (byte)grid, layer));
+                    Assert.Equal(Recompute(world, (byte)grid, layer, size, page),
+                        World.LayerHash(world, (byte)grid, layer));
             }
         }
 
@@ -160,7 +161,7 @@ public sealed unsafe class LayerHashTests
             for (var w = 0; w < 2; w++)
             {
                 var world = w == 0 ? first : second;
-                World.Place(world, (byte)(frame % 2), 8f + (frame * 7.3f) % 50f, 9f + (frame * 4.9f) % 50f, stamp, 3);
+                World.Place(world, (byte)(frame % 2), 8f + frame * 7.3f % 50f, 9f + frame * 4.9f % 50f, stamp, 3);
             }
 
             World.Process(first);

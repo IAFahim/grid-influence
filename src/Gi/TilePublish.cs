@@ -9,9 +9,10 @@ namespace Gi;
 
 internal static unsafe partial class TileBake
 {
-    internal const int PublishWholeTile = TileSize * TileSize / 2;
+    private const int PublishWholeTile = TileSize * TileSize / 2;
 
-    internal static ResolveOutcome Publish(PlaneStore* store, TilePlanes* tile, int x0, int y0, int x1, int y1, int tick)
+    internal static ResolveOutcome Publish(PlaneStore* store, TilePlanes* tile, int x0, int y0, int x1, int y1,
+        int tick)
     {
         var cells = store->Cells(*tile);
         if ((cells.Summary->CarryI | cells.Summary->HighT | cells.Summary->HighB) != 0)
@@ -23,9 +24,9 @@ internal static unsafe partial class TileBake
         return PublishScalar(cells, x0, y0, x1, y1, tick);
     }
 
-    #if NET
+#if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    #endif
+#endif
     internal static ResolveOutcome PublishScalar(PlaneCells t, int x0, int y0, int x1, int y1, int tick)
     {
         if ((x1 - x0) * (y1 - y0) >= PublishWholeTile)
@@ -53,6 +54,81 @@ internal static unsafe partial class TileBake
         UpdateSummaries(t, x0, y0, x1, y1);
         if (changed) t.Summary->Epoch = tick;
         return Outcome(PageAny(t.Page), changed);
+    }
+
+    private static bool RowScalar(int* i, int* tentOut, int* bellOut, short* page, int x0, int x1)
+    {
+        var changed = false;
+        for (var x = x0; x < x1; x++)
+        {
+            var total = (long)i[x] + tentOut[x] + bellOut[x];
+            var cell = (short)Math.Clamp(total, short.MinValue, short.MaxValue);
+            if (cell != page[x]) changed = true;
+            page[x] = cell;
+        }
+
+        return changed;
+    }
+
+    internal static bool AllZero(int* values, int count)
+    {
+        var i = 0;
+#if NET
+        if (Vector256.IsHardwareAccelerated)
+        {
+            var seen = Vector256<int>.Zero;
+            for (; i + 8 <= count; i += 8) seen |= Vector256.Load(values + i);
+            if (seen != Vector256<int>.Zero) return false;
+        }
+#endif
+        for (; i < count; i++)
+            if (values[i] != 0)
+                return false;
+
+        return true;
+    }
+
+    internal static bool AllZero(long* values, int count)
+    {
+        var i = 0;
+#if NET
+        if (Vector256.IsHardwareAccelerated)
+        {
+            var seen = Vector256<long>.Zero;
+            for (; i + 4 <= count; i += 4) seen |= Vector256.Load(values + i);
+            if (seen != Vector256<long>.Zero) return false;
+        }
+#endif
+        for (; i < count; i++)
+            if (values[i] != 0)
+                return false;
+
+        return true;
+    }
+
+#if NET
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+#endif
+    internal static bool PageAny(short* page)
+    {
+#if NET
+        if (Avx2.IsSupported)
+        {
+            var wide = Vector256<short>.Zero;
+            for (var i = 0; i < TileSize * TileSize; i += 16) wide |= Avx.LoadVector256(page + i);
+            return !Vector256.EqualsAll(wide, Vector256<short>.Zero);
+        }
+
+        if (Vector)
+        {
+            var wide = Vector128<short>.Zero;
+            for (var i = 0; i < TileSize * TileSize; i += 8) wide |= LoadShorts(page + i);
+            return !Vector128.EqualsAll(wide, Vector128<short>.Zero);
+        }
+#endif
+        var any = false;
+        for (var i = 0; i < TileSize * TileSize; i++) any |= page[i] != 0;
+        return any;
     }
 
 #if NET
@@ -151,7 +227,8 @@ internal static unsafe partial class TileBake
 
             for (var x = x0; x < vectorEnd; x += 8)
             {
-                var total = Avx.LoadVector256(iRow + x) + Avx.LoadVector256(tentOut + x) + Avx.LoadVector256(bellOut + x);
+                var total =
+                    Avx.LoadVector256(iRow + x) + Avx.LoadVector256(tentOut + x) + Avx.LoadVector256(bellOut + x);
                 var packed = Avx2.PackSignedSaturate(total, total);
                 var cells = Avx2.Permute4x64(packed.AsInt64(), 0xd8).GetLower().AsInt16();
                 var published = Sse2.LoadVector128(pageRow + x);
@@ -176,77 +253,4 @@ internal static unsafe partial class TileBake
         return AdvSimd.ExtractNarrowingSaturateUpper(narrowed, upper);
     }
 #endif
-
-    private static bool RowScalar(int* i, int* tentOut, int* bellOut, short* page, int x0, int x1)
-    {
-        var changed = false;
-        for (var x = x0; x < x1; x++)
-        {
-            var total = (long)i[x] + tentOut[x] + bellOut[x];
-            var cell = (short)Math.Clamp(total, short.MinValue, short.MaxValue);
-            if (cell != page[x]) changed = true;
-            page[x] = cell;
-        }
-
-        return changed;
-    }
-
-    internal static bool AllZero(int* values, int count)
-    {
-        var i = 0;
-#if NET
-        if (Vector256.IsHardwareAccelerated)
-        {
-            var seen = Vector256<int>.Zero;
-            for (; i + 8 <= count; i += 8) seen |= Vector256.Load(values + i);
-            if (seen != Vector256<int>.Zero) return false;
-        }
-#endif
-        for (; i < count; i++)
-            if (values[i] != 0) return false;
-
-        return true;
-    }
-
-    internal static bool AllZero(long* values, int count)
-    {
-        var i = 0;
-#if NET
-        if (Vector256.IsHardwareAccelerated)
-        {
-            var seen = Vector256<long>.Zero;
-            for (; i + 4 <= count; i += 4) seen |= Vector256.Load(values + i);
-            if (seen != Vector256<long>.Zero) return false;
-        }
-#endif
-        for (; i < count; i++)
-            if (values[i] != 0) return false;
-
-        return true;
-    }
-
-    #if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    #endif
-    internal static bool PageAny(short* page)
-    {
-#if NET
-        if (Avx2.IsSupported)
-        {
-            var wide = Vector256<short>.Zero;
-            for (var i = 0; i < TileSize * TileSize; i += 16) wide |= Avx.LoadVector256(page + i);
-            return !Vector256.EqualsAll(wide, Vector256<short>.Zero);
-        }
-
-        if (Vector)
-        {
-            var wide = Vector128<short>.Zero;
-            for (var i = 0; i < TileSize * TileSize; i += 8) wide |= LoadShorts(page + i);
-            return !Vector128.EqualsAll(wide, Vector128<short>.Zero);
-        }
-#endif
-        var any = false;
-        for (var i = 0; i < TileSize * TileSize; i++) any |= page[i] != 0;
-        return any;
-    }
 }

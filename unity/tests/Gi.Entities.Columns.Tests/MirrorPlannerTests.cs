@@ -6,6 +6,8 @@ namespace Gi.Entities.Columns.Tests;
 
 public sealed class MirrorPlannerTests
 {
+
+    private static readonly int[] TakenPrefix = new[] { 9, 3, 40, 7 };
     [Fact]
     public void TilesAreDeduplicatedAndLeaveInArrivalOrder()
     {
@@ -15,7 +17,7 @@ public sealed class MirrorPlannerTests
 
         var taken = new int[8];
         Assert.Equal(4, planner.Take(8, taken));
-        Assert.Equal(new[] { 9, 3, 40, 7 }, taken[..4]);
+        Assert.Equal(TakenPrefix, taken[..4]);
         Assert.Equal(0, planner.Pending);
 
         planner.Enqueue(9);

@@ -75,7 +75,7 @@ internal unsafe struct PlaneStore
             I = int32Index,
             T = -1,
             B = -1,
-            Summary = summaryIndex,
+            Summary = summaryIndex
         };
     }
 
@@ -95,7 +95,7 @@ internal unsafe struct PlaneStore
             I = -1,
             T = -1,
             B = -1,
-            Summary = summaryIndex,
+            Summary = summaryIndex
         };
     }
 
@@ -118,7 +118,7 @@ internal unsafe struct PlaneStore
         var summary = (TileSummary*)Summaries.Unit(tile.Summary);
         if ((summary->CarryI | summary->HighT | summary->HighB) != 0) return TotalsZero(tile, summary);
 
-        var count = TileBake.TileSize * TileBake.TileSize;
+        const int count = TileBake.TileSize * TileBake.TileSize;
         if (tile.I >= 0 && !TileBake.AllZero((int*)Int32Planes.Unit(tile.I), count)) return false;
         if (tile.T >= 0 && !TileBake.AllZero((long*)Int64Planes.Unit(tile.T), count)) return false;
         return tile.B < 0 || TileBake.AllZero((long*)Int64Planes.Unit(tile.B), count);
@@ -137,23 +137,31 @@ internal unsafe struct PlaneStore
         for (var i = 0; i < TileBake.TileSize * TileBake.TileSize; i++)
         {
             if ((i32 == null ? 0 : i32[i]) + (carry == null ? 0 : carry[i]) != 0) return false;
-            if (!Q40Zero(highT == null ? 0 : highT[i], (lowT == null ? 0 : lowT[i]) + (tent == null ? 0 : tent[i]))) return false;
-            if (!Q40Zero(highB == null ? 0 : highB[i], (lowB == null ? 0 : lowB[i]) + (bell == null ? 0 : bell[i]))) return false;
+            if (!Q40Zero(highT == null ? 0 : highT[i],
+                    (lowT == null ? 0 : lowT[i]) + (tent == null ? 0 : tent[i]))) return false;
+            if (!Q40Zero(highB == null ? 0 : highB[i],
+                    (lowB == null ? 0 : lowB[i]) + (bell == null ? 0 : bell[i]))) return false;
         }
 
         return true;
     }
 
-    private static bool Q40Zero(long high, long low) => high + (low >> 40) == 0 && (low & ((1L << 40) - 1)) == 0;
-
-    public readonly PlaneCells Cells(in TilePlanes tile) => new()
+    private static bool Q40Zero(long high, long low)
     {
-        Page = (short*)Pages.Unit(tile.Page),
-        I = tile.I < 0 ? null : (int*)Int32Planes.Unit(tile.I),
-        T = tile.T < 0 ? null : (long*)Int64Planes.Unit(tile.T),
-        B = tile.B < 0 ? null : (long*)Int64Planes.Unit(tile.B),
-        Summary = (TileSummary*)Summaries.Unit(tile.Summary),
-    };
+        return high + (low >> 40) == 0 && (low & ((1L << 40) - 1)) == 0;
+    }
+
+    public readonly PlaneCells Cells(in TilePlanes tile)
+    {
+        return new PlaneCells
+        {
+            Page = (short*)Pages.Unit(tile.Page),
+            I = tile.I < 0 ? null : (int*)Int32Planes.Unit(tile.I),
+            T = tile.T < 0 ? null : (long*)Int64Planes.Unit(tile.T),
+            B = tile.B < 0 ? null : (long*)Int64Planes.Unit(tile.B),
+            Summary = (TileSummary*)Summaries.Unit(tile.Summary)
+        };
+    }
 
     public void Give(in TilePlanes tile)
     {
@@ -178,7 +186,10 @@ internal unsafe struct PlaneStore
         Summaries.Reset();
     }
 
-    public int TakeWide() => TakeInt64() + 1;
+    public int TakeWide()
+    {
+        return TakeInt64() + 1;
+    }
 
     public void ClearWide(TilePlanes* tile)
     {
@@ -198,17 +209,14 @@ internal unsafe struct PlaneStore
         tile->BoundB = 0;
     }
 
-    public readonly long* Wide(int index) => (long*)Int64Planes.Unit(index - 1);
-
-    public void GiveWide(int index)
+    public readonly long* Wide(int index)
     {
-        if (index != 0) Int64Planes.Give(index - 1);
+        return (long*)Int64Planes.Unit(index - 1);
     }
 
-    public readonly bool HasWide(in TilePlanes tile)
+    private void GiveWide(int index)
     {
-        var summary = (TileSummary*)Summaries.Unit(tile.Summary);
-        return (summary->CarryI | summary->HighT | summary->HighB) != 0;
+        if (index != 0) Int64Planes.Give(index - 1);
     }
 
     private int TakeInt64()

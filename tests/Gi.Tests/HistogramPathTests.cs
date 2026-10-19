@@ -16,7 +16,8 @@ public unsafe class HistogramPathTests
         var stamps = new List<byte>();
         for (var width = 1; width <= 9; width += 2)
         for (var height = 2; height <= 9; height += 3)
-            stamps.Add(Stamp.Box((ushort)width, (ushort)height, (sbyte)(rng.Next(1, 40) * (rng.Next(2) == 0 ? 1 : -1))));
+            stamps.Add(Stamp.Box((ushort)width, (ushort)height,
+                (sbyte)(rng.Next(1, 40) * (rng.Next(2) == 0 ? 1 : -1))));
         stamps.Add(Stamp.Box(4, 4, 7));
         stamps.Add(Stamp.Box(6, 6, -9));
         stamps.Add(Stamp.Tent(5, 5, 30));
@@ -50,7 +51,7 @@ public unsafe class HistogramPathTests
 
                 Assert.Equal(count, World.Splat(w, transient, xs, ys, stampRows, gains));
                 World.Process(w);
-                for (byte grid = 0; grid < 3; grid++) Compare(w, grid, persistent, transient, expectContent: grid == 0 && count > 100);
+                for (byte grid = 0; grid < 3; grid++) Compare(w, grid, persistent, transient, grid == 0 && count > 100);
             }
         }
         finally

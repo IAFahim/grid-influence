@@ -296,7 +296,7 @@ public unsafe class ScheduleReadbackTests
                 {
                     var spec = source.Spec;
                     var id = World.Place(w, spec.Layer, spec.X, spec.Y, spec.Stamp, spec.Gain);
-                    Assert.NotEqual(default(World.SourceId), id);
+                    Assert.NotEqual(default, id);
                     World.Turn(w, id, RestoreHeading(spec.HeadingRadians));
                     World.Scale(w, id, spec.Scale);
                     AssertRoundTrip(w, id, spec);
@@ -308,7 +308,7 @@ public unsafe class ScheduleReadbackTests
                             From = source.From,
                             To = source.To,
                             Ticks = source.Ticks,
-                            Elapsed0 = source.Ticks - source.Left,
+                            Elapsed0 = source.Ticks - source.Left
                         });
                 }
 
@@ -396,7 +396,8 @@ public unsafe class ScheduleReadbackTests
 
                 Assert.True(resume >= 0, $"stream {seed} has fewer than {interruptFrame} frames");
                 savedCount = h.Attempts.Count;
-                for (var handle = 0; handle < h.Attempts.Count; handle++) Save(h.WorldId, h.Attempts[handle], handle, saved);
+                for (var handle = 0; handle < h.Attempts.Count; handle++)
+                    Save(h.WorldId, h.Attempts[handle], handle, saved);
             }
 
             var scheduled = 0;
@@ -408,7 +409,7 @@ public unsafe class ScheduleReadbackTests
                 {
                     var spec = source.Spec;
                     var id = World.Place(h.WorldId, spec.Layer, spec.X, spec.Y, spec.Stamp, spec.Gain);
-                    Assert.NotEqual(default(World.SourceId), id);
+                    Assert.NotEqual(default, id);
                     World.Turn(h.WorldId, id, RestoreHeading(spec.HeadingRadians));
                     World.Scale(h.WorldId, id, spec.Scale);
                     AssertRoundTrip(h.WorldId, id, spec);
@@ -430,7 +431,7 @@ public unsafe class ScheduleReadbackTests
                             To = source.To,
                             Ticks = source.Ticks,
                             Elapsed0 = source.Ticks - source.Left,
-                            Active = true,
+                            Active = true
                         });
                     }
                 }
@@ -688,13 +689,13 @@ public unsafe class ScheduleReadbackTests
     private sealed class StreamHarness : IDisposable
     {
         private const int MaxColumn = 8;
-
-        private readonly StreamSetup _setup;
-        private readonly byte[] _stamps;
+        public readonly List<World.SourceId> Attempts = new();
         private readonly short[] _page;
         private readonly Func<int, World.SourceId>? _remap;
         private readonly int _remapped;
-        public readonly List<World.SourceId> Attempts = new();
+
+        private readonly StreamSetup _setup;
+        private readonly byte[] _stamps;
         public byte WorldId;
 
         public StreamHarness(
@@ -713,7 +714,8 @@ public unsafe class ScheduleReadbackTests
                 if (!spec.Derived)
                 {
                     Layer.New(
-                        WorldId, spec.Transient ? Layer.Residency.Transient : Layer.Residency.Persistent, spec.Precision);
+                        WorldId, spec.Transient ? Layer.Residency.Transient : Layer.Residency.Persistent,
+                        spec.Precision);
                     continue;
                 }
 
@@ -741,7 +743,7 @@ public unsafe class ScheduleReadbackTests
             WorldId = 0;
         }
 
-        public World.SourceId Id(int handle)
+        private World.SourceId Id(int handle)
         {
             if (_remap == null) return (uint)handle < (uint)Attempts.Count ? Attempts[handle] : default;
             if ((uint)handle < (uint)_remapped) return _remap(handle);

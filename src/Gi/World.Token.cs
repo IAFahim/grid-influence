@@ -2,20 +2,6 @@ namespace Gi;
 
 public static unsafe partial class World
 {
-    public readonly struct Token
-    {
-        public readonly byte WorldId;
-        public readonly int RevisionAtCapture;
-
-        internal Token(byte worldId, int revisionAtCapture)
-        {
-            WorldId = worldId;
-            RevisionAtCapture = revisionAtCapture;
-        }
-
-        public bool IsValid => RevisionAtCapture != 0;
-    }
-
     public static Token Capture(byte world)
     {
         Runtime.Ensure();
@@ -57,5 +43,19 @@ public static unsafe partial class World
 
         context = candidate;
         return BatchStatus.Applied;
+    }
+
+    public readonly struct Token
+    {
+        public readonly byte WorldId;
+        public readonly int RevisionAtCapture;
+
+        internal Token(byte worldId, int revisionAtCapture)
+        {
+            WorldId = worldId;
+            RevisionAtCapture = revisionAtCapture;
+        }
+
+        public bool IsValid => RevisionAtCapture != 0;
     }
 }

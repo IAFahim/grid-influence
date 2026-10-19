@@ -3,18 +3,18 @@ using Xunit;
 
 namespace Gi.Tests;
 
-public sealed unsafe class TeardownTests
+public sealed unsafe partial class TeardownTests
 {
     private const int OpenReadOnly = 0;
 
-    [DllImport("libc", SetLastError = true)]
-    private static extern int open(byte* path, int flags);
+    [LibraryImport("libc", EntryPoint = "open", SetLastError = true)]
+    private static partial int Open(byte* path, int flags);
 
-    [DllImport("libc", SetLastError = true)]
-    private static extern int read(int descriptor, byte* buffer, nuint count);
+    [LibraryImport("libc", EntryPoint = "read", SetLastError = true)]
+    private static partial int Read(int descriptor, byte* buffer, nuint count);
 
-    [DllImport("libc", SetLastError = true)]
-    private static extern int close(int descriptor);
+    [LibraryImport("libc", EntryPoint = "close", SetLastError = true)]
+    private static partial int Close(int descriptor);
 
     private static int ResidentSetKb()
     {
@@ -24,13 +24,14 @@ public sealed unsafe class TeardownTests
         path[text.Length] = 0;
 
         var buffer = stackalloc byte[4096];
-        var descriptor = open(path, OpenReadOnly);
+        var descriptor = Open(path, OpenReadOnly);
         if (descriptor < 0) throw new InvalidOperationException("Cannot read /proc/self/status.");
 
         var total = 0;
         int readCount;
-        while (total < 4096 && (readCount = read(descriptor, buffer + total, (nuint)(4096 - total))) > 0) total += readCount;
-        _ = close(descriptor);
+        while (total < 4096 && (readCount = Read(descriptor, buffer + total, (nuint)(4096 - total))) > 0)
+            total += readCount;
+        _ = Close(descriptor);
 
         var span = new ReadOnlySpan<byte>(buffer, total);
         var marker = "VmRSS:"u8;
@@ -322,8 +323,8 @@ public sealed unsafe class TeardownTests
         var rasterStamp = Stamp.New(raster, 8, 8);
         for (var i = 0; i < 48; i++)
         {
-            xs[i] = (i * 37.7f) % 240f + 8f;
-            ys[i] = (i * 19.3f) % 240f + 8f;
+            xs[i] = i * 37.7f % 240f + 8f;
+            ys[i] = i * 19.3f % 240f + 8f;
             var shape = i % 4;
             ids[i] = World.Place(world, threat, xs[i], ys[i],
                 shape == 0 ? box : shape == 1 ? tent : shape == 2 ? cone : rasterStamp, 3);
@@ -338,7 +339,8 @@ public sealed unsafe class TeardownTests
 
         World.Sync(world, ids, xs, ys, 48);
         World.Process(world);
-        if (World.Query(world, 0, derived, 0, 0, 256, 256) >= 0) throw new InvalidOperationException("Derived sum must be negative.");
+        if (World.Query(world, 0, derived, 0, 0, 256, 256) >= 0)
+            throw new InvalidOperationException("Derived sum must be negative.");
 
         World.Free(world);
         callsAtFree = NativeHeap.Calls;

@@ -29,7 +29,9 @@ internal static unsafe class FloorDiskKernel
     }
 
     public static long Sum(in FloorDiskField field, int cx, int cy, int radius)
-        => Avx2.IsSupported ? SumVector(field, cx, cy, radius) : SumScalar(field, cx, cy, radius);
+    {
+        return Avx2.IsSupported ? SumVector(field, cx, cy, radius) : SumScalar(field, cx, cy, radius);
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public static long SumVector(in FloorDiskField field, int cx, int cy, int radius)
@@ -71,9 +73,11 @@ internal static unsafe class FloorDiskKernel
             }
 
             var leftMask0 = Vector256.Load(greaterEqual + (FloorShape.TileSize - (x0 & (FloorShape.TileSize - 1))));
-            var leftMask1 = Vector256.Load(greaterEqual + (FloorShape.TileSize - (x0 & (FloorShape.TileSize - 1))) + 16);
+            var leftMask1 =
+                Vector256.Load(greaterEqual + (FloorShape.TileSize - (x0 & (FloorShape.TileSize - 1))) + 16);
             var rightMask0 = Vector256.Load(lessEqual + (FloorShape.TileSize - 1 - (x1 & (FloorShape.TileSize - 1))));
-            var rightMask1 = Vector256.Load(lessEqual + (FloorShape.TileSize - 1 - (x1 & (FloorShape.TileSize - 1))) + 16);
+            var rightMask1 =
+                Vector256.Load(lessEqual + (FloorShape.TileSize - 1 - (x1 & (FloorShape.TileSize - 1))) + 16);
             acc += Masked(pages, upTiles[first], upRow, leftMask0, leftMask1);
             acc += Masked(pages, upTiles[last], upRow, rightMask0, rightMask1);
             if (distinct)
@@ -88,7 +92,8 @@ internal static unsafe class FloorDiskKernel
                 if (upPage >= 0) whole += rowSums[(upPage << FloorShape.TileBits) + (upRow >> FloorShape.TileBits)];
                 if (!distinct) continue;
                 var downPage = downTiles[t];
-                if (downPage >= 0) whole += rowSums[(downPage << FloorShape.TileBits) + (downRow >> FloorShape.TileBits)];
+                if (downPage >= 0)
+                    whole += rowSums[(downPage << FloorShape.TileBits) + (downRow >> FloorShape.TileBits)];
             }
         }
 
@@ -96,7 +101,8 @@ internal static unsafe class FloorDiskKernel
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static Vector256<int> Masked(short* pages, int page, int rowOffset, Vector256<short> mask0, Vector256<short> mask1)
+    private static Vector256<int> Masked(short* pages, int page, int rowOffset, Vector256<short> mask0,
+        Vector256<short> mask1)
     {
         if (page < 0) return Vector256<int>.Zero;
         var cells = pages + ((nint)page << 10) + rowOffset;
@@ -139,7 +145,7 @@ internal static unsafe class FloorDiskKernel
             if (page < 0) continue;
             var lo = t == first ? x0 & (FloorShape.TileSize - 1) : 0;
             var hi = t == last ? x1 & (FloorShape.TileSize - 1) : FloorShape.TileSize - 1;
-            if (lo == 0 & hi == FloorShape.TileSize - 1)
+            if ((lo == 0) & (hi == FloorShape.TileSize - 1))
             {
                 total += field.RowSums[(page << FloorShape.TileBits) + ly];
                 continue;
@@ -157,12 +163,12 @@ internal sealed unsafe class FloorDisksSuite : FloorSuite
 {
     private const int Disks = 1000;
     private static readonly int[] Radii = [16, 32, 64];
-
-    private readonly FloorDiskField _field;
+    private readonly FloorCase[] _cases;
     private readonly int*[] _centersX = new int*[Radii.Length];
     private readonly int*[] _centersY = new int*[Radii.Length];
+
+    private readonly FloorDiskField _field;
     private readonly long* _sums;
-    private readonly FloorCase[] _cases;
 
     public FloorDisksSuite()
     {
@@ -195,14 +201,15 @@ internal sealed unsafe class FloorDisksSuite : FloorSuite
         for (var row = 0; row < FloorShape.TileSize; row++)
         {
             var sum = 0;
-            for (var x = 0; x < FloorShape.TileSize; x++) sum += pages[page * FloorShape.TileCells + row * FloorShape.TileSize + x];
+            for (var x = 0; x < FloorShape.TileSize; x++)
+                sum += pages[page * FloorShape.TileCells + row * FloorShape.TileSize + x];
             rowSums[page * FloorShape.TileSize + row] = sum;
         }
 
         _field = new FloorDiskField
         {
             Pages = pages, Directory = directory, RowSums = rowSums, GreaterEqual = greaterEqual,
-            LessEqual = lessEqual, TilesPerSide = tilesPerSide, Side = side,
+            LessEqual = lessEqual, TilesPerSide = tilesPerSide, Side = side
         };
         _sums = Arena.Alloc<long>(Disks);
         var list = new List<FloorCase>();
@@ -251,7 +258,6 @@ internal sealed unsafe class FloorDisksSuite : FloorSuite
         var scalarOk = true;
         var vectorOk = true;
         foreach (var radius in new[] { 0, 1, 2, 5, 16, 32, 64 })
-        {
             for (var i = 0; i < 300; i++)
             {
                 var cx = radius + rng.Below(side - 2 * radius);
@@ -260,14 +266,14 @@ internal sealed unsafe class FloorDisksSuite : FloorSuite
                 scalarOk &= FloorDiskKernel.SumScalar(_field, cx, cy, radius) == expected;
                 if (Avx2.IsSupported) vectorOk &= FloorDiskKernel.SumVector(_field, cx, cy, radius) == expected;
             }
-        }
 
         for (var k = 0; k < Radii.Length; k++)
         for (var i = 0; i < Disks; i++)
         {
             var expected = Naive(flat, _centersX[k][i], _centersY[k][i], Radii[k]);
             scalarOk &= FloorDiskKernel.SumScalar(_field, _centersX[k][i], _centersY[k][i], Radii[k]) == expected;
-            if (Avx2.IsSupported) vectorOk &= FloorDiskKernel.SumVector(_field, _centersX[k][i], _centersY[k][i], Radii[k]) == expected;
+            if (Avx2.IsSupported)
+                vectorOk &= FloorDiskKernel.SumVector(_field, _centersX[k][i], _centersY[k][i], Radii[k]) == expected;
         }
 
         receipts.Check("floor-p7-scalar-disk-sums-match-cell-scan", scalarOk);
@@ -276,13 +282,15 @@ internal sealed unsafe class FloorDisksSuite : FloorSuite
     }
 
     private FloorCase Summing(int k)
-        => new("P7", $"r{Radii[k]}-1000-disks", Disks,
+    {
+        return new FloorCase("P7", $"r{Radii[k]}-1000-disks", Disks,
             () => Run(k),
             () =>
             {
                 Run(k);
                 return FloorHash.Of(_sums, Disks);
             });
+    }
 
     private void Run(int k)
     {

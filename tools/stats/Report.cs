@@ -10,7 +10,12 @@ internal static class Report
 {
     public static void WriteError(Options options, string error)
     {
-        if (!options.Json) { Console.Error.WriteLine(error); return; }
+        if (!options.Json)
+        {
+            Console.Error.WriteLine(error);
+            return;
+        }
+
         using var output = Console.OpenStandardOutput();
         using var writer = new Utf8JsonWriter(output);
         writer.WriteStartObject();
@@ -39,7 +44,8 @@ internal static class Report
         writer.WriteBoolean("success"u8, success);
         writer.WriteString("command"u8, options.Command);
         writer.WriteBoolean("hardware_intrinsics"u8, Vector128.IsHardwareAccelerated);
-        writer.WriteString("resolver"u8, Avx2.IsSupported ? "avx2" : Sse2.IsSupported ? "sse2" :
+        writer.WriteString("resolver"u8, Avx2.IsSupported ? "avx2" :
+            Sse2.IsSupported ? "sse2" :
             AdvSimd.IsSupported ? "advsimd" : "scalar");
         writer.WriteStartArray("receipts"u8);
         foreach (var receipt in receipts)
@@ -50,6 +56,7 @@ internal static class Report
             writer.WriteNumber("value"u8, receipt.Value);
             writer.WriteEndObject();
         }
+
         writer.WriteEndArray();
 
         if (snapshot.Valid)
@@ -81,7 +88,8 @@ internal static class Report
             writer.WriteEndObject();
 
             writer.WriteStartObject("memory"u8);
-            writer.WriteString("accounting"u8, "requested native bytes; selected world plus process-wide arenas and stamps; excludes allocator overhead");
+            writer.WriteString("accounting"u8,
+                "requested native bytes; selected world plus process-wide arenas and stamps; excludes allocator overhead");
             writer.WriteNumber("world_bytes"u8, snapshot.WorldBytes);
             writer.WriteNumber("shared_bytes"u8, snapshot.SharedBytes);
             writer.WriteNumber("native_bytes"u8, snapshot.NativeBytes);
@@ -135,6 +143,7 @@ internal static class Report
                 writer.WriteNumber("checksum"u8, measurement.Checksum);
                 writer.WriteEndObject();
             }
+
         writer.WriteEndArray();
         writer.WriteEndObject();
         writer.Flush();
@@ -149,17 +158,26 @@ internal static class Report
             Console.WriteLine($"{(receipt.Passed ? "PASS" : "FAIL")} {receipt.Name}: {receipt.Value}");
         if (snapshot.Valid)
         {
-            Console.WriteLine($"grids: {snapshot.Grids}; layers: {snapshot.Layers}; sources: {snapshot.LiveSources}/{snapshot.SourceCapacity}; field sum: {fieldSum}");
-            Console.WriteLine($"tiles: {snapshot.LiveTiles}/{snapshot.PossibleTiles}; dirty: {snapshot.DirtyTiles}; directories: {snapshot.Directories}; slab free units: {snapshot.SlabFreeUnits}");
-            Console.WriteLine($"native requested bytes: {snapshot.NativeBytes}; selected world: {snapshot.WorldBytes}; shared arenas + stamps: {snapshot.SharedBytes}");
-            Console.WriteLine($"grids: {snapshot.GridBytes}; layers: {snapshot.LayerBytes}; sources: {snapshot.SourceBytes}; scratch: {snapshot.ScratchBytes}");
-            Console.WriteLine($"dirty flags: {snapshot.DirtyFlagBytes}; queues: {snapshot.DirtyQueueBytes}; directories: {snapshot.DirectoryBytes}; slabs: {snapshot.SlabBytes}");
-            Console.WriteLine($"int32 planes: {snapshot.Int32Bytes}; tent: {snapshot.TentBytes} ({snapshot.TentTiles} tiles); bell: {snapshot.BellBytes} ({snapshot.BellTiles} tiles); query pages: {snapshot.PageBytes}; summaries: {snapshot.SummaryBytes}; records: {snapshot.RecordBytes}; kernels: {snapshot.KernelBytes}; max pyramids: {snapshot.PyramidBytes}");
+            Console.WriteLine(
+                $"grids: {snapshot.Grids}; layers: {snapshot.Layers}; sources: {snapshot.LiveSources}/{snapshot.SourceCapacity}; field sum: {fieldSum}");
+            Console.WriteLine(
+                $"tiles: {snapshot.LiveTiles}/{snapshot.PossibleTiles}; dirty: {snapshot.DirtyTiles}; directories: {snapshot.Directories}; slab free units: {snapshot.SlabFreeUnits}");
+            Console.WriteLine(
+                $"native requested bytes: {snapshot.NativeBytes}; selected world: {snapshot.WorldBytes}; shared arenas + stamps: {snapshot.SharedBytes}");
+            Console.WriteLine(
+                $"grids: {snapshot.GridBytes}; layers: {snapshot.LayerBytes}; sources: {snapshot.SourceBytes}; scratch: {snapshot.ScratchBytes}");
+            Console.WriteLine(
+                $"dirty flags: {snapshot.DirtyFlagBytes}; queues: {snapshot.DirtyQueueBytes}; directories: {snapshot.DirectoryBytes}; slabs: {snapshot.SlabBytes}");
+            Console.WriteLine(
+                $"int32 planes: {snapshot.Int32Bytes}; tent: {snapshot.TentBytes} ({snapshot.TentTiles} tiles); bell: {snapshot.BellBytes} ({snapshot.BellTiles} tiles); query pages: {snapshot.PageBytes}; summaries: {snapshot.SummaryBytes}; records: {snapshot.RecordBytes}; kernels: {snapshot.KernelBytes}; max pyramids: {snapshot.PyramidBytes}");
             using var process = Process.GetCurrentProcess();
-            Console.WriteLine($"managed heap: {GC.GetTotalMemory(false)}; working set: {process.WorkingSet64}; private process: {process.PrivateMemorySize64}");
+            Console.WriteLine(
+                $"managed heap: {GC.GetTotalMemory(false)}; working set: {process.WorkingSet64}; private process: {process.PrivateMemorySize64}");
         }
+
         if (measurements != null)
             foreach (var measurement in measurements)
-                Console.WriteLine($"{measurement.Name}: {measurement.NanosecondsPerOperation:F2} ns/op; {measurement.AllocatedBytes} B; checksum: {measurement.Checksum}");
+                Console.WriteLine(
+                    $"{measurement.Name}: {measurement.NanosecondsPerOperation:F2} ns/op; {measurement.AllocatedBytes} B; checksum: {measurement.Checksum}");
     }
 }

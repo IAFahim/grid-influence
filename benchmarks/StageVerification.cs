@@ -15,7 +15,7 @@ internal static partial class Verification
         var stamps = new[]
         {
             Stamp.Box(8, 8, 50), Stamp.Tent(16, 16, 90), Stamp.Bell(16, 16, 80),
-            Stamp.Disk(8, 90), Stamp.Cone(16, 90, 90),
+            Stamp.Disk(8, 90), Stamp.Cone(16, 90, 90)
         };
         var rng = new Random(35);
         const int count = 4000;
@@ -77,13 +77,15 @@ internal static partial class Verification
         var ids = new World.SourceId[count];
         var rng = new Random(77);
         for (var i = 0; i < count; i++)
-            ids[i] = World.Place(world, 0, (float)(rng.NextDouble() * 1000), (float)(rng.NextDouble() * 1000), stamp, 4);
+            ids[i] = World.Place(world, 0, (float)(rng.NextDouble() * 1000), (float)(rng.NextDouble() * 1000), stamp,
+                4);
         World.Process(world);
 
         for (var frame = 0; frame < 8; frame++)
         {
             for (var i = 0; i < movers; i++)
-                World.Move(world, ids[i * 4 % count], (float)(rng.NextDouble() * 1000), (float)(rng.NextDouble() * 1000));
+                World.Move(world, ids[i * 4 % count], (float)(rng.NextDouble() * 1000),
+                    (float)(rng.NextDouble() * 1000));
             World.Process(world);
         }
 
@@ -92,14 +94,15 @@ internal static partial class Verification
         for (var frame = 0; frame < frames; frame++)
         {
             for (var i = 0; i < movers; i++)
-                World.Move(world, ids[i * 4 % count], (float)(rng.NextDouble() * 1000), (float)(rng.NextDouble() * 1000));
+                World.Move(world, ids[i * 4 % count], (float)(rng.NextDouble() * 1000),
+                    (float)(rng.NextDouble() * 1000));
             World.Process(world);
         }
 
         ProcessStages.Measuring = false;
         var micros = 1e6 / Stopwatch.Frequency / frames;
         Console.WriteLine($"prep {ProcessStages.PrepareTicks * micros:F1} us, " +
-            $"apply {ProcessStages.ApplyTicks * micros:F1} us, resolve {ProcessStages.ResolveTicks * micros:F1} us");
+                          $"apply {ProcessStages.ApplyTicks * micros:F1} us, resolve {ProcessStages.ResolveTicks * micros:F1} us");
         World.Free(world);
         Stamp.Free(stamp);
     }

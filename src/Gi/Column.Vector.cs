@@ -44,14 +44,16 @@ public static unsafe partial class World
         for (; i + 8 <= to; i += 8)
         {
             var cx = Vector256.ShiftRightArithmetic(
-                Avx.ConvertToVector256Int32WithTruncation(Vector256.Floor((Vector256.Load(xs + i) - originX) * scale)), 8);
+                Avx.ConvertToVector256Int32WithTruncation(Vector256.Floor((Vector256.Load(xs + i) - originX) * scale)),
+                8);
             var cy = Vector256.ShiftRightArithmetic(
-                Avx.ConvertToVector256Int32WithTruncation(Vector256.Floor((Vector256.Load(ys + i) - originY) * scale)), 8);
+                Avx.ConvertToVector256Int32WithTruncation(Vector256.Floor((Vector256.Load(ys + i) - originY) * scale)),
+                8);
             var inside = Vector256.Equals(Vector256.Min(Vector256.Max(cx, Vector256<int>.Zero), limit), cx)
-                & Vector256.Equals(Vector256.Min(Vector256.Max(cy, Vector256<int>.Zero), limit), cy);
+                         & Vector256.Equals(Vector256.Min(Vector256.Max(cy, Vector256<int>.Zero), limit), cy);
             var accepted = inside.AsSingle().ExtractMostSignificantBits();
             var tile = Vector256.ShiftRightArithmetic(cy, TileBake.TileBits) * tilesPerSide
-                + Vector256.ShiftRightArithmetic(cx, TileBake.TileBits);
+                       + Vector256.ShiftRightArithmetic(cx, TileBake.TileBits);
             if (accepted == 0xFF && wide)
             {
                 var lx = cx & tileMask;
@@ -64,8 +66,9 @@ public static unsafe partial class World
                 if (Vector256.Equals(tile, Vector256.Create(first)).AsSingle().ExtractMostSignificantBits() == 0xFF)
                 {
                     var setIndex = directory[first];
-                    present = Vector256.Create(setIndex >> 31 ^ -1);
-                    baseBytes = Vector256.Create(setIndex < 0 ? 0 : sets[setIndex * (sizeof(TilePlanes) / sizeof(int))] << 11);
+                    present = Vector256.Create((setIndex >> 31) ^ -1);
+                    baseBytes =
+                        Vector256.Create(setIndex < 0 ? 0 : sets[setIndex * (sizeof(TilePlanes) / sizeof(int))] << 11);
                 }
                 else
                 {
@@ -74,19 +77,24 @@ public static unsafe partial class World
 
                 var center = GatherShort(pages, baseBytes + Vector256.ShiftLeft(local, 1)) & present;
                 var right = GatherTap(directory, sets, pages, stride, tile, Vector256.Equals(lx, edge),
-                    Vector256.GreaterThan(cx, inner), one, local + one + (Vector256.Equals(lx, edge) & minusRow), baseBytes, present);
+                    Vector256.GreaterThan(cx, inner), one, local + one + (Vector256.Equals(lx, edge) & minusRow),
+                    baseBytes, present);
                 var left = GatherTap(directory, sets, pages, stride, tile, Vector256.Equals(lx, zero),
-                    Vector256.LessThan(cx, one), minusOne, local - one + (Vector256.Equals(lx, zero) & row), baseBytes, present);
+                    Vector256.LessThan(cx, one), minusOne, local - one + (Vector256.Equals(lx, zero) & row), baseBytes,
+                    present);
                 var below = GatherTap(directory, sets, pages, stride, tile, Vector256.Equals(ly, edge),
-                    Vector256.GreaterThan(cy, inner), tilesPerSide, local + row + (Vector256.Equals(ly, edge) & minusPage), baseBytes, present);
+                    Vector256.GreaterThan(cy, inner), tilesPerSide,
+                    local + row + (Vector256.Equals(ly, edge) & minusPage), baseBytes, present);
                 var above = GatherTap(directory, sets, pages, stride, tile, Vector256.Equals(ly, zero),
-                    Vector256.LessThan(cy, one), -tilesPerSide, local - row + (Vector256.Equals(ly, zero) & page), baseBytes, present);
+                    Vector256.LessThan(cy, one), -tilesPerSide, local - row + (Vector256.Equals(ly, zero) & page),
+                    baseBytes, present);
                 if (values != null) Vector256.Narrow(center, center).GetLower().Store(values + i);
                 (Vector256.ConvertToSingle(right - left) * unit).Store(gradientXs + i);
                 (Vector256.ConvertToSingle(below - above) * unit).Store(gradientYs + i);
 
                 var interior = Vector256.GreaterThanOrEqual(cx, one) & Vector256.LessThanOrEqual(cx, inner)
-                    & Vector256.GreaterThanOrEqual(cy, one) & Vector256.LessThanOrEqual(cy, inner);
+                                                                     & Vector256.GreaterThanOrEqual(cy, one) &
+                                                                     Vector256.LessThanOrEqual(cy, inner);
                 var interiorBits = interior.AsSingle().ExtractMostSignificantBits();
                 if (whole != null) OrBits(whole, i, interiorBits);
                 if (interiorBits != 0xFF) allComplete = false;
@@ -99,7 +107,7 @@ public static unsafe partial class World
             for (var lane = 0; lane < 8; lane++)
             {
                 var at = i + lane;
-                if ((accepted >> lane & 1) == 0)
+                if (((accepted >> lane) & 1) == 0)
                 {
                     if (values != null) values[at] = 0;
                     gradientXs[at] = 0f;
@@ -119,7 +127,8 @@ public static unsafe partial class World
 
                 var lx = x & (TileBake.TileSize - 1);
                 var ly = y & (TileBake.TileSize - 1);
-                if (cachedPage != null && (uint)(lx - 1) < TileBake.TileSize - 2 && (uint)(ly - 1) < TileBake.TileSize - 2)
+                if (cachedPage != null && (uint)(lx - 1) < TileBake.TileSize - 2 &&
+                    (uint)(ly - 1) < TileBake.TileSize - 2)
                 {
                     var cell = cachedPage + ly * TileBake.TileSize + lx;
                     if (values != null) values[at] = *cell;
@@ -128,9 +137,15 @@ public static unsafe partial class World
                 }
                 else
                 {
-                    if (values != null) values[at] = cachedPage == null ? (short)0 : cachedPage[ly * TileBake.TileSize + lx];
-                    gradientXs[at] = (CellNear(g, ld, laneTile, cachedPage, x + 1, y) - CellNear(g, ld, laneTile, cachedPage, x - 1, y)) * scalarUnit;
-                    gradientYs[at] = (CellNear(g, ld, laneTile, cachedPage, x, y + 1) - CellNear(g, ld, laneTile, cachedPage, x, y - 1)) * scalarUnit;
+                    if (values != null)
+                        values[at] =
+                            cachedPage == null ? (short)0 : cachedPage[ly * TileBake.TileSize + lx];
+                    gradientXs[at] =
+                        (CellNear(g, ld, laneTile, cachedPage, x + 1, y) -
+                         CellNear(g, ld, laneTile, cachedPage, x - 1, y)) * scalarUnit;
+                    gradientYs[at] =
+                        (CellNear(g, ld, laneTile, cachedPage, x, y + 1) -
+                         CellNear(g, ld, laneTile, cachedPage, x, y - 1)) * scalarUnit;
                 }
 
                 if (x - 1 >= 0 && y - 1 >= 0 && x + 1 < size && y + 1 < size)
@@ -166,7 +181,8 @@ public static unsafe partial class World
     {
         if (cross.AsSingle().ExtractMostSignificantBits() != 0)
         {
-            baseBytes = PageBases(directory, sets, stride, tile + (Vector256.AndNot(cross, invalid) & tileStep), out present);
+            baseBytes =
+                PageBases(directory, sets, stride, tile + (Vector256.AndNot(cross, invalid) & tileStep), out present);
             present = Vector256.AndNot(present, invalid);
         }
 

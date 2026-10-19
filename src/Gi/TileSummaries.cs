@@ -133,9 +133,9 @@ internal static unsafe partial class TileBake
         {
             var target = Vector128.Create(value);
             var bits = Vector128.Equals(Vector128.Load(row), target).ExtractMostSignificantBits()
-                | (Vector128.Equals(Vector128.Load(row + 8), target).ExtractMostSignificantBits() << 8)
-                | (Vector128.Equals(Vector128.Load(row + 16), target).ExtractMostSignificantBits() << 16)
-                | (Vector128.Equals(Vector128.Load(row + 24), target).ExtractMostSignificantBits() << 24);
+                       | (Vector128.Equals(Vector128.Load(row + 8), target).ExtractMostSignificantBits() << 8)
+                       | (Vector128.Equals(Vector128.Load(row + 16), target).ExtractMostSignificantBits() << 16)
+                       | (Vector128.Equals(Vector128.Load(row + 24), target).ExtractMostSignificantBits() << 24);
             return BitOperations.TrailingZeroCount(bits);
         }
 #endif
@@ -146,7 +146,10 @@ internal static unsafe partial class TileBake
 
 #if NET
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static short MaxLane(Vector256<short> v) => MaxLane(Vector128.Max(v.GetLower(), v.GetUpper()));
+    private static short MaxLane(Vector256<short> v)
+    {
+        return MaxLane(Vector128.Max(v.GetLower(), v.GetUpper()));
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static short MaxLane(Vector128<short> v)

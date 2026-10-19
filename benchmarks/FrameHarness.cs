@@ -12,19 +12,22 @@ internal static class ReadMode
 
 internal sealed class FrameOptions
 {
-    public string Selection = "ALL";
     public bool Cell;
-    public int Warmup = 30;
-    public int Measure = 300;
     public int Entities = 1_000_000;
-    public ulong Seed = 402026;
-    public int JitMilliseconds = 1500;
     public bool Fused;
-    public bool View;
+    public int JitMilliseconds = 1500;
+    public int Measure = 300;
+    public ulong Seed = 402026;
+    public string Selection = "ALL";
     public bool Transient;
+    public bool View;
+    public int Warmup = 30;
 }
 
-internal sealed record FramePlan(string Name, Func<FrameOptions, FrameScenario> Create, Func<bool, FrameScenario> CreateSmall);
+internal sealed record FramePlan(
+    string Name,
+    Func<FrameOptions, FrameScenario> Create,
+    Func<bool, FrameScenario> CreateSmall);
 
 internal static class FrameHarness
 {
@@ -33,12 +36,18 @@ internal static class FrameHarness
 
     private static readonly FramePlan[] Catalog =
     [
-        new("B1", o => new FrameLegacy(o.Entities, 12, o.Seed, o.Cell), cell => new FrameLegacy(SmallEntities, SmallPower, 1, cell)),
-        new("B2", o => new FrameSparse(o.Entities, 12, o.Seed, 1, o.Cell), cell => new FrameSparse(SmallEntities, SmallPower, 1, 1, cell)),
-        new("B2", o => new FrameSparse(o.Entities, 12, o.Seed, 200, o.Cell), cell => new FrameSparse(SmallEntities, SmallPower, 1, 200, cell)),
-        new("B4", o => new FrameIdle(o.Entities, 12, o.Seed, o.Cell), cell => new FrameIdle(SmallEntities, SmallPower, 1, cell)),
-        new("C", o => new FrameCrowd(o.Entities, 10, o.Seed, o.Cell), cell => new FrameCrowd(SmallEntities, SmallPower, 1, cell)),
-        new("W", o => new FrameWorld(o.Entities, 11, o.Seed, o.Cell), cell => new FrameWorld(SmallEntities, SmallPower, 1, cell)),
+        new("B1", o => new FrameLegacy(o.Entities, 12, o.Seed, o.Cell),
+            cell => new FrameLegacy(SmallEntities, SmallPower, 1, cell)),
+        new("B2", o => new FrameSparse(o.Entities, 12, o.Seed, 1, o.Cell),
+            cell => new FrameSparse(SmallEntities, SmallPower, 1, 1, cell)),
+        new("B2", o => new FrameSparse(o.Entities, 12, o.Seed, 200, o.Cell),
+            cell => new FrameSparse(SmallEntities, SmallPower, 1, 200, cell)),
+        new("B4", o => new FrameIdle(o.Entities, 12, o.Seed, o.Cell),
+            cell => new FrameIdle(SmallEntities, SmallPower, 1, cell)),
+        new("C", o => new FrameCrowd(o.Entities, 10, o.Seed, o.Cell),
+            cell => new FrameCrowd(SmallEntities, SmallPower, 1, cell)),
+        new("W", o => new FrameWorld(o.Entities, 11, o.Seed, o.Cell),
+            cell => new FrameWorld(SmallEntities, SmallPower, 1, cell))
     ];
 
     public static int Run(string[] args)
@@ -54,7 +63,8 @@ internal static class FrameHarness
         var plans = Catalog.Where(p => options.Selection == "ALL" || options.Selection == p.Name).ToArray();
         if (plans.Length == 0)
         {
-            Console.Error.WriteLine("unknown frame '" + options.Selection + "'; expected B1, B2, B4, C, W, all or verify.");
+            Console.Error.WriteLine("unknown frame '" + options.Selection +
+                                    "'; expected B1, B2, B4, C, W, all or verify.");
             return 2;
         }
 
@@ -71,7 +81,8 @@ internal static class FrameHarness
         ReadMode.View = options.View;
         ReadMode.Transient = options.Transient;
         var precision = options.Cell ? "cell" : "exact";
-        Console.Out.Write(Header(options, precision, receipts.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries).Length));
+        Console.Out.Write(Header(options, precision,
+            receipts.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries).Length));
         Console.Out.Write('\n');
         Console.Out.Flush();
 
@@ -94,11 +105,13 @@ internal static class FrameHarness
     }
 
     private static string Header(FrameOptions options, string precision, int receiptCount)
-        => new FrameJson().BeginObject()
+    {
+        return new FrameJson().BeginObject()
             .BeginObject("header")
             .Text("tool", "gi-frames")
             .Integer("version", 1)
-            .Text("engine", "engine-v2: change-rate Process, transient layers with Splat; frame C runs as a transient layer unless --layer persistent")
+            .Text("engine",
+                "engine-v2: change-rate Process, transient layers with Splat; frame C runs as a transient layer unless --layer persistent")
             .Text("cpu_model", FrameHost.CpuModel())
             .Integer("cpu_id", Thread.GetCurrentProcessorId())
             .Integer("affinity_cpus", Environment.ProcessorCount)
@@ -118,6 +131,7 @@ internal static class FrameHarness
             .EndObject()
             .EndObject()
             .ToString();
+    }
 
     private static bool TryParse(string[] args, out FrameOptions options, out string error)
     {
@@ -125,7 +139,8 @@ internal static class FrameHarness
         error = "";
         if (args.Length < 2)
         {
-            error = "usage: --frames <B1|B2|B4|C|W|all|verify> [--precision exact|cell] [--measure N] [--warmup N] [--entities N] [--seed N] [--jit-ms N]";
+            error =
+                "usage: --frames <B1|B2|B4|C|W|all|verify> [--precision exact|cell] [--measure N] [--warmup N] [--entities N] [--seed N] [--jit-ms N]";
             return false;
         }
 
@@ -142,7 +157,10 @@ internal static class FrameHarness
             switch (args[i])
             {
                 case "--precision":
-                    if (value == "cell") options.Cell = true;
+                    if (value == "cell")
+                    {
+                        options.Cell = true;
+                    }
                     else if (value != "exact")
                     {
                         error = "--precision expects exact or cell";
@@ -182,5 +200,7 @@ internal static class FrameHarness
     }
 
     private static bool TryInt(string text, int minimum, out int value)
-        => int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out value) && value >= minimum;
+    {
+        return int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out value) && value >= minimum;
+    }
 }

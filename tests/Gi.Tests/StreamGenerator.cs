@@ -6,7 +6,7 @@ internal enum StreamProfile
     Heavy,
     Corpus,
     Transient,
-    Kinds,
+    Kinds
 }
 
 internal enum PrecisionMode : byte
@@ -15,14 +15,17 @@ internal enum PrecisionMode : byte
     Cell = 1,
     Quarter = 2,
     Half = 3,
-    Mixed = 4,
+    Mixed = 4
 }
 
 internal struct SplitMix64
 {
     private ulong _state;
 
-    public SplitMix64(ulong seed) => _state = seed;
+    public SplitMix64(ulong seed)
+    {
+        _state = seed;
+    }
 
     public ulong Next()
     {
@@ -39,13 +42,27 @@ internal struct SplitMix64
         return (int)(minInclusive + (long)(Next() % span));
     }
 
-    public float NextUnit() => (Next() >> 40) * (1f / (1 << 24));
+    public float NextUnit()
+    {
+        return (Next() >> 40) * (1f / (1 << 24));
+    }
 
-    public bool Chance(int percent) => NextInt(0, 100) < percent;
+    public bool Chance(int percent)
+    {
+        return NextInt(0, 100) < percent;
+    }
 }
 
 internal static class StreamGenerator
 {
+    private static readonly ReadKind[] TransientReads =
+    [
+        ReadKind.QueryRect, ReadKind.QueryRegion, ReadKind.QueryAt, ReadKind.QueryMaxWhole, ReadKind.QueryMaxRect,
+        ReadKind.QueryGradient, ReadKind.Sense, ReadKind.SenseArea, ReadKind.SenseMax, ReadKind.SenseNearest,
+        ReadKind.SenseGradient, ReadKind.ChangedDisk, ReadKind.ChangedTilesSince, ReadKind.ChangedTilesAll,
+        ReadKind.ChangedMask, ReadKind.SenseColumn, ReadKind.SenseGradientColumn, ReadKind.Covers
+    ];
+
     public static StreamSetup Generate(int seed, PrecisionMode mode, StreamProfile profile)
     {
         var rng = new SplitMix64((ulong)seed * 0x2545F4914F6CDD1Dul + 0x9E3779B97F4A7C15ul);
@@ -59,7 +76,7 @@ internal static class StreamGenerator
         setup.Grids = new GridSpec[gridCount];
         for (var g = 0; g < gridCount; g++)
         {
-            var power = heavy ? (rng.Chance(30) ? 7 : rng.Chance(50) ? 6 : 5) : (rng.Chance(20) ? 6 : 5);
+            var power = heavy ? rng.Chance(30) ? 7 : rng.Chance(50) ? 6 : 5 : rng.Chance(20) ? 6 : 5;
             var gridX = rng.NextInt(-2, 3) * 16f;
             var gridY = rng.NextInt(-2, 3) * 16f;
             var side = (1 << power) / PickSizeDivisor(ref rng);
@@ -68,12 +85,12 @@ internal static class StreamGenerator
                 Power = power,
                 X = gridX,
                 Y = gridY,
-                Size = side,
+                Size = side
             };
         }
 
         var baseCount = heavy ? rng.NextInt(2, 4) : rng.NextInt(1, 4);
-        var derivedCount = heavy ? rng.NextInt(1, 3) : (rng.Chance(50) ? 1 : 0);
+        var derivedCount = heavy ? rng.NextInt(1, 3) : rng.Chance(50) ? 1 : 0;
         setup.Layers = new LayerSpec[baseCount + derivedCount];
         for (var l = 0; l < baseCount; l++)
             setup.Layers[l] = new LayerSpec { Precision = PickPrecision(ref rng, mode) };
@@ -94,7 +111,7 @@ internal static class StreamGenerator
                         B = b,
                         WeightA = rng.NextInt(-3, 4),
                         WeightB = rng.NextInt(-3, 4),
-                        Shift = rng.Chance(25) ? rng.NextInt(1, 3) : 0,
+                        Shift = rng.Chance(25) ? rng.NextInt(1, 3) : 0
                     };
                     break;
                 case 1:
@@ -112,7 +129,7 @@ internal static class StreamGenerator
                         A = a,
                         B = b,
                         Low = low,
-                        High = (short)Math.Min(short.MaxValue, low + rng.NextInt(0, 700)),
+                        High = (short)Math.Min(short.MaxValue, low + rng.NextInt(0, 700))
                     };
                     break;
             }
@@ -134,7 +151,7 @@ internal static class StreamGenerator
                         Kind = StampKind.Box,
                         Width = rng.NextInt(1, axisLimit + 1),
                         Height = rng.NextInt(1, axisLimit + 1),
-                        Value = PickValue(ref rng),
+                        Value = PickValue(ref rng)
                     };
                     break;
                 case 1:
@@ -143,7 +160,7 @@ internal static class StreamGenerator
                         Kind = StampKind.Tent,
                         Width = rng.NextInt(2, axisLimit + 1),
                         Height = rng.NextInt(2, axisLimit + 1),
-                        Value = PickValue(ref rng),
+                        Value = PickValue(ref rng)
                     };
                     break;
                 case 2:
@@ -152,7 +169,7 @@ internal static class StreamGenerator
                         Kind = StampKind.Bell,
                         Width = rng.NextInt(2, axisLimit + 1),
                         Height = rng.NextInt(2, axisLimit + 1),
-                        Value = PickValue(ref rng),
+                        Value = PickValue(ref rng)
                     };
                     break;
                 case 3:
@@ -163,7 +180,7 @@ internal static class StreamGenerator
                         Kind = (StampKind)((int)StampKind.Disk + rng.NextInt(0, 3)),
                         Radius = rng.NextInt(1, (heavy ? 5 : 4) + 1),
                         Arc = rng.Chance(heavy ? 45 : 25) ? rng.NextInt(1, 360) : 360,
-                        Value = PickValue(ref rng),
+                        Value = PickValue(ref rng)
                     };
                     break;
                 default:
@@ -173,7 +190,7 @@ internal static class StreamGenerator
                         Width = rng.NextInt(2, heavy ? 6 : 5),
                         Height = rng.NextInt(2, heavy ? 6 : 5),
                         Value = 0,
-                        DataSeed = rng.Next(),
+                        DataSeed = rng.Next()
                     };
                     break;
             }
@@ -216,7 +233,8 @@ internal static class StreamGenerator
                 live = 0;
             }
 
-            var ops = profile == StreamProfile.Corpus ? rng.NextInt(6, 13) : heavy ? rng.NextInt(8, 17) : rng.NextInt(5, 11);
+            var ops = profile == StreamProfile.Corpus ? rng.NextInt(6, 13) :
+                heavy ? rng.NextInt(8, 17) : rng.NextInt(5, 11);
             for (var op = 0; op < ops; op++)
             {
                 if (rng.Chance(heavy ? 10 : 8))
@@ -239,14 +257,6 @@ internal static class StreamGenerator
         if (augment) AddTransient(setup, mode, seed);
         return setup;
     }
-
-    private static readonly ReadKind[] TransientReads =
-    [
-        ReadKind.QueryRect, ReadKind.QueryRegion, ReadKind.QueryAt, ReadKind.QueryMaxWhole, ReadKind.QueryMaxRect,
-        ReadKind.QueryGradient, ReadKind.Sense, ReadKind.SenseArea, ReadKind.SenseMax, ReadKind.SenseNearest,
-        ReadKind.SenseGradient, ReadKind.ChangedDisk, ReadKind.ChangedTilesSince, ReadKind.ChangedTilesAll,
-        ReadKind.ChangedMask, ReadKind.SenseColumn, ReadKind.SenseGradientColumn, ReadKind.Covers,
-    ];
 
     private static void AddTransient(StreamSetup setup, PrecisionMode mode, int seed)
     {
@@ -287,7 +297,7 @@ internal static class StreamGenerator
                         X = CoordIn(ref rng, target.X, target.Size),
                         Y = CoordIn(ref rng, target.Y, target.Size),
                         Gain = (sbyte)rng.NextInt(-40, 41),
-                        Aux = rng.Next(),
+                        Aux = rng.Next()
                     };
                 }
 
@@ -381,7 +391,9 @@ internal static class StreamGenerator
         {
             case < 28:
                 command.Op = StreamOp.Place;
-                command.Layer = rng.Chance(3) ? (byte)rng.NextInt(0, setup.Layers.Length) : PickBaseLayer(ref rng, setup);
+                command.Layer = rng.Chance(3)
+                    ? (byte)rng.NextInt(0, setup.Layers.Length)
+                    : PickBaseLayer(ref rng, setup);
                 command.Stamp = (byte)rng.NextInt(0, setup.Stamps.Length);
                 var placeTarget = setup.Grids[rng.NextInt(0, setup.Grids.Length)];
                 command.X = CoordIn(ref rng, placeTarget.X, placeTarget.Size);
@@ -481,7 +493,7 @@ internal static class StreamGenerator
             Layer = (byte)rng.NextInt(0, setup.Layers.Length),
             Grid = (byte)rng.NextInt(0, setup.Grids.Length),
             Handle = attempts == 0 ? 0 : rng.NextInt(0, attempts + 4),
-            Aux = rng.Next(),
+            Aux = rng.Next()
         };
         var target = setup.Grids[command.Grid];
         command.X = CoordIn(ref rng, target.X, target.Size);

@@ -10,12 +10,12 @@ public static unsafe partial class World
         return context == null ? BatchStatus.InvalidWorld : ApplyBatchCommands(context, commands, results);
     }
 
-    internal static BatchStatus ApplyBatchCommands(
+    private static BatchStatus ApplyBatchCommands(
         WorldCtx* context, ReadOnlySpan<SourceCommand> commands, Span<SourceResult> results)
     {
         if (commands.Length > MaxSourceSlots) return BatchStatus.TooManyCommands;
         if (results.Length < commands.Length) return BatchStatus.InsufficientResults;
-        if (MemoryMarshal.AsBytes(commands).Overlaps(MemoryMarshal.AsBytes(results.Slice(0, commands.Length))))
+        if (MemoryMarshal.AsBytes(commands).Overlaps(MemoryMarshal.AsBytes(results[..commands.Length])))
             return BatchStatus.OverlappingBuffers;
 
         for (var index = 0; index < commands.Length; index++)
@@ -39,7 +39,8 @@ public static unsafe partial class World
         var s = &w->Sources;
         if (command.Kind == SourceCommandKind.Place)
         {
-            var status = PlaceSlot(w, command.Layer, command.PositionX, command.PositionY, command.Stamp, command.Gain, out var created);
+            var status = PlaceSlot(w, command.Layer, command.PositionX, command.PositionY, command.Stamp, command.Gain,
+                out var created);
             results[index] = new SourceResult(created, status);
             if (status != SourceResultStatus.Applied) return;
 
@@ -72,7 +73,8 @@ public static unsafe partial class World
                     WriteMove(w, s, slot, command.PositionX, command.PositionY);
                 break;
             case SourceCommandKind.Turn:
-                if (float.IsFinite(command.HeadingRadians)) WriteTurn(w, s, slot, QuantizeAngle(command.HeadingRadians));
+                if (float.IsFinite(command.HeadingRadians))
+                    WriteTurn(w, s, slot, QuantizeAngle(command.HeadingRadians));
                 break;
             case SourceCommandKind.Scale:
                 if (float.IsFinite(command.ScaleValue)) WriteScale(w, s, slot, QuantizeScale(command.ScaleValue));

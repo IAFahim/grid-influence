@@ -58,7 +58,11 @@ public sealed class SourceSafetyTests
             Assert.Equal(48, World.Query(world, grid, layer, 48, 48));
             Assert.Equal(0, World.Query(world, grid, layer, 8, 8));
         }
-        finally { World.Free(world); Stamp.Free(stamp); }
+        finally
+        {
+            World.Free(world);
+            Stamp.Free(stamp);
+        }
     }
 
     [Theory]
@@ -91,7 +95,8 @@ public sealed class SourceSafetyTests
                 {
                     Sources = id, Xs = x, Ys = y, Invalid = invalid, InvalidWords = mask.Length, Count = count
                 };
-                Assert.Equal(World.BatchStatus.Applied, World.SyncTransforms(World.Capture(world), new ReadOnlySpan<World.TransformRange>(&range, 1)));
+                Assert.Equal(World.BatchStatus.Applied,
+                    World.SyncTransforms(World.Capture(world), new ReadOnlySpan<World.TransformRange>(&range, 1)));
             }
 
             Assert.Equal((1UL << 63) | 1, mask[0]);
@@ -102,6 +107,10 @@ public sealed class SourceSafetyTests
             for (var tick = 0; tick < 39; tick++) World.Process(world);
             Assert.False(World.TryGetSourceSpec(world, source, out _));
         }
-        finally { World.Free(world); Stamp.Free(stamp); }
+        finally
+        {
+            World.Free(world);
+            Stamp.Free(stamp);
+        }
     }
 }

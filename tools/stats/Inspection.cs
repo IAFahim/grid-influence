@@ -44,11 +44,12 @@ internal struct Snapshot
     public long StampRasterBytes;
 
     public readonly long WorldBytes => GridBytes + LayerBytes + SourceBytes + ScratchBytes +
-        DirtyFlagBytes + DirtyQueueBytes + DirectoryBytes + SlabBytes + PyramidBytes + EpochTreeBytes + QueueBytes +
-        RecordBytes + KernelBytes;
+                                       DirtyFlagBytes + DirtyQueueBytes + DirectoryBytes + SlabBytes + PyramidBytes +
+                                       EpochTreeBytes + QueueBytes +
+                                       RecordBytes + KernelBytes;
 
-    public readonly long SharedBytes => WorldArenaBytes + WorldRevisionBytes + ZeroDenseBytes +
-        StampArenaBytes + StampRasterBytes;
+    internal readonly long SharedBytes => WorldArenaBytes + WorldRevisionBytes + ZeroDenseBytes +
+                                        StampArenaBytes + StampRasterBytes;
 
     public readonly long NativeBytes => WorldBytes + SharedBytes;
 }
@@ -73,25 +74,27 @@ internal static unsafe class Inspection
             ScratchBytes = 0,
             KernelBytes = w->Kernels.Bytes,
             SourceBytes = (long)s->Chunks * SourceColumns.ChunkSlots *
-                (2 * sizeof(float) + 4 * sizeof(byte) + 2 * sizeof(ushort) + sizeof(uint) + sizeof(long)) +
-                (s->Chunks != 0 ? 10L * SourceColumns.MaxChunks * sizeof(void*) : 0) +
-                ((long)s->HotStamp.Capacity + s->SchedStamp.Capacity) * sizeof(int) +
-                s->Timed.Capacity + s->FadeFrom.Capacity + s->FadeTo.Capacity +
-                ((long)s->FadeStart.Capacity + s->FadeTicks.Capacity + s->ExpireAt.Capacity + s->TimedAt.Capacity) * sizeof(int) +
-                (long)s->Free.Capacity * sizeof(int),
+                          (2 * sizeof(float) + 4 * sizeof(byte) + 2 * sizeof(ushort) + sizeof(uint) + sizeof(long)) +
+                          (s->Chunks != 0 ? 10L * SourceColumns.MaxChunks * sizeof(void*) : 0) +
+                          ((long)s->HotStamp.Capacity + s->SchedStamp.Capacity) * sizeof(int) +
+                          s->Timed.Capacity + s->FadeFrom.Capacity + s->FadeTo.Capacity +
+                          ((long)s->FadeStart.Capacity + s->FadeTicks.Capacity + s->ExpireAt.Capacity +
+                           s->TimedAt.Capacity) * sizeof(int) +
+                          (long)s->Free.Capacity * sizeof(int),
             WorldArenaBytes = World.MaxWorlds * sizeof(WorldCtx),
             WorldRevisionBytes = World.MaxWorlds * sizeof(int),
             ZeroDenseBytes = World.PageBytes,
             StampArenaBytes = StampCatalog.MaxStamps * sizeof(StampVariant),
 
             QueueBytes = (long)w->Changed.Capacity * sizeof(int) +
-                ((long)w->Pending.Capacity + w->Journal.Capacity) * sizeof(JournalEntry) +
-                (long)w->ScheduleJournal.Capacity * sizeof(ScheduleRecord) +
-                (long)w->TimedList.Capacity * sizeof(TimedEntry) + (long)w->TimedDue.Capacity * sizeof(int),
+                         ((long)w->Pending.Capacity + w->Journal.Capacity) * sizeof(JournalEntry) +
+                         (long)w->ScheduleJournal.Capacity * sizeof(ScheduleRecord) +
+                         (long)w->TimedList.Capacity * sizeof(TimedEntry) + (long)w->TimedDue.Capacity * sizeof(int)
         };
 
         for (var i = 0; i < s->Count; i++)
-            if (s->Alive[i] != 0) result.LiveSources++;
+            if (s->Alive[i] != 0)
+                result.LiveSources++;
 
         for (var gi = 0; gi < w->GridCount; gi++)
         {
@@ -113,8 +116,10 @@ internal static unsafe class Inspection
 
                 result.SlabBytes += ld->Store.Bytes + ld->Sets.Bytes;
                 result.SlabFreeUnits += ld->Store.Pages.FreeCount + ld->Store.Int32Planes.FreeCount +
-                    ld->Store.Int64Planes.FreeCount + ld->Store.Summaries.FreeCount + ld->Sets.FreeCount;
-                result.DirtyQueueBytes += (long)(ld->Dirty.Capacity + ld->Changed.Capacity + ld->Stale.Capacity) * sizeof(int) +
+                                        ld->Store.Int64Planes.FreeCount + ld->Store.Summaries.FreeCount +
+                                        ld->Sets.FreeCount;
+                result.DirtyQueueBytes +=
+                    (long)(ld->Dirty.Capacity + ld->Changed.Capacity + ld->Stale.Capacity) * sizeof(int) +
                     (long)ld->Rects.Capacity * sizeof(TileRect);
                 result.PyramidBytes += ld->Max.Bytes;
                 result.EpochTreeBytes += ld->EpochTree.Bytes;

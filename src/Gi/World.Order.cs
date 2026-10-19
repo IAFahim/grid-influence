@@ -7,13 +7,14 @@ namespace Gi;
 
 public static unsafe partial class World
 {
-    internal static int SpatialKeys(byte world, byte grid, ReadOnlySpan<float> xs, ReadOnlySpan<float> ys, Span<uint> keys)
+    internal static int SpatialKeys(byte world, byte grid, ReadOnlySpan<float> xs, ReadOnlySpan<float> ys,
+        Span<uint> keys)
     {
         var count = Math.Min(Math.Min(xs.Length, ys.Length), keys.Length);
         var w = GetContext(world);
         if (w == null || grid >= w->GridCount || w->Grids[grid].ScaleQ8 == 0)
         {
-            keys.Slice(0, count).Fill(SpatialOrder.Outside);
+            keys[..count].Fill(SpatialOrder.Outside);
             return count;
         }
 
@@ -41,7 +42,8 @@ public static unsafe partial class World
     }
 
 #if NET
-    private static int SpatialKeysBlocks(GridCtx* g, ReadOnlySpan<float> xs, ReadOnlySpan<float> ys, Span<uint> keys, int count)
+    private static int SpatialKeysBlocks(GridCtx* g, ReadOnlySpan<float> xs, ReadOnlySpan<float> ys, Span<uint> keys,
+        int count)
     {
         var originX = Vector256.Create(g->OriginX);
         var originY = Vector256.Create(g->OriginY);
@@ -63,10 +65,12 @@ public static unsafe partial class World
                 var cy = Vector256.ShiftRightArithmetic(
                     Avx.ConvertToVector256Int32WithTruncation(Vector256.Floor((y - originY) * scale)), 8);
                 var inside = Vector256.Equals(Vector256.Min(Vector256.Max(cx, Vector256<int>.Zero), limit), cx)
-                    & Vector256.Equals(Vector256.Min(Vector256.Max(cy, Vector256<int>.Zero), limit), cy)
-                    & (Vector256.LessThan(Vector256.Abs(x), infinity) & Vector256.LessThan(Vector256.Abs(y), infinity)).AsInt32();
+                             & Vector256.Equals(Vector256.Min(Vector256.Max(cy, Vector256<int>.Zero), limit), cy)
+                             & (Vector256.LessThan(Vector256.Abs(x), infinity) &
+                                Vector256.LessThan(Vector256.Abs(y), infinity)).AsInt32();
                 var tile = (Spread(Vector256.ShiftRightArithmetic(cx, TileBake.TileBits)) |
-                    Vector256.ShiftLeft(Spread(Vector256.ShiftRightArithmetic(cy, TileBake.TileBits)), 1)).AsUInt32();
+                            Vector256.ShiftLeft(Spread(Vector256.ShiftRightArithmetic(cy, TileBake.TileBits)), 1))
+                    .AsUInt32();
                 var local = (Spread(cx & tileMask) | Vector256.ShiftLeft(Spread(cy & tileMask), 1)).AsUInt32();
                 var key = Vector256.ShiftLeft(tile, 2 * TileBake.TileBits) | local;
                 Vector256.ConditionalSelect(inside.AsUInt32(), key, outside).Store(pk + i);

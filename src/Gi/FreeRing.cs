@@ -6,18 +6,15 @@ internal unsafe struct FreeRing
 {
     private NativeBuffer<int> _slots;
     private int _head;
-    private int _count;
 
-    public int Count => _count;
-
-    public int Size => _slots.Length;
+    private int Count { get; set; }
 
     public readonly int Capacity => _slots.Capacity;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool TryPop(out int slot)
     {
-        if (_count == 0)
+        if (Count == 0)
         {
             slot = -1;
             return false;
@@ -26,23 +23,23 @@ internal unsafe struct FreeRing
         slot = _slots.Pointer[_head];
         var next = _head + 1;
         _head = next == _slots.Length ? 0 : next;
-        _count--;
+        Count--;
         return true;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Push(int slot)
     {
-        var tail = _head + _count;
+        var tail = _head + Count;
         if (tail >= _slots.Length) tail -= _slots.Length;
         _slots.Pointer[tail] = slot;
-        _count++;
+        Count++;
     }
 
     public void Clear()
     {
         _head = 0;
-        _count = 0;
+        Count = 0;
     }
 
     public void Reserve(int size)
@@ -52,11 +49,12 @@ internal unsafe struct FreeRing
 
         var grown = default(NativeBuffer<int>);
         grown.Resize(size);
-        if (_count > 0)
+        if (Count > 0)
         {
-            var leading = Math.Min(_count, current - _head);
+            var leading = Math.Min(Count, current - _head);
             new Span<int>(_slots.Pointer + _head, leading).CopyTo(new Span<int>(grown.Pointer, leading));
-            new Span<int>(_slots.Pointer, _count - leading).CopyTo(new Span<int>(grown.Pointer + leading, _count - leading));
+            new Span<int>(_slots.Pointer, Count - leading).CopyTo(new Span<int>(grown.Pointer + leading,
+                Count - leading));
         }
 
         _slots.Free();
@@ -68,6 +66,6 @@ internal unsafe struct FreeRing
     {
         _slots.Free();
         _head = 0;
-        _count = 0;
+        Count = 0;
     }
 }

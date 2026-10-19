@@ -11,7 +11,7 @@ internal enum LayerOp : byte
     Sum,
     Min,
     Max,
-    Mask,
+    Mask
 }
 
 internal struct LayerRecipe
@@ -34,8 +34,8 @@ internal struct LayerRecipe
 
 public static unsafe partial class World
 {
-
-    internal static byte AddDerived(byte world, LayerOp op, byte a, byte b, int weightA, int weightB, int shift, short low, short high)
+    internal static byte AddDerived(byte world, LayerOp op, byte a, byte b, int weightA, int weightB, int shift,
+        short low, short high)
     {
         var w = GetContext(world);
         if (w == null) throw new ArgumentOutOfRangeException(nameof(world));
@@ -66,20 +66,26 @@ public static unsafe partial class World
             WeightB = weightB,
             Low = low,
             High = high,
-            Reads = reads,
+            Reads = reads
         };
         w->DerivedCount++;
         return id;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static bool IsDerived(WorldCtx* w, int layer) => w->Recipes[layer].Op != LayerOp.Base;
+    internal static bool IsDerived(WorldCtx* w, int layer)
+    {
+        return w->Recipes[layer].Op != LayerOp.Base;
+    }
 
-    internal static bool IsTransient(WorldCtx* w, int layer) => w->Recipes[layer].Transient != 0;
+    private static bool IsTransient(WorldCtx* w, int layer)
+    {
+        return w->Recipes[layer].Transient != 0;
+    }
 
-    #if NET
+#if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    #endif
+#endif
     private static void Derive(WorldCtx* w)
     {
         for (var d = 0; d < w->LayerCount; d++)
@@ -155,7 +161,8 @@ public static unsafe partial class World
         var target = EnsureDirty(g, layer);
         var directory = source->Directory;
         for (var tile = 0; tile < g->TileCount; tile++)
-            if (directory[tile] >= 0) MarkDirty(g, target, tile);
+            if (directory[tile] >= 0)
+                MarkDirty(g, target, tile);
     }
 
     private static void MarkAll(GridCtx* g, LayerData* target, LayerData* source)
@@ -185,10 +192,11 @@ public static unsafe partial class World
         }
     }
 
-    #if NET
+#if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    #endif
-    private static ResolveOutcome Combine(LayerRecipe* r, short* inputA, short* inputB, short* output, long* pageSum, short* pageMax)
+#endif
+    private static ResolveOutcome Combine(LayerRecipe* r, short* inputA, short* inputB, short* output, long* pageSum,
+        short* pageMax)
     {
         var a = inputA == null ? (short*)Runtime.ZeroDense : inputA;
         var b = inputB == null ? (short*)Runtime.ZeroDense : inputB;
@@ -216,10 +224,11 @@ public static unsafe partial class World
     }
 
 #if NET
-    #if NET
+#if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    #endif
-    private static ResolveOutcome Combine256(LayerRecipe* r, short* a, short* b, short* output, long* pageSum, short* pageMax)
+#endif
+    private static ResolveOutcome Combine256(LayerRecipe* r, short* a, short* b, short* output, long* pageSum,
+        short* pageMax)
     {
         var any = Vector256<short>.Zero;
         var differs = Vector256<short>.Zero;
@@ -251,7 +260,9 @@ public static unsafe partial class World
                     v1 = Vector256.ShiftRightArithmetic(v1 + bias + Vector256.ShiftRightArithmetic(v1, 31), shift);
                 }
 
-                cells = Vector256.Narrow(Vector256.Min(Vector256.Max(v0, floor), ceiling), Vector256.Min(Vector256.Max(v1, floor), ceiling));
+                cells =
+                    Vector256.Narrow(Vector256.Min(Vector256.Max(v0, floor), ceiling),
+                        Vector256.Min(Vector256.Max(v1, floor), ceiling));
             }
             else if (op == LayerOp.Min)
             {
@@ -281,7 +292,8 @@ public static unsafe partial class World
     }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    private static ResolveOutcome Combine128(LayerRecipe* r, short* a, short* b, short* output, long* pageSum, short* pageMax)
+    private static ResolveOutcome Combine128(LayerRecipe* r, short* a, short* b, short* output, long* pageSum,
+        short* pageMax)
     {
         var any = Vector128<short>.Zero;
         var differs = Vector128<short>.Zero;
@@ -313,7 +325,9 @@ public static unsafe partial class World
                     v1 = Vector128.ShiftRightArithmetic(v1 + bias + Vector128.ShiftRightArithmetic(v1, 31), shift);
                 }
 
-                cells = Vector128.Narrow(Vector128.Min(Vector128.Max(v0, floor), ceiling), Vector128.Min(Vector128.Max(v1, floor), ceiling));
+                cells =
+                    Vector128.Narrow(Vector128.Min(Vector128.Max(v0, floor), ceiling),
+                        Vector128.Min(Vector128.Max(v1, floor), ceiling));
             }
             else if (op == LayerOp.Min)
             {

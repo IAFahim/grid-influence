@@ -11,7 +11,7 @@ internal enum SourceCommandKind : byte
     SetGain,
     Remove,
     Fade,
-    Expire,
+    Expire
 }
 
 public static partial class World
@@ -26,7 +26,7 @@ public static partial class World
         OverlappingBuffers,
         TooManyCommands,
         StaleRevision,
-        InvalidRange,
+        InvalidRange
     }
 
     public enum SourceResultStatus : byte
@@ -35,7 +35,7 @@ public static partial class World
         InvalidSource,
         InvalidLayer,
         InvalidStamp,
-        SourceLimitReached,
+        SourceLimitReached
     }
 
     public readonly struct SourceTarget
@@ -51,11 +51,20 @@ public static partial class World
             Pending = pending;
         }
 
-        public static SourceTarget Existing(SourceId sourceId) => new(sourceId, 0, false);
+        public static SourceTarget Existing(SourceId sourceId)
+        {
+            return new SourceTarget(sourceId, 0, false);
+        }
 
-        public static SourceTarget CreatedBy(int commandIndex) => new(default, commandIndex, true);
+        public static SourceTarget CreatedBy(int commandIndex)
+        {
+            return new SourceTarget(default, commandIndex, true);
+        }
 
-        public static implicit operator SourceTarget(SourceId sourceId) => Existing(sourceId);
+        public static implicit operator SourceTarget(SourceId sourceId)
+        {
+            return Existing(sourceId);
+        }
     }
 
     public readonly struct SourceCommand
@@ -91,36 +100,59 @@ public static partial class World
         public static SourceCommand Place(
             byte layer, float positionX, float positionY, byte stamp, sbyte gain,
             float headingRadians = 0f, float scale = 1f)
-            => new(SourceCommandKind.Place, positionX: positionX, positionY: positionY,
+        {
+            return new SourceCommand(SourceCommandKind.Place, positionX: positionX, positionY: positionY,
                 headingRadians: headingRadians, scale: scale, gain: gain, layer: layer, stamp: stamp);
+        }
 
         public static SourceCommand Update(
             SourceTarget source, float positionX, float positionY, float headingRadians, float scale, sbyte gain)
-            => new(SourceCommandKind.Update, source, positionX, positionY, headingRadians, scale, gain: gain);
+        {
+            return new SourceCommand(SourceCommandKind.Update, source, positionX, positionY, headingRadians, scale,
+                gain: gain);
+        }
 
         public static SourceCommand UpdateTransform(
             SourceTarget source, float positionX, float positionY, float headingRadians, float scale)
-            => new(SourceCommandKind.UpdateTransform, source, positionX, positionY, headingRadians, scale);
+        {
+            return new SourceCommand(SourceCommandKind.UpdateTransform, source, positionX, positionY, headingRadians,
+                scale);
+        }
 
         public static SourceCommand Move(SourceTarget source, float positionX, float positionY)
-            => new(SourceCommandKind.Move, source, positionX, positionY);
+        {
+            return new SourceCommand(SourceCommandKind.Move, source, positionX, positionY);
+        }
 
         public static SourceCommand Turn(SourceTarget source, float headingRadians)
-            => new(SourceCommandKind.Turn, source, headingRadians: headingRadians);
+        {
+            return new SourceCommand(SourceCommandKind.Turn, source, headingRadians: headingRadians);
+        }
 
         public static SourceCommand Scale(SourceTarget source, float scale)
-            => new(SourceCommandKind.Scale, source, scale: scale);
+        {
+            return new SourceCommand(SourceCommandKind.Scale, source, scale: scale);
+        }
 
         public static SourceCommand SetGain(SourceTarget source, sbyte gain)
-            => new(SourceCommandKind.SetGain, source, gain: gain);
+        {
+            return new SourceCommand(SourceCommandKind.SetGain, source, gain: gain);
+        }
 
-        public static SourceCommand Remove(SourceTarget source) => new(SourceCommandKind.Remove, source);
+        public static SourceCommand Remove(SourceTarget source)
+        {
+            return new SourceCommand(SourceCommandKind.Remove, source);
+        }
 
         public static SourceCommand Fade(SourceTarget source, sbyte gain, int ticks)
-            => new(SourceCommandKind.Fade, source, ticks: ticks, gain: gain);
+        {
+            return new SourceCommand(SourceCommandKind.Fade, source, ticks: ticks, gain: gain);
+        }
 
         public static SourceCommand Expire(SourceTarget source, int ticks)
-            => new(SourceCommandKind.Expire, source, ticks: ticks);
+        {
+            return new SourceCommand(SourceCommandKind.Expire, source, ticks: ticks);
+        }
     }
 
     public readonly struct SourceResult

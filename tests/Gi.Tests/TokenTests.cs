@@ -4,10 +4,10 @@ namespace Gi.Tests;
 
 public sealed class TokenTests : IDisposable
 {
-    private readonly byte _world = World.New();
     private readonly byte _grid;
     private readonly byte _layer;
     private readonly byte _stamp;
+    private readonly byte _world = World.New();
 
     public TokenTests()
     {
@@ -182,12 +182,12 @@ public sealed class TokenTests : IDisposable
             World.ApplyBatch(_world, new[]
             {
                 World.SourceCommand.Fade(first, 0, 12),
-                World.SourceCommand.Expire(second, 30),
+                World.SourceCommand.Expire(second, 30)
             }, new World.SourceResult[2]);
             World.ApplyBatch(twin, new[]
             {
                 World.SourceCommand.Fade(twinFirst, 0, 12),
-                World.SourceCommand.Expire(twinSecond, 30),
+                World.SourceCommand.Expire(twinSecond, 30)
             }, new World.SourceResult[2]);
             World.Process(_world);
             World.Process(twin);
@@ -203,9 +203,10 @@ public sealed class TokenTests : IDisposable
             var stale = new[]
             {
                 World.SourceCommand.Move(first, 1.5f, 1.5f),
-                World.SourceCommand.Place(_layer, 8.5f, 8.5f, _stamp, 5),
+                World.SourceCommand.Place(_layer, 8.5f, 8.5f, _stamp, 5)
             };
-            var results = new[] { new World.SourceResult(new World.SourceId(77, 9), World.SourceResultStatus.InvalidSource) };
+            var results = new[]
+                { new World.SourceResult(new World.SourceId(77, 9), World.SourceResultStatus.InvalidSource) };
             Assert.Equal(World.BatchStatus.StaleRevision, World.ApplyBatch(token, stale, results));
             Assert.Equal(new World.SourceId(77, 9), results[0].SourceId);
             Assert.Equal(World.BatchStatus.StaleRevision, World.Process(token));
@@ -286,7 +287,8 @@ public sealed class TokenTests : IDisposable
             var results = stackalloc World.SourceResult[2];
 
             Assert.Equal(World.BatchStatus.Applied,
-                World.ApplyBatch(token, new Span<World.SourceCommand>(commands, 2), new Span<World.SourceResult>(results, 2)));
+                World.ApplyBatch(token, new Span<World.SourceCommand>(commands, 2),
+                    new Span<World.SourceResult>(results, 2)));
             Assert.Equal(World.BatchStatus.Applied, World.Process(token));
         }
 

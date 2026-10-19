@@ -24,7 +24,7 @@ public class TransientExclusionTests
             var layers = new[]
             {
                 Layer.New(world, Layer.Residency.Transient, precision),
-                Layer.New(twin, Layer.Residency.Transient, precision),
+                Layer.New(twin, Layer.Residency.Transient, precision)
             };
 
             for (var frame = 0; frame < 3; frame++)
@@ -50,7 +50,8 @@ public class TransientExclusionTests
                 {
                     var k = rng.Next(count);
                     for (var i = 0; i < count; i++)
-                        if (i != k) World.Splat(twin, layers[1], new[] { xs[i] }, new[] { ys[i] }, stampOf[i], gains[i]);
+                        if (i != k)
+                            World.Splat(twin, layers[1], new[] { xs[i] }, new[] { ys[i] }, stampOf[i], gains[i]);
                     World.Process(twin);
 
                     Assert.Equal(
@@ -58,7 +59,8 @@ public class TransientExclusionTests
                         World.TrySense(world, layers[0], xs[k], ys[k], stampOf[k], gains[k], out var got));
                     Assert.Equal(expected, got);
                     World.TrySenseGradient(twin, layers[1], xs[k], ys[k], out var egx, out var egy);
-                    World.TrySenseGradient(world, layers[0], xs[k], ys[k], stampOf[k], gains[k], out var ggx, out var ggy);
+                    World.TrySenseGradient(world, layers[0], xs[k], ys[k], stampOf[k], gains[k], out var ggx,
+                        out var ggy);
                     Assert.Equal(egx, ggx);
                     Assert.Equal(egy, ggy);
                     World.TrySenseArea(twin, layers[1], xs[k], ys[k], 6f, out var earea);

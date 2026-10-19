@@ -9,7 +9,16 @@ internal sealed unsafe class FrameArena : IDisposable
 {
     private readonly List<nint> _blocks = [];
 
-    public static long Padded(long count) => Math.Max((count + 15) & ~15L, 16);
+    public void Dispose()
+    {
+        foreach (var block in _blocks) NativeMemory.AlignedFree((void*)block);
+        _blocks.Clear();
+    }
+
+    public static long Padded(long count)
+    {
+        return Math.Max((count + 15) & ~15L, 16);
+    }
 
     public T* Alloc<T>(long count) where T : unmanaged
     {
@@ -18,12 +27,6 @@ internal sealed unsafe class FrameArena : IDisposable
         NativeMemory.Clear(block, bytes);
         _blocks.Add((nint)block);
         return (T*)block;
-    }
-
-    public void Dispose()
-    {
-        foreach (var block in _blocks) NativeMemory.AlignedFree((void*)block);
-        _blocks.Clear();
     }
 }
 
@@ -39,9 +42,15 @@ internal struct FrameRandom(ulong seed)
         return z ^ (z >> 31);
     }
 
-    public float Unit() => (Next() >> 40) * (1f / 16777216f);
+    public float Unit()
+    {
+        return (Next() >> 40) * (1f / 16777216f);
+    }
 
-    public float Signed() => Unit() * 2f - 1f;
+    public float Signed()
+    {
+        return Unit() * 2f - 1f;
+    }
 }
 
 internal static unsafe class FrameHash
@@ -50,10 +59,12 @@ internal static unsafe class FrameHash
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ulong Mix(ulong hash, ulong value)
-        => BitOperations.RotateLeft(hash ^ value, 29) * 0x9E3779B97F4A7C15UL + 0x165667B19E3779F9UL;
+    {
+        return BitOperations.RotateLeft(hash ^ value, 29) * 0x9E3779B97F4A7C15UL + 0x165667B19E3779F9UL;
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    public static ulong Block(ulong hash, void* data, long bytes)
+    private static ulong Block(ulong hash, void* data, long bytes)
     {
         var words = (ulong*)data;
         for (var i = 0L; i < bytes >> 3; i++) hash = Mix(hash, words[i]);
@@ -61,7 +72,9 @@ internal static unsafe class FrameHash
     }
 
     public static ulong Elements<T>(ulong hash, T* data, long count) where T : unmanaged
-        => Block(hash, data, FrameArena.Padded(count) * sizeof(T));
+    {
+        return Block(hash, data, FrameArena.Padded(count) * sizeof(T));
+    }
 }
 
 internal static unsafe class FrameOrder
@@ -69,7 +82,10 @@ internal static unsafe class FrameOrder
     private const int DigitBits = 11;
     private const int Digits = 1 << DigitBits;
 
-    public static uint Morton(uint x, uint y) => Spread(x) | (Spread(y) << 1);
+    public static uint Morton(uint x, uint y)
+    {
+        return Spread(x) | (Spread(y) << 1);
+    }
 
     private static uint Spread(uint value)
     {
@@ -166,13 +182,25 @@ internal sealed class FrameJson
     private readonly StringBuilder _text = new();
     private bool _separate;
 
-    public FrameJson BeginObject(string? key = null) => Open(key, '{');
+    public FrameJson BeginObject(string? key = null)
+    {
+        return Open(key, '{');
+    }
 
-    public FrameJson BeginArray(string key) => Open(key, '[');
+    public FrameJson BeginArray(string key)
+    {
+        return Open(key, '[');
+    }
 
-    public FrameJson EndObject() => Close('}');
+    public FrameJson EndObject()
+    {
+        return Close('}');
+    }
 
-    public FrameJson EndArray() => Close(']');
+    public FrameJson EndArray()
+    {
+        return Close(']');
+    }
 
     public FrameJson Text(string key, string value)
     {
@@ -199,7 +227,8 @@ internal sealed class FrameJson
 
         var rounded = Math.Round(value, decimals, MidpointRounding.AwayFromZero);
         if (rounded == 0) rounded = 0;
-        _text.Append(rounded.ToString("F" + decimals.ToString(CultureInfo.InvariantCulture), CultureInfo.InvariantCulture));
+        _text.Append(rounded.ToString("F" + decimals.ToString(CultureInfo.InvariantCulture),
+            CultureInfo.InvariantCulture));
         return this;
     }
 
@@ -217,7 +246,10 @@ internal sealed class FrameJson
         return this;
     }
 
-    public override string ToString() => _text.ToString();
+    public override string ToString()
+    {
+        return _text.ToString();
+    }
 
     private FrameJson Open(string? key, char bracket)
     {
@@ -247,11 +279,10 @@ internal sealed class FrameJson
     {
         _text.Append('"');
         foreach (var c in value)
-        {
             if (c == '"' || c == '\\') _text.Append('\\').Append(c);
-            else if (c < 0x20 || c > 0x7E) _text.Append("\\u").Append(((int)c).ToString("x4", CultureInfo.InvariantCulture));
+            else if (c < 0x20 || c > 0x7E)
+                _text.Append("\\u").Append(((int)c).ToString("x4", CultureInfo.InvariantCulture));
             else _text.Append(c);
-        }
 
         _text.Append('"');
     }

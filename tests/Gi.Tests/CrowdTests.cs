@@ -4,33 +4,6 @@ namespace Gi.Tests;
 
 public sealed unsafe class CrowdTests
 {
-    private static class Catalog
-    {
-        public static readonly byte Box8 = Stamp.Box(8, 8, 60);
-        public static readonly byte Box7 = Stamp.Box(7, 7, 60);
-        public static readonly byte Box9 = Stamp.Box(9, 9, 55);
-        public static readonly byte Box10 = Stamp.Box(10, 10, 60);
-        public static readonly byte Box12 = Stamp.Box(12, 12, 60);
-        public static readonly byte[] Mixed = BakeMixed();
-
-        private static byte[] BakeMixed()
-        {
-            var samples = new sbyte[6 * 9];
-            for (var i = 0; i < samples.Length; i++) samples[i] = (sbyte)(i * 17 % 40 - 20);
-            return
-            [
-                Stamp.Box(6, 10, 70),
-                Stamp.Box(4, 4, -50),
-                Stamp.Tent(12, 12, 80),
-                Stamp.Bell(14, 14, 90),
-                Stamp.New(samples, 6, 9),
-                Stamp.Disk(6, 60),
-                Stamp.Cone(7, 70),
-                Stamp.Dome(5, -80, 120),
-            ];
-        }
-    }
-
     private static void Drift(float[] xs, float[] ys, int i, int frame)
     {
         xs[i] = (xs[i] * 1.00013f + i * 0.371f + frame * 1.137f) % 996f + 14f;
@@ -71,7 +44,8 @@ public sealed unsafe class CrowdTests
         }
 
         for (var i = 0; i < cells * cells; i++)
-            if (scratch[i] != scratch[half + i]) return false;
+            if (scratch[i] != scratch[half + i])
+                return false;
         return true;
     }
 
@@ -169,7 +143,7 @@ public sealed unsafe class CrowdTests
                 World.Place(oracle, otherO, steppedXs[i] + 3f, steppedYs[i] - 2f, stamp, 3);
             }
 
-            if ((i % 20) == 19) World.Process(oracle);
+            if (i % 20 == 19) World.Process(oracle);
         }
 
         World.Process(w);
@@ -416,7 +390,7 @@ public sealed unsafe class CrowdTests
         fixed (short* vp = values)
         fixed (ulong* hp = whole)
         {
-            allWhole = (World.SenseColumn(w, l, xp, yp, count, vp, hp) == World.ReadStatus.Complete);
+            allWhole = World.SenseColumn(w, l, xp, yp, count, vp, hp) == World.ReadStatus.Complete;
         }
 
         var anyIncomplete = false;
@@ -514,7 +488,8 @@ public sealed unsafe class CrowdTests
         }
 
         for (var i = 0; i < count; i++)
-            if ((i & 3) != 0) World.Move(oracle, ids[i], xs[i], ys[i]);
+            if ((i & 3) != 0)
+                World.Move(oracle, ids[i], xs[i], ys[i]);
         fixed (World.SourceId* ip = ids)
         fixed (float* xp = xs, yp = ys)
         {
@@ -612,5 +587,32 @@ public sealed unsafe class CrowdTests
         Assert.Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
         Assert.True(hits > 0);
         Assert.NotEqual(0L, acc);
+    }
+
+    private static class Catalog
+    {
+        public static readonly byte Box8 = Stamp.Box(8, 8, 60);
+        public static readonly byte Box7 = Stamp.Box(7, 7, 60);
+        public static readonly byte Box9 = Stamp.Box(9, 9, 55);
+        public static readonly byte Box10 = Stamp.Box(10, 10, 60);
+        public static readonly byte Box12 = Stamp.Box(12, 12, 60);
+        public static readonly byte[] Mixed = BakeMixed();
+
+        private static byte[] BakeMixed()
+        {
+            var samples = new sbyte[6 * 9];
+            for (var i = 0; i < samples.Length; i++) samples[i] = (sbyte)(i * 17 % 40 - 20);
+            return
+            [
+                Stamp.Box(6, 10, 70),
+                Stamp.Box(4, 4, -50),
+                Stamp.Tent(12, 12, 80),
+                Stamp.Bell(14, 14, 90),
+                Stamp.New(samples, 6, 9),
+                Stamp.Disk(6, 60),
+                Stamp.Cone(7, 70),
+                Stamp.Dome(5, -80, 120)
+            ];
+        }
     }
 }

@@ -10,6 +10,9 @@ namespace Gi.Entities.Columns.Tests;
 
 public sealed class ExplainTests
 {
+
+    private static readonly int[] ScatterLayers = new[] { 0, 1, 2, 3, 4, 5 };
+    private static readonly int[] ExpectedLayers = new[] { 2, 3, 4, 5 };
     private static readonly int[] IntegerStamps = { 0, 2, 3, 4 };
 
     private static GiWorld.SourceId[] Scatter(GiScenarioWorld setup, GiRandom rng, int count, int[] stamps, int layers)
@@ -68,7 +71,7 @@ public sealed class ExplainTests
         {
             using var setup = GiScenarioWorld.Create(GiScenarioProfile.Standard());
             var rng = new GiRandom(seed);
-            var ids = Scatter(setup, rng, 12 + rng.Next(14), new[] { 0, 1, 2, 3, 4, 5 }, 2);
+            var ids = Scatter(setup, rng, 12 + rng.Next(14), ScatterLayers, 2);
             var output = new GiContribution[ids.Length];
             for (var probe = 0; probe < 16; probe++)
             {
@@ -270,7 +273,7 @@ public sealed class ExplainTests
 
                 var count = GiRecipe.Trace(setup.World, specs, setup.Layers, 5, x, y, steps);
                 Assert.Equal(4, count);
-                Assert.Equal(new[] { 2, 3, 4, 5 }, new[] { steps[0].Layer, steps[1].Layer, steps[2].Layer, steps[3].Layer });
+                Assert.Equal(ExpectedLayers, new[] { steps[0].Layer, steps[1].Layer, steps[2].Layer, steps[3].Layer });
                 for (var s = 0; s < count; s++)
                 {
                     Assert.True(steps[s].Matches, "step " + steps[s].Layer + " " + steps[s].Value + " vs " + steps[s].Actual);

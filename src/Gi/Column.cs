@@ -6,7 +6,8 @@ namespace Gi;
 
 public static unsafe partial class World
 {
-    internal static bool SenseColumnCore(byte world, byte layer, float* xs, float* ys, int count, short* values, ulong* whole)
+    private static bool SenseColumnCore(byte world, byte layer, float* xs, float* ys, int count, short* values,
+        ulong* whole)
     {
         var w = GetContext(world);
         if (w == null || layer >= w->LayerCount) return Unfilled(values, whole, count);
@@ -18,7 +19,8 @@ public static unsafe partial class World
         return SenseRange(w, layer, xs, ys, values, whole, 0, count) == 0;
     }
 
-    public static int ChangedMask(byte world, byte layer, float* xs, float* ys, float reach, int since, int count, ulong* words)
+    public static int ChangedMask(byte world, byte layer, float* xs, float* ys, float reach, int since, int count,
+        ulong* words)
     {
         var w = GetContext(world);
         if (w == null || layer >= w->LayerCount || xs == null || ys == null || words == null || !float.IsFinite(reach))
@@ -45,7 +47,7 @@ public static unsafe partial class World
 #if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
 #endif
-    internal static void SyncColumns(WorldCtx* w, SourceId* sources, float* xs, float* ys, int count)
+    private static void SyncColumns(WorldCtx* w, SourceId* sources, float* xs, float* ys, int count)
     {
         if (count <= 0 || sources == null || xs == null || ys == null) return;
 
@@ -107,7 +109,8 @@ public static unsafe partial class World
         }
     }
 
-    internal static int SenseRange(WorldCtx* w, byte layer, float* xs, float* ys, short* values, ulong* whole, int from, int to)
+    private static int SenseRange(WorldCtx* w, byte layer, float* xs, float* ys, short* values, ulong* whole, int from,
+        int to)
     {
         var gaps = 0;
         if (w->GridCount == 1)
@@ -191,7 +194,8 @@ public static unsafe partial class World
         return gaps;
     }
 
-    internal static int ChangedRange(WorldCtx* w, byte layer, float* xs, float* ys, float reach, int since, ulong* words, int from, int to)
+    private static int ChangedRange(WorldCtx* w, byte layer, float* xs, float* ys, float reach, int since,
+        ulong* words, int from, int to)
     {
         var hits = 0;
         for (var i = from; i < to; i++)
@@ -215,7 +219,8 @@ public static unsafe partial class World
         var disk = Disk(g, x, y, reach);
         for (var ty = disk.Y0 >> TileBake.TileBits; ty <= disk.Y1 >> TileBake.TileBits; ty++)
         for (var tx = disk.X0 >> TileBake.TileBits; tx <= disk.X1 >> TileBake.TileBits; tx++)
-            if (epochs[ty * g->TilesPerSide + tx] - since > 0 && HoldsDiskCell(disk, tx, ty)) return true;
+            if (epochs[ty * g->TilesPerSide + tx] - since > 0 && HoldsDiskCell(disk, tx, ty))
+                return true;
         return false;
     }
 }

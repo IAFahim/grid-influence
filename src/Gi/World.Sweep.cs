@@ -4,8 +4,13 @@ namespace Gi;
 
 public static unsafe partial class World
 {
+    private const int FallbackCharge = 128;
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static DepositRecord* RecordOf(GridCtx* g, int slot) => g->Records.Pointer + slot;
+    private static DepositRecord* RecordOf(GridCtx* g, int slot)
+    {
+        return g->Records.Pointer + slot;
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void SnapshotPending(WorldCtx* w, SourceColumns* s, int slot)
@@ -23,7 +28,7 @@ public static unsafe partial class World
             Alive = s->Alive[slot],
             Angle = s->Angle[slot],
             Scale = s->Scale[slot],
-            Gen = s->Gen[slot],
+            Gen = s->Gen[slot]
         };
         var mark = s->Mark[slot];
         if ((int)mark != w->MarkEpoch) s->Mark[slot] = (mark & 0xFFFFFFFFL) | ((long)n << 32);
@@ -106,7 +111,9 @@ public static unsafe partial class World
     private static bool Same(DepositRecord* rec, in DepositRecord key)
     {
         fixed (DepositRecord* k = &key)
+        {
             return *(ulong*)rec == *(ulong*)k && ((ulong*)rec)[1] == ((ulong*)k)[1];
+        }
     }
 
     private static void SweepEntryAt(WorldCtx* w, SweepEntry* entry)
@@ -125,7 +132,6 @@ public static unsafe partial class World
             EmitDelta(w, gi, in key, 1);
             *rec = key;
         }
-
     }
 
     private static void EmitDelta(WorldCtx* w, int gi, in DepositRecord record, int sign)
@@ -142,7 +148,8 @@ public static unsafe partial class World
         }
 
         var precision = LayerPrecision(w, record.Layer);
-        if (!TileBake.PlaceAnchored(record.Ax, record.Ay, g->ScaleQ8, g->Size, v, record.Angle, record.Scale, precision, out var p))
+        if (!TileBake.PlaceAnchored(record.Ax, record.Ay, g->ScaleQ8, g->Size, v, record.Angle, record.Scale, precision,
+                out var p))
             return;
 
         var cx0 = Math.Max(p.X0, 0);
@@ -163,8 +170,10 @@ public static unsafe partial class World
                     break;
                 }
         }
+
         if (KernelFactory.TryFindTaps(w, gi, record.Stamp, record.Angle, precision, &p, out var taps) ||
-            (w->Kernels.CanInsert && KernelFactory.TryGetTaps(w, gi, record.Stamp, record.Angle, precision, &p, out taps)))
+            (w->Kernels.CanInsert &&
+             KernelFactory.TryGetTaps(w, gi, record.Stamp, record.Angle, precision, &p, out taps)))
         {
             EmitKernelTaps(g, ld, in taps, p.Px, p.Py, gain);
             return;
@@ -175,7 +184,7 @@ public static unsafe partial class World
 
     private static void EmitBoxFast(GridCtx* g, in DepositRecord record, StampVariant* v, int gain)
     {
-        var sampling = (int)Math.Min((long)g->ScaleQ8 * record.Scale >> 8, int.MaxValue);
+        var sampling = (int)Math.Min(((long)g->ScaleQ8 * record.Scale) >> 8, int.MaxValue);
         if (sampling == 0) return;
 
         TileBake.SpanAnchored(record.Ax, v->OriginQ8X, v->Width, sampling, g->Size, true, TileBake.MaxExtent,
@@ -294,9 +303,9 @@ public static unsafe partial class World
         return true;
     }
 
-    #if NET
+#if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    #endif
+#endif
     private static void EmitBoxDelta(
         GridCtx* g, LayerData* ld, int px, int py, int fx, int fy, int extentX, int extentY,
         int cx0, int cy0, int cx1, int cy1, int constant, int gain)
@@ -327,7 +336,8 @@ public static unsafe partial class World
             if (narrow)
             {
                 for (var x = 1; x < liveX; x++)
-                    if (xLo[x] < xHi[x - 1]) disjoint = false;
+                    if (xLo[x] < xHi[x - 1])
+                        disjoint = false;
                 if (disjoint) TileBake.LaneWeights(xLo, xHi, xWeight, liveX, column, laneWeights);
             }
 
@@ -357,7 +367,8 @@ public static unsafe partial class World
                     {
                         var value = TileBake.RoundQ16(constant * xWeight[x] * weightY) * gain;
                         any |= value;
-                        for (var lane = xLo[x] - xLo[0] + lead; lane < xHi[x] - xLo[0] + lead; lane++) lanes[lane] += value;
+                        for (var lane = xLo[x] - xLo[0] + lead; lane < xHi[x] - xLo[0] + lead; lane++)
+                            lanes[lane] += value;
                     }
 
                     if (any == 0) continue;
@@ -416,7 +427,7 @@ public static unsafe partial class World
         var tx1 = Math.Min(kx1 - 1, g->Size - 1) >> TileBake.TileBits;
         var ty1 = Math.Min(ky1 - 1, g->Size - 1) >> TileBake.TileBits;
         var tps = g->TilesPerSide;
-        var size = TileBake.TileSize;
+        const int size = TileBake.TileSize;
         var extents = taps.RowExtents;
         var ints = taps.Cells;
         var q40 = taps.Q40;
@@ -472,7 +483,8 @@ public static unsafe partial class World
                             dirty = DirtyIndex(g, ld, tile);
                         }
 
-                        TileBake.AddScaledRow(ints32 + ly * size + shift + kxA, ints + ry * taps.Width + kxA, kxB - kxA, gain);
+                        TileBake.AddScaledRow(ints32 + ly * size + shift + kxA, ints + ry * taps.Width + kxA, kxB - kxA,
+                            gain);
                     }
 
                     if (shift + kxA < minX) minX = shift + kxA;
@@ -491,8 +503,6 @@ public static unsafe partial class World
             }
         }
     }
-
-    private const int FallbackCharge = 128;
 
     private static void EmitFallback(GridCtx* g, LayerData* ld, Placement* p, int gain)
     {
@@ -513,24 +523,30 @@ public static unsafe partial class World
             switch (p->Plane)
             {
                 case Plane.Dense when p->Turned:
-                    TileBake.EmitTurnedDense(IntPlane(g, ld, tile, FallbackCharge * Math.Abs(gain)), tileX0, tileY0, p, gain);
+                    TileBake.EmitTurnedDense(IntPlane(g, ld, tile, FallbackCharge * Math.Abs(gain)), tileX0, tileY0, p,
+                        gain);
                     break;
                 case Plane.Dense:
-                    TileBake.EmitRaster(IntPlane(g, ld, tile, FallbackCharge * Math.Abs(gain)), tileX0, tileY0, p->Px, p->Py, p->Fx, p->Fy,
+                    TileBake.EmitRaster(IntPlane(g, ld, tile, FallbackCharge * Math.Abs(gain)), tileX0, tileY0, p->Px,
+                        p->Py, p->Fx, p->Fy,
                         p->X1, p->Y1, p->Sampling, p->V, gain);
                     break;
                 case Plane.Tent when p->Turned:
-                    TileBake.EmitTurnedSmooth(QPlane(ld, set, true, ((long)FallbackCharge * Math.Abs(gain)) << 40), tileX0, tileY0, p, gain);
+                    TileBake.EmitTurnedSmooth(QPlane(ld, set, true, ((long)FallbackCharge * Math.Abs(gain)) << 40),
+                        tileX0, tileY0, p, gain);
                     break;
                 case Plane.Tent:
-                    TileBake.EmitTent(QPlane(ld, set, true, ((long)FallbackCharge * Math.Abs(gain)) << 40), tileX0, tileY0, p->Px, p->Py, p->Fx, p->Fy,
+                    TileBake.EmitTent(QPlane(ld, set, true, ((long)FallbackCharge * Math.Abs(gain)) << 40), tileX0,
+                        tileY0, p->Px, p->Py, p->Fx, p->Fy,
                         p->ExtentX, p->ExtentY, p->V, gain);
                     break;
                 case Plane.Bell when p->Turned:
-                    TileBake.EmitTurnedSmooth(QPlane(ld, set, false, ((long)FallbackCharge * Math.Abs(gain)) << 40), tileX0, tileY0, p, gain);
+                    TileBake.EmitTurnedSmooth(QPlane(ld, set, false, ((long)FallbackCharge * Math.Abs(gain)) << 40),
+                        tileX0, tileY0, p, gain);
                     break;
                 default:
-                    TileBake.EmitBell(QPlane(ld, set, false, ((long)FallbackCharge * Math.Abs(gain)) << 40), tileX0, tileY0, p->Px, p->Py, p->Fx, p->Fy,
+                    TileBake.EmitBell(QPlane(ld, set, false, ((long)FallbackCharge * Math.Abs(gain)) << 40), tileX0,
+                        tileY0, p->Px, p->Py, p->Fx, p->Fy,
                         p->ExtentX, p->ExtentY, p->V, gain);
                     break;
             }

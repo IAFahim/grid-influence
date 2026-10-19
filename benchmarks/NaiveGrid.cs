@@ -1,15 +1,17 @@
 internal sealed class NaiveGrid(int size)
 {
-    private readonly int _size = size;
     private readonly int[] _field = new int[size * size];
-    private (float X, float Y, int W, int H, int Value, int Gain)[] _sources = new (float, float, int, int, int, int)[64];
+    private readonly int _size = size;
     private int _count;
 
-    public int Add(float x, float y, int w, int h, int value, int gain)
+    private (float X, float Y, int W, int H, int Value, int Gain)[] _sources =
+        new (float, float, int, int, int, int)[64];
+
+    public void Add(float x, float y, int w, int h, int value, int gain)
     {
         if (_count == _sources.Length) Array.Resize(ref _sources, _sources.Length * 2);
         _sources[_count] = (x, y, w, h, value, gain);
-        return _count++;
+        _count++;
     }
 
     public void Move(int source, float x, float y)
@@ -36,7 +38,9 @@ internal sealed class NaiveGrid(int size)
     }
 
     public short Query(int x, int y)
-        => (short)Math.Clamp(_field[y * _size + x], short.MinValue, short.MaxValue);
+    {
+        return (short)Math.Clamp(_field[y * _size + x], short.MinValue, short.MaxValue);
+    }
 
     public long Sum()
     {

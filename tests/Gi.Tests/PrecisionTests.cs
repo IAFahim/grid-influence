@@ -121,7 +121,7 @@ public sealed unsafe class PrecisionTests
                 Xs = &syncX,
                 Ys = &syncY,
                 Headings = &heading,
-                Count = 1,
+                Count = 1
             };
             var bSpecBefore = World.TryGetSourceSpec(world, b, out var specB);
             Assert.True(bSpecBefore);
@@ -138,7 +138,7 @@ public sealed unsafe class PrecisionTests
             World.SourceCommand[] commands =
             [
                 World.SourceCommand.Move(a, nextX, nextY),
-                World.SourceCommand.Turn(b, 0.5f + 0.001f),
+                World.SourceCommand.Turn(b, 0.5f + 0.001f)
             ];
             Assert.Equal(World.BatchStatus.Applied, World.ApplyBatch(world, commands, results));
             Assert.Equal(0, ctx->Changed.Length);
@@ -171,7 +171,7 @@ public sealed unsafe class PrecisionTests
             Stamp.Bell(11, 9, 100),
             Stamp.New(new sbyte[] { 40, -20, 80, 10, 90, -50, 30, 70, 120 }, 3, 3),
             Stamp.Disk(5, 85),
-            Stamp.Cone(6, 95, 150),
+            Stamp.Cone(6, 95, 150)
         };
         try
         {
@@ -195,7 +195,7 @@ public sealed unsafe class PrecisionTests
                 if (gain == 0) gain = 5;
                 ids[i] = World.Place(world, layer, xs[i], ys[i], stamp, gain);
                 World.Turn(world, ids[i], (float)(rng.NextDouble() * 6.2));
-                World.Scale(world, ids[i], 0.75f + (i % 3) * 0.5f);
+                World.Scale(world, ids[i], 0.75f + i % 3 * 0.5f);
             }
 
             World.Process(world);
@@ -238,7 +238,11 @@ public sealed unsafe class PrecisionTests
     private static short[] Snapshot(byte world, byte grid, byte layer, int size)
     {
         var cells = new short[size * size];
-        fixed (short* p = cells) World.QueryRegion(world, grid, layer, 0, 0, size, size, p);
+        fixed (short* p = cells)
+        {
+            World.QueryRegion(world, grid, layer, 0, 0, size, size, p);
+        }
+
         return cells;
     }
 }

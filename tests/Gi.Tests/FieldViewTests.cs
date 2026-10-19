@@ -21,12 +21,13 @@ public class FieldViewTests
             var b = Layer.New(w, Layer.Precision.Cell);
             var sum = Layer.Sum(w, a, 2, b, -1);
             for (var i = 0; i < 260; i++)
-                World.Place(w, rng.Next(2) == 0 ? a : b, (float)(rng.NextDouble() * 120.0 + 4.0), (float)(rng.NextDouble() * 120.0 + 4.0),
+                World.Place(w, rng.Next(2) == 0 ? a : b, (float)(rng.NextDouble() * 120.0 + 4.0),
+                    (float)(rng.NextDouble() * 120.0 + 4.0),
                     stamps[rng.Next(stamps.Count)], (sbyte)rng.Next(-5, 6));
             World.Process(w);
 
             foreach (var layer in new[] { a, b, sum })
-            foreach (byte grid in new byte[] { 0, 1 })
+            foreach (var grid in new byte[] { 0, 1 })
             {
                 var view = World.View(w, grid, layer);
                 var size = view.Size;
@@ -49,7 +50,8 @@ public class FieldViewTests
                     Grid.TryGetSpec(w, grid, out _, out var ox, out var oy, out var worldSize);
                     var dx = x - ox;
                     var dy = y - oy;
-                    if (MathF.Abs(dx) > 1e-3f && MathF.Abs(dy) > 1e-3f && MathF.Abs(dx - worldSize) > 1e-3f && MathF.Abs(dy - worldSize) > 1e-3f)
+                    if (MathF.Abs(dx) > 1e-3f && MathF.Abs(dy) > 1e-3f && MathF.Abs(dx - worldSize) > 1e-3f &&
+                        MathF.Abs(dy - worldSize) > 1e-3f)
                         Assert.Equal(dx >= 0f && dy >= 0f && dx < worldSize && dy < worldSize, found);
                     if (found) Assert.Equal(World.QueryAt(w, grid, layer, x, y), view[cx, cy]);
                     else Assert.Equal(0, World.QueryAt(w, grid, layer, x, y));

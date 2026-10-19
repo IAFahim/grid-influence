@@ -15,12 +15,13 @@ public sealed unsafe class FiniteInputTests : IDisposable
     private static readonly float[] Unreachable =
         { 3e9f, -3e9f, 1e20f, -1e20f, 4194304f, -4194304f, 4194305f, float.MaxValue, float.MinValue };
 
-    private readonly byte _world = World.New();
+    private readonly byte _box = Stamp.Box(8, 8, 100);
+    private readonly byte _derived;
     private readonly byte _grid;
     private readonly byte _layer;
-    private readonly byte _derived;
-    private readonly byte _box = Stamp.Box(8, 8, 100);
     private readonly World.SourceId _source;
+
+    private readonly byte _world = World.New();
 
     public FiniteInputTests()
     {
@@ -110,33 +111,38 @@ public sealed unsafe class FiniteInputTests : IDisposable
         var whole = stackalloc ulong[1] { ulong.MaxValue };
         var words = stackalloc ulong[1] { ulong.MaxValue };
 
-        Assert.False((World.SenseColumn(_world, _layer, xs, ys, count, values, whole) == World.ReadStatus.Complete));
+        Assert.False(World.SenseColumn(_world, _layer, xs, ys, count, values, whole) == World.ReadStatus.Complete);
         Assert.Equal(5ul, whole[0]);
         Assert.Equal(0, values[1]);
 
         values[1] = -1;
         whole[0] = ulong.MaxValue;
-        Assert.False((World.SenseColumn(_world, _layer, xs, ys, excludes, count, values, whole) == World.ReadStatus.Complete));
+        Assert.False(World.SenseColumn(_world, _layer, xs, ys, excludes, count, values, whole) ==
+                     World.ReadStatus.Complete);
         Assert.Equal(5ul, whole[0]);
         Assert.Equal(0, values[1]);
 
         whole[0] = ulong.MaxValue;
-        Assert.False((World.SenseGradientColumn(_world, _layer, xs, ys, excludes, count, fxs, fys, whole) == World.ReadStatus.Complete));
+        Assert.False(World.SenseGradientColumn(_world, _layer, xs, ys, excludes, count, fxs, fys, whole) ==
+                     World.ReadStatus.Complete);
         Assert.Equal(5ul, whole[0]);
         Assert.Equal((0f, 0f), (fxs[1], fys[1]));
 
         whole[0] = ulong.MaxValue;
-        Assert.False((World.SenseAreaColumn(_world, _layer, xs, ys, reaches, excludes, count, totals, whole) == World.ReadStatus.Complete));
+        Assert.False(World.SenseAreaColumn(_world, _layer, xs, ys, reaches, excludes, count, totals, whole) ==
+                     World.ReadStatus.Complete);
         Assert.Equal(5ul, whole[0]);
         Assert.Equal(0, totals[1]);
 
         whole[0] = ulong.MaxValue;
-        Assert.False((World.SenseMaxColumn(_world, _layer, xs, ys, reaches, count, values, bestXs, bestYs, whole) == World.ReadStatus.Complete));
+        Assert.False(World.SenseMaxColumn(_world, _layer, xs, ys, reaches, count, values, bestXs, bestYs, whole) ==
+                     World.ReadStatus.Complete);
         Assert.Equal(5ul, whole[0]);
 
         whole[0] = ulong.MaxValue;
-        Assert.False((World.SenseNearestColumn(
-            _world, _layer, xs, ys, reaches, thresholds, count, values, bestXs, bestYs, whole) == World.ReadStatus.Complete));
+        Assert.False(World.SenseNearestColumn(
+                         _world, _layer, xs, ys, reaches, thresholds, count, values, bestXs, bestYs, whole) ==
+                     World.ReadStatus.Complete);
         Assert.Equal(5ul, whole[0]);
         Assert.Equal(short.MinValue, values[1]);
 
@@ -374,7 +380,7 @@ public sealed unsafe class FiniteInputTests : IDisposable
         var stamps = new[]
         {
             Stamp.Box(5, 3, 40), Stamp.Tent(7, 5, 60), Stamp.Bell(9, 9, 70),
-            Stamp.Disk(6, 50), Stamp.Cone(6, 50, 270), Stamp.Dome(6, 50),
+            Stamp.Disk(6, 50), Stamp.Cone(6, 50, 270), Stamp.Dome(6, 50)
         };
         try
         {
@@ -384,7 +390,8 @@ public sealed unsafe class FiniteInputTests : IDisposable
             foreach (var stamp in stamps)
             foreach (var unreachable in Unreachable)
             {
-                var id = World.Place(parked, parkedLayer, unreachable, index % 2 == 0 ? unreachable : 20f, stamp, (sbyte)(1 + index % 3));
+                var id = World.Place(parked, parkedLayer, unreachable, index % 2 == 0 ? unreachable : 20f, stamp,
+                    (sbyte)(1 + index % 3));
                 Assert.True(id != default);
                 World.Turn(parked, id, 0.7f + index);
                 World.Scale(parked, id, 0.5f + index % 4);
@@ -413,7 +420,8 @@ public sealed unsafe class FiniteInputTests : IDisposable
             World.Process(direct);
             Assert.NotEqual(0, World.Query(direct, directGrid, directLayer, 0, 0, Cells, Cells));
             Assert.True(
-                Region(parked, parkedGrid, parkedLayer).AsSpan().SequenceEqual(Region(direct, directGrid, directLayer)));
+                Region(parked, parkedGrid, parkedLayer).AsSpan()
+                    .SequenceEqual(Region(direct, directGrid, directLayer)));
         }
         finally
         {
@@ -475,35 +483,38 @@ public sealed unsafe class FiniteInputTests : IDisposable
         Assert.NotEqual(0L, checksum);
     }
 
-    public static TheoryData<int, float, float, float, string?> GridCases() => new()
+    public static TheoryData<int, float, float, float, string?> GridCases()
     {
-        { 6, 0f, 0f, 64f, null },
-        { 6, -1000f, 250.5f, 64f, null },
-        { 6, 3e38f, -3e38f, 64f, null },
-        { 5, 0f, 0f, 8192f, null },
-        { 5, 0f, 0f, 8193f, "size" },
-        { 14, 0f, 0f, 4f, null },
-        { 14, 0f, 0f, 3.9999f, "size" },
-        { 14, 0f, 0f, 16384f, null },
-        { 4, 0f, 0f, 64f, "power" },
-        { 15, 0f, 0f, 64f, "power" },
-        { 6, float.NaN, 0f, 64f, "x" },
-        { 6, float.PositiveInfinity, 0f, 64f, "x" },
-        { 6, float.NegativeInfinity, 0f, 64f, "x" },
-        { 6, 0f, float.NaN, 64f, "y" },
-        { 6, 0f, float.PositiveInfinity, 64f, "y" },
-        { 6, 0f, float.NegativeInfinity, 64f, "y" },
-        { 6, 0f, 0f, float.NaN, "size" },
-        { 6, 0f, 0f, float.PositiveInfinity, "size" },
-        { 6, 0f, 0f, float.NegativeInfinity, "size" },
-        { 6, 0f, 0f, 0f, "size" },
-        { 6, 0f, 0f, -64f, "size" },
-        { 6, 0f, 0f, 1e-30f, "size" },
-        { 6, 0f, 0f, 1e-3f, "size" },
-        { 6, 0f, 0f, 3e38f, "size" },
-        { 6, 0f, 0f, float.Epsilon, "size" },
-        { 6, 0f, 0f, float.MaxValue, "size" },
-    };
+        return new TheoryData<int, float, float, float, string?>
+        {
+            { 6, 0f, 0f, 64f, null },
+            { 6, -1000f, 250.5f, 64f, null },
+            { 6, 3e38f, -3e38f, 64f, null },
+            { 5, 0f, 0f, 8192f, null },
+            { 5, 0f, 0f, 8193f, "size" },
+            { 14, 0f, 0f, 4f, null },
+            { 14, 0f, 0f, 3.9999f, "size" },
+            { 14, 0f, 0f, 16384f, null },
+            { 4, 0f, 0f, 64f, "power" },
+            { 15, 0f, 0f, 64f, "power" },
+            { 6, float.NaN, 0f, 64f, "x" },
+            { 6, float.PositiveInfinity, 0f, 64f, "x" },
+            { 6, float.NegativeInfinity, 0f, 64f, "x" },
+            { 6, 0f, float.NaN, 64f, "y" },
+            { 6, 0f, float.PositiveInfinity, 64f, "y" },
+            { 6, 0f, float.NegativeInfinity, 64f, "y" },
+            { 6, 0f, 0f, float.NaN, "size" },
+            { 6, 0f, 0f, float.PositiveInfinity, "size" },
+            { 6, 0f, 0f, float.NegativeInfinity, "size" },
+            { 6, 0f, 0f, 0f, "size" },
+            { 6, 0f, 0f, -64f, "size" },
+            { 6, 0f, 0f, 1e-30f, "size" },
+            { 6, 0f, 0f, 1e-3f, "size" },
+            { 6, 0f, 0f, 3e38f, "size" },
+            { 6, 0f, 0f, float.Epsilon, "size" },
+            { 6, 0f, 0f, float.MaxValue, "size" }
+        };
+    }
 
     [Theory]
     [MemberData(nameof(GridCases))]
@@ -546,7 +557,10 @@ public sealed unsafe class FiniteInputTests : IDisposable
         Assert.False(GiValidation.TryGrid(6, 3e38f, out _));
     }
 
-    private World.SourceId Place(float x, float y) => World.Place(_world, _layer, x, y, _box, 2);
+    private World.SourceId Place(float x, float y)
+    {
+        return World.Place(_world, _layer, x, y, _box, 2);
+    }
 
     private void SyncOne(World.SourceId id, float x, float y)
     {
@@ -564,12 +578,19 @@ public sealed unsafe class FiniteInputTests : IDisposable
         return World.Sync(World.Capture(_world), ids, xs, ys, 1);
     }
 
-    private short[] Snapshot() => Region(_world, _grid, _layer);
+    private short[] Snapshot()
+    {
+        return Region(_world, _grid, _layer);
+    }
 
     private static short[] Region(byte world, byte grid, byte layer)
     {
         var cells = new short[Cells * Cells];
-        fixed (short* pointer = cells) World.QueryRegion(world, grid, layer, 0, 0, Cells, Cells, pointer);
+        fixed (short* pointer = cells)
+        {
+            World.QueryRegion(world, grid, layer, 0, 0, Cells, Cells, pointer);
+        }
+
         return cells;
     }
 }

@@ -80,7 +80,7 @@ public class SpatialOrderTests
                 0 => (uint)rng.Next(16),
                 1 => (uint)rng.Next(),
                 2 => uint.MaxValue - (uint)rng.Next(8),
-                _ => (uint)(rng.Next() << 1) ^ (uint)rng.Next(),
+                _ => (uint)(rng.Next() << 1) ^ (uint)rng.Next()
             };
 
         var permutation = new int[count];
@@ -98,7 +98,7 @@ public class SpatialOrderTests
     [Fact]
     public void DisorderCountsAdjacentPairsWhoseTileDescends()
     {
-        var sorted = Enumerable.Range(0, 100).Select(i => (uint)(i / 2) << 10 | (uint)(i % 7)).ToArray();
+        var sorted = Enumerable.Range(0, 100).Select(i => ((uint)(i / 2) << 10) | (uint)(i % 7)).ToArray();
         var reversed = sorted.Reverse().ToArray();
         Assert.Equal(0f, Grid.Disorder(sorted));
         Assert.Equal(0f, Grid.Disorder(Array.Empty<uint>()));

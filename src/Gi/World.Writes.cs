@@ -4,14 +4,14 @@ namespace Gi;
 
 public static unsafe partial class World
 {
-    internal static ushort QuantizeAngle(float radians)
+    private static ushort QuantizeAngle(float radians)
     {
         var turns = radians * (1.0 / (2 * Math.PI));
         turns -= Math.Floor(turns);
         return (ushort)((int)(turns * 65536.0) & 0xFFFF);
     }
 
-    internal static bool FootprintFits(WorldCtx* w, byte stamp, long scale)
+    private static bool FootprintFits(WorldCtx* w, byte stamp, long scale)
     {
         var v = StampCatalog.Get(stamp);
         for (var gi = 0; gi < w->GridCount; gi++)
@@ -19,16 +19,16 @@ public static unsafe partial class World
             var scaleQ8 = w->Grids[gi].ScaleQ8;
             if (scaleQ8 == 0) continue;
 
-            var sampling = scaleQ8 * scale >> 8;
-            if (!ValidationRules.IsFootprint(v->Width * sampling + 255 >> 8) ||
-                !ValidationRules.IsFootprint(v->Height * sampling + 255 >> 8))
+            var sampling = (scaleQ8 * scale) >> 8;
+            if (!ValidationRules.IsFootprint((v->Width * sampling + 255) >> 8) ||
+                !ValidationRules.IsFootprint((v->Height * sampling + 255) >> 8))
                 return false;
         }
 
         return true;
     }
 
-    internal static ushort QuantizeScale(float scale)
+    private static ushort QuantizeScale(float scale)
     {
         var quantized = Math.Floor(scale * 256.0);
         return (ushort)(quantized < 1 ? 1 : quantized > ushort.MaxValue ? ushort.MaxValue : quantized);
@@ -38,13 +38,13 @@ public static unsafe partial class World
         WorldCtx* w, byte layer, float x, float y, byte stamp, sbyte gain, out SourceId id)
     {
         id = default;
-        if (layer >= w->LayerCount || IsDerived(w, layer) || IsTransient(w, layer)) return SourceResultStatus.InvalidLayer;
+        if (layer >= w->LayerCount || IsDerived(w, layer) || IsTransient(w, layer))
+            return SourceResultStatus.InvalidLayer;
         if (!StampCatalog.Valid(stamp) || !FootprintFits(w, stamp, UnitScale)) return SourceResultStatus.InvalidStamp;
         if (!float.IsFinite(x) || !float.IsFinite(y)) return SourceResultStatus.InvalidSource;
 
         var s = &w->Sources;
-        int i;
-        if (!s->Free.TryPop(out i))
+        if (!s->Free.TryPop(out var i))
         {
             if (s->Count >= MaxSourceSlots) return SourceResultStatus.SourceLimitReached;
             if (s->Count == s->Slots) EnsureSourceCapacity(s, w, s->Count + 1);

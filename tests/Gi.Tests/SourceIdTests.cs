@@ -5,9 +5,9 @@ namespace Gi.Tests;
 
 public sealed class SourceIdTests : IDisposable
 {
-    private readonly byte _world = World.New();
     private readonly byte _layer;
     private readonly byte _stamp = Stamp.Box(2, 2, 3);
+    private readonly byte _world = World.New();
 
     public SourceIdTests()
     {

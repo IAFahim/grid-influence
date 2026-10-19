@@ -15,12 +15,15 @@ public static unsafe partial class World
 {
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static SweepEntry EntryOf(SourceColumns* s, int slot)
-        => new()
+    {
+        return new SweepEntry
         {
             Slot = slot,
             X = s->X[slot],
             Y = s->Y[slot],
-            Meta = s->Layer[slot] | (uint)s->Stamp[slot] << 8 | (uint)s->Gain[slot] << 16 | (uint)s->Alive[slot] << 24,
-            Shape = s->Angle[slot] | (uint)s->Scale[slot] << 16,
+            Meta = s->Layer[slot] | ((uint)s->Stamp[slot] << 8) | ((uint)s->Gain[slot] << 16) |
+                   ((uint)s->Alive[slot] << 24),
+            Shape = s->Angle[slot] | ((uint)s->Scale[slot] << 16)
         };
+    }
 }

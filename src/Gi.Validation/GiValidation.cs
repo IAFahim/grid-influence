@@ -12,7 +12,8 @@ public static class GiValidation
     public static bool TryRound(int radius, int arc, int value, out string? error)
     {
         if (!ValidationRules.IsRadius(radius) || !ValidationRules.IsArc(arc) || !ValidationRules.IsValue(value))
-            return Reject("Round stamp radius must be 1 through 128, arc 1 through 360, and value -128 through 127.", out error);
+            return Reject("Round stamp radius must be 1 through 128, arc 1 through 360, and value -128 through 127.",
+                out error);
         return Accept(out error);
     }
 
@@ -67,13 +68,16 @@ public static class GiValidation
 
     public static bool TryDerivedLayer(int firstWeight, int secondWeight, int shift, out string? error)
     {
-        if (!ValidationRules.IsWeight(firstWeight) || !ValidationRules.IsWeight(secondWeight) || !ValidationRules.IsShift(shift))
+        if (!ValidationRules.IsWeight(firstWeight) || !ValidationRules.IsWeight(secondWeight) ||
+            !ValidationRules.IsShift(shift))
             return Reject("Derived layer weights must be -32767 through 32767 and shift 0 through 15.", out error);
         return Accept(out error);
     }
 
     public static bool TryGrid(int power, float size, out string? error)
-        => TryGrid(power, 0f, 0f, size, out error);
+    {
+        return TryGrid(power, 0f, 0f, size, out error);
+    }
 
     public static bool TryGrid(int power, float x, float y, float size, out string? error)
     {

@@ -2,12 +2,15 @@ namespace Gi;
 
 internal static unsafe class PlaneFold
 {
-    internal const long DefaultLimitI = int.MaxValue;
-    internal const long DefaultLimitQ40 = 1L << 62;
+    private const long DefaultLimitI = int.MaxValue;
+    private const long DefaultLimitQ40 = 1L << 62;
     private const long Mask40 = (1L << 40) - 1;
     private const int Cells = TileBake.TileSize * TileBake.TileSize;
 
-    public static long LimitI(PlaneStore* store) => store->LimitI == 0 ? DefaultLimitI : store->LimitI;
+    public static long LimitI(PlaneStore* store)
+    {
+        return store->LimitI == 0 ? DefaultLimitI : store->LimitI;
+    }
 
     public static void ChargeI(PlaneStore* store, TilePlanes* set, long amount)
     {

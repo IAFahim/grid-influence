@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using Gi;
 
 internal static unsafe class SplatTiming
@@ -8,11 +9,11 @@ internal static unsafe class SplatTiming
         var count = int.Parse(Environment.GetEnvironmentVariable("GI_SPLATS") ?? "1000000");
         var world = World.New();
         Grid.New(world, 10, 0f, 0f, 1024f);
-        var phase = int.Parse(Environment.GetEnvironmentVariable("GI_PHASE") ?? "0", System.Globalization.CultureInfo.InvariantCulture);
+        var phase = int.Parse(Environment.GetEnvironmentVariable("GI_PHASE") ?? "0", CultureInfo.InvariantCulture);
         var layer = Layer.New(world, Layer.Residency.Transient, new Layer.Precision((byte)phase, 0));
         var box = Stamp.Box(4, 4, 8);
         var cost = Environment.GetEnvironmentVariable("GI_COST");
-        if (cost != null) World.ConfigureConvolveCost(world, layer, long.Parse(cost, System.Globalization.CultureInfo.InvariantCulture));
+        if (cost != null) World.ConfigureConvolveCost(world, layer, long.Parse(cost, CultureInfo.InvariantCulture));
         var xs = new float[count];
         var ys = new float[count];
         var rng = new Random(3);
@@ -21,7 +22,7 @@ internal static unsafe class SplatTiming
         {
             var x = (float)(rng.NextDouble() * 1000.0 + 12.0);
             var y = (float)(rng.NextDouble() * 1000.0 + 12.0);
-            keys[i] = Morton((uint)x, (uint)y) << 32 | (uint)i;
+            keys[i] = (Morton((uint)x, (uint)y) << 32) | (uint)i;
             xs[i] = x;
             ys[i] = y;
         }
@@ -36,7 +37,7 @@ internal static unsafe class SplatTiming
             sy[i] = ys[source];
         }
 
-        var drift = float.Parse(Environment.GetEnvironmentVariable("GI_DRIFT") ?? "0", System.Globalization.CultureInfo.InvariantCulture);
+        var drift = float.Parse(Environment.GetEnvironmentVariable("GI_DRIFT") ?? "0", CultureInfo.InvariantCulture);
         if (drift != 0f)
         {
             var wobble = new Random(11);
@@ -47,8 +48,8 @@ internal static unsafe class SplatTiming
             }
         }
 
-        double bestSplat = double.MaxValue;
-        double bestProcess = double.MaxValue;
+        var bestSplat = double.MaxValue;
+        var bestProcess = double.MaxValue;
         for (var pass = 0; pass < int.Parse(Environment.GetEnvironmentVariable("GI_PASSES") ?? "14"); pass++)
         {
             var started = Stopwatch.GetTimestamp();
@@ -87,8 +88,10 @@ internal static unsafe class SplatTiming
             }
         }
 
-        Console.WriteLine($"1M fused reads: morton {bestRead:F2} ms ({bestRead * 1e6 / count:F2} ns each), random {bestShuffled:F2} ms ({bestShuffled * 1e6 / count:F2} ns each)");
-        Console.WriteLine($"1M Morton splats: splat {bestSplat:F2} ms ({bestSplat * 1e6 / count:F2} ns each), process {bestProcess:F2} ms ({bestProcess * 1e6 / count:F2} ns/agent)");
+        Console.WriteLine(
+            $"1M fused reads: morton {bestRead:F2} ms ({bestRead * 1e6 / count:F2} ns each), random {bestShuffled:F2} ms ({bestShuffled * 1e6 / count:F2} ns each)");
+        Console.WriteLine(
+            $"1M Morton splats: splat {bestSplat:F2} ms ({bestSplat * 1e6 / count:F2} ns each), process {bestProcess:F2} ms ({bestProcess * 1e6 / count:F2} ns/agent)");
         World.Free(world);
         Stamp.Free(box);
         return 0;
@@ -98,7 +101,7 @@ internal static unsafe class SplatTiming
     {
         ulong result = 0;
         for (var bit = 0; bit < 16; bit++)
-            result |= ((ulong)(x >> bit & 1) << (2 * bit)) | ((ulong)(y >> bit & 1) << (2 * bit + 1));
+            result |= ((ulong)((x >> bit) & 1) << (2 * bit)) | ((ulong)((y >> bit) & 1) << (2 * bit + 1));
         return result;
     }
 }

@@ -17,20 +17,23 @@ internal static class Live
     private const int WolfCount = 8;
     private const int FoodClusterCount = 6;
     internal const double TickSeconds = 0.05;
+    private const int PaintFadeTicks = 300;
+
+    private const float CrowdReach = 4f;
+    internal const long Crowded = 4000;
 
     internal static byte WorldId;
-    internal static byte GridOne;
-    internal static byte GridHalf;
+    private static byte _gridOne;
+    private static byte _gridHalf;
     internal static byte Food;
     internal static byte Threat;
     internal static byte Herd;
-    internal static byte Calm;
+    private static byte _calm;
 
     private static readonly byte FoodCrumb = Stamp.Box(3, 3, 40);
-    private static readonly byte WolfAura = Stamp.Cone(20, 110, arc: 100);
+    private static readonly byte WolfAura = Stamp.Cone(20, 110, 100);
     private static readonly byte FearBrush = Gaussian(15, 140);
     private static readonly byte HerdPing = Stamp.Tent(9, 9, 60);
-    private const int PaintFadeTicks = 300;
 
     private static Random _rng = new(42);
     private static LiveSheep[] _sheep = [];
@@ -55,8 +58,11 @@ internal static class Live
 
     private static readonly ConcurrentQueue<ClientOp> Ops = new();
     private static readonly List<WebSocket> Sockets = [];
+
     private static readonly byte[] Frame =
         new byte[16 + 8 * (SheepCount + WolfCount) + 6 * CellCount * CellCount];
+
+    internal static int CrowdedSheep;
 
     internal static void Run(string[] args)
     {
@@ -66,12 +72,12 @@ internal static class Live
                 port = p;
 
         WorldId = World.New();
-        GridOne = Grid.New(WorldId, 8, 0f, 0f, WorldUnits);
-        GridHalf = Grid.New(WorldId, 7, 0f, 0f, WorldUnits);
+        _gridOne = Grid.New(WorldId, 8, 0f, 0f, WorldUnits);
+        _gridHalf = Grid.New(WorldId, 7, 0f, 0f, WorldUnits);
         Food = Layer.New(WorldId);
         Threat = Layer.New(WorldId);
         Herd = Layer.New(WorldId);
-        Calm = Layer.Sum(WorldId, Food, 1, Threat, -2);
+        _calm = Layer.Sum(WorldId, Food, 1, Threat, -2);
         SpawnFood();
         SpawnAgents();
 
@@ -92,7 +98,11 @@ internal static class Live
             }
 
             var socket = await ctx.WebSockets.AcceptWebSocketAsync();
-            lock (Sockets) Sockets.Add(socket);
+            lock (Sockets)
+            {
+                Sockets.Add(socket);
+            }
+
             var buffer = new byte[16];
             try
             {
@@ -114,7 +124,10 @@ internal static class Live
             {
             }
 
-            lock (Sockets) Sockets.Remove(socket);
+            lock (Sockets)
+            {
+                Sockets.Remove(socket);
+            }
         });
 
         Console.WriteLine("live field on http://127.0.0.1:" + port.ToString(CultureInfo.InvariantCulture) + "/");
@@ -142,10 +155,6 @@ internal static class Live
         World.TrySenseArea(WorldId, Herd, x, y, CrowdReach, self, out var crowd);
         return crowd;
     }
-
-    internal const float CrowdReach = 4f;
-    internal const long Crowded = 4000;
-    internal static int CrowdedSheep;
 
     private static void SimLoop()
     {
@@ -261,7 +270,12 @@ internal static class Live
         {
             var sx = SheepSnaps[slot * SheepCount * 2 + i * 2];
             var sy = SheepSnaps[slot * SheepCount * 2 + i * 2 + 1];
-            if (sx < 0.01f && sy < 0.01f) { _sheep[i].Respawn(_rng); continue; }
+            if (sx < 0.01f && sy < 0.01f)
+            {
+                _sheep[i].Respawn(_rng);
+                continue;
+            }
+
             _sheep[i].X = sx;
             _sheep[i].Y = sy;
             _sheep[i].Vx = 0f;
@@ -381,35 +395,42 @@ internal static class Live
                 *p++ = _sheep[i].X;
                 *p++ = _sheep[i].Y;
             }
+
             for (var i = 0; i < _wolves.Length; i++)
             {
                 *p++ = _wolves[i].X;
                 *p++ = _wolves[i].Y;
             }
+
             var s = (short*)p;
-            World.QueryRegion(WorldId, GridOne, Threat, 0, 0, CellCount, CellCount, s);
+            World.QueryRegion(WorldId, _gridOne, Threat, 0, 0, CellCount, CellCount, s);
             s += CellCount * CellCount;
-            World.QueryRegion(WorldId, GridOne, Food, 0, 0, CellCount, CellCount, s);
+            World.QueryRegion(WorldId, _gridOne, Food, 0, 0, CellCount, CellCount, s);
             s += CellCount * CellCount;
-            World.QueryRegion(WorldId, GridOne, Herd, 0, 0, CellCount, CellCount, s);
+            World.QueryRegion(WorldId, _gridOne, Herd, 0, 0, CellCount, CellCount, s);
         }
     }
 
     private static void SendFrame(string stats)
     {
         WebSocket[] snapshot;
-        lock (Sockets) snapshot = [.. Sockets];
+        lock (Sockets)
+        {
+            snapshot = [.. Sockets];
+        }
+
         if (snapshot.Length == 0) return;
 
         List<WebSocket> dead = null;
         foreach (var socket in snapshot)
-        {
             try
             {
-                socket.SendAsync(new ArraySegment<byte>(Frame), WebSocketMessageType.Binary, true, CancellationToken.None)
+                socket.SendAsync(new ArraySegment<byte>(Frame), WebSocketMessageType.Binary, true,
+                        CancellationToken.None)
                     .GetAwaiter().GetResult();
                 if (stats != null)
-                    socket.SendAsync(Encoding.UTF8.GetBytes(stats), WebSocketMessageType.Text, true, CancellationToken.None)
+                    socket.SendAsync(Encoding.UTF8.GetBytes(stats), WebSocketMessageType.Text, true,
+                            CancellationToken.None)
                         .GetAwaiter().GetResult();
             }
             catch (Exception)
@@ -417,32 +438,37 @@ internal static class Live
                 dead ??= [];
                 dead.Add(socket);
             }
-        }
 
         if (dead == null) return;
         lock (Sockets)
+        {
             foreach (var socket in dead) Sockets.Remove(socket);
+        }
     }
 
     private static string BuildStats()
     {
-        var full = World.Query(WorldId, GridOne, Food, 0, 0, CellCount, CellCount);
-        var half = World.Query(WorldId, GridHalf, Food, 0, 0, CellCount >> 1, CellCount >> 1);
+        var full = World.Query(WorldId, _gridOne, Food, 0, 0, CellCount, CellCount);
+        var half = World.Query(WorldId, _gridHalf, Food, 0, 0, CellCount >> 1, CellCount >> 1);
         var conservation = full == 4 * half
-            ? "food 1x " + full.ToString(CultureInfo.InvariantCulture) + " == 4 x half " + half.ToString(CultureInfo.InvariantCulture)
-            : "food 1x " + full.ToString(CultureInfo.InvariantCulture) + " != 4 x half " + half.ToString(CultureInfo.InvariantCulture);
+            ? "food 1x " + full.ToString(CultureInfo.InvariantCulture) + " == 4 x half " +
+              half.ToString(CultureInfo.InvariantCulture)
+            : "food 1x " + full.ToString(CultureInfo.InvariantCulture) + " != 4 x half " +
+              half.ToString(CultureInfo.InvariantCulture);
         var queries = _queries - _queriesAtStat;
         _queriesAtStat = _queries;
 
         var sb = new StringBuilder();
-        sb.Append("sim+pack ").Append(_simMs.ToString("F2", CultureInfo.InvariantCulture)).Append(" ms/tick · 20 ticks/s\n");
+        sb.Append("sim+pack ").Append(_simMs.ToString("F2", CultureInfo.InvariantCulture))
+            .Append(" ms/tick · 20 ticks/s\n");
         sb.Append("sheep ").Append(_sheep.Length).Append(" · wolves ").Append(_wolves.Length)
             .Append(" · eaten ").Append(_eaten.ToString(CultureInfo.InvariantCulture)).Append('\n');
         sb.Append("field queries/s ").Append(queries.ToString("N0", CultureInfo.InvariantCulture))
-            .Append(" · tick managed alloc max ").Append(_maxAlloc.ToString("N0", CultureInfo.InvariantCulture)).Append(" B\n");
+            .Append(" · tick managed alloc max ").Append(_maxAlloc.ToString("N0", CultureInfo.InvariantCulture))
+            .Append(" B\n");
         sb.Append("crowded sheep ").Append(CrowdedSheep.ToString(CultureInfo.InvariantCulture))
             .Append(" · herd sensed excluding self (TrySenseArea exclude)\n");
-        var calm = World.QueryMax(WorldId, GridOne, Calm, out var calmX, out var calmY);
+        var calm = World.QueryMax(WorldId, _gridOne, _calm, out var calmX, out var calmY);
         sb.Append("calmest cell (").Append(calmX.ToString(CultureInfo.InvariantCulture)).Append(',')
             .Append(calmY.ToString(CultureInfo.InvariantCulture)).Append(") reads ")
             .Append(calm.ToString(CultureInfo.InvariantCulture))
@@ -484,8 +510,10 @@ internal static class Live
         }
     }
 
-    private static float SnapFood(float v) =>
-        1.5f + 2f * MathF.Floor(Math.Clamp(v, 3f, 251.5f) / 2f);
+    private static float SnapFood(float v)
+    {
+        return 1.5f + 2f * MathF.Floor(Math.Clamp(v, 3f, 251.5f) / 2f);
+    }
 
     private static void SpawnAgents()
     {
@@ -528,6 +556,7 @@ internal static class Live
             var v = peak * Math.Exp(-(dx * dx + dy * dy) / (2 * sigma * sigma));
             samples[y * size + x] = (sbyte)Math.Clamp((int)Math.Round(v), -128, 127);
         }
+
         return Stamp.New(samples, (ushort)size, (ushort)size);
     }
 
@@ -536,8 +565,8 @@ internal static class Live
 
 internal sealed class LiveSheep
 {
-    public float X, Y, Vx, Vy, Phase;
     public World.SourceId Source;
+    public float X, Y, Vx, Vy, Phase;
 
     public void Update(float t)
     {
@@ -607,11 +636,11 @@ internal sealed class LiveSheep
 
 internal sealed class LiveWolf
 {
-    public float X, Y, Vx, Vy;
-    public World.SourceId Source;
+    public float Facing;
+    public int Gain = 7;
     public float HuntX, HuntY;
     public bool Hunting;
     public float RetryClock;
-    public float Facing;
-    public int Gain = 7;
+    public World.SourceId Source;
+    public float X, Y, Vx, Vy;
 }

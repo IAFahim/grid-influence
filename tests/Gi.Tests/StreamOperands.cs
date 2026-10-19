@@ -33,15 +33,23 @@ internal struct CorpusHash
 {
     public const ulong Offset = 14695981039346656037ul;
     private const ulong Prime = 1099511628211ul;
-    private ulong _hash;
 
-    public CorpusHash(ulong seed) => _hash = seed;
+    public CorpusHash(ulong seed)
+    {
+        Value = seed;
+    }
 
-    public ulong Value => _hash;
+    public ulong Value { get; private set; }
 
-    public void Mix(byte value) => _hash = (_hash ^ value) * Prime;
+    public void Mix(byte value)
+    {
+        Value = (Value ^ value) * Prime;
+    }
 
-    public void Mix(bool value) => Mix(value ? (byte)1 : (byte)0);
+    public void Mix(bool value)
+    {
+        Mix(value ? (byte)1 : (byte)0);
+    }
 
     public void Mix(short value)
     {
@@ -63,7 +71,10 @@ internal struct CorpusHash
         Mix((int)((ulong)value >> 32));
     }
 
-    public void Mix(float value) => Mix(BitConverter.SingleToInt32Bits(value));
+    public void Mix(float value)
+    {
+        Mix(BitConverter.SingleToInt32Bits(value));
+    }
 
     public void Mix(short[] values, int count)
     {

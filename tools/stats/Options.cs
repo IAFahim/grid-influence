@@ -5,16 +5,16 @@ namespace Gi.Stats;
 internal sealed class Options
 {
     public string Command = "stats";
-    public bool Json = true;
     public bool Help;
-    public int Power = 8;
+    public int Iterations = 1000;
+    public bool Json = true;
     public int Layers = 3;
+    public int Moves = 200;
+    public int Power = 8;
+    public int Queries = 10000;
+    public bool Raster;
     public int Sources = 4000;
     public int StampSize = 16;
-    public bool Raster;
-    public int Iterations = 1000;
-    public int Queries = 10000;
-    public int Moves = 200;
 
     public static bool TryParse(string[] args, out Options result, out string error)
     {
@@ -24,11 +24,26 @@ internal sealed class Options
         for (var i = 0; i < args.Length; i++)
         {
             var arg = args[i];
-            if (arg is "--help" or "-h") { result.Help = true; continue; }
-            if (arg == "--json") { result.Json = true; continue; }
+            if (arg is "--help" or "-h")
+            {
+                result.Help = true;
+                continue;
+            }
+
+            if (arg == "--json")
+            {
+                result.Json = true;
+                continue;
+            }
+
             if (arg is "stats" or "memory" or "profile" or "verify")
             {
-                if (hasCommand) { error = "Specify one command."; return false; }
+                if (hasCommand)
+                {
+                    error = "Specify one command.";
+                    return false;
+                }
+
                 result.Command = arg;
                 hasCommand = true;
                 continue;
@@ -40,25 +55,44 @@ internal sealed class Options
                 error = $"Unknown command or option: {arg}";
                 return false;
             }
-            if (++i == args.Length) { error = $"Missing value for {arg}."; return false; }
+
+            if (++i == args.Length)
+            {
+                error = $"Missing value for {arg}.";
+                return false;
+            }
+
             var value = args[i];
             if (arg == "--format")
             {
-                if (value is not ("human" or "json")) { error = "Format must be human or json."; return false; }
+                if (value is not ("human" or "json"))
+                {
+                    error = "Format must be human or json.";
+                    return false;
+                }
+
                 result.Json = value == "json";
                 continue;
             }
+
             if (arg == "--stamp")
             {
-                if (value is not ("box" or "raster")) { error = "Stamp must be box or raster."; return false; }
+                if (value is not ("box" or "raster"))
+                {
+                    error = "Stamp must be box or raster.";
+                    return false;
+                }
+
                 result.Raster = value == "raster";
                 continue;
             }
+
             if (!int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var number))
             {
                 error = $"Expected an unsigned integer for {arg}.";
                 return false;
             }
+
             switch (arg)
             {
                 case "--power": result.Power = number; break;

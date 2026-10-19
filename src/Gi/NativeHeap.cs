@@ -4,8 +4,8 @@ namespace Gi;
 
 internal static unsafe class NativeHeap
 {
-    internal const nuint DefaultAlignment = 0;
-    internal const nuint VectorAlignment = 64;
+    private const nuint DefaultAlignment = 0;
+    private const nuint VectorAlignment = 64;
 
     internal static int Calls;
     internal static delegate* unmanaged[Cdecl]<nuint, nuint, void*> HookAllocate;

@@ -15,7 +15,8 @@ public unsafe class RecordRewindTests
     {
         var a = World.New();
         var b = World.New();
-        var stamps = new List<byte> { Stamp.Box(3, 3, 30), Stamp.Box(6, 2, -25), Stamp.Tent(6, 6, 40), Stamp.Disk(4, 50) };
+        var stamps = new List<byte>
+            { Stamp.Box(3, 3, 30), Stamp.Box(6, 2, -25), Stamp.Tent(6, 6, 40), Stamp.Disk(4, 50) };
         try
         {
             var idsA = new List<World.SourceId>();
@@ -85,7 +86,8 @@ public unsafe class RecordRewindTests
                         case 5: World.Fade(b, id, (sbyte)mutate.Next(-6, 7), mutate.Next(0, 10)); break;
                         case 6: World.Expire(b, id, mutate.Next(0, 12)); break;
                         default:
-                            var fresh = World.Place(b, (byte)mutate.Next(2), x, y, stamps[mutate.Next(stamps.Count)], 4);
+                            var fresh = World.Place(b, (byte)mutate.Next(2), x, y, stamps[mutate.Next(stamps.Count)],
+                                4);
                             if (fresh != default) idsB.Add(fresh);
                             break;
                     }

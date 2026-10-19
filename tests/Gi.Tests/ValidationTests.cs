@@ -55,7 +55,8 @@ public sealed class ValidationTests
     [InlineData(33, true, false, true)]
     [InlineData(255, true, false, true)]
     [InlineData(256, false, false, false)]
-    public void Count_limits_include_empty_registers_and_reserve_stamp_zero(int count, bool worlds, bool layers, bool stamps)
+    public void Count_limits_include_empty_registers_and_reserve_stamp_zero(int count, bool worlds, bool layers,
+        bool stamps)
     {
         Assert.Equal(worlds, GiValidation.TryWorldCount(count, out var worldError));
         Assert.Equal(worlds, worldError == null);
@@ -82,7 +83,8 @@ public sealed class ValidationTests
     [InlineData(5, 8193f, false)]
     [InlineData(5, 1e-30f, false)]
     [InlineData(5, 3e38f, false)]
-    public void Grid_requires_supported_power_finite_positive_size_and_representable_scale(int power, float size, bool valid)
+    public void Grid_requires_supported_power_finite_positive_size_and_representable_scale(int power, float size,
+        bool valid)
     {
         Assert.Equal(valid, GiValidation.TryGrid(power, size, out var error));
         Assert.Equal(valid, error == null);
@@ -99,7 +101,8 @@ public sealed class ValidationTests
     [InlineData(254, true, false, true)]
     [InlineData(255, false, false, false)]
     [InlineData(int.MaxValue, false, false, false)]
-    public void Register_indices_reject_missing_selections_and_exclusive_upper_bounds(int index, bool worlds, bool layers, bool stamps)
+    public void Register_indices_reject_missing_selections_and_exclusive_upper_bounds(int index, bool worlds,
+        bool layers, bool stamps)
     {
         Assert.Equal(worlds, GiValidation.TryWorldIndex(index, out var worldError));
         Assert.Equal(worlds, worldError == null);
@@ -125,7 +128,8 @@ public sealed class ValidationTests
     [InlineData(0, 32768, 0, false)]
     [InlineData(1, 1, -1, false)]
     [InlineData(1, 1, 16, false)]
-    public void Derived_layer_parameters_follow_runtime_weight_and_shift_limits(int firstWeight, int secondWeight, int shift, bool valid)
+    public void Derived_layer_parameters_follow_runtime_weight_and_shift_limits(int firstWeight, int secondWeight,
+        int shift, bool valid)
     {
         Assert.Equal(valid, GiValidation.TryDerivedLayer(firstWeight, secondWeight, shift, out var error));
         Assert.Equal(valid, error == null);

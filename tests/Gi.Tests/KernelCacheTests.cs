@@ -9,9 +9,10 @@ public sealed unsafe class KernelCacheTests
     private static readonly int[] Scales = { 128, 256, 947 };
     private static readonly int[] Angles = { 0, 1, 8192, 16384, 32768, 49152, 60000 };
     private static readonly int[] Gains = { 1, -1, 3, 16, -16 };
+
     private static readonly (int X, int Y)[] Phases =
     {
-        (0, 0), (1, 1), (13, 200), (64, 127), (128, 128), (255, 255), (200, 13),
+        (0, 0), (1, 1), (13, 200), (64, 127), (128, 128), (255, 255), (200, 13)
     };
 
     private static byte NewWorld()
@@ -25,7 +26,7 @@ public sealed unsafe class KernelCacheTests
     {
         var origin = xAxis ? v->OriginQ8X : v->OriginQ8Y;
         var lead = ((long)cell << 8) + phase;
-        return (lead - ((long)origin * scaleQ8 >> 8) + 0.5f) / 256f;
+        return (lead - (((long)origin * scaleQ8) >> 8) + 0.5f) / 256f;
     }
 
     private static void EmitOracle(Placement* p, int gain, int* cells, long* q40, int ox0, int oy0, int ox1, int oy1)
@@ -115,7 +116,8 @@ public sealed unsafe class KernelCacheTests
         var v = StampCatalog.Get(stamp);
         var x = PositionFor(v, true, cellX, phaseX, scaleQ8);
         var y = PositionFor(v, false, cellY, phaseY, scaleQ8);
-        Assert.True(TileBake.Place(x, y, 0f, 0f, 256, Size, v, angle, scaleQ8, Layer.Precision.Exact, out var p), context);
+        Assert.True(TileBake.Place(x, y, 0f, 0f, 256, Size, v, angle, scaleQ8, Layer.Precision.Exact, out var p),
+            context);
         if (!clamped)
         {
             Assert.Equal(phaseX, p.Fx);
@@ -130,7 +132,8 @@ public sealed unsafe class KernelCacheTests
         var oy1 = Math.Min(p.Y1, Size);
         if (ox1 <= ox0 || oy1 <= oy0)
         {
-            Assert.True(KernelFactory.TryGetTaps(w, 0, stamp, angle, Layer.Precision.Exact, &p, out var empty), context);
+            Assert.True(KernelFactory.TryGetTaps(w, 0, stamp, angle, Layer.Precision.Exact, &p, out var empty),
+                context);
             Assert.True(empty.Width == 0 && empty.Height == 0, $"{context}: expected an empty kernel");
             return;
         }
@@ -162,7 +165,8 @@ public sealed unsafe class KernelCacheTests
 
             var boundsX0 = p.Px + taps.OriginX;
             var boundsY0 = p.Py + taps.OriginY;
-            var insideGrid = boundsX0 >= ox0 && boundsY0 >= oy0 && boundsX0 + taps.Width <= ox1 && boundsY0 + taps.Height <= oy1;
+            var insideGrid = boundsX0 >= ox0 && boundsY0 >= oy0 && boundsX0 + taps.Width <= ox1 &&
+                             boundsY0 + taps.Height <= oy1;
             if (!(metadata && Math.Abs((long)gain) <= 16 && insideGrid)) return;
 
             var minX = int.MaxValue;
@@ -214,7 +218,8 @@ public sealed unsafe class KernelCacheTests
                 if (tapRow < 0 || tapRow >= taps.Height) continue;
                 if (rowFirst[j] == 0 && rowEnd[j] == 0)
                 {
-                    Assert.True(taps.RowExtents[2 * tapRow] == 0 && taps.RowExtents[2 * tapRow + 1] == 0, $"{context}: empty row {tapRow}");
+                    Assert.True(taps.RowExtents[2 * tapRow] == 0 && taps.RowExtents[2 * tapRow + 1] == 0,
+                        $"{context}: empty row {tapRow}");
                     continue;
                 }
 
@@ -239,14 +244,16 @@ public sealed unsafe class KernelCacheTests
         var world = NewWorld();
         try
         {
-            foreach (var (width, height) in new[] { (1, 1), (2, 2), (1, 2), (2, 1), (3, 3), (4, 5), (7, 3), (8, 8), (16, 16) })
+            foreach (var (width, height) in new[]
+                         { (1, 1), (2, 2), (1, 2), (2, 1), (3, 3), (4, 5), (7, 3), (8, 8), (16, 16) })
             foreach (var value in new sbyte[] { 1, 37, -50, 127, -128 })
             {
                 var stamp = Stamp.Box((ushort)width, (ushort)height, value);
                 foreach (var scale in Scales)
                 foreach (var angle in Angles)
                 foreach (var gain in Gains)
-                    CheckCase(world, stamp, scale, angle, gain, $"box {width}x{height} v{value} s{scale} a{angle} g{gain}");
+                    CheckCase(world, stamp, scale, angle, gain,
+                        $"box {width}x{height} v{value} s{scale} a{angle} g{gain}");
                 Assert.True(Stamp.Free(stamp));
             }
         }
@@ -271,7 +278,8 @@ public sealed unsafe class KernelCacheTests
                     foreach (var scale in Scales)
                     foreach (var angle in Angles)
                     foreach (var gain in Gains)
-                        CheckCase(world, stamp, scale, angle, gain, $"raster {width}x{height} s{scale} a{angle} g{gain}");
+                        CheckCase(world, stamp, scale, angle, gain,
+                            $"raster {width}x{height} s{scale} a{angle} g{gain}");
                     Assert.True(Stamp.Free(stamp));
                 }
             }
@@ -292,14 +300,15 @@ public sealed unsafe class KernelCacheTests
             {
                 Stamp.Tent(1, 1, 60), Stamp.Tent(2, 2, -60), Stamp.Tent(3, 5, 127), Stamp.Tent(8, 8, -128),
                 Stamp.Tent(12, 7, 40), Stamp.Bell(1, 1, 60), Stamp.Bell(2, 2, -60), Stamp.Bell(3, 3, 127),
-                Stamp.Bell(6, 6, -128), Stamp.Bell(9, 4, 40), Stamp.Bell(64, 64, 90),
+                Stamp.Bell(6, 6, -128), Stamp.Bell(9, 4, 40), Stamp.Bell(64, 64, 90)
             };
             foreach (var stamp in stamps)
             {
                 foreach (var scale in Scales)
                 foreach (var angle in Angles)
                 foreach (var gain in Gains)
-                    CheckCase(world, stamp, scale, angle, gain, $"smooth {StampCatalog.Get(stamp)->Kind} s{scale} a{angle} g{gain}");
+                    CheckCase(world, stamp, scale, angle, gain,
+                        $"smooth {StampCatalog.Get(stamp)->Kind} s{scale} a{angle} g{gain}");
                 Assert.True(Stamp.Free(stamp));
             }
         }
@@ -365,7 +374,7 @@ public sealed unsafe class KernelCacheTests
                 foreach (var (cellX, cellY) in new[]
                          {
                              (0, 0), (1, 1), (0, 41), (35, 0), (Size - 1, Size - 1), (Size - 3, 40), (40, Size - 3),
-                             (Size - 20, Size - 20),
+                             (Size - 20, Size - 20)
                          })
                 foreach (var (phaseX, phaseY) in Phases)
                 {
@@ -399,15 +408,17 @@ public sealed unsafe class KernelCacheTests
             {
                 var stamp = Stamp.Box((ushort)width, (ushort)height, 37);
                 var variant = StampCatalog.Get(stamp);
-                var offsetX = (long)variant->OriginQ8X * 256 >> 8;
-                var offsetY = (long)variant->OriginQ8Y * 256 >> 8;
+                var offsetX = ((long)variant->OriginQ8X * 256) >> 8;
+                var offsetY = ((long)variant->OriginQ8Y * 256) >> 8;
                 for (var phaseX = 0; phaseX < 256; phaseX++)
                 for (var phaseY = 0; phaseY < 256; phaseY++)
                 {
                     var x = ((35 << 8) + phaseX - offsetX + 0.5f) / 256f;
                     var y = ((41 << 8) + phaseY - offsetY + 0.5f) / 256f;
-                    Assert.True(TileBake.Place(x, y, 0f, 0f, 256, Size, variant, 0, 256, Layer.Precision.Exact, out var p));
-                    Assert.True(p.Px == 35 && p.Py == 41 && p.Fx == phaseX && p.Fy == phaseY, $"{width}x{height} {phaseX},{phaseY}");
+                    Assert.True(TileBake.Place(x, y, 0f, 0f, 256, Size, variant, 0, 256, Layer.Precision.Exact,
+                        out var p));
+                    Assert.True(p.Px == 35 && p.Py == 41 && p.Fx == phaseX && p.Fy == phaseY,
+                        $"{width}x{height} {phaseX},{phaseY}");
 
                     new Span<int>(difference, TileBake.DiffRows * TileBake.DiffPitch).Clear();
                     new Span<int>(carryRow, TileBake.TileSize).Clear();
@@ -431,7 +442,9 @@ public sealed unsafe class KernelCacheTests
                     {
                         var i = 32 + column - p.Px - taps.OriginX;
                         var j = 32 + row - p.Py - taps.OriginY;
-                        var expected = i >= 0 && i < taps.Width && j >= 0 && j < taps.Height ? taps.Cells[j * taps.Width + i] * 3 : 0;
+                        var expected = i >= 0 && i < taps.Width && j >= 0 && j < taps.Height
+                            ? taps.Cells[j * taps.Width + i] * 3
+                            : 0;
                         if (expected != cells[row * 16 + column])
                             Assert.Fail(
                                 $"box {width}x{height} phase {phaseX},{phaseY}: cell ({column},{row}) expected {expected} got {cells[row * 16 + column]}");
@@ -510,9 +523,10 @@ public sealed unsafe class KernelCacheTests
                     var phaseX = (int)(seed >> 16) & 255;
                     seed = seed * 1664525u + 1013904223u;
                     var phaseY = (int)(seed >> 16) & 255;
-                    var x = ((35 << 8) + phaseX - ((long)variant->OriginQ8X * 256 >> 8) + 0.5f) / 256f;
-                    var y = ((41 << 8) + phaseY - ((long)variant->OriginQ8Y * 256 >> 8) + 0.5f) / 256f;
-                    Assert.True(TileBake.Place(x, y, 0f, 0f, 256, Size, variant, 0, 256, Layer.Precision.Exact, out var p));
+                    var x = ((35 << 8) + phaseX - (((long)variant->OriginQ8X * 256) >> 8) + 0.5f) / 256f;
+                    var y = ((41 << 8) + phaseY - (((long)variant->OriginQ8Y * 256) >> 8) + 0.5f) / 256f;
+                    Assert.True(TileBake.Place(x, y, 0f, 0f, 256, Size, variant, 0, 256, Layer.Precision.Exact,
+                        out var p));
                     new Span<long>(smooth, TileBake.TileSize * TileBake.TileSize).Clear();
                     TileBake.EmitTent(smooth, 32, 32, p.Px, p.Py, p.Fx, p.Fy, p.ExtentX, p.ExtentY, variant, gain);
                     for (var row = 0; row < TileBake.TileSize; row++)
@@ -550,8 +564,8 @@ public sealed unsafe class KernelCacheTests
             var stamp = Stamp.Box(8, 8, 90);
             var w = World.GetContext(world);
             var variant = StampCatalog.Get(stamp);
-            var x = ((35 << 8) + 128 - ((long)variant->OriginQ8X * 256 >> 8) + 0.5f) / 256f;
-            var y = ((41 << 8) + 128 - ((long)variant->OriginQ8Y * 256 >> 8) + 0.5f) / 256f;
+            var x = ((35 << 8) + 128 - (((long)variant->OriginQ8X * 256) >> 8) + 0.5f) / 256f;
+            var y = ((41 << 8) + 128 - (((long)variant->OriginQ8Y * 256) >> 8) + 0.5f) / 256f;
             Assert.True(TileBake.Place(x, y, 0f, 0f, 256, Size, variant, 0, 256, Layer.Precision.Exact, out var mid));
             Assert.True(KernelFactory.TryGetTaps(w, 0, stamp, 0, Layer.Precision.Exact, &mid, out _));
             var key = new KernelKey(stamp, mid.Sampling, 0, mid.Fx, mid.Fy, 0);
@@ -580,8 +594,9 @@ public sealed unsafe class KernelCacheTests
 
             Placement PlaceAt(int phase)
             {
-                var x = ((35L << 8) + phase - ((long)variant->OriginQ8X * 256 >> 8) + 0.5f) / 256f;
-                Assert.True(TileBake.Place(x, 41.5f, 0f, 0f, 256, Size, variant, 0, 256, Layer.Precision.Exact, out var p));
+                var x = ((35L << 8) + phase - (((long)variant->OriginQ8X * 256) >> 8) + 0.5f) / 256f;
+                Assert.True(TileBake.Place(x, 41.5f, 0f, 0f, 256, Size, variant, 0, 256, Layer.Precision.Exact,
+                    out var p));
                 return p;
             }
 
@@ -610,7 +625,8 @@ public sealed unsafe class KernelCacheTests
             Assert.True(w->Kernels.Find(lastKey.Main, lastKey.Turn) != null);
 
             var big = Stamp.Box(100, 100, 60);
-            Assert.True(TileBake.Place(300.5f, 300.5f, 0f, 0f, 256, Size, StampCatalog.Get(big), 0, 256, Layer.Precision.Exact, out var oversized));
+            Assert.True(TileBake.Place(300.5f, 300.5f, 0f, 0f, 256, Size, StampCatalog.Get(big), 0, 256,
+                Layer.Precision.Exact, out var oversized));
             Assert.True(KernelFactory.TryGetTaps(w, 0, big, 0, Layer.Precision.Exact, &oversized, out var bigTaps));
             Assert.True(bigTaps.Width > KernelCache.MaxSide || bigTaps.Height > KernelCache.MaxSide);
             var bigKey = new KernelKey(big, oversized.Sampling, 0, oversized.Fx, oversized.Fy, 0);
@@ -638,8 +654,9 @@ public sealed unsafe class KernelCacheTests
             for (var phase = 1; phase <= KernelCache.FrameInsertCap + 4; phase++)
             {
                 Assert.Equal(phase <= KernelCache.FrameInsertCap, w->Kernels.CanInsert);
-                var x = ((35L << 8) + phase - ((long)variant->OriginQ8X * 256 >> 8) + 0.5f) / 256f;
-                Assert.True(TileBake.Place(x, 41.5f, 0f, 0f, 256, Size, variant, 0, 256, Layer.Precision.Exact, out var p));
+                var x = ((35L << 8) + phase - (((long)variant->OriginQ8X * 256) >> 8) + 0.5f) / 256f;
+                Assert.True(TileBake.Place(x, 41.5f, 0f, 0f, 256, Size, variant, 0, 256, Layer.Precision.Exact,
+                    out var p));
                 Assert.False(KernelFactory.TryFindTaps(w, 0, stamp, 0, Layer.Precision.Exact, &p, out _));
                 Assert.True(KernelFactory.TryGetTaps(w, 0, stamp, 0, Layer.Precision.Exact, &p, out _));
                 Assert.True(KernelFactory.TryFindTaps(w, 0, stamp, 0, Layer.Precision.Exact, &p, out var found));
@@ -710,7 +727,7 @@ public sealed unsafe class KernelCacheTests
                 Assert.True(w->Kernels.Find(key.Main, key.Turn) == null);
                 Assert.True(KernelFactory.TryGetTaps(w, grid, stampId, angle, Layer.Precision.Exact, &p, out _));
                 Assert.True(w->Kernels.Find(key.Main, key.Turn) != null);
-                Assert.Equal(angle & 0xFFFF, (int)(key.Turn));
+                Assert.Equal(angle & 0xFFFF, (int)key.Turn);
             }
 
             CheckDistinct(a, 0, 0, 256);
@@ -734,7 +751,8 @@ public sealed unsafe class KernelCacheTests
         {
             var w = World.GetContext(world);
             var stamp = Stamp.Box(4, 4, 60);
-            Assert.True(TileBake.Place(35.5f, 41.5f, 0f, 0f, 256, Size, StampCatalog.Get(stamp), 0, 256, Layer.Precision.Exact, out var p));
+            Assert.True(TileBake.Place(35.5f, 41.5f, 0f, 0f, 256, Size, StampCatalog.Get(stamp), 0, 256,
+                Layer.Precision.Exact, out var p));
             Assert.True(KernelFactory.TryGetTaps(w, 0, stamp, 0, Layer.Precision.Exact, &p, out _));
             var key = new KernelKey(stamp, p.Sampling, 0, p.Fx, p.Fy, 0);
             Assert.True(w->Kernels.Find(key.Main, key.Turn) != null);
@@ -773,11 +791,12 @@ public sealed unsafe class KernelCacheTests
                 (StampOf(StampKind.Cone, 8, 60, 90), 0, KernelShape.Dense, Plane.Dense),
                 (Stamp.Box(4, 4, 60), 16384, KernelShape.Dense, Plane.Dense),
                 (Stamp.Tent(5, 5, 60), 8192, KernelShape.Dense, Plane.Tent),
-                (Stamp.Bell(5, 5, 60), 32768, KernelShape.Dense, Plane.Bell),
+                (Stamp.Bell(5, 5, 60), 32768, KernelShape.Dense, Plane.Bell)
             };
             foreach (var (id, angle, shape, plane) in stamps)
             {
-                Assert.True(TileBake.Place(35.5f, 41.5f, 0f, 0f, 256, Size, StampCatalog.Get(id), angle, 256, Layer.Precision.Exact, out var p));
+                Assert.True(TileBake.Place(35.5f, 41.5f, 0f, 0f, 256, Size, StampCatalog.Get(id), angle, 256,
+                    Layer.Precision.Exact, out var p));
                 Assert.True(KernelFactory.TryGetTaps(w, 0, id, angle, Layer.Precision.Exact, &p, out var taps));
                 Assert.Equal(shape, taps.Shape);
                 Assert.Equal(plane, taps.Plane);
@@ -797,15 +816,17 @@ public sealed unsafe class KernelCacheTests
     {
         var samples = new sbyte[width * height];
         for (var i = 0; i < samples.Length; i++)
-            samples[i] = (sbyte)(((i * 37) % 231) - 115);
+            samples[i] = (sbyte)(i * 37 % 231 - 115);
         return samples;
     }
 
     private static byte StampOf(StampKind kind, int radius, sbyte value, int arc)
-        => kind switch
+    {
+        return kind switch
         {
             StampKind.Disk => Stamp.Disk((ushort)radius, value, (ushort)arc),
             StampKind.Cone => Stamp.Cone((ushort)radius, value, (ushort)arc),
-            _ => Stamp.Dome((ushort)radius, value, (ushort)arc),
+            _ => Stamp.Dome((ushort)radius, value, (ushort)arc)
         };
+    }
 }

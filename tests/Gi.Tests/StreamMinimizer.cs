@@ -5,7 +5,8 @@ namespace Gi.Tests;
 
 internal static class StreamMinimizer
 {
-    public static List<StreamCommand> Minimize(StreamSetup setup, List<StreamCommand> commands, BugInjection? bug, (long I, long Q40)? fold = null)
+    public static List<StreamCommand> Minimize(StreamSetup setup, List<StreamCommand> commands, BugInjection? bug,
+        (long I, long Q40)? fold = null)
     {
         var current = new List<StreamCommand>(commands);
         var first = StreamRunner.TryRun(setup, current, bug, null, fold);
@@ -15,7 +16,9 @@ internal static class StreamMinimizer
             current = current.GetRange(0, first.CommandIndex + 1);
 
         bool Fails(List<StreamCommand> candidate)
-            => candidate.Count > 0 && StreamRunner.TryRun(setup, candidate, bug, null, fold) != null;
+        {
+            return candidate.Count > 0 && StreamRunner.TryRun(setup, candidate, bug, null, fold) != null;
+        }
 
         var granularity = 2;
         while (current.Count > 1)
@@ -57,13 +60,11 @@ internal static class StreamMinimizer
         text.AppendLine("        Grids = new[]");
         text.AppendLine("        {");
         foreach (var grid in setup.Grids)
-        {
             text.Append("            new GridSpec { Power = ").Append(grid.Power.ToString(CultureInfo.InvariantCulture))
                 .Append(", X = ").Append(FloatLiteral(grid.X))
                 .Append(", Y = ").Append(FloatLiteral(grid.Y))
                 .Append(", Size = ").Append(FloatLiteral(grid.Size))
                 .AppendLine(" },");
-        }
 
         text.AppendLine("        },");
         text.AppendLine("        Layers = new[]");
@@ -99,23 +100,17 @@ internal static class StreamMinimizer
         {
             text.Append("            new StampSpec { Kind = StampKind.").Append(stamp.Kind);
             if (stamp.Kind == StampKind.Raster)
-            {
                 text.Append(", Width = ").Append(stamp.Width.ToString(CultureInfo.InvariantCulture))
                     .Append(", Height = ").Append(stamp.Height.ToString(CultureInfo.InvariantCulture))
                     .Append(", DataSeed = ").Append(stamp.DataSeed.ToString(CultureInfo.InvariantCulture)).Append("ul");
-            }
             else if (stamp.Kind is StampKind.Box or StampKind.Tent or StampKind.Bell)
-            {
                 text.Append(", Width = ").Append(stamp.Width.ToString(CultureInfo.InvariantCulture))
                     .Append(", Height = ").Append(stamp.Height.ToString(CultureInfo.InvariantCulture))
                     .Append(", Value = ").Append(stamp.Value.ToString(CultureInfo.InvariantCulture));
-            }
             else
-            {
                 text.Append(", Radius = ").Append(stamp.Radius.ToString(CultureInfo.InvariantCulture))
                     .Append(", Arc = ").Append(stamp.Arc.ToString(CultureInfo.InvariantCulture))
                     .Append(", Value = ").Append(stamp.Value.ToString(CultureInfo.InvariantCulture));
-            }
 
             text.AppendLine(" },");
         }
@@ -127,15 +122,19 @@ internal static class StreamMinimizer
         {
             text.Append("            new StreamCommand { Op = StreamOp.").Append(command.Op);
             if (command.Op == StreamOp.Read) text.Append(", Read = ReadKind.").Append(command.Read);
-            if (command.Layer != 0) text.Append(", Layer = ").Append(command.Layer.ToString(CultureInfo.InvariantCulture));
+            if (command.Layer != 0)
+                text.Append(", Layer = ").Append(command.Layer.ToString(CultureInfo.InvariantCulture));
             if (command.Grid != 0) text.Append(", Grid = ").Append(command.Grid.ToString(CultureInfo.InvariantCulture));
-            if (command.Stamp != 0) text.Append(", Stamp = ").Append(command.Stamp.ToString(CultureInfo.InvariantCulture));
-            if (command.Handle != 0) text.Append(", Handle = ").Append(command.Handle.ToString(CultureInfo.InvariantCulture));
+            if (command.Stamp != 0)
+                text.Append(", Stamp = ").Append(command.Stamp.ToString(CultureInfo.InvariantCulture));
+            if (command.Handle != 0)
+                text.Append(", Handle = ").Append(command.Handle.ToString(CultureInfo.InvariantCulture));
             if (command.Gain != 0) text.Append(", Gain = ").Append(command.Gain.ToString(CultureInfo.InvariantCulture));
             if (command.Int0 != 0) text.Append(", Int0 = ").Append(command.Int0.ToString(CultureInfo.InvariantCulture));
             if (command.X != 0f) text.Append(", X = ").Append(FloatLiteral(command.X));
             if (command.Y != 0f) text.Append(", Y = ").Append(FloatLiteral(command.Y));
-            if (command.Aux != 0) text.Append(", Aux = ").Append(command.Aux.ToString(CultureInfo.InvariantCulture)).Append("ul");
+            if (command.Aux != 0)
+                text.Append(", Aux = ").Append(command.Aux.ToString(CultureInfo.InvariantCulture)).Append("ul");
             text.AppendLine(" },");
         }
 
@@ -151,7 +150,8 @@ internal static class StreamMinimizer
         var bits = (precision.PhaseBits, precision.TurnBits);
         if (bits == (Layer.Precision.Exact.PhaseBits, Layer.Precision.Exact.TurnBits)) return "Layer.Precision.Exact";
         if (bits == (Layer.Precision.Half.PhaseBits, Layer.Precision.Half.TurnBits)) return "Layer.Precision.Half";
-        if (bits == (Layer.Precision.Quarter.PhaseBits, Layer.Precision.Quarter.TurnBits)) return "Layer.Precision.Quarter";
+        if (bits == (Layer.Precision.Quarter.PhaseBits, Layer.Precision.Quarter.TurnBits))
+            return "Layer.Precision.Quarter";
         if (bits == (Layer.Precision.Cell.PhaseBits, Layer.Precision.Cell.TurnBits)) return "Layer.Precision.Cell";
         return $"new Layer.Precision({precision.PhaseBits}, {precision.TurnBits})";
     }
@@ -159,7 +159,9 @@ internal static class StreamMinimizer
     private static string FloatLiteral(float value)
     {
         var bits = BitConverter.SingleToInt32Bits(value);
-        var literal = bits < 0 ? $"unchecked((int)0x{bits.ToString("X8", CultureInfo.InvariantCulture)})" : $"0x{bits.ToString("X8", CultureInfo.InvariantCulture)}";
+        var literal = bits < 0
+            ? $"unchecked((int)0x{bits.ToString("X8", CultureInfo.InvariantCulture)})"
+            : $"0x{bits.ToString("X8", CultureInfo.InvariantCulture)}";
         return $"BitConverter.Int32BitsToSingle({literal})";
     }
 }

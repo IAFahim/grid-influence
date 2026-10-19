@@ -13,21 +13,31 @@ internal unsafe interface IPyramidOp<T> where T : unmanaged
 
 internal struct ShortMaxOp : IPyramidOp<short>
 {
-    public readonly bool Greater(short a, short b) => a > b;
+    public readonly bool Greater(short a, short b)
+    {
+        return a > b;
+    }
 
-    public readonly unsafe short Reduce(short* slots, int validX, int validY) => Pyramid<short, ShortMaxOp>.ReduceMax(slots, validX, validY);
+    public readonly unsafe short Reduce(short* slots, int validX, int validY)
+    {
+        return Pyramid<short, ShortMaxOp>.ReduceMax(slots, validX, validY);
+    }
 }
 
 internal struct EpochMaxOp : IPyramidOp<int>
 {
-    public readonly bool Greater(int a, int b) => a - b > 0;
+    public readonly bool Greater(int a, int b)
+    {
+        return a - b > 0;
+    }
 
     public readonly unsafe int Reduce(int* slots, int validX, int validY)
     {
         var best = slots[0];
         for (var y = 0; y < validY; y++)
         for (var x = 0; x < validX; x++)
-            if (slots[y * Pyramid<int, EpochMaxOp>.FanOut + x] - best > 0) best = slots[y * Pyramid<int, EpochMaxOp>.FanOut + x];
+            if (slots[y * Pyramid<int, EpochMaxOp>.FanOut + x] - best > 0)
+                best = slots[y * Pyramid<int, EpochMaxOp>.FanOut + x];
         return best;
     }
 }
@@ -40,23 +50,25 @@ internal unsafe struct Pyramid<T, TOp> where T : unmanaged where TOp : struct, I
     private NativeBuffer<T> _slots;
     private NativeBuffer<int> _offsets;
     private NativeBuffer<int> _sides;
-    private int _levels;
 
-    public readonly int Levels => _levels;
+    public int Levels { get; private set; }
 
     public readonly long Bytes =>
         (long)_slots.Capacity * sizeof(T) + ((long)_offsets.Capacity + _sides.Capacity) * sizeof(int);
 
-    public readonly int Side(int level) => _sides.Pointer[level];
-
     public readonly T* Node(int level, int nodeX, int nodeY)
-        => _slots.Pointer + _offsets.Pointer[level] + (nodeY * _sides.Pointer[level] + nodeX) * NodeSlots;
+    {
+        return _slots.Pointer + _offsets.Pointer[level] + (nodeY * _sides.Pointer[level] + nodeX) * NodeSlots;
+    }
 
-    public readonly int ChildSide(int level, int tilesPerSide) => level == 0 ? tilesPerSide : _sides.Pointer[level - 1];
+    public readonly int ChildSide(int level, int tilesPerSide)
+    {
+        return level == 0 ? tilesPerSide : _sides.Pointer[level - 1];
+    }
 
     public void Ensure(int tilesPerSide)
     {
-        if (_levels > 0) return;
+        if (Levels > 0) return;
 
         var side = (tilesPerSide + FanOut - 1) >> 3;
         var total = 0;
@@ -75,7 +87,7 @@ internal unsafe struct Pyramid<T, TOp> where T : unmanaged where TOp : struct, I
 
         _slots.Resize(total);
         new Span<T>(_slots.Pointer, total).Clear();
-        _levels = level;
+        Levels = level;
     }
 
     public void Reset()
@@ -83,12 +95,12 @@ internal unsafe struct Pyramid<T, TOp> where T : unmanaged where TOp : struct, I
         _slots.Free();
         _offsets.Free();
         _sides.Free();
-        _levels = 0;
+        Levels = 0;
     }
 
     public void Update(int tilesPerSide, int tile, T leaf)
     {
-        if (_levels == 0) Ensure(tilesPerSide);
+        if (Levels == 0) Ensure(tilesPerSide);
 
         var op = default(TOp);
         var tx = tile % tilesPerSide;
@@ -99,13 +111,13 @@ internal unsafe struct Pyramid<T, TOp> where T : unmanaged where TOp : struct, I
         var childSide = tilesPerSide;
         var value = leaf;
         var old = Node(0, nodeX, nodeY)[slot];
-        for (var level = 0; ; level++)
+        for (var level = 0;; level++)
         {
             var target = Node(level, nodeX, nodeY);
             if (!op.Greater(old, value) && !op.Greater(value, old)) return;
 
             target[slot] = value;
-            if (level == _levels - 1) return;
+            if (level == Levels - 1) return;
 
             var parentSlot = (nodeY & 7) * FanOut + (nodeX & 7);
             var parent = Node(level + 1, nodeX >> 3, nodeY >> 3) + parentSlot;
@@ -164,7 +176,8 @@ internal unsafe struct Pyramid<T, TOp> where T : unmanaged where TOp : struct, I
         {
             var row = slots + y * FanOut;
             for (var x = 0; x < vx; x++)
-                if (row[x] > best) best = row[x];
+                if (row[x] > best)
+                    best = row[x];
         }
 
         return best;

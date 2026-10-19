@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.CompilerServices;
 #if NET
 using System.Runtime.Intrinsics;
@@ -175,7 +176,6 @@ internal unsafe struct GridCtx
     public float OriginX;
     public float OriginY;
     public float WorldSize;
-    public float Scale;
     public int ScaleQ8;
     public int TilesPerSide;
     public int TileCount;
@@ -252,7 +252,7 @@ public static unsafe partial class World
     private const int MaxGain = ValidationRules.MaxGain;
     private const ushort UnitScale = 256;
     internal const int MaxSourceSlots = 1 << 24;
-    internal const int Cells = TileBake.TileSize * TileBake.TileSize;
+    private const int Cells = TileBake.TileSize * TileBake.TileSize;
     internal const int PageBytes = Cells * sizeof(short);
 
     private static int _worldCount;
@@ -269,7 +269,8 @@ public static unsafe partial class World
     private static byte ReserveSlot()
     {
         for (var i = 0; i < _worldCount; i++)
-            if (Runtime.Worlds[i].Grids == null) return (byte)i;
+            if (Runtime.Worlds[i].Grids == null)
+                return (byte)i;
 
         if (_worldCount >= MaxWorlds) throw new InvalidOperationException("World limit reached.");
 
@@ -310,67 +311,23 @@ public static unsafe partial class World
         return true;
     }
 
-    public static int Revision(byte world) => world < _worldCount ? Runtime.WorldRevisions[world] : 0;
+    public static int Revision(byte world)
+    {
+        return world < _worldCount ? Runtime.WorldRevisions[world] : 0;
+    }
 
     public static bool Teardown()
     {
         if (Runtime.Worlds == null) return true;
 
         for (var i = 0; i < _worldCount; i++)
-            if (Runtime.Worlds[i].Grids != null) return false;
+            if (Runtime.Worlds[i].Grids != null)
+                return false;
 
         StampCatalog.Release();
         Runtime.Release();
         _worldCount = 0;
         return true;
-    }
-
-    public readonly struct SourceId : IEquatable<SourceId>
-    {
-        public readonly uint Slot;
-        public readonly uint Generation;
-
-        public SourceId(uint slot, uint generation)
-        {
-            Slot = slot;
-            Generation = generation;
-        }
-
-        public bool Equals(SourceId other) => Slot == other.Slot && Generation == other.Generation;
-
-        public override bool Equals(object? obj) => obj is SourceId other && Equals(other);
-
-        public override int GetHashCode() => (int)(Slot * 31u ^ Generation);
-
-        public override string ToString()
-            => "slot " + Slot.ToString(System.Globalization.CultureInfo.InvariantCulture) +
-               " generation " + Generation.ToString(System.Globalization.CultureInfo.InvariantCulture);
-
-        public static bool operator ==(SourceId left, SourceId right) => left.Equals(right);
-
-        public static bool operator !=(SourceId left, SourceId right) => !left.Equals(right);
-    }
-
-    public readonly struct SourceSpec
-    {
-        public readonly float X;
-        public readonly float Y;
-        public readonly float HeadingRadians;
-        public readonly float Scale;
-        public readonly sbyte Gain;
-        public readonly byte Layer;
-        public readonly byte Stamp;
-
-        internal SourceSpec(float x, float y, float headingRadians, float scale, sbyte gain, byte layer, byte stamp)
-        {
-            X = x;
-            Y = y;
-            HeadingRadians = headingRadians;
-            Scale = scale;
-            Gain = gain;
-            Layer = layer;
-            Stamp = stamp;
-        }
     }
 
     public static bool TryGetSourceSpec(byte world, SourceId source, out SourceSpec spec)
@@ -405,7 +362,8 @@ public static unsafe partial class World
     public static void ProcessAll()
     {
         for (var i = 0; i < _worldCount; i++)
-            if ((Runtime.Worlds + i)->Grids != null) Process((byte)i);
+            if ((Runtime.Worlds + i)->Grids != null)
+                Process((byte)i);
     }
 
     internal static int GridCount(byte world)
@@ -459,12 +417,12 @@ public static unsafe partial class World
 
     private static void FreeGrid(GridCtx* g, int layerCount)
     {
-        for (var l = 0; l < layerCount; l++) FreeLayer(g, g->Layers + l);
+        for (var l = 0; l < layerCount; l++) FreeLayer(g->Layers + l);
         NativeHeap.Free(g->Layers);
         g->Records.Free();
     }
 
-    private static void FreeLayer(GridCtx* g, LayerData* ld)
+    private static void FreeLayer(LayerData* ld)
     {
         ld->Sets.Reset();
         ld->Store.Reset();
@@ -478,7 +436,7 @@ public static unsafe partial class World
         ld->Hash = 0;
         if (ld->Hist != null)
         {
-            ld->Hist->Release(g->TileCount);
+            ld->Hist->Release();
             NativeHeap.Free(ld->Hist);
             ld->Hist = null;
         }
@@ -497,7 +455,8 @@ public static unsafe partial class World
         if (!ValidationRules.IsGridSize(size)) throw new ArgumentOutOfRangeException(nameof(size));
         if (!ValidationRules.IsGridOrigin(x)) throw new ArgumentOutOfRangeException(nameof(x));
         if (!ValidationRules.IsGridOrigin(y)) throw new ArgumentOutOfRangeException(nameof(y));
-        if (!ValidationRules.TryGridScaleQ8(power, size, out var scaleQ8)) throw new ArgumentOutOfRangeException(nameof(size));
+        if (!ValidationRules.TryGridScaleQ8(power, size, out var scaleQ8))
+            throw new ArgumentOutOfRangeException(nameof(size));
 
         var w = GetContext(world);
         if (w == null) throw new ArgumentOutOfRangeException(nameof(world));
@@ -509,7 +468,6 @@ public static unsafe partial class World
         g->OriginX = x;
         g->OriginY = y;
         g->WorldSize = size;
-        g->Scale = g->Size / size;
         g->ScaleQ8 = scaleQ8;
         g->TilesPerSide = g->Size >> TileBake.TileBits;
         g->TileCount = g->TilesPerSide * g->TilesPerSide;
@@ -565,13 +523,13 @@ public static unsafe partial class World
             TurnMask = precision.TurnMask,
             AnchorMask = precision.AnchorMask,
             Reads = 1u << id,
-            Transient = (byte)(transient ? 1 : 0),
+            Transient = (byte)(transient ? 1 : 0)
         };
         return (byte)id;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static Layer.Precision LayerPrecision(WorldCtx* w, byte layer)
+    private static Layer.Precision LayerPrecision(WorldCtx* w, byte layer)
     {
         var r = w->Recipes + layer;
         return new Layer.Precision(r->PhaseBits, r->TurnBits);
@@ -585,8 +543,10 @@ public static unsafe partial class World
         {
             var g = w->Grids + gi;
             if (g->ScaleQ8 == 0) continue;
-            var dx = TileBake.AnchorQ8(oldX, g->OriginX, g->ScaleQ8, mask) ^ TileBake.AnchorQ8(newX, g->OriginX, g->ScaleQ8, mask);
-            var dy = TileBake.AnchorQ8(oldY, g->OriginY, g->ScaleQ8, mask) ^ TileBake.AnchorQ8(newY, g->OriginY, g->ScaleQ8, mask);
+            var dx = TileBake.AnchorQ8(oldX, g->OriginX, g->ScaleQ8, mask) ^
+                     TileBake.AnchorQ8(newX, g->OriginX, g->ScaleQ8, mask);
+            var dy = TileBake.AnchorQ8(oldY, g->OriginY, g->ScaleQ8, mask) ^
+                     TileBake.AnchorQ8(newY, g->OriginY, g->ScaleQ8, mask);
             if ((dx | dy) != 0) return true;
         }
 
@@ -594,13 +554,18 @@ public static unsafe partial class World
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static bool AngleChanged(WorldCtx* w, byte layer, ushort oldAngle, ushort newAngle)
-        => w->GridCount > 0 && ((oldAngle ^ newAngle) & w->Recipes[layer].TurnMask) != 0;
+    private static bool AngleChanged(WorldCtx* w, byte layer, ushort oldAngle, ushort newAngle)
+    {
+        return w->GridCount > 0 && ((oldAngle ^ newAngle) & w->Recipes[layer].TurnMask) != 0;
+    }
 
     public static SourceId Place(byte world, byte layer, float x, float y, byte stamp, sbyte gain)
-        => Place(world, layer, x, y, stamp, gain, out _);
+    {
+        return Place(world, layer, x, y, stamp, gain, out _);
+    }
 
-    public static SourceId Place(byte world, byte layer, float x, float y, byte stamp, sbyte gain, out WriteStatus status)
+    public static SourceId Place(byte world, byte layer, float x, float y, byte stamp, sbyte gain,
+        out WriteStatus status)
     {
         var id = default(SourceId);
         var w = GetContext(world);
@@ -608,9 +573,10 @@ public static unsafe partial class World
         else if (IsTransient(w, layer)) status = WriteStatus.WrongResidency;
         else if (!StampCatalog.Valid(stamp) || !FootprintFits(w, stamp, UnitScale)) status = WriteStatus.InvalidStamp;
         else if (!float.IsFinite(x) || !float.IsFinite(y)) status = WriteStatus.NonFinite;
-        else status = PlaceSlot(w, layer, x, y, stamp, gain, out id) == SourceResultStatus.Applied
-            ? WriteStatus.Applied
-            : WriteStatus.CapacityReached;
+        else
+            status = PlaceSlot(w, layer, x, y, stamp, gain, out id) == SourceResultStatus.Applied
+                ? WriteStatus.Applied
+                : WriteStatus.CapacityReached;
         return id;
     }
 
@@ -805,7 +771,8 @@ public static unsafe partial class World
             var w = Runtime.Worlds + wi;
             var s = &w->Sources;
             for (var i = 0; i < s->Count; i++)
-                if (s->Alive[i] != 0 && s->Stamp[i] == stamp) return true;
+                if (s->Alive[i] != 0 && s->Stamp[i] == stamp)
+                    return true;
             if (References(w->Pending, stamp) || References(w->Journal, stamp)) return true;
         }
 
@@ -824,7 +791,8 @@ public static unsafe partial class World
     private static bool References(NativeBuffer<JournalEntry> entries, byte stamp)
     {
         for (var i = 0; i < entries.Length; i++)
-            if (entries.Pointer[i].Stamp == stamp) return true;
+            if (entries.Pointer[i].Stamp == stamp)
+                return true;
         return false;
     }
 
@@ -874,7 +842,7 @@ public static unsafe partial class World
         return set;
     }
 
-    internal static void DropPage(LayerData* ld, int tile)
+    private static void DropPage(LayerData* ld, int tile)
     {
         var index = ld->Directory[tile];
         if (index < 0) return;
@@ -886,7 +854,7 @@ public static unsafe partial class World
         ld->LivePages--;
     }
 
-    internal static int DirtyIndex(GridCtx* g, LayerData* ld, int tile)
+    private static int DirtyIndex(GridCtx* g, LayerData* ld, int tile)
     {
         EnsureEpochs(g, ld);
         var index = ld->InDirty[tile];
@@ -901,17 +869,20 @@ public static unsafe partial class World
             X0 = TileBake.TileSize,
             Y0 = TileBake.TileSize,
             X1 = 0,
-            Y1 = 0,
+            Y1 = 0
         };
         ld->InDirty[tile] = n + 1;
         return n;
     }
 
-    private static void MarkDirty(GridCtx* g, LayerData* ld, int tile) => DirtyIndex(g, ld, tile);
+    private static void MarkDirty(GridCtx* g, LayerData* ld, int tile)
+    {
+        DirtyIndex(g, ld, tile);
+    }
 
-    #if NET
+#if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    #endif
+#endif
     public static void Process(byte world)
     {
         var w = GetContext(world);
@@ -985,9 +956,9 @@ public static unsafe partial class World
         return page[(y & (TileBake.TileSize - 1)) * TileBake.TileSize + (x & (TileBake.TileSize - 1))];
     }
 
-    #if NET
+#if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    #endif
+#endif
     public static long Query(byte world, byte grid, byte layer, int x, int y, int width, int height)
     {
         var w = GetContext(world);
@@ -1045,9 +1016,9 @@ public static unsafe partial class World
         return sum;
     }
 
-    #if NET
+#if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    #endif
+#endif
     private static long PartialSum(short* page, int lx0, int ly0, int lx1, int ly1)
     {
 #if NET
@@ -1111,9 +1082,9 @@ public static unsafe partial class World
         return sum;
     }
 
-    #if NET
+#if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    #endif
+#endif
     public static void QueryRegion(
         byte world, byte grid, byte layer, int x, int y, int width, int height, short* destination)
     {
@@ -1123,7 +1094,7 @@ public static unsafe partial class World
         var g = w->Grids + grid;
         var ld = g->Layers + layer;
         var tps = g->TilesPerSide;
-        var mask = TileBake.TileSize - 1;
+        const int mask = TileBake.TileSize - 1;
 
         var row = 0;
         while (row < height)
@@ -1220,22 +1191,6 @@ public static unsafe partial class World
         for (var i = 0; i < count; i++) destination[i] = 0;
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static Vector128<short> LoadShorts(short* p)
-    {
-        if (Sse2.IsSupported) return Sse2.LoadVector128(p);
-        return AdvSimd.LoadVector128(p);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void StoreShorts(short* p, Vector128<short> v)
-    {
-        if (Sse2.IsSupported) Sse2.Store(p, v);
-        else AdvSimd.Store(p, v);
-    }
-#endif
-
     public static short QueryAt(byte world, byte grid, byte layer, float x, float y)
     {
         var w = GetContext(world);
@@ -1315,4 +1270,85 @@ public static unsafe partial class World
             Buffer.MemoryCopy(changed.Pointer, destination, (long)count * sizeof(int), (long)count * sizeof(int));
         return count;
     }
+
+    public readonly struct SourceId : IEquatable<SourceId>
+    {
+        public readonly uint Slot;
+        public readonly uint Generation;
+
+        public SourceId(uint slot, uint generation)
+        {
+            Slot = slot;
+            Generation = generation;
+        }
+
+        public bool Equals(SourceId other)
+        {
+            return Slot == other.Slot && Generation == other.Generation;
+        }
+
+        public override bool Equals(object? obj)
+        {
+            return obj is SourceId other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            return (int)((Slot * 31u) ^ Generation);
+        }
+
+        public override string ToString()
+        {
+            return "slot " + Slot.ToString(CultureInfo.InvariantCulture) +
+                   " generation " + Generation.ToString(CultureInfo.InvariantCulture);
+        }
+
+        public static bool operator ==(SourceId left, SourceId right)
+        {
+            return left.Equals(right);
+        }
+
+        public static bool operator !=(SourceId left, SourceId right)
+        {
+            return !left.Equals(right);
+        }
+    }
+
+    public readonly struct SourceSpec
+    {
+        public readonly float X;
+        public readonly float Y;
+        public readonly float HeadingRadians;
+        public readonly float Scale;
+        public readonly sbyte Gain;
+        public readonly byte Layer;
+        public readonly byte Stamp;
+
+        internal SourceSpec(float x, float y, float headingRadians, float scale, sbyte gain, byte layer, byte stamp)
+        {
+            X = x;
+            Y = y;
+            HeadingRadians = headingRadians;
+            Scale = scale;
+            Gain = gain;
+            Layer = layer;
+            Stamp = stamp;
+        }
+    }
+
+#if NET
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector128<short> LoadShorts(short* p)
+    {
+        if (Sse2.IsSupported) return Sse2.LoadVector128(p);
+        return AdvSimd.LoadVector128(p);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void StoreShorts(short* p, Vector128<short> v)
+    {
+        if (Sse2.IsSupported) Sse2.Store(p, v);
+        else AdvSimd.Store(p, v);
+    }
+#endif
 }
