@@ -33,6 +33,7 @@ namespace Gi.Entities.Editor
         public void Select(string ecsWorld)
         {
             DropReplay();
+            _recorder = null;
             EcsWorld = ecsWorld;
             var info = ecsWorld == null ? null : GiInspectorBoard.Find(ecsWorld);
             HasWorld = info != null && info.Alive;
@@ -102,6 +103,14 @@ namespace Gi.Entities.Editor
         {
             _diff.Clear();
             if (!HasWorld) return 0;
+
+            GiRuntime.CompleteAll();
+            _recorder = GiRecorderGate.Find(GiWorldId);
+            if (_recorder == null)
+            {
+                Message = "Nothing is recorded.";
+                return 0;
+            }
 
             if (!_recorder.TryWindow(out _, out var last)) return 0;
 

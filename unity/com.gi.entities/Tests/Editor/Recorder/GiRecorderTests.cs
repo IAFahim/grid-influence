@@ -120,6 +120,19 @@ namespace Gi.Entities.Editor.Tests
         }
 
         [Test]
+        public void CompareWithLiveBeforeAnythingWasRecordedReturnsZero()
+        {
+            using var fixture = Fixture("RecordNone");
+            fixture.Frame1();
+            using var model = new GiRecorderModel();
+            model.Select("RecordNone");
+            Assert.That(model.HasWorld, Is.True);
+            Assert.That(Recorder(fixture), Is.Null);
+            Assert.That(model.CompareWithLive(), Is.EqualTo(0));
+            Assert.That(model.Message, Is.EqualTo("Nothing is recorded."));
+        }
+
+        [Test]
         public void TheModelScrubsComparesExportsAndSaves()
         {
             GiDebugConfig.RecordTicks.Data = 200;
