@@ -52,11 +52,35 @@ public sealed class ProbeTests
                 Assert.Equal(maxOk, max.Ok);
 
                 var nearest = GiProbe.Run(Request(GiProbeKind.Nearest, setup, layer, x, y, reach, threshold));
-                GiWorld.TrySenseNearest(setup.World, setup.Layers[layer], x, y, reach, threshold, out var near, out var nx, out var ny);
+                var nearestOk = GiWorld.TrySenseNearest(setup.World, setup.Layers[layer], x, y, reach, threshold, out var near, out var nx, out var ny);
                 Assert.Equal((near, nx, ny), (nearest.Value, nearest.PositionX, nearest.PositionY));
-                Assert.Equal(near != short.MinValue, nearest.Ok);
+                Assert.Equal(nearestOk && near != short.MinValue, nearest.Ok);
             }
         }
+    }
+
+    [Fact]
+    public void ANearestProbeIsOkOnlyWhenTheDiskIsWholeAndSomethingWasFound()
+    {
+        using var setup = GiScenarioWorld.Create(GiScenarioProfile.Standard());
+        GiWorld.Place(setup.World, setup.Layers[0], 12f, 12f, setup.Stamps[0], 8);
+        GiWorld.Process(setup.World);
+        GiWorld.Process(setup.World);
+
+        var wholeFound = GiProbe.Run(Request(GiProbeKind.Nearest, setup, 0, 30f, 30f, 26f, 1));
+        Assert.True(GiWorld.TrySenseNearest(setup.World, setup.Layers[0], 30f, 30f, 26f, 1, out var found, out _, out _));
+        Assert.NotEqual(short.MinValue, found);
+        Assert.True(wholeFound.Ok);
+
+        var clippedFound = GiProbe.Run(Request(GiProbeKind.Nearest, setup, 0, 4f, 4f, 12f, 1));
+        Assert.False(GiWorld.TrySenseNearest(setup.World, setup.Layers[0], 4f, 4f, 12f, 1, out var near, out _, out _));
+        Assert.NotEqual(short.MinValue, near);
+        Assert.False(clippedFound.Ok);
+
+        var wholeMissed = GiProbe.Run(Request(GiProbeKind.Nearest, setup, 0, 55f, 55f, 5f, 1));
+        Assert.True(GiWorld.TrySenseNearest(setup.World, setup.Layers[0], 55f, 55f, 5f, 1, out var missed, out _, out _));
+        Assert.Equal(short.MinValue, missed);
+        Assert.False(wholeMissed.Ok);
     }
 
     [Fact]

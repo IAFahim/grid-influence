@@ -58,9 +58,8 @@ namespace Gi.Entities
                         out result.PositionX, out result.PositionY);
                     break;
                 default:
-                    GiWorld.TrySenseNearest(request.World, request.Layer, request.X, request.Y, request.Reach, request.Threshold, out result.Value,
-                        out result.PositionX, out result.PositionY);
-                    result.Ok = result.Value != short.MinValue;
+                    result.Ok = GiWorld.TrySenseNearest(request.World, request.Layer, request.X, request.Y, request.Reach, request.Threshold,
+                        out result.Value, out result.PositionX, out result.PositionY) && result.Value != short.MinValue;
                     break;
             }
 
