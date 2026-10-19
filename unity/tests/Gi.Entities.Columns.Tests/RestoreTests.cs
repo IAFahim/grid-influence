@@ -125,7 +125,9 @@ public sealed class RestoreTests
             for (var from = -16; from <= 16; from++)
             for (var to = -16; to <= 16; to++)
             {
-                ids.Add(GiWorld.Place(world, setup.Layers[0], 4f + (index % 33) * 1.75f, 4f + (index / 33) * 1.75f, setup.Stamps[0], (sbyte)from));
+                var row = index / 33;
+                var column = index % 33;
+                ids.Add(GiWorld.Place(world, setup.Layers[0], 4f + column * 1.75f, 4f + row * 1.75f, setup.Stamps[0], (sbyte)from));
                 plans[index] = ((sbyte)from, (sbyte)to);
                 index++;
             }

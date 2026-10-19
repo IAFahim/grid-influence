@@ -223,7 +223,7 @@ public static unsafe partial class World
         {
             var g = w->Grids + gi;
             size += 4 + (long)SnapshotRecordBytes * s->Count;
-            for (var l = 0; l < w->LayerCount; l++) size += SnapshotLayerBytes(w, g, l);
+            for (var l = 0; l < w->LayerCount; l++) size += SnapshotLayerBytes(g, l);
         }
 
         return size > int.MaxValue ? 0 : (int)size;
@@ -273,7 +273,7 @@ public static unsafe partial class World
         return count;
     }
 
-    private static long SnapshotLayerBytes(WorldCtx* w, GridCtx* g, int layer)
+    private static long SnapshotLayerBytes(GridCtx* g, int layer)
     {
         var ld = g->Layers + layer;
         var derived = ld->Derived != 0;
@@ -419,11 +419,11 @@ public static unsafe partial class World
         for (var gi = 0; gi < w->GridCount; gi++)
         {
             var g = w->Grids + gi;
-            for (var l = 0; l < w->LayerCount; l++) WriteLayerSnapshot(w, g, l, summary, ref writer);
+            for (var l = 0; l < w->LayerCount; l++) WriteLayerSnapshot(g, l, summary, ref writer);
         }
     }
 
-    private static void WriteLayerSnapshot(WorldCtx* w, GridCtx* g, int layer, byte* summaryBytes, ref SnapshotWriter writer)
+    private static void WriteLayerSnapshot(GridCtx* g, int layer, byte* summaryBytes, ref SnapshotWriter writer)
     {
         var ld = g->Layers + layer;
         var derived = ld->Derived != 0;
@@ -461,10 +461,10 @@ public static unsafe partial class World
                 writer.I64(set->BoundB);
                 writer.I32(ld->Epochs != null ? ld->Epochs[tile] : 0);
                 writer.Copy((byte*)summary, TileSummary.Bytes);
-                writer.Copy((byte*)ld->Store.Pages.Unit(set->Page), PlaneStore.PageUnit);
-                if (!derived) writer.Copy((byte*)ld->Store.Int32Planes.Unit(set->I), PlaneStore.Int32Unit);
-                if (set->T >= 0) writer.Copy((byte*)ld->Store.Int64Planes.Unit(set->T), PlaneStore.Int64Unit);
-                if (set->B >= 0) writer.Copy((byte*)ld->Store.Int64Planes.Unit(set->B), PlaneStore.Int64Unit);
+                writer.Copy(ld->Store.Pages.Unit(set->Page), PlaneStore.PageUnit);
+                if (!derived) writer.Copy(ld->Store.Int32Planes.Unit(set->I), PlaneStore.Int32Unit);
+                if (set->T >= 0) writer.Copy(ld->Store.Int64Planes.Unit(set->T), PlaneStore.Int64Unit);
+                if (set->B >= 0) writer.Copy(ld->Store.Int64Planes.Unit(set->B), PlaneStore.Int64Unit);
                 if (summary->CarryI != 0) writer.Copy((byte*)ld->Store.Wide(summary->CarryI), PlaneStore.Int64Unit);
                 if (summary->HighT != 0) writer.Copy((byte*)ld->Store.Wide(summary->HighT), PlaneStore.Int64Unit);
                 if (summary->LowT != 0) writer.Copy((byte*)ld->Store.Wide(summary->LowT), PlaneStore.Int64Unit);
@@ -580,9 +580,18 @@ public static unsafe partial class World
             if (!reader.I32(out var records) || records != slots) return false;
             for (var i = 0; i < records; i++)
             {
-                if (!reader.Byte(out _) || !reader.Byte(out _) || !reader.I8(out _) || !reader.Byte(out _)) return false;
-                if (!reader.U16(out _) || !reader.U16(out _)) return false;
-                if (!reader.I32(out _) || !reader.I32(out _)) return false;
+                if (!reader.Byte(out var layer) || !reader.Byte(out var stamp) || !reader.I8(out var recordGain) ||
+                    !reader.Byte(out var alive)) return false;
+                if (!reader.U16(out var angle) || !reader.U16(out var scale)) return false;
+                if (!reader.I32(out var ax) || !reader.I32(out var ay)) return false;
+                if (layer >= layerCount) return false;
+                if (alive == 0)
+                {
+                    if ((layer | stamp | (byte)recordGain | alive | angle | scale | ax | ay) != 0) return false;
+                    continue;
+                }
+
+                if (!ValidationRules.IsGain(recordGain) || usage[stamp] == 0) return false;
             }
         }
 
@@ -805,13 +814,13 @@ public static unsafe partial class World
         for (var gi = 0; gi < gridCount; gi++)
         {
             var g = w->Grids + gi;
-            for (var l = 0; l < layerCount; l++) RestoreLayer(w, g, l, summary, ref reader);
+            for (var l = 0; l < layerCount; l++) RestoreLayer(g, l, summary, ref reader);
         }
 
         RebuildTimed(w);
     }
 
-    private static void RestoreLayer(WorldCtx* w, GridCtx* g, int layer, byte* summaryBytes, ref SnapshotReader reader)
+    private static void RestoreLayer(GridCtx* g, int layer, byte* summaryBytes, ref SnapshotReader reader)
     {
         var ld = g->Layers + layer;
         var derived = ld->Derived != 0;
@@ -841,8 +850,8 @@ public static unsafe partial class World
             set->BoundT = boundT;
             set->BoundB = boundB;
             set->Stale = stale;
-            reader.Copy((byte*)ld->Store.Pages.Unit(set->Page), PlaneStore.PageUnit);
-            if ((flags & SnapshotHasI) != 0) reader.Copy((byte*)ld->Store.Int32Planes.Unit(set->I), PlaneStore.Int32Unit);
+            reader.Copy(ld->Store.Pages.Unit(set->Page), PlaneStore.PageUnit);
+            if ((flags & SnapshotHasI) != 0) reader.Copy(ld->Store.Int32Planes.Unit(set->I), PlaneStore.Int32Unit);
             if ((flags & SnapshotHasT) != 0) reader.Copy((byte*)ld->Store.EnsureT(ref *set), PlaneStore.Int64Unit);
             if ((flags & SnapshotHasB) != 0) reader.Copy((byte*)ld->Store.EnsureB(ref *set), PlaneStore.Int64Unit);
             if (summary->CarryI != 0)

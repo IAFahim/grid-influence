@@ -64,10 +64,10 @@ internal static unsafe class StampCatalog
 
     private static ulong Mix(ulong hash, int value)
     {
-        hash = (hash ^ (ulong)(byte)value) * TileHash.Prime;
-        hash = (hash ^ (ulong)(byte)(value >> 8)) * TileHash.Prime;
-        hash = (hash ^ (ulong)(byte)(value >> 16)) * TileHash.Prime;
-        hash = (hash ^ (ulong)(byte)(value >> 24)) * TileHash.Prime;
+        hash = (hash ^ (ulong)(value & 0xFF)) * TileHash.Prime;
+        hash = (hash ^ (ulong)((value >> 8) & 0xFF)) * TileHash.Prime;
+        hash = (hash ^ (ulong)((value >> 16) & 0xFF)) * TileHash.Prime;
+        hash = (hash ^ (ulong)((value >> 24) & 0xFF)) * TileHash.Prime;
         return hash;
     }
 

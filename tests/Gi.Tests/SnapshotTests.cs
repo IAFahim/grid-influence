@@ -24,7 +24,7 @@ public unsafe class SnapshotTests
             var cell = Layer.New(a, Layer.Precision.Cell);
             var transient = Layer.New(a, Layer.Residency.Transient, Layer.Precision.Cell);
             var sum = Layer.Sum(a, exact, 1, cell, 1);
-            var mask = Layer.Mask(a, sum, cell, -20, 20);
+            Layer.Mask(a, sum, cell, -20, 20);
 
             var ids = new List<World.SourceId>();
             var setup = new Random(seed);
