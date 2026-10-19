@@ -50,10 +50,14 @@ namespace Gi.Entities
             var conflict = write
                 ? Interlocked.Add(ref _state[world], WriterBit) != WriterBit
                 : Interlocked.Increment(ref _state[world]) >= WriterBit;
-            var previous = Volatile.Read(ref _holder[world]);
+            if (conflict)
+            {
+                Report(world, tag, Volatile.Read(ref _holder[world]), write);
+                return false;
+            }
+
             Volatile.Write(ref _holder[world], tag);
-            if (conflict) Report(world, tag, previous, write);
-            return !conflict;
+            return true;
         }
 
         public void End(byte world, bool write)

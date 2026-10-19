@@ -134,6 +134,26 @@ public sealed unsafe class GuardTests
     }
 
     [Fact]
+    public void AConflictDoesNotOverwriteTheHoldersTag()
+    {
+        var table = new GiGuardTable();
+        var t = &table;
+        Assert.True(t->Begin(6, Process, true));
+        Assert.False(t->Begin(6, Rogue, true));
+        Assert.True(t->Take(out var first));
+        Assert.Equal(Process, first.Holder);
+        t->End(6, true);
+
+        Assert.False(t->Begin(6, Sense, false));
+        Assert.True(t->Take(out var second));
+        Assert.Equal(Sense, second.Intruder);
+        Assert.Equal(Process, second.Holder);
+        t->End(6, false);
+        t->End(6, true);
+        Assert.True(t->Idle(6));
+    }
+
+    [Fact]
     public void EveryBeginIsBalancedByAnEndEvenAfterAConflict()
     {
         var table = new GiGuardTable();
