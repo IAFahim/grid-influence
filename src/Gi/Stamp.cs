@@ -42,6 +42,35 @@ internal static unsafe class StampCatalog
 
     internal static bool Valid(byte id) => id != 0 && id < _count && Runtime.Stamps[id].Live != 0;
 
+    internal static ulong Fingerprint(byte id)
+    {
+        var v = Runtime.Stamps + id;
+        var hash = TileHash.Offset;
+        hash = Mix(hash, (byte)v->Kind);
+        hash = Mix(hash, v->Width);
+        hash = Mix(hash, v->Height);
+        hash = Mix(hash, v->Pitch);
+        hash = Mix(hash, v->OriginQ8X);
+        hash = Mix(hash, v->OriginQ8Y);
+        hash = Mix(hash, v->Constant);
+        hash = Mix(hash, v->Arc);
+        if (v->Data == null) return hash;
+
+        var bordered = v->Data - v->Pitch - 1;
+        var end = bordered + (long)v->Pitch * (v->Height + 2);
+        for (var p = bordered; p < end; p++) hash = (hash ^ (ulong)*p) * TileHash.Prime;
+        return hash;
+    }
+
+    private static ulong Mix(ulong hash, int value)
+    {
+        hash = (hash ^ (ulong)(byte)value) * TileHash.Prime;
+        hash = (hash ^ (ulong)(byte)(value >> 8)) * TileHash.Prime;
+        hash = (hash ^ (ulong)(byte)(value >> 16)) * TileHash.Prime;
+        hash = (hash ^ (ulong)(byte)(value >> 24)) * TileHash.Prime;
+        return hash;
+    }
+
     public static bool Free(byte id)
     {
         if (!Valid(id) || World.UsesStamp(id)) return false;

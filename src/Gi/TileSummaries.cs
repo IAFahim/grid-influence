@@ -8,7 +8,7 @@ namespace Gi;
 
 internal static unsafe partial class TileBake
 {
-    private static void UpdateSummaries(PlaneCells t, int x0, int y0, int x1, int y1)
+    internal static void UpdateSummaries(PlaneCells t, int x0, int y0, int x1, int y1)
     {
         if (y1 <= y0) return;
 

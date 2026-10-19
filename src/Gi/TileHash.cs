@@ -2,8 +2,8 @@ namespace Gi;
 
 internal static unsafe class TileHash
 {
-    private const ulong Offset = 0xcbf29ce484222325ul;
-    private const ulong Prime = 0x100000001b3ul;
+    internal const ulong Offset = 0xcbf29ce484222325ul;
+    internal const ulong Prime = 0x100000001b3ul;
 
     internal static ulong Of(int tile, short* page)
     {

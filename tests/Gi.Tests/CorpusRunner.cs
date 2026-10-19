@@ -24,17 +24,21 @@ internal sealed unsafe class CorpusRunner
     private short[] _rect = [];
     private CorpusHash _frameReads;
     private int _frames;
+    private readonly Func<byte, byte>? _swap;
+    private readonly int _swapFrame;
 
-    private CorpusRunner(StreamSetup setup, TextWriter output)
+    private CorpusRunner(StreamSetup setup, TextWriter output, Func<byte, byte>? swap, int swapFrame)
     {
         _setup = setup;
         _output = output;
         _frameReads = new CorpusHash(CorpusHash.Offset);
+        _swap = swap;
+        _swapFrame = swapFrame;
     }
 
-    public static void Run(StreamSetup setup, string mode, TextWriter output)
+    public static void Run(StreamSetup setup, string mode, TextWriter output, Func<byte, byte>? swap = null, int swapFrame = 5)
     {
-        new CorpusRunner(setup, output).Execute(mode);
+        new CorpusRunner(setup, output, swap, swapFrame).Execute(mode);
     }
 
     private void Execute(string mode)
@@ -171,6 +175,7 @@ internal sealed unsafe class CorpusRunner
                         World.Process(_world);
                         _frames++;
                         WriteFrameLine();
+                        if (_swap != null && _frames >= _swapFrame) _world = _swap(_world);
                         break;
                     case StreamOp.Read:
                         ExecuteRead(command);
