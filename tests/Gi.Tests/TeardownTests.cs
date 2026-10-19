@@ -3,18 +3,18 @@ using Xunit;
 
 namespace Gi.Tests;
 
-public sealed unsafe partial class TeardownTests
+public sealed unsafe class TeardownTests
 {
     private const int OpenReadOnly = 0;
 
-    [LibraryImport("libc", EntryPoint = "open", SetLastError = true)]
-    private static partial int Open(byte* path, int flags);
+    [DllImport("libc", SetLastError = true)]
+    private static extern int open(byte* path, int flags);
 
-    [LibraryImport("libc", EntryPoint = "read", SetLastError = true)]
-    private static partial int Read(int descriptor, byte* buffer, nuint count);
+    [DllImport("libc", SetLastError = true)]
+    private static extern int read(int descriptor, byte* buffer, nuint count);
 
-    [LibraryImport("libc", EntryPoint = "close", SetLastError = true)]
-    private static partial int Close(int descriptor);
+    [DllImport("libc", SetLastError = true)]
+    private static extern int close(int descriptor);
 
     private static int ResidentSetKb()
     {
@@ -24,14 +24,14 @@ public sealed unsafe partial class TeardownTests
         path[text.Length] = 0;
 
         var buffer = stackalloc byte[4096];
-        var descriptor = Open(path, OpenReadOnly);
+        var descriptor = open(path, OpenReadOnly);
         if (descriptor < 0) throw new InvalidOperationException("Cannot read /proc/self/status.");
 
         var total = 0;
         int readCount;
-        while (total < 4096 && (readCount = Read(descriptor, buffer + total, (nuint)(4096 - total))) > 0)
+        while (total < 4096 && (readCount = read(descriptor, buffer + total, (nuint)(4096 - total))) > 0)
             total += readCount;
-        _ = Close(descriptor);
+        _ = close(descriptor);
 
         var span = new ReadOnlySpan<byte>(buffer, total);
         var marker = "VmRSS:"u8;

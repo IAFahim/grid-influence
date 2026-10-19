@@ -4,7 +4,7 @@ using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using System.Text;
 
-internal static partial class FloorProbes
+internal static class FloorProbes
 {
     private static readonly Registration[] Suites =
     [
@@ -222,8 +222,8 @@ internal static partial class FloorProbes
         return builder.ToString().Trim();
     }
 
-    [LibraryImport("libc", EntryPoint = "sched_getcpu")]
-    private static partial int SchedGetCpuNative();
+    [DllImport("libc", EntryPoint = "sched_getcpu")]
+    private static extern int SchedGetCpuNative();
 
     private static int SchedGetCpu()
     {
