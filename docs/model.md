@@ -509,6 +509,40 @@ before reading command payloads, writing
   rebuilds the timed list: pending fades and expiries resume with exactly the remaining time they had
   at the checkpoint, and a rewound world re-simulates tick for tick like a twin that never left
   it.
+- **Snapshot**: `World.SnapshotSize(world)` returns the exact byte count of a snapshot, and
+  `World.TrySnapshot(world, destination, out written)` writes one into a caller-supplied buffer —
+  both are O(state) arithmetic and blits with zero managed allocation. Capture is only defined on a
+  quiescent world: no mutation since the last `Process` (the pending list is empty) and not
+  recording, so derived layers are folded and there is no journal to carry; anything else returns 0
+  or `false`. The format (`GISN`, version 1, little-endian) stores the semantic state verbatim:
+  the tick and mark epoch, the fold limits, the grid specs (power, origin, world size) and the
+  recipe table, every source column up to the slot high-water mark including dead slots — so
+  generations, retired `uint.MaxValue` slots and the free ring's rebuild are exact — the fade and
+  expire schedules with their absolute anchors, the per-grid deposit records that make the next
+  sweep a pure delta, and for every live tile its bounds, published page, `I`/`T`/`B` planes, wide
+  carry planes, summary, epoch, and the transient deferred-clear byte and list. Stamps are stored
+  as `(id, fingerprint)` pairs — an FNV-1a over the variant's kind, extents, origins, constant,
+  arc and bordered raster — so a restore demands the same stamp content alive in the process
+  catalog under the same id and refuses on drift instead of silently mis-emitting. Caches are
+  never serialized: the directory, tile sets, tile hashes and layer hash (recomputed as the XOR
+  fold, equal to the capture-time hash by construction), the base tiles' page-derived summary
+  fields (sum, row sums and maxima, max and argmax, recomputed from the restored page so no
+  scan ever trusts summary bytes off the wire; derived summaries stay verbatim because `Derive`
+  writes them straight from `Combine` and publish never scans them), both pyramids (leaf-fed
+  from summaries and epochs), the histogram state, the kernel cache and the timed list are
+  rebuilt on load, and
+  the free ring is rebuilt canonically exactly like `Rewind`'s. `World.TryRestore(world, data)`
+  requires an empty world — no grids, no layers, no source chunks — and runs two passes: a
+  validation walk that bounds-checks every count and index against the remaining buffer and the
+  recomputed grid geometry (strictly ascending live, changed and sparse-epoch tile lists reject
+  duplicates; alive sources must sit on base non-transient layers and reference a fingerprinted
+  stamp), then an apply pass that replays `AddGrid`/`AddLayer`, overwrites the recipes verbatim,
+  restores the columns and planes, and rebuilds the caches — so a rejected restore leaves the
+  target world untouched and no malformed buffer can move the apply past a checked read. The
+  restored world keeps its tick and epochs, so `Changed(since)` answers across the boundary and
+  in-flight fades and expiries fire on the same ticks as the world it was captured from; its
+  revision is bumped like any rewind. Snapshots are pinned to little-endian hosts, the same
+  stance as the tile-hash word order.
 - **Field view**: `World.View(world, grid, layer)` returns a `World.FieldView`, a `ref struct`
   over one (grid, layer) directory and its published pages, in cell coordinates. `view[x, y]` is
   one bounds test, one tile-index compare against a cached tile and one `int16` load (0 outside
@@ -1228,6 +1262,30 @@ digits. Concurrency: single thread.
   and the gradient fast path reads `at ± 1` and `at ± 32` only when the local cell is in
   `[1, 30]²` of its page, so no load leaves the 32×32 page. *Concurrency*: none beyond the
   serial-per-world rule; readers never share a view.
+- **Snapshot**: *Lifetime*: the reader and writer cursors are `ref struct`s over the caller's
+  span, alive only inside the call; no engine pointer is stored into the buffer and no buffer
+  pointer outlives the call. The apply pass allocates every slab unit, directory, epoch array,
+  tile-hash table and dirty mirror through the world's own allocators, so the restored state is
+  owned exactly like state built by `Process`; nothing references the input buffer after the
+  call returns. *Aliasing*: the writer reads engine memory and writes only the destination span;
+  the reader treats the input as read-only. Engine state lives on the native heap and the caller
+  supplies an external span, so the two cannot overlap; the one copy that touches both — a
+  summary blitted through a 256 B stack scratch to remap its five wide-plane handles to the
+  freshly taken slab indices — never aliases, because the scratch is a local and the source and
+  destination of each copy are distinct allocations. *Alignment*: the cursor sits at arbitrary
+  byte offsets, so every scalar goes through explicit little-endian `BinaryPrimitives`
+  reads/writes and every plane, summary and record block moves as a byte-span `CopyTo` — no
+  value is ever reinterpreted at the cursor's alignment. The restored planes themselves are
+  properly allocated slab units, so nothing realigned leaks into the engine. *Bounds*: each
+  cursor read checks the remaining length before it advances, counts are checked against the
+  recomputed tile counts, layer, grid, stamp and slot limits, and the live, changed and
+  sparse-epoch tile lists must be strictly ascending, so a forged count can neither walk past
+  the buffer nor alias two tiles onto one directory slot; validation completes before the first
+  engine mutation, so a rejected restore allocates nothing and leaves the target world's
+  zeroed state untouched. *Concurrency*: the same serial-per-world rule as every other `World`
+  call; the only process-global reads are the stamp catalog lookups the fingerprints were
+  checked against. *Finite inputs*: a restore rejects non-finite source coordinates exactly as
+  the write paths do.
 - **Aliasing**: each tile's planes are written by emissions and published in place on the
   calling thread; `I`, `T` and `B` writes land on their own tile, and publish's `tentOut` and
   `bellOut` rows are stack-allocated per call; sources are read-only during emissions of other

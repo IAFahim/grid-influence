@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.0.0-alpha.3 (unreleased)
+
+### Added
+
+* **Snapshots.** `World.SnapshotSize(world)` and `World.TrySnapshot(world, destination, out
+  written)` serialize a whole world — grid specs, layer recipes, every source column including
+  dead slots and generations, fade/expire schedules, deposit records, live-tile planes and
+  summaries, change epochs, and the transient deferred-clear state — into a caller-supplied
+  little-endian buffer (`GISN` version 1) with zero managed allocation. Capture requires a
+  quiescent world: no mutation since the last `Process` and not recording. `World.TryRestore(world,
+  data)` rebuilds that state into an empty world: two passes (validate, then apply) so a malformed
+  or tampered buffer never half-mutates the target and never throws, hashes recomputed to equal the
+  capture-time values, in-flight fades and expiries resuming on their original ticks, `Changed(since)`
+  answering across the boundary, and the free ring rebuilt canonically like `Rewind`'s. Stamps are
+  carried as id + content fingerprint; a restore refuses if the live catalog's stamp under that id
+  was baked differently. Sample: `samples/world` `Rollback`.
+
 ## 2.0.0-alpha.1 (unreleased)
 
 The engine is rebuilt around change-rate work: `Process` re-emits only the sources whose snapped

@@ -7,6 +7,7 @@ BestSpot();
 VisionCone();
 ScentTrail();
 NearestFood();
+Rollback();
 return 0;
 
 void AggroRange()
@@ -148,4 +149,42 @@ void NearestFood()
     World.TrySenseNearest(w, food, 64f, 64f, 60f, 10, out var any, out var ax, out var ay);
     World.TrySenseNearest(w, food, 64f, 64f, 60f, 50, out var rich, out var rx, out var ry);
     Console.WriteLine($"nearest food >= 10: {any} at ({ax},{ay}); nearest food >= 50: {rich} at ({rx},{ry})");
+}
+
+void Rollback()
+{
+    Console.WriteLine("== undo a whole fight with a snapshot ==");
+    var w = World.New();
+    var g = Grid.New(w, power: 7, x: 0f, y: 0f, size: 128f);
+    var threat = Layer.New(w);
+    var alarm = Stamp.Disk(6, 30);
+    var guard = World.Place(w, threat, 64f, 64f, alarm, 8);
+    World.Process(w);
+
+    var snapshot = new byte[World.SnapshotSize(w)];
+    World.TrySnapshot(w, snapshot, out _);
+    var captured = World.LayerHash(w, g, threat);
+
+    World.Move(w, guard, 96f, 96f);
+    World.Fade(w, guard, 2, ticks: 10);
+    World.Process(w);
+    World.Process(w);
+
+    var undo = World.New();
+    World.TryRestore(undo, snapshot);
+    Console.WriteLine($"tick {World.Tick(w)} after the fight: alarm {World.QueryAt(w, g, threat, 64f, 64f)} at the start, " +
+        $"{World.QueryAt(w, g, threat, 96f, 96f)} where it moved");
+    Console.WriteLine($"tick {World.Tick(undo)} restored: alarm {World.QueryAt(undo, g, threat, 64f, 64f)} at the start, " +
+        $"{World.QueryAt(undo, g, threat, 96f, 96f)} where it moved, hash matches capture: " +
+        $"{World.LayerHash(undo, g, threat) == captured}");
+
+    World.Move(undo, guard, 96f, 96f);
+    World.Fade(undo, guard, 2, ticks: 10);
+    World.Process(undo);
+    World.Process(undo);
+    Console.WriteLine($"the fight replayed from the snapshot ends identically: " +
+        $"{World.QueryAt(undo, g, threat, 96f, 96f)} here, {World.QueryAt(undo, g, threat, 64f, 64f)} at the start");
+    World.Free(w);
+    World.Free(undo);
+    Stamp.Free(alarm);
 }
