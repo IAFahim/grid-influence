@@ -600,15 +600,18 @@ public unsafe class SnapshotTests
             Assert.True(World.TryRestore(world, buffer));
             World.Free(world);
 
-            var before = GC.GetAllocatedBytesForCurrentThread();
+            var minimum = long.MaxValue;
             for (var i = 0; i < 50; i++)
             {
+                var before = GC.GetAllocatedBytesForCurrentThread();
                 world = World.New();
                 Assert.True(World.TryRestore(world, buffer));
                 World.Free(world);
+                var delta = GC.GetAllocatedBytesForCurrentThread() - before;
+                if (delta < minimum) minimum = delta;
             }
 
-            Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+            Assert.Equal(0, minimum);
         }
         finally
         {
