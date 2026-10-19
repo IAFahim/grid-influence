@@ -16,6 +16,8 @@ namespace Gi.Entities.Editor
 
         private static GiOverlaySettings _settings;
 
+        private static readonly Vector3[] Quad = new Vector3[4];
+
         static GiSceneOverlay()
         {
             SceneView.duringSceneGui += Draw;
@@ -62,10 +64,14 @@ namespace Gi.Entities.Editor
                 var grid = settings.Grid < info.Grids.Length ? info.Grids[settings.Grid] : null;
                 if (grid == null) continue;
 
-                if (settings.GridBounds) DrawGrids(info);
-                if (settings.Heatmap) DrawHeatmap(info, grid, settings);
-                if (settings.Footprints) DrawFootprints(info, settings);
-                if (settings.ReachDiscs) DrawReaches(info);
+                var world = GiOverlayWorld(info);
+                var frame = FrameOf(world);
+                var axes = frame?.Plane.Axes ?? GiPlaneAxes.Xz;
+
+                if (settings.GridBounds) DrawGrids(info, axes);
+                if (settings.Heatmap) DrawHeatmap(frame, grid, settings, axes);
+                if (settings.Footprints) DrawFootprints(world, axes, settings);
+                if (settings.ReachDiscs) DrawReaches(world, axes);
             }
         }
 
@@ -74,9 +80,8 @@ namespace Gi.Entities.Editor
             return axes == GiPlaneAxes.Xz ? new Vector3(plane.x, 0f, plane.y) : new Vector3(plane.x, plane.y, 0f);
         }
 
-        private static void DrawGrids(GiWorldInfo info)
+        private static void DrawGrids(GiWorldInfo info, GiPlaneAxes axes)
         {
-            var axes = Axes(info);
             Handles.color = new Color(0.1f, 0.5f, 0.8f, 0.8f);
             foreach (var grid in info.Grids)
             {
@@ -88,52 +93,45 @@ namespace Gi.Entities.Editor
             }
         }
 
-        private static void DrawHeatmap(GiWorldInfo info, GiGridInfo grid, GiOverlaySettings settings)
+        private static void DrawHeatmap(GiFrame? frame, GiGridInfo grid, GiOverlaySettings settings, GiPlaneAxes axes)
         {
-            var axes = Axes(info);
+            if (frame == null || !frame.Value.Alive || !frame.Value.Tables.TryLayer(new GiLayerKey((byte)settings.Layer), out var layer)) return;
+
             var step = grid.Size / Lattice;
+            var half = step * 0.5f;
             for (var row = 0; row < Lattice; row++)
             for (var column = 0; column < Lattice; column++)
             {
                 var x = grid.X + (column + 0.5f) * step;
                 var y = grid.Y + (row + 0.5f) * step;
-                var value = Sample(info, settings.Layer, x, y);
+                global::Gi.World.TrySense(frame.Value.World, layer, x, y, out var value);
                 if (value == 0) continue;
 
                 var t = Mathf.Clamp(value / settings.ValueScale, -1f, 1f);
                 var color = t >= 0f ? Color.Lerp(Color.white, new Color(0.90f, 0.45f, 0.05f), t) : Color.Lerp(Color.white, new Color(0.05f, 0.35f, 0.75f), -t);
                 color.a = 0.55f;
-                var half = step * 0.5f;
-                var verts = new[]
-                {
-                    Embed(new Vector2(x - half, y - half), axes), Embed(new Vector2(x + half, y - half), axes),
-                    Embed(new Vector2(x + half, y + half), axes), Embed(new Vector2(x - half, y + half), axes),
-                };
-                Handles.DrawSolidRectangleWithOutline(verts, color, Color.clear);
+                Quad[0] = Embed(new Vector2(x - half, y - half), axes);
+                Quad[1] = Embed(new Vector2(x + half, y - half), axes);
+                Quad[2] = Embed(new Vector2(x + half, y + half), axes);
+                Quad[3] = Embed(new Vector2(x - half, y + half), axes);
+                Handles.DrawSolidRectangleWithOutline(Quad, color, Color.clear);
             }
         }
 
-        private static short Sample(GiWorldInfo info, int layerKey, float x, float y)
+        private static GiFrame? FrameOf(Unity.Entities.World world)
         {
-            var world = GiOverlayWorld(info);
-            if (world == null) return 0;
+            if (world == null) return null;
 
             using var query = world.EntityManager.CreateEntityQuery(ComponentType.ReadOnly<GiFrame>());
-            if (query.IsEmptyIgnoreFilter) return 0;
+            if (query.IsEmptyIgnoreFilter) return null;
 
-            var frame = world.EntityManager.GetComponentData<GiFrame>(query.GetSingletonEntity());
-            if (!frame.Alive || !frame.Tables.TryLayer(new GiLayerKey((byte)layerKey), out var layer)) return 0;
-
-            global::Gi.World.TrySense(frame.World, layer, x, y, out var value);
-            return value;
+            return world.EntityManager.GetComponentData<GiFrame>(query.GetSingletonEntity());
         }
 
-        private static void DrawReaches(GiWorldInfo info)
+        private static void DrawReaches(Unity.Entities.World world, GiPlaneAxes axes)
         {
-            var world = GiOverlayWorld(info);
             if (world == null) return;
 
-            var axes = Axes(info);
             var normal = axes == GiPlaneAxes.Xz ? Vector3.up : Vector3.forward;
             foreach (var draw in GiOverlayModel.Reaches(world, GiOverlaySelection.Entities(world)))
             {
@@ -153,9 +151,8 @@ namespace Gi.Entities.Editor
             }
         }
 
-        private static void DrawFootprints(GiWorldInfo info, GiOverlaySettings settings)
+        private static void DrawFootprints(Unity.Entities.World world, GiPlaneAxes axes, GiOverlaySettings settings)
         {
-            var world = GiOverlayWorld(info);
             if (world == null) return;
 
             var profile = FindProfile();
@@ -174,7 +171,6 @@ namespace Gi.Entities.Editor
                 selected = GiOverlaySelection.Entities(world);
             }
 
-            var axes = Axes(info);
             Handles.color = new Color(0.9f, 0.2f, 0.2f, 0.9f);
             foreach (var draw in GiOverlayModel.Footprints(world, profile.ToSpec(), selected))
             {
@@ -189,15 +185,6 @@ namespace Gi.Entities.Editor
                 if (authoring.Profile != null)
                     return authoring.Profile;
             return null;
-        }
-
-        private static GiPlaneAxes Axes(GiWorldInfo info)
-        {
-            var world = GiOverlayWorld(info);
-            if (world == null) return GiPlaneAxes.Xz;
-
-            using var query = world.EntityManager.CreateEntityQuery(ComponentType.ReadOnly<GiFrame>());
-            return query.IsEmptyIgnoreFilter ? GiPlaneAxes.Xz : world.EntityManager.GetComponentData<GiFrame>(query.GetSingletonEntity()).Plane.Axes;
         }
 
         private static Unity.Entities.World GiOverlayWorld(GiWorldInfo info)
