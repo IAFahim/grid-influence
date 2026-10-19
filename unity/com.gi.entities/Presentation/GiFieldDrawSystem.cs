@@ -635,7 +635,7 @@ namespace Gi.Entities.Presentation
                 if (!tables.TryStamp(stamp, out var handle) || !GiStamp.TryGetSpec(handle, out var spec)) return 0.5f;
                 return spec.StampShape == GiStamp.Shape.Disk || spec.StampShape == GiStamp.Shape.Cone ||
                        spec.StampShape == GiStamp.Shape.Dome
-                    ? math.max(1f, spec.Width)
+                    ? math.max(1f, spec.Width * 0.5f)
                     : math.max(1f, spec.Width + spec.Height) * 0.5f;
             }
         }
