@@ -29,7 +29,7 @@ namespace Gi.Entities.Presentation
 
         private struct GiFieldBindingDraw
         {
-            public TypeIndex Type;
+            public DynamicComponentTypeHandle Data;
             public int Size;
             public ushort Offset;
             public byte Kind;
@@ -45,6 +45,8 @@ namespace Gi.Entities.Presentation
         private NativeList<GiFieldBindingDraw> _bindingDraws;
         private EntityQuery _profiles;
         private EntityQuery _sources;
+        private ComponentTypeHandle<LocalTransform> _transforms;
+        private ComponentTypeHandle<GiSource> _sourceHandle;
         private ComponentLookup<GiFieldDrawStats> _stats;
         private ulong _builtHash;
         private uint _generation;
@@ -70,6 +72,8 @@ namespace Gi.Entities.Presentation
             _bindingDraws = new NativeList<GiFieldBindingDraw>(8, Allocator.Persistent);
             _profiles = state.GetEntityQuery(ComponentType.ReadOnly<GiProfileReference>());
             _sources = state.GetEntityQuery(ComponentType.ReadOnly<LocalTransform>(), ComponentType.ReadOnly<GiSource>());
+            _transforms = state.GetComponentTypeHandle<LocalTransform>(true);
+            _sourceHandle = state.GetComponentTypeHandle<GiSource>(true);
             _stats = state.GetComponentLookup<GiFieldDrawStats>();
             _resync = true;
             state.RequireForUpdate<GiFrame>();
@@ -175,6 +179,8 @@ namespace Gi.Entities.Presentation
             var normal = NormalOf(frame.Plane);
             var lift = LiftOf(frame.Plane, GiDebugConfig.DrawHeight.Data);
             var handle = state.Dependency;
+            _transforms.Update(ref state);
+            _sourceHandle.Update(ref state);
 
             if (hasLayer)
             {
@@ -224,8 +230,8 @@ namespace Gi.Entities.Presentation
                     Drawer = drawer,
                     Culling = culling,
                     CullingOther = cullingOther,
-                    Transforms = state.GetComponentTypeHandle<LocalTransform>(true),
-                    Sources = state.GetComponentTypeHandle<GiSource>(true),
+                    Transforms = _transforms,
+                    Sources = _sourceHandle,
                     Tables = frame.Tables,
                     Plane = frame.Plane,
                     Lift = lift,
@@ -237,20 +243,19 @@ namespace Gi.Entities.Presentation
 
             if (GiDebugConfig.DrawBindings.Data)
             {
-                var transforms = state.GetComponentTypeHandle<LocalTransform>(true);
                 for (var i = 0; i < _bindingDraws.Length; i++)
                 {
-                    var binding = _bindingDraws[i];
+                    ref var binding = ref _bindingDraws.ElementAt(i);
                     if (_bindingQueries[i].IsEmptyIgnoreFilter) continue;
 
-                    var data = state.EntityManager.GetDynamicComponentTypeHandle(ComponentType.ReadOnly(binding.Type));
+                    binding.Data.Update(ref state);
                     handle = new GiFieldDrawBindingsJob
                     {
                         Drawer = drawer,
                         Culling = culling,
                         CullingOther = cullingOther,
-                        Transforms = transforms,
-                        Data = data,
+                        Transforms = _transforms,
+                        Data = binding.Data,
                         TypeSize = binding.Size,
                         Kind = binding.Kind,
                         Offset = binding.Offset,
@@ -352,7 +357,7 @@ namespace Gi.Entities.Presentation
                     ComponentType.ReadOnly(type), ComponentType.ReadOnly<LocalTransform>()));
                 _bindingDraws.Add(new GiFieldBindingDraw
                 {
-                    Type = type,
+                    Data = state.GetDynamicComponentTypeHandle(ComponentType.ReadOnly(type)),
                     Size = info.TypeSize,
                     Offset = field.Offset,
                     Kind = (byte)spec.Kind,
