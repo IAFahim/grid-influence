@@ -415,15 +415,14 @@ public static unsafe partial class World
             }
         }
 
-        var summary = stackalloc byte[TileSummary.Bytes];
         for (var gi = 0; gi < w->GridCount; gi++)
         {
             var g = w->Grids + gi;
-            for (var l = 0; l < w->LayerCount; l++) WriteLayerSnapshot(g, l, summary, ref writer);
+            for (var l = 0; l < w->LayerCount; l++) WriteLayerSnapshot(g, l, ref writer);
         }
     }
 
-    private static void WriteLayerSnapshot(GridCtx* g, int layer, byte* summaryBytes, ref SnapshotWriter writer)
+    private static void WriteLayerSnapshot(GridCtx* g, int layer, ref SnapshotWriter writer)
     {
         var ld = g->Layers + layer;
         var derived = ld->Derived != 0;
