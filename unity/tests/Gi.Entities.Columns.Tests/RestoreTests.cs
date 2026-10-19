@@ -113,6 +113,42 @@ public sealed class RestoreTests
     }
 
     [Fact]
+    public void TheEngineFadeGainEqualsTheRestoreStaircaseOverTheWholeGainRange()
+    {
+        foreach (var ticks in new[] { 1, 2, 3, 5, 8, 13, 64 })
+        {
+            using var setup = GiScenarioWorld.Create(Profile());
+            var world = setup.World;
+            var ids = new List<GiWorld.SourceId>();
+            var plans = new (sbyte From, sbyte To)[33 * 33];
+            var index = 0;
+            for (var from = -16; from <= 16; from++)
+            for (var to = -16; to <= 16; to++)
+            {
+                ids.Add(GiWorld.Place(world, setup.Layers[0], 4f + (index % 33) * 1.75f, 4f + (index / 33) * 1.75f, setup.Stamps[0], (sbyte)from));
+                plans[index] = ((sbyte)from, (sbyte)to);
+                index++;
+            }
+
+            for (var i = 0; i < ids.Count; i++)
+                Assert.Equal(GiWorld.WriteStatus.Applied, GiWorld.Fade(world, ids[i], plans[i].To, ticks));
+
+            for (var elapsed = 0; elapsed <= ticks; elapsed++)
+            {
+                for (var i = 0; i < ids.Count; i++)
+                {
+                    Assert.True(GiWorld.TryGetSourceSpec(world, ids[i], out var spec));
+                    var staircase = GiRestoreDriver.Staircase(plans[i].From, plans[i].To, ticks, elapsed);
+                    Assert.True(staircase == spec.Gain,
+                        $"ticks {ticks} from {plans[i].From} to {plans[i].To} elapsed {elapsed} engine {spec.Gain} staircase {staircase}");
+                }
+
+                if (elapsed < ticks) GiWorld.Process(world);
+            }
+        }
+    }
+
+    [Fact]
     public void TheStaircaseMatchesTheDocumentedRounding()
     {
         Assert.Equal((sbyte)0, GiRestoreDriver.Staircase(0, 0, 5, 3));
