@@ -628,6 +628,194 @@ public unsafe class SnapshotTests
     }
 
     [Fact]
+    public void RestoreRejectsAliveColumnsAndRecordsOnDerivedLayers()
+    {
+        var stamp = Stamp.Box(3, 3, 40);
+        var a = World.New();
+        Grid.New(a, 5, 0f, 0f, 32f);
+        var layer = Layer.New(a);
+        Layer.Sum(a, layer, 1, layer, 1);
+        World.Place(a, layer, 16f, 16f, stamp, 8);
+        World.Process(a);
+        var buffer = Snapshot(a);
+        var b = World.New();
+        try
+        {
+            Rejects(buffer, b, data => data[162] = 1);
+            Rejects(buffer, b, data => data[132] = 1);
+            Assert.True(World.TryRestore(b, buffer));
+        }
+        finally
+        {
+            World.Free(b);
+            World.Free(a);
+            Stamp.Free(stamp);
+        }
+    }
+
+    [Fact]
+    public void RestoreRejectsMarkEpochZero()
+    {
+        var stamp = Stamp.Box(3, 3, 40);
+        var a = World.New();
+        Grid.New(a, 5, 0f, 0f, 32f);
+        var layer = Layer.New(a);
+        World.Place(a, layer, 16f, 16f, stamp, 8);
+        World.Process(a);
+        var buffer = Snapshot(a);
+        var b = World.New();
+        try
+        {
+            Rejects(buffer, b, data => System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(12, 4), 0));
+            Assert.True(World.TryRestore(b, buffer));
+        }
+        finally
+        {
+            World.Free(b);
+            World.Free(a);
+            Stamp.Free(stamp);
+        }
+    }
+
+    [Fact]
+    public void RestorePinsFoldLimitsToTheEngineRange()
+    {
+        var stamp = Stamp.Box(3, 3, 40);
+        var a = World.New();
+        Grid.New(a, 5, 0f, 0f, 32f);
+        var layer = Layer.New(a);
+        World.Place(a, layer, 16f, 16f, stamp, 8);
+        World.Process(a);
+        var buffer = Snapshot(a);
+        var b = World.New();
+        try
+        {
+            Rejects(buffer, b,
+                data => System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(data.AsSpan(16, 8), long.MaxValue));
+            Rejects(buffer, b,
+                data => System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(data.AsSpan(16, 8), -1));
+            Rejects(buffer, b,
+                data => System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(data.AsSpan(24, 8), (1L << 62) + 1));
+            Assert.True(World.TryRestore(b, buffer));
+        }
+        finally
+        {
+            World.Free(b);
+            World.Free(a);
+            Stamp.Free(stamp);
+        }
+    }
+
+    [Fact]
+    public void RestoreRejectsAliveRecordsOnTransientLayers()
+    {
+        var stamp = Stamp.Box(3, 3, 40);
+        var a = World.New();
+        Grid.New(a, 5, 0f, 0f, 32f);
+        var layer = Layer.New(a);
+        var transient = Layer.New(a, Layer.Residency.Transient, Layer.Precision.Cell);
+        World.Place(a, layer, 16f, 16f, stamp, 8);
+        World.Process(a);
+        var buffer = Snapshot(a);
+        var b = World.New();
+        try
+        {
+            Rejects(buffer, b, data => data[162] = transient);
+            Assert.True(World.TryRestore(b, buffer));
+        }
+        finally
+        {
+            World.Free(b);
+            World.Free(a);
+            Stamp.Free(stamp);
+        }
+    }
+
+    [Fact]
+    public void RestoreRejectsImpossibleReadsMasks()
+    {
+        var stamp = Stamp.Box(3, 3, 40);
+        var a = World.New();
+        Grid.New(a, 5, 0f, 0f, 32f);
+        var layer = Layer.New(a);
+        Layer.Sum(a, layer, 2, layer, 0);
+        World.Place(a, layer, 16f, 16f, stamp, 8);
+        World.Process(a);
+        var buffer = Snapshot(a);
+        var b = World.New();
+        try
+        {
+            Rejects(buffer, b, data => System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(92, 4), 0));
+            Rejects(buffer, b,
+                data => System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(92, 4), uint.MaxValue));
+            Assert.True(World.TryRestore(b, buffer));
+        }
+        finally
+        {
+            World.Free(b);
+            World.Free(a);
+            Stamp.Free(stamp);
+        }
+    }
+
+    [Fact]
+    public void RestoreRejectsSparsePairsNamingLiveTiles()
+    {
+        var stamp = Stamp.Box(3, 3, 40);
+        var a = World.New();
+        Grid.New(a, 6, 0f, 0f, 64f);
+        var layer = Layer.New(a);
+        var gone = World.Place(a, layer, 16f, 16f, stamp, 8);
+        World.Place(a, layer, 48f, 48f, stamp, 8);
+        World.Process(a);
+        World.Remove(a, gone);
+        World.Process(a);
+        var buffer = Snapshot(a);
+        SectionLayout(buffer, 0, 0, out var firstTile, out var pairs);
+        var b = World.New();
+        try
+        {
+            Rejects(buffer, b, data =>
+            {
+                var liveTile = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(firstTile, 4));
+                System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(pairs + 4, 4), liveTile);
+            });
+            Assert.True(World.TryRestore(b, buffer));
+        }
+        finally
+        {
+            World.Free(b);
+            World.Free(a);
+            Stamp.Free(stamp);
+        }
+    }
+    [Fact]
+    public void RestoreRejectsDerivedSummariesThatLieAboutTheirPage()
+    {
+        var stamp = Stamp.Box(3, 3, 40);
+        var a = World.New();
+        Grid.New(a, 5, 0f, 0f, 32f);
+        var layer = Layer.New(a);
+        var sum = Layer.Sum(a, layer, 2, layer, 0);
+        World.Place(a, layer, 16f, 16f, stamp, 8);
+        World.Process(a);
+        var buffer = Snapshot(a);
+        SectionLayout(buffer, 0, sum, out var firstTile, out _);
+        var b = World.New();
+        try
+        {
+            Rejects(buffer, b, data =>
+                System.Buffers.Binary.BinaryPrimitives.WriteInt16LittleEndian(data.AsSpan(firstTile + 38, 2), short.MaxValue));
+            Assert.True(World.TryRestore(b, buffer));
+        }
+        finally
+        {
+            World.Free(b);
+            World.Free(a);
+            Stamp.Free(stamp);
+        }
+    }
+    [Fact]
     public void RestoringAnySingleByteCorruptionNeverThrows()
     {
         var buffer = SmallWorldSnapshot(out var a, out var stamp);
@@ -737,6 +925,66 @@ public unsafe class SnapshotTests
         return buffer;
     }
 
+    private static void SectionLayout(
+        byte[] buffer, int targetGrid, int targetLayer, out int firstTile, out int pairs)
+    {
+        var summary = stackalloc byte[TileSummary.Bytes];
+        var reader = new SnapshotReader(buffer);
+        reader.U32(out _);
+        reader.U16(out _);
+        reader.Byte(out var layers);
+        reader.Byte(out var grids);
+        reader.Skip(24);
+        reader.Skip(32 * layers);
+        reader.Skip(13 * grids);
+        reader.Byte(out var stamps);
+        reader.Skip(9 * stamps);
+        reader.I32(out var slots);
+        reader.Skip(35 * slots);
+        for (var gi = 0; gi < grids; gi++)
+        {
+            reader.I32(out var records);
+            reader.Skip(16 * records);
+        }
+
+        firstTile = -1;
+        pairs = -1;
+        for (var gi = 0; gi < grids; gi++)
+        for (var l = 0; l < layers; l++)
+        {
+            reader.Byte(out _);
+            reader.I32(out var live);
+            if (gi == targetGrid && l == targetLayer) firstTile = reader.Position;
+            for (var i = 0; i < live; i++)
+            {
+                reader.U32(out _);
+                reader.Byte(out var flags);
+                reader.Byte(out _);
+                reader.Skip(24);
+                reader.Copy(summary, TileSummary.Bytes);
+                var handles = (TileSummary*)summary;
+                var planes = PlaneStore.PageUnit;
+                if ((flags & 1) != 0) planes += PlaneStore.Int32Unit;
+                if ((flags & 2) != 0) planes += PlaneStore.Int64Unit;
+                if ((flags & 4) != 0) planes += PlaneStore.Int64Unit;
+                if (handles->CarryI != 0) planes += PlaneStore.Int64Unit;
+                if (handles->HighT != 0) planes += PlaneStore.Int64Unit;
+                if (handles->LowT != 0) planes += PlaneStore.Int64Unit;
+                if (handles->HighB != 0) planes += PlaneStore.Int64Unit;
+                if (handles->LowB != 0) planes += PlaneStore.Int64Unit;
+                reader.Skip(planes);
+            }
+
+            reader.I32(out var changed);
+            reader.Skip(4 * changed);
+            reader.I32(out var stale);
+            reader.Skip(4 * stale);
+            if (gi == targetGrid && l == targetLayer) pairs = reader.Position;
+            reader.I32(out var pairCount);
+            reader.Skip(8 * pairCount);
+        }
+    }
+
     private static void Rejects(byte[] buffer, byte target, Action<byte[]> corrupt)
     {
         var data = buffer.ToArray();
@@ -777,4 +1025,6 @@ public unsafe class SnapshotTests
             Assert.Equal((xA, yA), (xB, yB));
         }
     }
+
+
 }

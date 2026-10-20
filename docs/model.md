@@ -527,7 +527,12 @@ before reading command payloads, writing
   answer like the capture world — restores identically. Stamps are stored
   as `(id, fingerprint)` pairs — an FNV-1a over the variant's kind, extents, origins, constant,
   arc and bordered raster — so a restore demands the same stamp content alive in the process
-  catalog under the same id and refuses on drift instead of silently mis-emitting. Caches are
+  catalog under the same id and refuses on drift instead of silently mis-emitting. Validation
+also refuses every state no API sequence can produce: alive source columns and alive deposit
+records naming transient or derived layers, a mark epoch below 1, fold limits outside the
+engine's range, a `Reads` mask that differs from the recomputed union of the recipe's inputs,
+a sparse epoch pair naming a live tile, and a derived summary whose maximum disagrees with
+its serialized page. Caches are
   never serialized: the directory, tile sets, tile hashes and layer hash (recomputed as the XOR
   fold, equal to the capture-time hash by construction), the base tiles' page-derived summary
   fields (sum, row sums and maxima, max and argmax, recomputed from the restored page so no

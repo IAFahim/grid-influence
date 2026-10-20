@@ -89,6 +89,15 @@ internal unsafe ref struct SnapshotReader
 
     public readonly bool AtEnd => _cursor == _buffer.Length;
 
+    public readonly int Position => _cursor;
+
+    public SnapshotReader From(int position)
+    {
+        var clone = this;
+        clone._cursor = position;
+        return clone;
+    }
+
     private readonly int Remaining => _buffer.Length - _cursor;
 
     public bool U32(out uint value)
@@ -518,11 +527,13 @@ public static unsafe partial class World
         if (!reader.U16(out var version) || version != SnapshotVersion) return false;
         if (!reader.Byte(out var layerCount) || layerCount > WorldCtx.MaxLayers) return false;
         if (!reader.Byte(out var gridCount) || gridCount > MaxGrids) return false;
-        if (!reader.I32(out _) || !reader.I32(out _)) return false;
-        if (!reader.I64(out _) || !reader.I64(out _)) return false;
+        if (!reader.I32(out _) || !reader.I32(out var markEpoch) || markEpoch < 1) return false;
+        if (!reader.I64(out var foldI) || !reader.I64(out var foldQ40)) return false;
+        if (foldI < 0 || foldI > int.MaxValue || foldQ40 < 0 || foldQ40 > 1L << 62) return false;
 
         var transient = stackalloc byte[WorldCtx.MaxLayers];
         var derivedLayers = stackalloc byte[WorldCtx.MaxLayers];
+        var reads = stackalloc uint[WorldCtx.MaxLayers];
         for (var l = 0; l < layerCount; l++)
         {
             if (!reader.Byte(out var op) || op > (byte)LayerOp.Mask) return false;
@@ -537,13 +548,21 @@ public static unsafe partial class World
             if (!reader.U16(out _)) return false;
             if (!reader.I32(out _) || !reader.I32(out var weightA) || !reader.I32(out var weightB)) return false;
             if (!ValidationRules.IsWeight(weightA) || !ValidationRules.IsWeight(weightB)) return false;
-            if (!reader.U32(out _)) return false;
+            if (!reader.U32(out var readMask)) return false;
 
             transient[l] = residency;
             derivedLayers[l] = (byte)(op == (byte)LayerOp.Base ? 0 : 1);
-            if (op == (byte)LayerOp.Base) continue;
-            if (a >= layerCount || b >= layerCount || residency != 0) return false;
+            if (op == (byte)LayerOp.Base)
+            {
+                if (readMask != 1u << l) return false;
+                reads[l] = readMask;
+                continue;
+            }
+
+            if (a >= l || b >= l || residency != 0) return false;
+            if (readMask != (reads[a] | reads[b])) return false;
             if (op == (byte)LayerOp.Mask && low > high) return false;
+            reads[l] = readMask;
         }
 
         var powers = stackalloc int[MaxGrids];
@@ -587,7 +606,7 @@ public static unsafe partial class World
             if (!reader.I32(out _) || !reader.I32(out var fadeTicks) || !reader.I32(out _)) return false;
             if (alive == 0) continue;
 
-            if (transient[layer] != 0) return false;
+            if (transient[layer] != 0 || derivedLayers[layer] != 0) return false;
             if (usage[stamp] == 0) return false;
             if ((timed & 1) != 0 && (!ValidationRules.IsGain(fadeFrom) || !ValidationRules.IsGain(fadeTo) || fadeTicks <= 0)) return false;
         }
@@ -609,16 +628,19 @@ public static unsafe partial class World
                 }
 
                 if (!ValidationRules.IsGain(recordGain) || usage[stamp] == 0) return false;
+                if (transient[layer] != 0 || derivedLayers[layer] != 0) return false;
             }
         }
 
         var summary = stackalloc byte[TileSummary.Bytes];
+        var page = stackalloc byte[PlaneStore.PageUnit];
         for (var gi = 0; gi < gridCount; gi++)
         {
             var tileCount = tileCounts[gi];
             for (var l = 0; l < layerCount; l++)
             {
                 if (!reader.Byte(out var layerFlags) || layerFlags > SnapshotEpochsAllocated) return false;
+                var liveStart = reader.Position;
                 if (!reader.I32(out var live) || live < 0 || live > tileCount) return false;
                 var derived = derivedLayers[l] != 0;
                 var previous = -1;
@@ -638,6 +660,17 @@ public static unsafe partial class World
                     if ((flags & SnapshotHasT) != 0) planes += PlaneStore.Int64Unit;
                     if ((flags & SnapshotHasB) != 0) planes += PlaneStore.Int64Unit;
                     planes += SnapshotWideCount(handles) * PlaneStore.Int64Unit;
+                    if (derived)
+                    {
+                        if (!reader.Copy(page, PlaneStore.PageUnit)) return false;
+                        var cells = (short*)page;
+                        var max = short.MinValue;
+                        for (var c = 0; c < TileBake.TileSize * TileBake.TileSize; c++)
+                            if (cells[c] > max) max = cells[c];
+                        if (max != handles->Max) return false;
+                        planes -= PlaneStore.PageUnit;
+                    }
+
                     if (!reader.Skip(planes)) return false;
                 }
 
@@ -655,16 +688,45 @@ public static unsafe partial class World
 
                 previous = -1;
                 if (!reader.I32(out var pairs) || pairs < 0 || pairs > tileCount) return false;
+                var liveScan = reader.From(liveStart);
+                liveScan.I32(out _);
+                var scanned = 0;
+                var liveTile = -1;
+                var hasLive = scanned < live && NextLiveTile(ref liveScan, summary, out liveTile);
                 for (var i = 0; i < pairs; i++)
                 {
                     if (!reader.U32(out var tile) || (int)tile >= tileCount || (int)tile <= previous) return false;
                     previous = (int)tile;
                     if (!reader.I32(out _)) return false;
+                    while (hasLive && liveTile < (int)tile)
+                    {
+                        scanned++;
+                        hasLive = scanned < live && NextLiveTile(ref liveScan, summary, out liveTile);
+                    }
+
+                    if (hasLive && liveTile == (int)tile) return false;
                 }
             }
         }
 
         return reader.AtEnd;
+    }
+
+    private static bool NextLiveTile(ref SnapshotReader reader, byte* summary, out int tile)
+    {
+        tile = -1;
+        if (!reader.U32(out var raw)) return false;
+        if (!reader.Byte(out var flags) || !reader.Byte(out _)) return false;
+        if (!reader.Skip(SnapshotTileBytes - 6)) return false;
+        if (!reader.Copy(summary, TileSummary.Bytes)) return false;
+        var planes = PlaneStore.PageUnit;
+        if ((flags & SnapshotHasI) != 0) planes += PlaneStore.Int32Unit;
+        if ((flags & SnapshotHasT) != 0) planes += PlaneStore.Int64Unit;
+        if ((flags & SnapshotHasB) != 0) planes += PlaneStore.Int64Unit;
+        planes += SnapshotWideCount((TileSummary*)summary) * PlaneStore.Int64Unit;
+        if (!reader.Skip(planes)) return false;
+        tile = (int)raw;
+        return true;
     }
 
     private static bool WideMismatch(byte flags, TileSummary* summary)
