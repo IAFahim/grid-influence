@@ -5,7 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
-internal static partial class GateRunner
+internal static class GateRunner
 {
     private const double DefaultTolerance = 0.05;
 
@@ -119,41 +119,24 @@ internal static partial class GateRunner
         return host;
     }
 
-    [GeneratedRegex(@"^area r=\s*(\d+):\s+([\d.]+) ns each", RegexOptions.Multiline)]
-    private static partial Regex Area();
-
-    [GeneratedRegex(@"^\s+(max|near)\s+r=\s*(\d+):\s+([\d.]+) ns each", RegexOptions.Multiline)]
-    private static partial Regex MaxNearest();
-
-    [GeneratedRegex(@"^exclusion r=\s*(\d+): area\s+([\d.]+) ->\s+([\d.]+) ns; point ([\d.]+) -> ([\d.]+); gradient ([\d.]+) -> ([\d.]+)", RegexOptions.Multiline)]
-    private static partial Regex Exclusion();
-
-    [GeneratedRegex(@"^region\s+(\d+)x\d+\s*: QueryRegion\s+(\d+) ns.*Query\(rect\)\s+(\d+) ns", RegexOptions.Multiline)]
-    private static partial Regex Region();
-
-    [GeneratedRegex(@"^1M Morton splats: splat ([\d.]+) ms.*process ([\d.]+) ms", RegexOptions.Multiline)]
-    private static partial Regex Splat();
-
-    [GeneratedRegex(@"^1M fused reads: morton ([\d.]+) ms.*random ([\d.]+) ms", RegexOptions.Multiline)]
-    private static partial Regex Fused();
-
-    [GeneratedRegex(@"^1M spatial keys ([\d.]+) ms, radix sort ([\d.]+) ms", RegexOptions.Multiline)]
-    private static partial Regex Order();
-
-    [GeneratedRegex(@"ChangedTiles\(since\) on [\d,]+ tiles: ([\d.]+) µs; Changed\(disk r=64\): (\d+) ns", RegexOptions.Multiline)]
-    private static partial Regex Changed();
-
-    [GeneratedRegex(@"^(\S.*?)\s{2,}([\d.]+)\s+[\d.]+\s+([\d.]+)\s+[\d.]+\s*$", RegexOptions.Multiline)]
-    private static partial Regex Kind();
-
-    [GeneratedRegex(@"^view coherent cell read: ([\d.]+) ns", RegexOptions.Multiline)]
-    private static partial Regex View();
+    private static readonly Regex Area = new(@"^area r=\s*(\d+):\s+([\d.]+) ns each", RegexOptions.Multiline);
+    private static readonly Regex MaxNearest = new(@"^\s+(max|near)\s+r=\s*(\d+):\s+([\d.]+) ns each", RegexOptions.Multiline);
+    private static readonly Regex Exclusion = new(
+        @"^exclusion r=\s*(\d+): area\s+([\d.]+) ->\s+([\d.]+) ns; point ([\d.]+) -> ([\d.]+); gradient ([\d.]+) -> ([\d.]+)",
+        RegexOptions.Multiline);
+    private static readonly Regex Region = new(@"^region\s+(\d+)x\d+\s*: QueryRegion\s+(\d+) ns.*Query\(rect\)\s+(\d+) ns", RegexOptions.Multiline);
+    private static readonly Regex Splat = new(@"^1M Morton splats: splat ([\d.]+) ms.*process ([\d.]+) ms", RegexOptions.Multiline);
+    private static readonly Regex Fused = new(@"^1M fused reads: morton ([\d.]+) ms.*random ([\d.]+) ms", RegexOptions.Multiline);
+    private static readonly Regex Order = new(@"^1M spatial keys ([\d.]+) ms, radix sort ([\d.]+) ms", RegexOptions.Multiline);
+    private static readonly Regex Changed = new(@"ChangedTiles\(since\) on [\d,]+ tiles: ([\d.]+) µs; Changed\(disk r=64\): (\d+) ns", RegexOptions.Multiline);
+    private static readonly Regex Kind = new(@"^(\S.*?)\s{2,}([\d.]+)\s+[\d.]+\s+([\d.]+)\s+[\d.]+\s*$", RegexOptions.Multiline);
+    private static readonly Regex View = new(@"^view coherent cell read: ([\d.]+) ns", RegexOptions.Multiline);
 
     private static void ParsePrices(string output, SortedDictionary<string, double> times)
     {
-        foreach (Match m in Area().Matches(output)) times[$"price.area.r{m.Groups[1].Value}.ns"] = Number(m, 2);
-        foreach (Match m in MaxNearest().Matches(output)) times[$"price.{m.Groups[1].Value}.r{m.Groups[2].Value}.ns"] = Number(m, 3);
-        foreach (Match m in Exclusion().Matches(output))
+        foreach (Match m in Area.Matches(output)) times[$"price.area.r{m.Groups[1].Value}.ns"] = Number(m, 2);
+        foreach (Match m in MaxNearest.Matches(output)) times[$"price.{m.Groups[1].Value}.r{m.Groups[2].Value}.ns"] = Number(m, 3);
+        foreach (Match m in Exclusion.Matches(output))
         {
             var r = m.Groups[1].Value;
             times[$"price.excluded.area.r{r}.ns"] = Number(m, 3);
@@ -161,38 +144,38 @@ internal static partial class GateRunner
             times[$"price.excluded.gradient.r{r}.ns"] = Number(m, 7);
         }
 
-        foreach (Match m in Region().Matches(output))
+        foreach (Match m in Region.Matches(output))
         {
             times[$"price.region.{m.Groups[1].Value}.copy.ns"] = Number(m, 2);
             times[$"price.region.{m.Groups[1].Value}.sum.ns"] = Number(m, 3);
         }
 
-        foreach (Match m in Splat().Matches(output))
+        foreach (Match m in Splat.Matches(output))
         {
             times["price.splat.1m.ms"] = Number(m, 1);
             times["price.splat.process.ms"] = Number(m, 2);
         }
 
-        foreach (Match m in Fused().Matches(output))
+        foreach (Match m in Fused.Matches(output))
         {
             times["price.reads.morton.ms"] = Number(m, 1);
             times["price.reads.random.ms"] = Number(m, 2);
         }
 
-        foreach (Match m in Order().Matches(output))
+        foreach (Match m in Order.Matches(output))
         {
             times["price.order.keys.ms"] = Number(m, 1);
             times["price.order.sort.ms"] = Number(m, 2);
         }
 
-        foreach (Match m in Changed().Matches(output))
+        foreach (Match m in Changed.Matches(output))
         {
             times["price.changed.tiles.us"] = Number(m, 1);
             times["price.changed.disk.ns"] = Number(m, 2);
         }
 
-        foreach (Match m in View().Matches(output)) times["price.view.cell.ns"] = Number(m, 1);
-        foreach (Match m in Kind().Matches(output))
+        foreach (Match m in View.Matches(output)) times["price.view.cell.ns"] = Number(m, 1);
+        foreach (Match m in Kind.Matches(output))
         {
             var name = m.Groups[1].Value.Trim();
             if (name == "kind") continue;
