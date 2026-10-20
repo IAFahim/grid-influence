@@ -16,7 +16,6 @@ public static unsafe partial class World
     public ref struct FieldView
     {
         private readonly LayerData* _layer;
-        private readonly int _size;
         private readonly int _tilesPerSide;
         private readonly int _scaleQ8;
         private readonly float _originX;
@@ -27,7 +26,7 @@ public static unsafe partial class World
         internal FieldView(GridCtx* g, LayerData* layer)
         {
             _layer = layer;
-            _size = g->Size;
+            Size = g->Size;
             _tilesPerSide = g->TilesPerSide;
             _scaleQ8 = g->ScaleQ8;
             _originX = g->OriginX;
@@ -36,14 +35,14 @@ public static unsafe partial class World
             _page = null;
         }
 
-        public readonly int Size => _size;
+        public int Size { get; }
 
         public short this[int x, int y]
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get
             {
-                if ((uint)x >= (uint)_size || (uint)y >= (uint)_size) return 0;
+                if ((uint)x >= (uint)Size || (uint)y >= (uint)Size) return 0;
 
                 var tile = (y >> TileBake.TileBits) * _tilesPerSide + (x >> TileBake.TileBits);
                 if (tile != _tile)
@@ -62,11 +61,11 @@ public static unsafe partial class World
         {
             cx = 0;
             cy = 0;
-            if (_size == 0) return false;
+            if (Size == 0) return false;
 
             var qx = CellQ8(x, _originX, _scaleQ8);
             var qy = CellQ8(y, _originY, _scaleQ8);
-            if (qx < 0 || qy < 0 || qx >= (long)_size << 8 || qy >= (long)_size << 8) return false;
+            if (qx < 0 || qy < 0 || qx >= (long)Size << 8 || qy >= (long)Size << 8) return false;
 
             cx = (int)(qx >> 8);
             cy = (int)(qy >> 8);
@@ -85,7 +84,7 @@ public static unsafe partial class World
         {
             var lx = x & (TileBake.TileSize - 1);
             var ly = y & (TileBake.TileSize - 1);
-            if ((uint)x < (uint)_size && (uint)y < (uint)_size &&
+            if ((uint)x < (uint)Size && (uint)y < (uint)Size &&
                 (uint)(lx - 1) < TileBake.TileSize - 2 && (uint)(ly - 1) < TileBake.TileSize - 2)
             {
                 var tile = (y >> TileBake.TileBits) * _tilesPerSide + (x >> TileBake.TileBits);

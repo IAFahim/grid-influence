@@ -5,11 +5,11 @@ namespace Gi.Tests;
 
 internal static class CorpusBuilder
 {
-    public const string Header = "gi-corpus 1";
-    public const int StreamsPerMode = 300;
-    public const int SeedBase = 2_000_000;
-    public const int TransientStreamsPerMode = 100;
-    public const int TransientSeedBase = 3_000_000;
+    private const string Header = "gi-corpus 1";
+    private const int StreamsPerMode = 300;
+    private const int SeedBase = 2_000_000;
+    private const int TransientStreamsPerMode = 100;
+    private const int TransientSeedBase = 3_000_000;
 
     public static string Build()
     {
@@ -33,7 +33,8 @@ internal static class CorpusBuilder
             writer.WriteLine(mode.ToString().ToLowerInvariant());
             for (var i = 0; i < TransientStreamsPerMode; i++)
             {
-                var setup = StreamGenerator.Generate(TransientSeedBase + (int)mode * 100_000 + i, mode, StreamProfile.Transient);
+                var setup = StreamGenerator.Generate(TransientSeedBase + (int)mode * 100_000 + i, mode,
+                    StreamProfile.Transient);
                 CorpusRunner.Run(setup, "transient-" + mode.ToString().ToLowerInvariant(), writer);
             }
         }

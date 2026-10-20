@@ -8,7 +8,11 @@ public sealed unsafe class ChangedBytesTests
     {
         var count = World.ChangedTiles(w, g, l, null);
         var tiles = new int[count];
-        fixed (int* p = tiles) Assert.Equal(count, World.ChangedTiles(w, g, l, p));
+        fixed (int* p = tiles)
+        {
+            Assert.Equal(count, World.ChangedTiles(w, g, l, p));
+        }
+
         Array.Sort(tiles);
         return tiles;
     }
@@ -17,7 +21,11 @@ public sealed unsafe class ChangedBytesTests
     {
         var count = World.ChangedTiles(w, g, l, since, null);
         var tiles = new int[count];
-        fixed (int* p = tiles) Assert.Equal(count, World.ChangedTiles(w, g, l, since, p));
+        fixed (int* p = tiles)
+        {
+            Assert.Equal(count, World.ChangedTiles(w, g, l, since, p));
+        }
+
         return tiles;
     }
 
@@ -178,8 +186,8 @@ public sealed unsafe class ChangedBytesTests
             var deltaIds = new World.SourceId[movers];
             for (var i = 0; i < movers; i++)
             {
-                xs[i] = 16f + (i * 3.71f) % 88f;
-                ys[i] = 16f + (i * 5.37f) % 88f;
+                xs[i] = 16f + i * 3.71f % 88f;
+                ys[i] = 16f + i * 5.37f % 88f;
                 crowdIds[i] = World.Place(crowdWorld, crowdLayer, xs[i], ys[i], box, 7);
                 deltaIds[i] = World.Place(deltaWorld, deltaLayer, xs[i], ys[i], box, 7);
             }
@@ -205,7 +213,8 @@ public sealed unsafe class ChangedBytesTests
                 World.Process(crowdWorld);
                 World.Process(deltaWorld);
                 Assert.Equal(Drain(crowdWorld, crowdGrid, crowdLayer), Drain(deltaWorld, deltaGrid, deltaLayer));
-                Assert.Equal(Since(crowdWorld, crowdGrid, crowdLayer, since), Since(deltaWorld, deltaGrid, deltaLayer, since));
+                Assert.Equal(Since(crowdWorld, crowdGrid, crowdLayer, since),
+                    Since(deltaWorld, deltaGrid, deltaLayer, since));
                 fixed (short* l = left, r = right)
                 {
                     World.QueryRegion(crowdWorld, crowdGrid, crowdLayer, 0, 0, 128, 128, l);
@@ -243,7 +252,11 @@ public sealed unsafe class ChangedBytesTests
         var after = new short[cells * cells];
         for (var frame = 0; frame < 24; frame++)
         {
-            fixed (short* p = before) World.QueryRegion(w, g, l, 0, 0, cells, cells, p);
+            fixed (short* p = before)
+            {
+                World.QueryRegion(w, g, l, 0, 0, cells, cells, p);
+            }
+
             var crowdFrame = frame % 3 == 0;
             for (var i = 0; i < count; i++)
             {
@@ -269,15 +282,19 @@ public sealed unsafe class ChangedBytesTests
             }
 
             World.Process(w);
-            fixed (short* p = after) World.QueryRegion(w, g, l, 0, 0, cells, cells, p);
+            fixed (short* p = after)
+            {
+                World.QueryRegion(w, g, l, 0, 0, cells, cells, p);
+            }
+
             var expected = TileDiff(before, after, cells);
             var reported = Drain(w, g, l);
             Assert.Equal(expected, reported);
             if (expected.Length != 0)
             {
                 var probe = expected[0];
-                var px = (probe % 4) * 32 + 16;
-                var py = (probe / 4) * 32 + 16;
+                var px = probe % 4 * 32 + 16;
+                var py = probe / 4 * 32 + 16;
                 Assert.True(World.Changed(w, l, px, py, 40f, World.Tick(w) - 1));
             }
 

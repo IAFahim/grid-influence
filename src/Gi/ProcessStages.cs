@@ -25,7 +25,10 @@ internal static unsafe class ProcessStages
         for (var i = 0; i < World.MaxWorlds; i++) Runtime.Worlds[i].Stages = default;
     }
 
-    internal static long Mark() => Measuring ? Stopwatch.GetTimestamp() : 0L;
+    internal static long Mark()
+    {
+        return Measuring ? Stopwatch.GetTimestamp() : 0L;
+    }
 
     internal static void Measure(ref long stage, long stamp)
     {

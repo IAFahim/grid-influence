@@ -10,34 +10,35 @@ if (!Options.TryParse(args, out var options, out var error))
     Report.WriteError(options, error);
     return 2;
 }
+
 if (options.Help)
 {
     Console.WriteLine("""
-        Gi stats — inspect a deterministic workload, without reflection.
+                      Gi stats — inspect a deterministic workload, without reflection.
 
-        dotnet run --project tools/stats -c Release -- <command> [options]
+                      dotnet run --project tools/stats -c Release -- <command> [options]
 
-        Commands:
-          stats       Internal source, tile, queue, and stamp statistics (default)
-          memory      Native memory breakdown, GC heap, and process memory
-          profile     Verify first, then measure idle process, query, move + process
-          verify      Correctness, native memory, and zero-allocation receipts
+                      Commands:
+                        stats       Internal source, tile, queue, and stamp statistics (default)
+                        memory      Native memory breakdown, GC heap, and process memory
+                        profile     Verify first, then measure idle process, query, move + process
+                        verify      Correctness, native memory, and zero-allocation receipts
 
-        Options:
-          --format human|json    Output format (default: compact JSON; --json also accepted)
-          --power <5..14>         Grid power; cells per side = 2^power (default: 8)
-          --layers <1..32>        Independent layers (default: 3)
-          --sources <0..1000000>  Persistent placements (default: 4000)
-          --stamp box|raster     Stamp path (default: box)
-          --stamp-size <1..256>  Stamp width and height (default: 16; raster >= 2)
-          --iterations <n>       Frames per profile phase (default: 1000)
-          --queries <n>          Cell queries per frame (default: 10000)
-          --moves <n>            Sources moved per frame, capped to sources (default: 200)
-          -h, --help             Show this help
+                      Options:
+                        --format human|json    Output format (default: compact JSON; --json also accepted)
+                        --power <5..14>         Grid power; cells per side = 2^power (default: 8)
+                        --layers <1..32>        Independent layers (default: 3)
+                        --sources <0..1000000>  Persistent placements (default: 4000)
+                        --stamp box|raster     Stamp path (default: box)
+                        --stamp-size <1..256>  Stamp width and height (default: 16; raster >= 2)
+                        --iterations <n>       Frames per profile phase (default: 1000)
+                        --queries <n>          Cell queries per frame (default: 10000)
+                        --moves <n>            Sources moved per frame, capped to sources (default: 200)
+                        -h, --help             Show this help
 
-        CPU counters: bash tools/stats/perf.sh stat [profile options]
-        CPU samples:  bash tools/stats/perf.sh record [profile options]
-        """);
+                      CPU counters: bash tools/stats/perf.sh stat [profile options]
+                      CPU samples:  bash tools/stats/perf.sh record [profile options]
+                      """);
     return 0;
 }
 

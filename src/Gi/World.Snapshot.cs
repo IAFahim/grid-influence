@@ -4,51 +4,50 @@ namespace Gi;
 
 internal unsafe ref struct SnapshotWriter
 {
-    private Span<byte> _buffer;
-    private int _cursor;
+    private readonly Span<byte> _buffer;
 
     public SnapshotWriter(Span<byte> buffer)
     {
         _buffer = buffer;
-        _cursor = 0;
+        Written = 0;
     }
 
-    public readonly int Written => _cursor;
+    private int Written { get; set; }
 
     public void U32(uint value)
     {
-        BinaryPrimitives.WriteUInt32LittleEndian(_buffer.Slice(_cursor, 4), value);
-        _cursor += 4;
+        BinaryPrimitives.WriteUInt32LittleEndian(_buffer.Slice(Written, 4), value);
+        Written += 4;
     }
 
     public void U64(ulong value)
     {
-        BinaryPrimitives.WriteUInt64LittleEndian(_buffer.Slice(_cursor, 8), value);
-        _cursor += 8;
+        BinaryPrimitives.WriteUInt64LittleEndian(_buffer.Slice(Written, 8), value);
+        Written += 8;
     }
 
     public void U16(ushort value)
     {
-        BinaryPrimitives.WriteUInt16LittleEndian(_buffer.Slice(_cursor, 2), value);
-        _cursor += 2;
+        BinaryPrimitives.WriteUInt16LittleEndian(_buffer.Slice(Written, 2), value);
+        Written += 2;
     }
 
     public void I16(short value)
     {
-        BinaryPrimitives.WriteInt16LittleEndian(_buffer.Slice(_cursor, 2), value);
-        _cursor += 2;
+        BinaryPrimitives.WriteInt16LittleEndian(_buffer.Slice(Written, 2), value);
+        Written += 2;
     }
 
     public void I32(int value)
     {
-        BinaryPrimitives.WriteInt32LittleEndian(_buffer.Slice(_cursor, 4), value);
-        _cursor += 4;
+        BinaryPrimitives.WriteInt32LittleEndian(_buffer.Slice(Written, 4), value);
+        Written += 4;
     }
 
     public void I64(long value)
     {
-        BinaryPrimitives.WriteInt64LittleEndian(_buffer.Slice(_cursor, 8), value);
-        _cursor += 8;
+        BinaryPrimitives.WriteInt64LittleEndian(_buffer.Slice(Written, 8), value);
+        Written += 8;
     }
 
     public void F32(float value)
@@ -59,26 +58,26 @@ internal unsafe ref struct SnapshotWriter
 
     public void Byte(byte value)
     {
-        _buffer[_cursor] = value;
-        _cursor++;
+        _buffer[Written] = value;
+        Written++;
     }
 
     public void I8(sbyte value)
     {
-        _buffer[_cursor] = *(byte*)&value;
-        _cursor++;
+        _buffer[Written] = *(byte*)&value;
+        Written++;
     }
 
     public void Copy(byte* source, int bytes)
     {
-        new Span<byte>(source, bytes).CopyTo(_buffer.Slice(_cursor, bytes));
-        _cursor += bytes;
+        new Span<byte>(source, bytes).CopyTo(_buffer.Slice(Written, bytes));
+        Written += bytes;
     }
 }
 
 internal unsafe ref struct SnapshotReader
 {
-    private ReadOnlySpan<byte> _buffer;
+    private readonly ReadOnlySpan<byte> _buffer;
     private int _cursor;
 
     public SnapshotReader(ReadOnlySpan<byte> buffer)
@@ -381,7 +380,7 @@ public static unsafe partial class World
             var g = w->Grids + gi;
             var power = 0;
             var size = g->Size;
-            while ((size >> 1) != 0)
+            while (size >> 1 != 0)
             {
                 power++;
                 size >>= 1;
@@ -544,7 +543,8 @@ public static unsafe partial class World
             if (!reader.Byte(out var turnBits) || !ValidationRules.IsTurnBits(turnBits)) return false;
             if (!reader.Byte(out var residency)) return false;
             if (residency > 1) return false;
-            if (!reader.Byte(out _) || !reader.U16(out _) || !reader.I16(out var low) || !reader.I16(out var high)) return false;
+            if (!reader.Byte(out _) || !reader.U16(out _) || !reader.I16(out var low) ||
+                !reader.I16(out var high)) return false;
             if (!reader.U16(out _)) return false;
             if (!reader.I32(out _) || !reader.I32(out var weightA) || !reader.I32(out var weightB)) return false;
             if (!ValidationRules.IsWeight(weightA) || !ValidationRules.IsWeight(weightB)) return false;
@@ -608,7 +608,8 @@ public static unsafe partial class World
 
             if (transient[layer] != 0 || derivedLayers[layer] != 0) return false;
             if (usage[stamp] == 0) return false;
-            if ((timed & 1) != 0 && (!ValidationRules.IsGain(fadeFrom) || !ValidationRules.IsGain(fadeTo) || fadeTicks <= 0)) return false;
+            if ((timed & 1) != 0 &&
+                (!ValidationRules.IsGain(fadeFrom) || !ValidationRules.IsGain(fadeTo) || fadeTicks <= 0)) return false;
         }
 
         for (var gi = 0; gi < gridCount; gi++)
@@ -650,11 +651,12 @@ public static unsafe partial class World
                     previous = (int)tile;
                     if (!reader.Byte(out var flags) || !reader.Byte(out var stale)) return false;
                     if (stale != 0 && transient[l] == 0) return false;
-                    if (!reader.I32(out _) || !reader.I64(out _) || !reader.I64(out _) || !reader.I32(out _)) return false;
+                    if (!reader.I32(out _) || !reader.I64(out _) || !reader.I64(out _) || !reader.I32(out _))
+                        return false;
                     if (!reader.Copy(summary, TileSummary.Bytes)) return false;
                     var handles = (TileSummary*)summary;
                     if (WideMismatch(flags, handles)) return false;
-                    if (((flags & SnapshotHasI) != 0) == derived) return false;
+                    if ((flags & SnapshotHasI) != 0 == derived) return false;
                     var planes = PlaneStore.PageUnit;
                     if ((flags & SnapshotHasI) != 0) planes += PlaneStore.Int32Unit;
                     if ((flags & SnapshotHasT) != 0) planes += PlaneStore.Int64Unit;
@@ -684,7 +686,8 @@ public static unsafe partial class World
 
                 if (!reader.I32(out var staleCount) || staleCount < 0 || staleCount > tileCount) return false;
                 for (var i = 0; i < staleCount; i++)
-                    if (!reader.U32(out var tile) || (int)tile >= tileCount) return false;
+                    if (!reader.U32(out var tile) || (int)tile >= tileCount)
+                        return false;
 
                 previous = -1;
                 if (!reader.I32(out var pairs) || pairs < 0 || pairs > tileCount) return false;
@@ -731,11 +734,11 @@ public static unsafe partial class World
 
     private static bool WideMismatch(byte flags, TileSummary* summary)
     {
-        if (((flags & SnapshotHasCarryI) != 0) != (summary->CarryI != 0)) return true;
-        if (((flags & SnapshotHasHighT) != 0) != (summary->HighT != 0)) return true;
-        if (((flags & SnapshotHasLowT) != 0) != (summary->LowT != 0)) return true;
-        if (((flags & SnapshotHasHighB) != 0) != (summary->HighB != 0)) return true;
-        return ((flags & SnapshotHasLowB) != 0) != (summary->LowB != 0);
+        if ((flags & SnapshotHasCarryI) != 0 != (summary->CarryI != 0)) return true;
+        if ((flags & SnapshotHasHighT) != 0 != (summary->HighT != 0)) return true;
+        if ((flags & SnapshotHasLowT) != 0 != (summary->LowT != 0)) return true;
+        if ((flags & SnapshotHasHighB) != 0 != (summary->HighB != 0)) return true;
+        return (flags & SnapshotHasLowB) != 0 != (summary->LowB != 0);
     }
 
     private static void RestoreApply(byte world, WorldCtx* w, ReadOnlySpan<byte> data)
@@ -784,7 +787,7 @@ public static unsafe partial class World
                 Low = low,
                 High = high,
                 Reads = reads,
-                Transient = residency,
+                Transient = residency
             };
         }
 
@@ -885,7 +888,7 @@ public static unsafe partial class World
                     Angle = angle,
                     Scale = scale,
                     Ax = ax,
-                    Ay = ay,
+                    Ay = ay
                 };
             }
         }

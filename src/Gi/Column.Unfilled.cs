@@ -27,7 +27,8 @@ public static unsafe partial class World
         return false;
     }
 
-    private static bool UnfilledValueGradient(short* values, float* gradientXs, float* gradientYs, ulong* whole, int count)
+    private static bool UnfilledValueGradient(short* values, float* gradientXs, float* gradientYs, ulong* whole,
+        int count)
     {
         ClearRows(values, count);
         ClearRows(gradientXs, count);

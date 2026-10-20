@@ -6,8 +6,6 @@ internal static class KindTiming
     private const int Sources = 50_000;
     private const int Frames = 24;
 
-    private readonly record struct Kind(string Name, Func<byte> Make, int Cells, bool Turns);
-
     public static int Run()
     {
         var kinds = new[]
@@ -19,15 +17,17 @@ internal static class KindTiming
             new Kind("cone r4", () => Stamp.Cone(4, 3), 81, false),
             new Kind("dome r4", () => Stamp.Dome(4, 3), 81, false),
             new Kind("arc120 r4", () => Stamp.Disk(4, 3, 120), 81, true),
-            new Kind("raster 8x8", () => RasterStamp(), 64, true),
+            new Kind("raster 8x8", RasterStamp, 64, true)
         };
 
-        Console.WriteLine($"{"kind",-12} {"cell-hit ns/src",16} {"ns/cell",9} {"exact-free-angle ns/src",25} {"ns/cell",9}");
+        Console.WriteLine(
+            $"{"kind",-12} {"cell-hit ns/src",16} {"ns/cell",9} {"exact-free-angle ns/src",25} {"ns/cell",9}");
         foreach (var kind in kinds)
         {
             var hit = Measure(kind, Layer.Precision.Cell, false);
             var free = Measure(kind, Layer.Precision.Exact, true);
-            Console.WriteLine($"{kind.Name,-12} {hit,16:F1} {hit / kind.Cells,9:F2} {free,25:F1} {free / kind.Cells,9:F2}");
+            Console.WriteLine(
+                $"{kind.Name,-12} {hit,16:F1} {hit / kind.Cells,9:F2} {free,25:F1} {free / kind.Cells,9:F2}");
         }
 
         return 0;
@@ -65,7 +65,7 @@ internal static class KindTiming
             {
                 xs[i] += frame % 2 == 0 ? 1f : -1f;
                 World.Move(world, ids[i], xs[i], ys[i]);
-                if (freeAngle && kind.Turns) World.Turn(world, ids[i], ((i * 7 + frame * 13) % 6283) / 1000f);
+                if (freeAngle && kind.Turns) World.Turn(world, ids[i], (i * 7 + frame * 13) % 6283 / 1000f);
             }
 
             var started = Stopwatch.GetTimestamp();
@@ -78,4 +78,6 @@ internal static class KindTiming
         Stamp.Free(stamp);
         return samples[Frames / 2];
     }
+
+    private readonly record struct Kind(string Name, Func<byte> Make, int Cells, bool Turns);
 }

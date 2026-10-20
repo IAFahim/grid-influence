@@ -35,7 +35,7 @@ internal unsafe struct HistState
     public int* Strip;
     public int* Out;
 
-    public void Release(int tileCount)
+    public void Release()
     {
         if (Classes != null)
         {
@@ -85,7 +85,8 @@ public static unsafe partial class World
         if (cls->Directory == null) cls->Directory = (int*)NativeHeap.AllocZeroed((nuint)g->TileCount * sizeof(int));
 
         var tile = (cy >> TileBake.TileBits) * g->TilesPerSide + (cx >> TileBake.TileBits);
-        HistPage(g, ld, hist, cls, tile)[(cy & (TileBake.TileSize - 1)) * TileBake.TileSize + (cx & (TileBake.TileSize - 1))] += gain;
+        HistPage(g, ld, hist, cls, tile)[
+            (cy & (TileBake.TileSize - 1)) * TileBake.TileSize + (cx & (TileBake.TileSize - 1))] += gain;
         return true;
     }
 
@@ -148,16 +149,18 @@ public static unsafe partial class World
             var clampedX = Vector256.Min(Vector256.Max(cx, Vector256<int>.Zero), limit);
             var clampedY = Vector256.Min(Vector256.Max(cy, Vector256<int>.Zero), limit);
             var inside = Vector256.Equals(clampedX, cx) & Vector256.Equals(clampedY, cy)
-                & (Vector256.LessThan(Vector256.Abs(x), infinity) & Vector256.LessThan(Vector256.Abs(y), infinity)).AsInt32();
+                                                        & (Vector256.LessThan(Vector256.Abs(x), infinity) &
+                                                           Vector256.LessThan(Vector256.Abs(y), infinity)).AsInt32();
             var accepted = inside.AsSingle().ExtractMostSignificantBits();
             var tileVector = Vector256.ShiftRightArithmetic(clampedY, TileBake.TileBits) * tilesPerSide
-                + Vector256.ShiftRightArithmetic(clampedX, TileBake.TileBits);
+                             + Vector256.ShiftRightArithmetic(clampedX, TileBake.TileBits);
             var local = Vector256.ShiftLeft(clampedY & tileMask, TileBake.TileBits) + (clampedX & tileMask);
             var firstTile = tileVector.GetElement(0);
-            if (accepted == 0xFF && Vector256.Equals(tileVector, Vector256.Create(firstTile)).AsSingle().ExtractMostSignificantBits() == 0xFF)
+            if (accepted == 0xFF && Vector256.Equals(tileVector, Vector256.Create(firstTile)).AsSingle()
+                    .ExtractMostSignificantBits() == 0xFF)
             {
                 var slot = directory[firstTile] - 1;
-                int* page = slot >= 0 ? (int*)hist->Pages.Unit(slot) : HistPage(g, ld, hist, cls, firstTile);
+                var page = slot >= 0 ? (int*)hist->Pages.Unit(slot) : HistPage(g, ld, hist, cls, firstTile);
                 local.Store(offsets);
                 page[offsets[0]] += gain;
                 page[offsets[1]] += gain;
@@ -171,7 +174,8 @@ public static unsafe partial class World
             }
 
             var slots = Avx2.GatherVector256(directory, tileVector, 4);
-            var missing = Vector256.Equals(slots, Vector256<int>.Zero).AsSingle().ExtractMostSignificantBits() & accepted;
+            var missing =
+                Vector256.Equals(slots, Vector256<int>.Zero).AsSingle().ExtractMostSignificantBits() & accepted;
             if (missing != 0)
             {
                 tileVector.Store(tiles);
@@ -200,7 +204,7 @@ public static unsafe partial class World
                 pages[offsets[BitOperations.TrailingZeroCount(bits)]] += gain;
 
             for (var lane = 0; lane < 8; lane++)
-                if ((accepted >> lane & 1) == 0)
+                if (((accepted >> lane) & 1) == 0)
                     SplatOne(w, gi, g, ld, hist, cls, ref key, mask, xs[i + lane], ys[i + lane]);
         }
 
@@ -279,16 +283,19 @@ public static unsafe partial class World
         var precision = LayerPrecision(w, layer);
         var anchorCell = g->Size >> 1;
         var anchor = anchorCell << 8;
-        if (!TileBake.PlaceAnchored(anchor, anchor, g->ScaleQ8, g->Size, v, 0, UnitScale, precision, out var p)) return false;
+        if (!TileBake.PlaceAnchored(anchor, anchor, g->ScaleQ8, g->Size, v, 0, UnitScale, precision, out var p))
+            return false;
         if (p.Plane != Plane.Difference || !TileBake.Unclipped(v, &p)) return false;
         if (!KernelFactory.TryGetTaps(w, gi, stamp, 0, precision, &p, out var taps) || taps.Cells == null) return false;
-        if (taps.Width <= 0 || taps.Height <= 0 || taps.Width > TileBake.TileSize || taps.Height > TileBake.TileSize) return false;
+        if (taps.Width <= 0 || taps.Height <= 0 || taps.Width > TileBake.TileSize ||
+            taps.Height > TileBake.TileSize) return false;
 
         value = taps.Cells[0];
         if (value == 0) return false;
 
         for (var i = 1; i < taps.Width * taps.Height; i++)
-            if (taps.Cells[i] != value) return false;
+            if (taps.Cells[i] != value)
+                return false;
 
         ox = p.Px + taps.OriginX - anchorCell;
         oy = p.Py + taps.OriginY - anchorCell;
@@ -298,7 +305,8 @@ public static unsafe partial class World
                oy >= -TileBake.TileSize && oy + height <= TileBake.TileSize + 1;
     }
 
-    private static void ReplayClass(WorldCtx* w, int gi, GridCtx* g, HistState* hist, HistClass* cls, byte layer, byte stamp)
+    private static void ReplayClass(WorldCtx* w, int gi, GridCtx* g, HistState* hist, HistClass* cls, byte layer,
+        byte stamp)
     {
         var key = new DepositRecord { Layer = layer, Stamp = stamp, Alive = 1, Scale = UnitScale };
         for (var t = 0; t < cls->Tiles.Length; t++)
@@ -361,16 +369,15 @@ public static unsafe partial class World
         var i = 0;
 #if NET
         if (Vector256.IsHardwareAccelerated)
-        {
             for (; i + 8 <= TileBake.TileSize * TileBake.TileSize; i += 8)
             {
                 var zero = Vector256.Equals(Vector256.Load(page + i), Vector256<int>.Zero).ExtractMostSignificantBits();
                 count += 8 - BitOperations.PopCount(zero);
             }
-        }
 #endif
         for (; i < TileBake.TileSize * TileBake.TileSize; i++)
-            if (page[i] != 0) count++;
+            if (page[i] != 0)
+                count++;
 
         return count;
     }
@@ -548,7 +555,9 @@ public static unsafe partial class World
                 var span = Math.Min(windowWidth - x, ((tileColumn + 1) << TileBake.TileBits) - ax);
                 var slot = cls->Directory[rowTiles + tileColumn] - 1;
                 if (slot < 0) ClearBlock(target + x, rows, span);
-                else CopyBlock(target + x, (int*)hist->Pages.Unit(slot) + rowAt + (ax & (TileBake.TileSize - 1)), rows, span);
+                else
+                    CopyBlock(target + x, (int*)hist->Pages.Unit(slot) + rowAt + (ax & (TileBake.TileSize - 1)), rows,
+                        span);
                 x += span;
             }
 
@@ -566,7 +575,7 @@ public static unsafe partial class World
 #if NET
             if (Vector256.IsHardwareAccelerated)
             {
-                for (var k = 0; k < span; k += 8) Vector256.Store(Vector256.Load(from + k), to + k);
+                for (var k = 0; k < span; k += 8) Vector256.Load(from + k).Store(to + k);
                 continue;
             }
 #endif
@@ -583,7 +592,7 @@ public static unsafe partial class World
 #if NET
             if (Vector256.IsHardwareAccelerated)
             {
-                for (var k = 0; k < span; k += 8) Vector256.Store(Vector256<int>.Zero, to + k);
+                for (var k = 0; k < span; k += 8) Vector256<int>.Zero.Store(to + k);
                 continue;
             }
 #endif

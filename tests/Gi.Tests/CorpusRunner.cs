@@ -6,26 +6,26 @@ internal sealed unsafe class CorpusRunner
 {
     private const int MaxTiles = 64;
     private const int MaxColumn = 8;
-
-    private readonly StreamSetup _setup;
-    private readonly TextWriter _output;
     private readonly List<World.SourceId> _attemptIds = [];
-    private readonly int[] _tiles = new int[MaxTiles];
-    private readonly float[] _columnXs = new float[MaxColumn];
-    private readonly float[] _columnYs = new float[MaxColumn];
     private readonly World.SourceId[] _columnExcludes = new World.SourceId[MaxColumn];
     private readonly short[] _columnValues = new short[MaxColumn];
+    private readonly float[] _columnXs = new float[MaxColumn];
+    private readonly float[] _columnYs = new float[MaxColumn];
     private readonly float[] _gradientXs = new float[MaxColumn];
     private readonly float[] _gradientYs = new float[MaxColumn];
-    private readonly ulong[] _words = new ulong[(MaxColumn + 63) >> 6];
-    private byte _world;
-    private byte[] _stamps = [];
-    private short[] _page = [];
-    private short[] _rect = [];
-    private CorpusHash _frameReads;
-    private int _frames;
+    private readonly TextWriter _output;
+
+    private readonly StreamSetup _setup;
     private readonly Func<byte, byte>? _swap;
     private readonly int _swapFrame;
+    private readonly int[] _tiles = new int[MaxTiles];
+    private readonly ulong[] _words = new ulong[(MaxColumn + 63) >> 6];
+    private CorpusHash _frameReads;
+    private int _frames;
+    private short[] _page = [];
+    private short[] _rect = [];
+    private byte[] _stamps = [];
+    private byte _world;
 
     private CorpusRunner(StreamSetup setup, TextWriter output, Func<byte, byte>? swap, int swapFrame)
     {
@@ -36,7 +36,8 @@ internal sealed unsafe class CorpusRunner
         _swapFrame = swapFrame;
     }
 
-    public static void Run(StreamSetup setup, string mode, TextWriter output, Func<byte, byte>? swap = null, int swapFrame = 5)
+    public static void Run(StreamSetup setup, string mode, TextWriter output, Func<byte, byte>? swap = null,
+        int swapFrame = 5)
     {
         new CorpusRunner(setup, output, swap, swapFrame).Execute(mode);
     }
@@ -63,7 +64,8 @@ internal sealed unsafe class CorpusRunner
                 var spec = _setup.Layers[l];
                 if (!spec.Derived)
                 {
-                    Layer.New(_world, spec.Transient ? Layer.Residency.Transient : Layer.Residency.Persistent, spec.Precision);
+                    Layer.New(_world, spec.Transient ? Layer.Residency.Transient : Layer.Residency.Persistent,
+                        spec.Precision);
                     continue;
                 }
 
@@ -125,7 +127,6 @@ internal sealed unsafe class CorpusRunner
             _output.WriteLine(mode);
 
             foreach (var command in _setup.Commands)
-            {
                 switch (command.Op)
                 {
                     case StreamOp.Place:
@@ -169,7 +170,8 @@ internal sealed unsafe class CorpusRunner
                         World.Clear(_world);
                         break;
                     case StreamOp.Splat:
-                        World.Splat(_world, command.Layer, new[] { command.X }, new[] { command.Y }, _stamps[command.Stamp], command.Gain);
+                        World.Splat(_world, command.Layer, new[] { command.X }, new[] { command.Y },
+                            _stamps[command.Stamp], command.Gain);
                         break;
                     case StreamOp.Process:
                         World.Process(_world);
@@ -181,7 +183,6 @@ internal sealed unsafe class CorpusRunner
                         ExecuteRead(command);
                         break;
                 }
-            }
 
             _output.Write("post reads ");
             _output.WriteLine(_frameReads.Value.ToString("x16", CultureInfo.InvariantCulture));
@@ -194,7 +195,9 @@ internal sealed unsafe class CorpusRunner
     }
 
     private World.SourceId Id(int handle)
-        => (uint)handle < (uint)_attemptIds.Count ? _attemptIds[handle] : default;
+    {
+        return (uint)handle < (uint)_attemptIds.Count ? _attemptIds[handle] : default;
+    }
 
     private void ExecuteSync(StreamCommand command)
     {
@@ -317,7 +320,8 @@ internal sealed unsafe class CorpusRunner
                 hash.Mix(nearY);
                 break;
             case ReadKind.SenseGradient:
-                hash.Mix(World.TrySenseGradient(_world, command.Layer, command.X, command.Y, out var gradientX, out var gradientY));
+                hash.Mix(World.TrySenseGradient(_world, command.Layer, command.X, command.Y, out var gradientX,
+                    out var gradientY));
                 hash.Mix(gradientX);
                 hash.Mix(gradientY);
                 break;
@@ -387,8 +391,10 @@ internal sealed unsafe class CorpusRunner
                 fixed (ulong* pWords = _words)
                 {
                     complete = command.Read == ReadKind.SenseColumnEx
-                        ? (World.SenseColumn(_world, command.Layer, pXs, pYs, pExcludes, count, pValues, pWords) == World.ReadStatus.Complete)
-                        : (World.SenseColumn(_world, command.Layer, pXs, pYs, count, pValues, pWords) == World.ReadStatus.Complete);
+                        ? World.SenseColumn(_world, command.Layer, pXs, pYs, pExcludes, count, pValues, pWords) ==
+                          World.ReadStatus.Complete
+                        : World.SenseColumn(_world, command.Layer, pXs, pYs, count, pValues, pWords) ==
+                          World.ReadStatus.Complete;
                 }
 
                 hash.Mix(complete);
@@ -407,8 +413,8 @@ internal sealed unsafe class CorpusRunner
                 fixed (float* pGx = _gradientXs, pGy = _gradientYs)
                 fixed (ulong* pWords = _words)
                 {
-                    complete = (World.SenseGradientColumn(
-                        _world, command.Layer, pXs, pYs, null, count, pGx, pGy, pWords) == World.ReadStatus.Complete);
+                    complete = World.SenseGradientColumn(
+                        _world, command.Layer, pXs, pYs, null, count, pGx, pGy, pWords) == World.ReadStatus.Complete;
                 }
 
                 hash.Mix(complete);
@@ -450,7 +456,8 @@ internal sealed unsafe class CorpusRunner
         var s = &World.GetContext(_world)->Sources;
         var count = 0;
         for (var i = 0; i < s->Count; i++)
-            if (s->Alive[i] != 0 && s->Gain[i] != 0 && s->Layer[i] == layer) count++;
+            if (s->Alive[i] != 0 && s->Gain[i] != 0 && s->Layer[i] == layer)
+                count++;
         return count;
     }
 }

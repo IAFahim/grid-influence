@@ -1,12 +1,17 @@
 namespace Gi.Stats;
 
-internal readonly struct Scene(byte world, byte grid, int cells, int layers, int sources, int moves, World.SourceId[] ids)
+internal readonly struct Scene(
+    byte world,
+    byte grid,
+    int cells,
+    int layers,
+    int moves,
+    World.SourceId[] ids)
 {
     public readonly byte World = world;
     public readonly byte Grid = grid;
     public readonly int Cells = cells;
     public readonly int Layers = layers;
-    public readonly int Sources = sources;
     public readonly int Moves = moves;
     public readonly World.SourceId[] Ids = ids;
 
@@ -25,7 +30,10 @@ internal readonly struct Scene(byte world, byte grid, int cells, int layers, int
             for (var i = 0; i < samples.Length; i++) samples[i] = (sbyte)(i % 61 - 30);
             stamp = Stamp.New(samples, size, size);
         }
-        else stamp = Stamp.Box(size, size, 60);
+        else
+        {
+            stamp = Stamp.Box(size, size, 60);
+        }
 
         var ids = new World.SourceId[options.Sources];
         var state = 17u;
@@ -38,8 +46,10 @@ internal readonly struct Scene(byte world, byte grid, int cells, int layers, int
             if ((ids[i] = Gi.World.Place(world, (byte)(i % options.Layers), x, y, stamp, 8)).Slot != (uint)i)
                 throw new InvalidOperationException("Scene placement failed.");
         }
+
         Gi.World.Process(world);
-        return new Scene(world, grid, cells, options.Layers, options.Sources, Math.Min(options.Moves, options.Sources), ids);
+        return new Scene(world, grid, cells, options.Layers, Math.Min(options.Moves, options.Sources),
+            ids);
     }
 
     public long Sum()

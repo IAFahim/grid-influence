@@ -9,6 +9,9 @@ namespace Gi.Entities.Columns.Tests;
 
 public sealed unsafe class FootprintTests
 {
+
+    private static readonly float[] NorthCorners = new[] { 8f, 19f, 12f, 19f, 12f, 21f, 8f, 21f };
+    private static readonly float[] SouthCorners = new[] { 11f, 18f, 11f, 22f, 9f, 22f, 9f, 18f };
     private const int Power = 7;
     private const float Size = 64f;
     private const int Cells = 1 << Power;
@@ -105,11 +108,11 @@ public sealed unsafe class FootprintTests
         var box = new GiStampSpec { Shape = GiStampShape.Box, Width = 4, Height = 2, Value = 10 };
         var corners = new float[8];
         GiFootprint.Corners(box, 10f, 20f, 0f, 1f, corners);
-        Assert.Equal(new[] { 8f, 19f, 12f, 19f, 12f, 21f, 8f, 21f }, corners);
+        Assert.Equal(NorthCorners, corners);
 
         GiFootprint.Corners(box, 10f, 20f, (float)(Math.PI / 2), 1f, corners);
         for (var i = 0; i < 8; i++) corners[i] = (float)Math.Round(corners[i], 3);
-        Assert.Equal(new[] { 11f, 18f, 11f, 22f, 9f, 22f, 9f, 18f }, corners);
+        Assert.Equal(SouthCorners, corners);
 
         var disk = new GiStampSpec { Shape = GiStampShape.Disk, Radius = 5, Arc = 360, Value = 10 };
         GiFootprint.HalfExtents(disk, 1.2f, 2f, out var hx, out var hy);

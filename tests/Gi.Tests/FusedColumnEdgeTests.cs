@@ -64,7 +64,10 @@ public unsafe class FusedColumnEdgeTests
             fixed (float* pgx = gx)
             fixed (float* pgy = gy)
             fixed (ulong* pw = whole)
-                complete = (World.SenseGradientColumn(w, layer, px, py, null, count, pv, pgx, pgy, pw) == World.ReadStatus.Complete);
+            {
+                complete = World.SenseGradientColumn(w, layer, px, py, null, count, pv, pgx, pgy, pw) ==
+                           World.ReadStatus.Complete;
+            }
 
             var expectedComplete = true;
             for (var i = 0; i < count; i++)
@@ -89,13 +92,16 @@ public unsafe class FusedColumnEdgeTests
         }
     }
 
-    private static int EdgeBiased(Random rng, int mode) => mode switch
+    private static int EdgeBiased(Random rng, int mode)
     {
-        0 => rng.Next(32),
-        1 => rng.Next(2) == 0 ? 0 : 31,
-        2 => rng.Next(4) switch { 0 => 0, 1 => 1, 2 => 30, _ => 31 },
-        3 => rng.Next(3) == 0 ? 31 : rng.Next(32),
-        4 => rng.Next(3) == 0 ? 0 : rng.Next(32),
-        _ => rng.Next(32),
-    };
+        return mode switch
+        {
+            0 => rng.Next(32),
+            1 => rng.Next(2) == 0 ? 0 : 31,
+            2 => rng.Next(4) switch { 0 => 0, 1 => 1, 2 => 30, _ => 31 },
+            3 => rng.Next(3) == 0 ? 31 : rng.Next(32),
+            4 => rng.Next(3) == 0 ? 0 : rng.Next(32),
+            _ => rng.Next(32)
+        };
+    }
 }

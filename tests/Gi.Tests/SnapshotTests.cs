@@ -15,7 +15,10 @@ public unsafe class SnapshotTests
     {
         var a = World.New();
         var b = World.New();
-        var stamps = new List<byte> { Stamp.Box(3, 3, 30), Stamp.Box(6, 2, -25), Stamp.Tent(6, 6, 40), Stamp.Disk(4, 50), Stamp.Bell(5, 5, 20) };
+        var stamps = new List<byte>
+        {
+            Stamp.Box(3, 3, 30), Stamp.Box(6, 2, -25), Stamp.Tent(6, 6, 40), Stamp.Disk(4, 50), Stamp.Bell(5, 5, 20)
+        };
         try
         {
             Grid.New(a, 6, 0f, 0f, 64f);
@@ -48,11 +51,13 @@ public unsafe class SnapshotTests
             {
                 foreach (var id in ids)
                 {
-                    World.Move(a, id, (float)(setup.NextDouble() * 128.0 - 32.0), (float)(setup.NextDouble() * 128.0 - 32.0));
+                    World.Move(a, id, (float)(setup.NextDouble() * 128.0 - 32.0),
+                        (float)(setup.NextDouble() * 128.0 - 32.0));
                     World.Turn(a, id, (float)(setup.NextDouble() * 6.0));
                 }
 
-                World.Splat(a, transient, new[] { (float)(setup.NextDouble() * 64.0) }, new[] { (float)(setup.NextDouble() * 64.0) },
+                World.Splat(a, transient, new[] { (float)(setup.NextDouble() * 64.0) },
+                    new[] { (float)(setup.NextDouble() * 64.0) },
                     stamps[0], 5);
                 World.Process(a);
             }
@@ -186,7 +191,7 @@ public unsafe class SnapshotTests
         var swapped = new StringWriter();
         var buffer = new byte[1 << 20];
         var done = false;
-        CorpusRunner.Run(setup, modeText, swapped, swap: w =>
+        CorpusRunner.Run(setup, modeText, swapped, w =>
         {
             if (done || !World.TrySnapshot(w, buffer, out var written)) return w;
             done = true;
@@ -318,7 +323,6 @@ public unsafe class SnapshotTests
             var tilesA = new int[64];
             var tilesB = new int[64];
             foreach (var since in new[] { 1, 2, 3 })
-            {
                 fixed (int* pA = tilesA)
                 fixed (int* pB = tilesB)
                 {
@@ -327,7 +331,6 @@ public unsafe class SnapshotTests
                     Assert.Equal(countA, countB);
                     for (var i = 0; i < countA; i++) Assert.Equal(tilesA[i], tilesB[i]);
                 }
-            }
 
             fixed (int* pA = tilesA)
             fixed (int* pB = tilesB)
@@ -1021,7 +1024,8 @@ public unsafe class SnapshotTests
 
             Assert.Equal(pageA, pageB);
             Assert.Equal(World.Query(a, g, l, 0, 0, size, size), World.Query(b, g, l, 0, 0, size, size));
-            Assert.Equal(World.QueryMax(a, g, l, out var xA, out var yA), World.QueryMax(b, g, l, out var xB, out var yB));
+            Assert.Equal(World.QueryMax(a, g, l, out var xA, out var yA),
+                World.QueryMax(b, g, l, out var xB, out var yB));
             Assert.Equal((xA, yA), (xB, yB));
         }
     }

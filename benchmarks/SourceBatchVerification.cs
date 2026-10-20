@@ -3,12 +3,6 @@ using Gi;
 
 internal static partial class Verification
 {
-    private readonly record struct SourceBatchInput(World.SourceId Source, float PositionX, float PositionY,
-        float Heading, float Scale, sbyte Gain);
-
-    private readonly record struct SourceBatchMeasurement(double SerialMicroseconds,
-        double BatchMicroseconds, long AllocatedBytes, long Checksum, bool Matches);
-
     private static bool SourceBatchesMatchSerialAndAllocateNothing()
     {
         var measurement = MeasureSourceBatch(16384, 4, 8);
@@ -49,7 +43,8 @@ internal static partial class Verification
 
             if (World.ApplyBatch(world, commands, results) != World.BatchStatus.Applied) return false;
             foreach (var result in results)
-                if (result.Status != World.SourceResultStatus.Applied) return false;
+                if (result.Status != World.SourceResultStatus.Applied)
+                    return false;
             World.Process(world);
             if (World.Query(world, 0, 0, 0, 0, 64, 64) != 0 || World.Query(world, 1, 0, 0, 0, 32, 32) != 0 ||
                 World.Query(world, 0, 1, 0, 0, 64, 64) <= 0 || World.QueryAt(world, 0, 2, 40.5f, 40.5f) >= 0)
@@ -57,7 +52,7 @@ internal static partial class Verification
             World.Rewind(world);
             World.Process(world);
             return initial > 0 && World.Query(world, 0, 0, 0, 0, 64, 64) == initial &&
-                World.Query(world, 0, 1, 0, 0, 64, 64) == 0;
+                   World.Query(world, 0, 1, 0, 0, 64, 64) == 0;
         }
         finally
         {
@@ -80,14 +75,15 @@ internal static partial class Verification
             var measurement = MeasureSourceBatch(count, 32, 80);
             if (!measurement.Matches || measurement.AllocatedBytes != 0)
             {
-                Console.WriteLine($"FAIL source-batch-{count}: match {measurement.Matches}, allocation {measurement.AllocatedBytes}");
+                Console.WriteLine(
+                    $"FAIL source-batch-{count}: match {measurement.Matches}, allocation {measurement.AllocatedBytes}");
                 return 1;
             }
 
             Console.WriteLine($"{count} full source updates: serial {measurement.SerialMicroseconds:F1} us, " +
-                $"batch {measurement.BatchMicroseconds:F1} us, " +
-                $"{count / measurement.BatchMicroseconds:F1} million updates/s, " +
-                $"{measurement.AllocatedBytes} B, checksum {measurement.Checksum}");
+                              $"batch {measurement.BatchMicroseconds:F1} us, " +
+                              $"{count / measurement.BatchMicroseconds:F1} million updates/s, " +
+                              $"{measurement.AllocatedBytes} B, checksum {measurement.Checksum}");
         }
 
         if (!TransformUpdatesMatchOrderedCallsAndAllocateNothing())
@@ -102,14 +98,15 @@ internal static partial class Verification
             var measurement = MeasureTransformBatch(count, 32, 80);
             if (!measurement.Matches || measurement.AllocatedBytes != 0)
             {
-                Console.WriteLine($"FAIL transform-batch-{count}: match {measurement.Matches}, allocation {measurement.AllocatedBytes}");
+                Console.WriteLine(
+                    $"FAIL transform-batch-{count}: match {measurement.Matches}, allocation {measurement.AllocatedBytes}");
                 return 1;
             }
 
             Console.WriteLine($"{count} transform updates: serial {measurement.SerialMicroseconds:F1} us, " +
-                $"batch {measurement.BatchMicroseconds:F1} us, " +
-                $"{count / measurement.BatchMicroseconds:F1} million updates/s, " +
-                $"{measurement.AllocatedBytes} B, checksum {measurement.Checksum}");
+                              $"batch {measurement.BatchMicroseconds:F1} us, " +
+                              $"{count / measurement.BatchMicroseconds:F1} million updates/s, " +
+                              $"{measurement.AllocatedBytes} B, checksum {measurement.Checksum}");
         }
 
         return 0;
@@ -146,9 +143,11 @@ internal static partial class Verification
                 var second = new SourceBatchInput(source, positionX, positionY, 0f, 1f, 0);
                 firstInputs[index] = first;
                 secondInputs[index] = second;
-                firstCommands[index] = World.SourceCommand.UpdateTransform(first.Source, first.PositionX, first.PositionY,
+                firstCommands[index] = World.SourceCommand.UpdateTransform(first.Source, first.PositionX,
+                    first.PositionY,
                     first.Heading, first.Scale);
-                secondCommands[index] = World.SourceCommand.UpdateTransform(second.Source, second.PositionX, second.PositionY,
+                secondCommands[index] = World.SourceCommand.UpdateTransform(second.Source, second.PositionX,
+                    second.PositionY,
                     second.Heading, second.Scale);
             }
 
@@ -250,7 +249,8 @@ internal static partial class Verification
 
             matches &= World.ApplyBatch(batchWorld, creations, results) == World.BatchStatus.Applied;
             for (var index = 0; index < count; index++)
-                matches &= results[index].Status == World.SourceResultStatus.Applied && results[index].SourceId == firstInputs[index].Source;
+                matches &= results[index].Status == World.SourceResultStatus.Applied &&
+                           results[index].SourceId == firstInputs[index].Source;
             World.Process(serialWorld);
             World.Process(batchWorld);
 
@@ -309,4 +309,19 @@ internal static partial class Verification
             Stamp.Free(stamp);
         }
     }
+
+    private readonly record struct SourceBatchInput(
+        World.SourceId Source,
+        float PositionX,
+        float PositionY,
+        float Heading,
+        float Scale,
+        sbyte Gain);
+
+    private readonly record struct SourceBatchMeasurement(
+        double SerialMicroseconds,
+        double BatchMicroseconds,
+        long AllocatedBytes,
+        long Checksum,
+        bool Matches);
 }

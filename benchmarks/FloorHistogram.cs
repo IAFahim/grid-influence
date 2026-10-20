@@ -4,7 +4,7 @@ using System.Runtime.Intrinsics.X86;
 
 internal static unsafe class FloorHistogramKernel
 {
-    public const int PrefetchDistance = 16;
+    private const int PrefetchDistance = 16;
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public static void Accumulate(int* cells, int count, int* histogram, bool prefetch)
@@ -69,22 +69,25 @@ internal static unsafe class FloorHistogramKernel
         for (; i < count; i++) target[i] += source[i];
     }
 
-    public static void Clear(int* histogram, int count) => new Span<int>(histogram, count).Clear();
+    public static void Clear(int* histogram, int count)
+    {
+        new Span<int>(histogram, count).Clear();
+    }
 }
 
 internal sealed unsafe class FloorHistogramSuite : FloorSuite
 {
     private const int Count = FloorShape.Splats;
     private const int Cells = FloorShape.Cells;
+    private readonly FloorCase[] _cases;
+    private readonly int* _clumpMorton;
+    private readonly int* _clumpRandom;
+    private readonly int* _histogram;
+    private readonly int* _merged;
+    private readonly int* _odd;
+    private readonly int* _uniformMorton;
 
     private readonly int* _uniformRandom;
-    private readonly int* _uniformMorton;
-    private readonly int* _clumpRandom;
-    private readonly int* _clumpMorton;
-    private readonly int* _histogram;
-    private readonly int* _odd;
-    private readonly int* _merged;
-    private readonly FloorCase[] _cases;
 
     public FloorHistogramSuite()
     {
@@ -121,7 +124,7 @@ internal sealed unsafe class FloorHistogramSuite : FloorSuite
                     _odd[7] = 3;
                     FloorHistogramKernel.Merge(_histogram, _odd, Cells);
                     return FloorHash.Of(_histogram, Cells);
-                }),
+                })
         ];
     }
 
@@ -134,7 +137,7 @@ internal sealed unsafe class FloorHistogramSuite : FloorSuite
         var sets = new (string Name, nint Data)[]
         {
             ("random-uniform", (nint)_uniformRandom), ("morton-uniform", (nint)_uniformMorton),
-            ("random-clump", (nint)_clumpRandom), ("morton-clump", (nint)_clumpMorton),
+            ("random-clump", (nint)_clumpRandom), ("morton-clump", (nint)_clumpMorton)
         };
         foreach (var (name, address) in sets)
         {
@@ -159,7 +162,8 @@ internal sealed unsafe class FloorHistogramSuite : FloorSuite
             FloorHistogramKernel.Clear(_odd, Cells);
             FloorHistogramKernel.AccumulateInterleaved(data, Count, _histogram, _odd, !prefetching);
             FloorHistogramKernel.Merge(_histogram, _odd, Cells);
-            receipts.Check($"floor-p3-interleaved-{name}-other-prefetch-matches-reference", Equal(_histogram, expected));
+            receipts.Check($"floor-p3-interleaved-{name}-other-prefetch-matches-reference",
+                Equal(_histogram, expected));
 
             FloorHistogramKernel.Clear(_histogram, Cells);
             FloorHistogramKernel.AccumulateCoalesced(data, Count, _histogram, prefetching);
@@ -196,7 +200,8 @@ internal sealed unsafe class FloorHistogramSuite : FloorSuite
     }
 
     private FloorCase Accumulating(string probe, string variant, int* data, bool prefetch)
-        => new(probe, variant, Count,
+    {
+        return new FloorCase(probe, variant, Count,
             () => FloorHistogramKernel.Accumulate(data, Count, _histogram, prefetch),
             () =>
             {
@@ -204,9 +209,11 @@ internal sealed unsafe class FloorHistogramSuite : FloorSuite
                 FloorHistogramKernel.Accumulate(data, Count, _histogram, prefetch);
                 return FloorHash.Of(_histogram, Cells);
             });
+    }
 
     private FloorCase Interleaved(string probe, string variant, int* data, bool prefetch)
-        => new(probe, variant, Count,
+    {
+        return new FloorCase(probe, variant, Count,
             () => FloorHistogramKernel.AccumulateInterleaved(data, Count, _histogram, _odd, prefetch),
             () =>
             {
@@ -217,9 +224,11 @@ internal sealed unsafe class FloorHistogramSuite : FloorSuite
                 FloorHistogramKernel.Merge(_merged, _odd, Cells);
                 return FloorHash.Of(_merged, Cells);
             });
+    }
 
     private FloorCase Coalesced(string probe, string variant, int* data, bool prefetch)
-        => new(probe, variant, Count,
+    {
+        return new FloorCase(probe, variant, Count,
             () => FloorHistogramKernel.AccumulateCoalesced(data, Count, _histogram, prefetch),
             () =>
             {
@@ -227,6 +236,7 @@ internal sealed unsafe class FloorHistogramSuite : FloorSuite
                 FloorHistogramKernel.AccumulateCoalesced(data, Count, _histogram, prefetch);
                 return FloorHash.Of(_histogram, Cells);
             });
+    }
 
     private static int[] Reference(int* data)
     {
@@ -236,7 +246,9 @@ internal sealed unsafe class FloorHistogramSuite : FloorSuite
     }
 
     private static bool Equal(int* actual, int[] expected)
-        => new ReadOnlySpan<int>(actual, Cells).SequenceEqual(expected);
+    {
+        return new ReadOnlySpan<int>(actual, Cells).SequenceEqual(expected);
+    }
 
     private void Generate(int origin, int span, ref FloorRandom rng, out int* random, out int* morton)
     {

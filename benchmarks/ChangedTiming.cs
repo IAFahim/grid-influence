@@ -55,7 +55,8 @@ internal static unsafe class ChangedTiming
             bestDisk = Math.Min(bestDisk, Stopwatch.GetElapsedTime(middle, finished).TotalNanoseconds / 50);
         }
 
-        Console.WriteLine($"ChangedTiles(since) on 65,536 tiles: {best / 1000.0:F1} µs; Changed(disk r=64): {bestDisk:F0} ns; checksum {checksum}");
+        Console.WriteLine(
+            $"ChangedTiles(since) on 65,536 tiles: {best / 1000.0:F1} µs; Changed(disk r=64): {bestDisk:F0} ns; checksum {checksum}");
         World.Free(world);
         Stamp.Free(box);
         return 0;

@@ -4,10 +4,10 @@ namespace Gi.Tests;
 
 public sealed class BatchSemanticsTests : IDisposable
 {
-    private readonly byte _world = World.New();
     private readonly byte _grid;
     private readonly byte _layer;
     private readonly byte _stamp;
+    private readonly byte _world = World.New();
 
     public BatchSemanticsTests()
     {

@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Runtime.CompilerServices;
 
 internal sealed class FrameResult
 {
@@ -97,8 +99,8 @@ internal sealed class FrameResult
             .Number("rss_after_setup_mb", RssSetupMb, 1)
             .Number("rss_peak_mb", RssPeakMb, 1)
             .Flag("reads_complete", ReadsComplete)
-            .Text("checksum", Checksum.ToString("x16", System.Globalization.CultureInfo.InvariantCulture))
-            .Text("final_state", FinalState.ToString("x16", System.Globalization.CultureInfo.InvariantCulture))
+            .Text("checksum", Checksum.ToString("x16", CultureInfo.InvariantCulture))
+            .Text("final_state", FinalState.ToString("x16", CultureInfo.InvariantCulture))
             .Flag("ok", Ok)
             .EndObject()
             .ToString();
@@ -157,14 +159,14 @@ internal static unsafe class FrameDriver
         scenario.Setup();
         var marks = stackalloc long[scenario.Stages.Length + 1];
         var started = Stopwatch.GetTimestamp();
-        for (var frame = 0; ; frame++)
+        for (var frame = 0;; frame++)
         {
             Execute(scenario, frame, marks, out _);
             if (frame >= 16 && Stopwatch.GetElapsedTime(started).TotalMilliseconds >= milliseconds) break;
         }
     }
 
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public static bool Execute(FrameScenario scenario, int frame, long* marks, out ulong frameHash)
     {
         scenario.Step(frame);
@@ -233,7 +235,7 @@ internal static unsafe class FrameDriver
             RssPeakMb = FrameHost.ResidentMegabytes("VmHWM"),
             Checksum = checksum,
             FinalState = finalState,
-            ReadsComplete = complete,
+            ReadsComplete = complete
         };
     }
 }

@@ -261,7 +261,8 @@ public unsafe class ReferenceWorldTests
         }
     }
 
-    private static void VerifyReads(byte w, ReferenceWorld rw, byte[] layers, List<World.SourceId> ids, Random rng, int tick)
+    private static void VerifyReads(byte w, ReferenceWorld rw, byte[] layers, List<World.SourceId> ids, Random rng,
+        int tick)
     {
         for (var q = 0; q < 8; q++)
         {
@@ -315,7 +316,8 @@ public unsafe class ReferenceWorldTests
                 Assert.Equal((rmv, rbx, rby), (mv, bx, by));
 
                 var threshold = (short)rng.Next(-20, 50);
-                var okNear = World.TrySenseNearest(w, layer, x, y, reach, threshold, out var nv, out var nx, out var ny);
+                var okNear =
+                    World.TrySenseNearest(w, layer, x, y, reach, threshold, out var nv, out var nx, out var ny);
                 var rokNear = rw.TrySenseNearest(layer, x, y, reach, threshold, out var rnv, out var rnx, out var rny);
                 Assert.Equal(rokNear, okNear);
                 Assert.Equal((rnv, rnx, rny), (nv, nx, ny));

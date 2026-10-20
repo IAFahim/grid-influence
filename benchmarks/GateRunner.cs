@@ -265,7 +265,7 @@ internal static class GateRunner
         foreach (var row in document.RootElement.GetProperty("checksums").EnumerateObject())
             if (!checksums.TryGetValue(row.Name, out var current) || current != row.Value.GetString())
             {
-                Console.WriteLine($"FAIL checksum {row.Name}: {row.Value.GetString()} -> {(checksums.TryGetValue(row.Name, out var c) ? c : "missing")}");
+                Console.WriteLine($"FAIL checksum {row.Name}: {row.Value.GetString()} -> {checksums.GetValueOrDefault(row.Name, "missing")}");
                 failures++;
             }
 

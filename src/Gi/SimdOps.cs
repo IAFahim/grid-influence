@@ -10,14 +10,18 @@ internal static unsafe class SimdOps
 {
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static short HorizontalMax(Vector256<short> vector)
-        => HorizontalMax(Vector128.Max(vector.GetLower(), vector.GetUpper()));
+    {
+        return HorizontalMax(Vector128.Max(vector.GetLower(), vector.GetUpper()));
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static short HorizontalMax(Vector128<short> vector)
     {
         var halves = Vector128.Max(vector, Vector128.Shuffle(vector, Vector128.Create((short)4, 5, 6, 7, 0, 1, 2, 3)));
-        var quarters = Vector128.Max(halves, Vector128.Shuffle(halves, Vector128.Create((short)2, 3, 0, 1, 6, 7, 4, 5)));
-        return Vector128.Max(quarters, Vector128.Shuffle(quarters, Vector128.Create((short)1, 0, 3, 2, 5, 4, 7, 6))).ToScalar();
+        var quarters =
+            Vector128.Max(halves, Vector128.Shuffle(halves, Vector128.Create((short)2, 3, 0, 1, 6, 7, 4, 5)));
+        return Vector128.Max(quarters, Vector128.Shuffle(quarters, Vector128.Create((short)1, 0, 3, 2, 5, 4, 7, 6)))
+            .ToScalar();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
@@ -45,7 +49,8 @@ internal static unsafe class SimdOps
         }
 
         for (; index < count; index++)
-            if (values[index] == target) return index;
+            if (values[index] == target)
+                return index;
         return count;
     }
 
@@ -102,7 +107,8 @@ internal static unsafe class SimdOps
         }
 
         for (; index < count; index++)
-            if (values[first + index] == target) return first + index;
+            if (values[first + index] == target)
+                return first + index;
         return end;
     }
 
@@ -143,7 +149,8 @@ internal static unsafe class SimdOps
 
         var maximum = row[first];
         for (var i = first + 1; i < end; i++)
-            if (row[i] > maximum) maximum = row[i];
+            if (row[i] > maximum)
+                maximum = row[i];
         return maximum;
     }
 
@@ -181,8 +188,12 @@ internal static unsafe class SimdOps
                 var from = Vector256.Create((short)first);
                 var to = Vector256.Create((short)end);
                 var row = rows + r * TileBake.TileSize;
-                var low = Vector256.Load(row) & Vector256.GreaterThanOrEqual(indicesLow, from) & Vector256.LessThan(indicesLow, to);
-                var high = Vector256.Load(row + 16) & Vector256.GreaterThanOrEqual(indicesHigh, from) & Vector256.LessThan(indicesHigh, to);
+                var low =
+                    Vector256.Load(row) & Vector256.GreaterThanOrEqual(indicesLow, from) &
+                    Vector256.LessThan(indicesLow, to);
+                var high =
+                    Vector256.Load(row + 16) & Vector256.GreaterThanOrEqual(indicesHigh, from) &
+                    Vector256.LessThan(indicesHigh, to);
                 total += PairSums(low, ones) + PairSums(high, ones);
             }
 
@@ -264,7 +275,8 @@ internal static unsafe class SimdOps
                 {
                     var (page0, page1) = Vector256.Widen(Vector256.Load(page + row + c));
                     var absent0 = Vector256.Min(Vector256.Max(page0 - Vector256.Load(core + row + c), floor), ceiling);
-                    var absent1 = Vector256.Min(Vector256.Max(page1 - Vector256.Load(core + row + c + 8), floor), ceiling);
+                    var absent1 =
+                        Vector256.Min(Vector256.Max(page1 - Vector256.Load(core + row + c + 8), floor), ceiling);
                     total += absent0 - page0 + absent1 - page1;
                 }
 
@@ -292,7 +304,8 @@ internal static unsafe class SimdOps
                 {
                     var (page0, page1) = Vector128.Widen(Vector128.Load(page + row + c));
                     var absent0 = Vector128.Min(Vector128.Max(page0 - Vector128.Load(core + row + c), floor), ceiling);
-                    var absent1 = Vector128.Min(Vector128.Max(page1 - Vector128.Load(core + row + c + 4), floor), ceiling);
+                    var absent1 =
+                        Vector128.Min(Vector128.Max(page1 - Vector128.Load(core + row + c + 4), floor), ceiling);
                     total += absent0 - page0 + absent1 - page1;
                 }
 
@@ -319,6 +332,9 @@ internal static unsafe class SimdOps
         return delta;
     }
 
-    private static long Saturate(long value) => Math.Clamp(value, short.MinValue, short.MaxValue);
+    private static long Saturate(long value)
+    {
+        return Math.Clamp(value, short.MinValue, short.MaxValue);
+    }
 }
 #endif

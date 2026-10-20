@@ -1,3 +1,4 @@
+using Gi.Stats;
 using Xunit;
 
 namespace Gi.Tests;
@@ -68,11 +69,12 @@ public sealed class LayerTests
         Grid.New(w, 6, 0f, 0f, 64f);
         var a = Layer.New(w);
         var d = Layer.Max(w, a, a);
-        Assert.Equal(default(World.SourceId), World.Place(w, d, 10f, 10f, Stamp.Box(2, 2, 10), 1));
+        Assert.Equal(default, World.Place(w, d, 10f, 10f, Stamp.Box(2, 2, 10), 1));
         Assert.Throws<ArgumentOutOfRangeException>(() => Layer.Min(w, a, 31));
         Assert.Throws<ArgumentOutOfRangeException>(() => Layer.Sum(w, a, short.MaxValue + 1));
         Assert.Throws<ArgumentOutOfRangeException>(() => Layer.Sum(w, a, 1, -1));
-        Assert.Equal("weight", Assert.Throws<ArgumentOutOfRangeException>(() => Layer.Sum(w, a, short.MinValue)).ParamName);
+        Assert.Equal("weight",
+            Assert.Throws<ArgumentOutOfRangeException>(() => Layer.Sum(w, a, short.MinValue)).ParamName);
         Assert.Throws<ArgumentOutOfRangeException>(() => Layer.Mask(w, a, d, 5, 4));
         Assert.Equal("min", Assert.Throws<ArgumentOutOfRangeException>(() => Layer.Mask(w, a, a, 5, 4)).ParamName);
     }
@@ -149,7 +151,7 @@ public sealed class LayerTests
         var d = Layer.Sum(w, a, 2);
         World.Place(w, a, 16f, 16f, Stamp.Box(4, 4, 60), 2);
         World.Process(w);
-        var snapshot = Stats.Inspection.Read(w);
+        var snapshot = Inspection.Read(w);
         Assert.Equal(2, snapshot.LiveTiles);
         Assert.Equal(1, snapshot.DerivedTiles);
         Assert.Equal(PlaneStore.Int32Unit, snapshot.Int32Bytes);

@@ -36,7 +36,8 @@ internal static class OrderTiming
             bestSort = Math.Min(bestSort, Stopwatch.GetElapsedTime(middle, finished).TotalMilliseconds);
         }
 
-        Console.WriteLine($"1M spatial keys {bestKeys:F2} ms, radix sort {bestSort:F2} ms, disorder of random order {disorder:F3}");
+        Console.WriteLine(
+            $"1M spatial keys {bestKeys:F2} ms, radix sort {bestSort:F2} ms, disorder of random order {disorder:F3}");
         World.Free(world);
         return 0;
     }

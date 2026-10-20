@@ -11,100 +11,36 @@ internal sealed unsafe class ReferenceWorld
     private const int MaxSourceSlots = World.MaxSourceSlots;
     private const long MaxReachQ8 = 1L << 24;
     private const float MaxCellQ8 = 1073741824f;
-
-    internal struct Source
-    {
-        public float X;
-        public float Y;
-        public byte Stamp;
-        public byte Layer;
-        public sbyte Gain;
-        public ushort Angle;
-        public ushort Scale;
-        public bool Alive;
-        public uint Gen;
-        public byte Timed;
-        public sbyte FadeFrom;
-        public sbyte FadeTo;
-        public int FadeStart;
-        public int FadeTicks;
-        public int ExpireAt;
-    }
-
-    private struct ScheduleState
-    {
-        public byte Timed;
-        public sbyte FadeFrom;
-        public sbyte FadeTo;
-        public int FadeStart;
-        public int FadeTicks;
-        public int ExpireAt;
-    }
-
-    private sealed class LayerData
-    {
-        public short[]? Field;
-        public int[]? Epochs;
-        public bool MaxInit;
-        public List<int> Changed = new();
-        public HashSet<int> Marked = new();
-    }
-
-    private sealed class GridData
-    {
-        public int Size;
-        public float OriginX;
-        public float OriginY;
-        public int ScaleQ8;
-        public int TilesPerSide;
-        public int TileCount;
-        public readonly LayerData?[] Layers = new LayerData?[World.MaxLayers];
-    }
-
-    private struct Recipe
-    {
-        public LayerOp Op;
-        public byte A;
-        public byte B;
-        public byte Shift;
-        public int WeightA;
-        public int WeightB;
-        public short Low;
-        public short High;
-        public uint Reads;
-        public Layer.Precision Precision;
-        public bool Transient;
-    }
+    private readonly Queue<int> _free = new();
+    private readonly List<GridData> _grids = new();
+    private readonly List<(int Slot, Source From)> _journal = new();
+    private readonly HashSet<int> _journaled = new();
+    private readonly List<Recipe> _layers = new();
+    private readonly List<int> _pendingOrder = new();
+    private readonly List<(int Slot, ScheduleState State)> _scheduleJournal = new();
+    private readonly HashSet<int> _scheduleJournaled = new();
 
     private readonly List<Source> _splats = new();
-    private readonly List<GridData> _grids = new();
-    private readonly List<Recipe> _layers = new();
-    private Source[] _now = new Source[64];
     private Source[] _deposited = new Source[64];
+    private Source[] _now = new Source[64];
+    private bool[] _pending = new bool[64];
     private Source[] _pendingFrom = new Source[64];
     private sbyte[] _pendingToGain = new sbyte[64];
-    private bool[] _pending = new bool[64];
-    private readonly List<int> _pendingOrder = new();
-    private readonly Queue<int> _free = new();
-    private readonly List<(int Slot, Source From)> _journal = new();
-    private readonly List<(int Slot, ScheduleState State)> _scheduleJournal = new();
-    private readonly HashSet<int> _journaled = new();
-    private readonly HashSet<int> _scheduleJournaled = new();
-    private int _count;
-    private int _tick;
     private int _recordTick;
     private bool _recording;
-    private int _revision = 1;
 
-    public int Tick => _tick;
-    public int Revision => _revision;
+    internal int Tick { get; set; }
+
+    internal int Revision { get; set; } = 1;
+
     public int GridCount => _grids.Count;
     public int LayerCount => _layers.Count;
-    public int SourceCount => _count;
+    internal int SourceCount { get; set; }
 
     public byte AddGrid(int power, float x, float y, float size)
     {
-        if (!ValidationRules.TryGridScaleQ8(power, size, out var scaleQ8)) throw new ArgumentOutOfRangeException(nameof(size));
+        if (!ValidationRules.TryGridScaleQ8(power, size, out var scaleQ8))
+            throw new ArgumentOutOfRangeException(nameof(size));
         var cells = 1 << power;
         _grids.Add(new GridData
         {
@@ -113,14 +49,15 @@ internal sealed unsafe class ReferenceWorld
             OriginY = y,
             ScaleQ8 = scaleQ8,
             TilesPerSide = cells >> 5,
-            TileCount = (cells >> 5) * (cells >> 5),
+            TileCount = (cells >> 5) * (cells >> 5)
         });
         return (byte)(_grids.Count - 1);
     }
 
     public byte AddLayer(Layer.Precision precision, bool transient = false)
     {
-        _layers.Add(new Recipe { Op = LayerOp.Base, Reads = 1u << _layers.Count, Precision = precision, Transient = transient });
+        _layers.Add(new Recipe
+            { Op = LayerOp.Base, Reads = 1u << _layers.Count, Precision = precision, Transient = transient });
         return (byte)(_layers.Count - 1);
     }
 
@@ -137,7 +74,7 @@ internal sealed unsafe class ReferenceWorld
             Layer = layer,
             Gain = (sbyte)Math.Clamp((int)gain, -MaxGain, MaxGain),
             Scale = UnitScale,
-            Alive = true,
+            Alive = true
         });
         return true;
     }
@@ -149,7 +86,7 @@ internal sealed unsafe class ReferenceWorld
         _layers.Add(new Recipe
         {
             Op = op, A = a, B = b, Shift = (byte)shift, WeightA = weightA, WeightB = weightB,
-            Low = low, High = high, Reads = reads, Precision = Layer.Precision.Exact,
+            Low = low, High = high, Reads = reads, Precision = Layer.Precision.Exact
         });
         foreach (var g in _grids)
         {
@@ -183,9 +120,14 @@ internal sealed unsafe class ReferenceWorld
     }
 
     private static LayerData Data(GridData g, int layer)
-        => g.Layers[layer] ??= new LayerData();
+    {
+        return g.Layers[layer] ??= new LayerData();
+    }
 
-    private static short[]? LayerField(GridData g, int layer) => g.Layers[layer]?.Field;
+    private static short[]? LayerField(GridData g, int layer)
+    {
+        return g.Layers[layer]?.Field;
+    }
 
     private static bool TrySource(Source[] now, int count, World.SourceId id, out int slot)
     {
@@ -193,7 +135,10 @@ internal sealed unsafe class ReferenceWorld
         return (uint)slot < (uint)count && now[slot].Alive && id.Generation == now[slot].Gen;
     }
 
-    private bool TrySource(World.SourceId id, out int slot) => TrySource(_now, _count, id, out slot);
+    private bool TrySource(World.SourceId id, out int slot)
+    {
+        return TrySource(_now, SourceCount, id, out slot);
+    }
 
     public World.SourceId Place(byte layer, float x, float y, byte stamp, sbyte gain)
     {
@@ -202,9 +147,9 @@ internal sealed unsafe class ReferenceWorld
 
         if (!_free.TryDequeue(out var slot))
         {
-            if (_count >= MaxSourceSlots) return default;
-            slot = _count++;
-            if (_count > _now.Length)
+            if (SourceCount >= MaxSourceSlots) return default;
+            slot = SourceCount++;
+            if (SourceCount > _now.Length)
             {
                 var capacity = _now.Length * 2;
                 Array.Resize(ref _now, capacity);
@@ -222,22 +167,26 @@ internal sealed unsafe class ReferenceWorld
         {
             _pending[slot] = true;
             _pendingOrder.Add(slot);
-            _pendingFrom[slot] = new Source { X = x, Y = y, Stamp = stamp, Layer = layer, Gen = gen, Scale = UnitScale };
+            _pendingFrom[slot] = new Source
+                { X = x, Y = y, Stamp = stamp, Layer = layer, Gen = gen, Scale = UnitScale };
         }
 
         _pendingToGain[slot] = g;
         _now[slot] = new Source
         {
-            X = x, Y = y, Stamp = stamp, Layer = layer, Gain = g, Scale = UnitScale, Alive = true, Gen = gen,
+            X = x, Y = y, Stamp = stamp, Layer = layer, Gain = g, Scale = UnitScale, Alive = true, Gen = gen
         };
         return new World.SourceId((uint)slot, gen);
     }
 
-    private static ScheduleState ScheduleOf(in Source s) => new()
+    private static ScheduleState ScheduleOf(in Source s)
     {
-        Timed = s.Timed, FadeFrom = s.FadeFrom, FadeTo = s.FadeTo,
-        FadeStart = s.FadeStart, FadeTicks = s.FadeTicks, ExpireAt = s.ExpireAt,
-    };
+        return new ScheduleState
+        {
+            Timed = s.Timed, FadeFrom = s.FadeFrom, FadeTo = s.FadeTo,
+            FadeStart = s.FadeStart, FadeTicks = s.FadeTicks, ExpireAt = s.ExpireAt
+        };
+    }
 
     private static void ApplySchedule(ref Source s, in ScheduleState state)
     {
@@ -267,8 +216,10 @@ internal sealed unsafe class ReferenceWorld
         foreach (var g in _grids)
         {
             if (g.ScaleQ8 == 0) continue;
-            var dx = TileBake.AnchorQ8(oldX, g.OriginX, g.ScaleQ8, mask) ^ TileBake.AnchorQ8(x, g.OriginX, g.ScaleQ8, mask);
-            var dy = TileBake.AnchorQ8(oldY, g.OriginY, g.ScaleQ8, mask) ^ TileBake.AnchorQ8(y, g.OriginY, g.ScaleQ8, mask);
+            var dx = TileBake.AnchorQ8(oldX, g.OriginX, g.ScaleQ8, mask) ^
+                     TileBake.AnchorQ8(x, g.OriginX, g.ScaleQ8, mask);
+            var dy = TileBake.AnchorQ8(oldY, g.OriginY, g.ScaleQ8, mask) ^
+                     TileBake.AnchorQ8(y, g.OriginY, g.ScaleQ8, mask);
             if ((dx | dy) != 0) return true;
         }
 
@@ -276,7 +227,9 @@ internal sealed unsafe class ReferenceWorld
     }
 
     private bool AngleChanged(byte layer, ushort oldAngle, ushort angle)
-        => _grids.Count > 0 && ((oldAngle ^ angle) & _layers[layer].Precision.TurnMask) != 0;
+    {
+        return _grids.Count > 0 && ((oldAngle ^ angle) & _layers[layer].Precision.TurnMask) != 0;
+    }
 
     public void Move(World.SourceId source, float x, float y)
     {
@@ -361,7 +314,7 @@ internal sealed unsafe class ReferenceWorld
         {
             s.FadeFrom = s.Gain;
             s.FadeTo = target;
-            s.FadeStart = _tick;
+            s.FadeStart = Tick;
             s.FadeTicks = ticks;
             s.Timed |= Fading;
         }
@@ -372,10 +325,13 @@ internal sealed unsafe class ReferenceWorld
         if (!TrySource(source, out var i)) return;
         if (_recording && _scheduleJournaled.Add(i)) _scheduleJournal.Add((i, ScheduleOf(_now[i])));
         ref var s = ref _now[i];
-        if (ticks <= 0) s.Timed &= unchecked((byte)~Expiring);
+        if (ticks <= 0)
+        {
+            s.Timed &= unchecked((byte)~Expiring);
+        }
         else
         {
-            s.ExpireAt = _tick + ticks;
+            s.ExpireAt = Tick + ticks;
             s.Timed |= Expiring;
         }
     }
@@ -409,19 +365,20 @@ internal sealed unsafe class ReferenceWorld
     public int LiveCount(byte layer)
     {
         var live = 0;
-        for (var i = 0; i < _count; i++)
-            if (_now[i].Alive && _now[i].Gain != 0 && _now[i].Layer == layer) live++;
+        for (var i = 0; i < SourceCount; i++)
+            if (_now[i].Alive && _now[i].Gain != 0 && _now[i].Layer == layer)
+                live++;
         return live;
     }
 
     public void Process()
     {
-        _tick++;
-        for (var i = 0; i < _count; i++)
+        Tick++;
+        for (var i = 0; i < SourceCount; i++)
         {
             ref var s = ref _now[i];
             if (!s.Alive || s.Timed == 0) continue;
-            if ((s.Timed & Expiring) != 0 && s.ExpireAt - _tick <= 0)
+            if ((s.Timed & Expiring) != 0 && s.ExpireAt - Tick <= 0)
             {
                 Mutate(i, 0);
                 s.Alive = false;
@@ -430,7 +387,7 @@ internal sealed unsafe class ReferenceWorld
             }
 
             if ((s.Timed & Fading) == 0) continue;
-            var elapsed = Math.Clamp(_tick - s.FadeStart, 0, s.FadeTicks);
+            var elapsed = Math.Clamp(Tick - s.FadeStart, 0, s.FadeTicks);
             var delta = s.FadeTo - s.FadeFrom;
             var step = (int)(((long)Math.Abs(delta) * elapsed + s.FadeTicks / 2) / s.FadeTicks);
             var gain = (sbyte)(s.FadeFrom + (delta < 0 ? -step : step));
@@ -460,7 +417,6 @@ internal sealed unsafe class ReferenceWorld
                     _journal.Add((slot, _pendingFrom[slot]));
 
         foreach (var g in _grids)
-        {
             for (var l = 0; l < _layers.Count; l++)
             {
                 var ld = Data(g, l);
@@ -468,13 +424,12 @@ internal sealed unsafe class ReferenceWorld
                 if (r.Op == LayerOp.Base) ResolveBase(g, ld, l, r.Transient || (crowded & (1u << l)) != 0);
                 else ResolveDerived(g, ld, in r);
             }
-        }
 
         _splats.Clear();
 
         foreach (var slot in _pendingOrder) _pending[slot] = false;
         _pendingOrder.Clear();
-        Array.Copy(_now, _deposited, _count);
+        Array.Copy(_now, _deposited, SourceCount);
     }
 
     private void ResolveBase(GridData g, LayerData ld, int layer, bool crowded)
@@ -485,7 +440,7 @@ internal sealed unsafe class ReferenceWorld
         var processed = new HashSet<int>();
         var transient = _layers[layer].Transient;
         var sources = transient ? _splats.ToArray() : _now;
-        var sourceCount = transient ? sources.Length : _count;
+        var sourceCount = transient ? sources.Length : SourceCount;
         if (crowded)
         {
             if (!transient) ld.Epochs ??= new int[g.TileCount];
@@ -499,7 +454,8 @@ internal sealed unsafe class ReferenceWorld
             var prev = ld.Field;
             if (prev != null)
                 for (var t = 0; t < g.TileCount; t++)
-                    if (TileNonZero(prev, size, (t % tps) << 5, (t / tps) << 5)) processed.Add(t);
+                    if (TileNonZero(prev, size, (t % tps) << 5, (t / tps) << 5))
+                        processed.Add(t);
             if (transient && processed.Count != 0) ld.Epochs ??= new int[g.TileCount];
         }
         else
@@ -524,7 +480,8 @@ internal sealed unsafe class ReferenceWorld
             ref readonly var s = ref sources[i];
             if (!s.Alive || s.Gain == 0 || s.Layer != layer) continue;
             var v = StampCatalog.Get(s.Stamp);
-            if (!TileBake.Place(s.X, s.Y, g.OriginX, g.OriginY, g.ScaleQ8, size, v, s.Angle, s.Scale, precision, out var p))
+            if (!TileBake.Place(s.X, s.Y, g.OriginX, g.OriginY, g.ScaleQ8, size, v, s.Angle, s.Scale, precision,
+                    out var p))
                 continue;
 
             var x0 = Math.Max(p.X0, 0);
@@ -623,7 +580,8 @@ internal sealed unsafe class ReferenceWorld
         ld.Marked.Clear();
         foreach (var t in g.Layers[r.A]?.Changed ?? (IEnumerable<int>)Array.Empty<int>()) touched.Add(t);
         if (r.B != r.A)
-            foreach (var t in g.Layers[r.B]?.Changed ?? (IEnumerable<int>)Array.Empty<int>()) touched.Add(t);
+            foreach (var t in g.Layers[r.B]?.Changed ?? (IEnumerable<int>)Array.Empty<int>())
+                touched.Add(t);
         if (touched.Count == 0)
         {
             ld.Changed.Clear();
@@ -660,12 +618,15 @@ internal sealed unsafe class ReferenceWorld
         }
 
         if (changed.Count != 0 && ld.Epochs != null)
-            foreach (var t in changed) ld.Epochs[t] = _tick;
+            foreach (var t in changed)
+                ld.Epochs[t] = Tick;
         ld.Field = field;
     }
 
     private static BigInteger RoundQ40(BigInteger value)
-        => (value + 549755813888L + (value.Sign < 0 ? -1 : 0)) >> 40;
+    {
+        return (value + 549755813888L + (value.Sign < 0 ? -1 : 0)) >> 40;
+    }
 
     private static short CombineCell(in Recipe r, int a, int b)
     {
@@ -692,7 +653,7 @@ internal sealed unsafe class ReferenceWorld
         _scheduleJournal.Clear();
         _journaled.Clear();
         _scheduleJournaled.Clear();
-        _recordTick = _tick;
+        _recordTick = Tick;
         _recording = true;
     }
 
@@ -707,7 +668,7 @@ internal sealed unsafe class ReferenceWorld
 
     public void Rewind()
     {
-        _revision++;
+        Revision++;
         for (var i = _pendingOrder.Count - 1; i >= 0; i--)
         {
             var slot = _pendingOrder[i];
@@ -744,8 +705,8 @@ internal sealed unsafe class ReferenceWorld
         _scheduleJournal.Clear();
         if (_recording)
         {
-            var delta = _tick - _recordTick;
-            for (var i = 0; i < _count; i++)
+            var delta = Tick - _recordTick;
+            for (var i = 0; i < SourceCount; i++)
             {
                 ref var s = ref _now[i];
                 if (!s.Alive || s.Timed == 0) continue;
@@ -756,8 +717,9 @@ internal sealed unsafe class ReferenceWorld
 
         _recording = false;
         _free.Clear();
-        for (var i = 0; i < _count; i++)
-            if (!_now[i].Alive && _now[i].Gen != uint.MaxValue) _free.Enqueue(i);
+        for (var i = 0; i < SourceCount; i++)
+            if (!_now[i].Alive && _now[i].Gen != uint.MaxValue)
+                _free.Enqueue(i);
     }
 
     private static void RestoreFields(ref Source target, in Source from)
@@ -775,13 +737,14 @@ internal sealed unsafe class ReferenceWorld
 
     public void Clear()
     {
-        _revision++;
-        for (var i = 0; i < _count; i++)
+        Revision++;
+        for (var i = 0; i < SourceCount; i++)
         {
             _now[i].Alive = false;
             _deposited[i].Alive = false;
         }
-        _count = 0;
+
+        SourceCount = 0;
         _splats.Clear();
         _free.Clear();
         _pendingOrder.Clear();
@@ -792,7 +755,6 @@ internal sealed unsafe class ReferenceWorld
         _scheduleJournaled.Clear();
         _recording = false;
         foreach (var g in _grids)
-        {
             for (var l = 0; l < _layers.Count; l++)
             {
                 var ld = g.Layers[l];
@@ -804,7 +766,7 @@ internal sealed unsafe class ReferenceWorld
                     {
                         var tx = (t % tps) << 5;
                         var ty = (t / tps) << 5;
-                        if (TileNonZero(ld.Field, g.Size, tx, ty)) ld.Epochs[t] = _tick + 1;
+                        if (TileNonZero(ld.Field, g.Size, tx, ty)) ld.Epochs[t] = Tick + 1;
                     }
                 }
 
@@ -813,7 +775,6 @@ internal sealed unsafe class ReferenceWorld
                 ld.Marked.Clear();
                 ld.MaxInit = false;
             }
-        }
     }
 
     private bool Applied(World.SourceId id, byte layer, out int slot, out Source applied)
@@ -821,7 +782,7 @@ internal sealed unsafe class ReferenceWorld
         slot = -1;
         applied = default;
         var index = (int)id.Slot;
-        if ((uint)index >= (uint)_count) return false;
+        if ((uint)index >= (uint)SourceCount) return false;
         var generation = id.Generation;
         var reads = _layers[layer].Reads;
         Source candidate;
@@ -860,7 +821,7 @@ internal sealed unsafe class ReferenceWorld
         BigInteger core = 0;
         BigInteger tent = 0;
         BigInteger bell = 0;
-        for (var i = 0; i < _count; i++)
+        for (var i = 0; i < SourceCount; i++)
         {
             if (i == excludeSlot) continue;
             ref readonly var s = ref _deposited[i];
@@ -914,7 +875,7 @@ internal sealed unsafe class ReferenceWorld
         return (long)p->V->Constant * gain * p->Curve * wx * wy;
     }
 
-    public short Query(byte grid, byte layer, int x, int y)
+    private short Query(byte grid, byte layer, int x, int y)
     {
         if (grid >= _grids.Count || layer >= _layers.Count) return 0;
         return Cell(_grids[grid], layer, x, y);
@@ -967,7 +928,8 @@ internal sealed unsafe class ReferenceWorld
     {
         if (grid >= _grids.Count || layer >= _layers.Count) return 0;
         var g = _grids[grid];
-        return Query(grid, layer, (int)(CellQ8(x, g.OriginX, g.ScaleQ8) >> 8), (int)(CellQ8(y, g.OriginY, g.ScaleQ8) >> 8));
+        return Query(grid, layer, (int)(CellQ8(x, g.OriginX, g.ScaleQ8) >> 8),
+            (int)(CellQ8(y, g.OriginY, g.ScaleQ8) >> 8));
     }
 
     public short QueryMax(byte grid, byte layer, out int x, out int y)
@@ -1093,14 +1055,18 @@ internal sealed unsafe class ReferenceWorld
     }
 
     private static int PyramidKey(int tx, int ty)
-        => ((ty >> 6) << 15) | ((tx >> 6) << 12) | (((ty >> 3) & 7) << 9) | (((tx >> 3) & 7) << 6) | ((ty & 7) << 3) | (tx & 7);
+    {
+        return ((ty >> 6) << 15) | ((tx >> 6) << 12) | (((ty >> 3) & 7) << 9) | (((tx >> 3) & 7) << 6) |
+               ((ty & 7) << 3) | (tx & 7);
+    }
 
     private static bool TileNonZero(short[]? field, int size, int tileX, int tileY)
     {
         if (field == null) return false;
         for (var y = tileY; y < tileY + 32; y++)
         for (var x = tileX; x < tileX + 32; x++)
-            if (field[y * size + x] != 0) return true;
+            if (field[y * size + x] != 0)
+                return true;
         return false;
     }
 
@@ -1119,15 +1085,20 @@ internal sealed unsafe class ReferenceWorld
     public bool Covers(float x, float y)
     {
         foreach (var g in _grids)
-            if (Contains(g, CellQ8(x, g.OriginX, g.ScaleQ8), CellQ8(y, g.OriginY, g.ScaleQ8))) return true;
+            if (Contains(g, CellQ8(x, g.OriginX, g.ScaleQ8), CellQ8(y, g.OriginY, g.ScaleQ8)))
+                return true;
         return false;
     }
 
     public bool TrySense(byte layer, float x, float y, out short value)
-        => SenseValue(layer, x, y, default, out value);
+    {
+        return SenseValue(layer, x, y, default, out value);
+    }
 
     public bool TrySense(byte layer, float x, float y, World.SourceId exclude, out short value)
-        => SenseValue(layer, x, y, exclude, out value);
+    {
+        return SenseValue(layer, x, y, exclude, out value);
+    }
 
     private bool SenseValue(byte layer, float x, float y, World.SourceId exclude, out short value)
     {
@@ -1147,10 +1118,14 @@ internal sealed unsafe class ReferenceWorld
     }
 
     public bool TrySenseArea(byte layer, float x, float y, float reach, out long total)
-        => SenseArea(layer, x, y, reach, default, out total);
+    {
+        return SenseArea(layer, x, y, reach, default, out total);
+    }
 
     public bool TrySenseArea(byte layer, float x, float y, float reach, World.SourceId exclude, out long total)
-        => SenseArea(layer, x, y, reach, exclude, out total);
+    {
+        return SenseArea(layer, x, y, reach, exclude, out total);
+    }
 
     private bool SenseArea(byte layer, float x, float y, float reach, World.SourceId exclude, out long total)
     {
@@ -1171,7 +1146,8 @@ internal sealed unsafe class ReferenceWorld
         return complete;
     }
 
-    public bool TrySenseMax(byte layer, float x, float y, float reach, out short value, out float bestX, out float bestY)
+    public bool TrySenseMax(byte layer, float x, float y, float reach, out short value, out float bestX,
+        out float bestY)
     {
         value = 0;
         bestX = 0;
@@ -1249,10 +1225,14 @@ internal sealed unsafe class ReferenceWorld
     }
 
     public bool TrySenseGradient(byte layer, float x, float y, out float gx, out float gy)
-        => SenseGradient(layer, x, y, default, out gx, out gy);
+    {
+        return SenseGradient(layer, x, y, default, out gx, out gy);
+    }
 
     public bool TrySenseGradient(byte layer, float x, float y, World.SourceId exclude, out float gx, out float gy)
-        => SenseGradient(layer, x, y, exclude, out gx, out gy);
+    {
+        return SenseGradient(layer, x, y, exclude, out gx, out gy);
+    }
 
     private bool SenseGradient(byte layer, float x, float y, World.SourceId exclude, out float gx, out float gy)
     {
@@ -1264,13 +1244,17 @@ internal sealed unsafe class ReferenceWorld
         var cy = (int)(CellQ8(y, g.OriginY, g.ScaleQ8) >> 8);
         var excluding = Applied(exclude, layer, out var slot, out var source);
         var perUnit = g.ScaleQ8 / 512f;
-        gx = (NeighborCell(g, layer, excluding, slot, source, cx + 1, cy) - NeighborCell(g, layer, excluding, slot, source, cx - 1, cy)) * perUnit;
-        gy = (NeighborCell(g, layer, excluding, slot, source, cx, cy + 1) - NeighborCell(g, layer, excluding, slot, source, cx, cy - 1)) * perUnit;
+        gx = (NeighborCell(g, layer, excluding, slot, source, cx + 1, cy) -
+              NeighborCell(g, layer, excluding, slot, source, cx - 1, cy)) * perUnit;
+        gy = (NeighborCell(g, layer, excluding, slot, source, cx, cy + 1) -
+              NeighborCell(g, layer, excluding, slot, source, cx, cy - 1)) * perUnit;
         return complete;
     }
 
     private short NeighborCell(GridData g, byte layer, bool excluding, int slot, in Source source, int cx, int cy)
-        => excluding ? ExcludedCell(g, layer, slot, source, cx, cy) : Cell(g, layer, cx, cy);
+    {
+        return excluding ? ExcludedCell(g, layer, slot, source, cx, cy) : Cell(g, layer, cx, cy);
+    }
 
     public bool Changed(byte layer, float x, float y, float reach, int since)
     {
@@ -1281,7 +1265,8 @@ internal sealed unsafe class ReferenceWorld
         var disk = Disk(g, x, y, reach);
         for (var ty = disk.Y0 >> 5; ty <= disk.Y1 >> 5; ty++)
         for (var tx = disk.X0 >> 5; tx <= disk.X1 >> 5; tx++)
-            if (epochs[ty * g.TilesPerSide + tx] - since > 0 && HoldsDiskCell(disk, tx, ty)) return true;
+            if (epochs[ty * g.TilesPerSide + tx] - since > 0 && HoldsDiskCell(disk, tx, ty))
+                return true;
         return false;
     }
 
@@ -1292,7 +1277,8 @@ internal sealed unsafe class ReferenceWorld
         var tileY = ty << 5;
         var rowEnd = Math.Min(tileY + 31, disk.Y1);
         for (var cy = Math.Max(tileY, disk.Y0); cy <= rowEnd; cy++)
-            if (Span(disk, cy, out var lo, out var hi) && Math.Max(lo, tileX) < Math.Min(hi, tileX + 32)) return true;
+            if (Span(disk, cy, out var lo, out var hi) && Math.Max(lo, tileX) < Math.Min(hi, tileX + 32))
+                return true;
         return false;
     }
 
@@ -1319,7 +1305,8 @@ internal sealed unsafe class ReferenceWorld
         var changed = _grids[grid].Layers[layer]?.Changed;
         if (changed == null) return 0;
         if (destination != null)
-            for (var i = 0; i < changed.Count; i++) destination[i] = changed[i];
+            for (var i = 0; i < changed.Count; i++)
+                destination[i] = changed[i];
         return changed.Count;
     }
 
@@ -1350,9 +1337,12 @@ internal sealed unsafe class ReferenceWorld
     }
 
     public bool SenseColumn(byte layer, float* xs, float* ys, int count, short* values, ulong* whole)
-        => SenseColumn(layer, xs, ys, null, count, values, whole);
+    {
+        return SenseColumn(layer, xs, ys, null, count, values, whole);
+    }
 
-    public bool SenseColumn(byte layer, float* xs, float* ys, World.SourceId* excludes, int count, short* values, ulong* whole)
+    public bool SenseColumn(byte layer, float* xs, float* ys, World.SourceId* excludes, int count, short* values,
+        ulong* whole)
     {
         if (layer >= _layers.Count) return Unfilled(values, whole, count);
         if (count <= 0) return true;
@@ -1384,9 +1374,9 @@ internal sealed unsafe class ReferenceWorld
         foreach (var g in _grids)
         {
             if (g.ScaleQ8 == 0) continue;
-            var sampling = g.ScaleQ8 * scale >> 8;
-            if (!ValidationRules.IsFootprint(v->Width * sampling + 255 >> 8) ||
-                !ValidationRules.IsFootprint(v->Height * sampling + 255 >> 8))
+            var sampling = (g.ScaleQ8 * scale) >> 8;
+            if (!ValidationRules.IsFootprint((v->Width * sampling + 255) >> 8) ||
+                !ValidationRules.IsFootprint((v->Height * sampling + 255) >> 8))
                 return false;
         }
 
@@ -1431,27 +1421,13 @@ internal sealed unsafe class ReferenceWorld
         return grid >= 0;
     }
 
-    private struct Circle
-    {
-        public long Px;
-        public long Py;
-        public long R;
-        public int Cx;
-        public int Cy;
-        public int X0;
-        public int Y0;
-        public int X1;
-        public int Y1;
-        public bool Clipped;
-    }
-
     private static Circle Disk(GridData g, float x, float y, float reach)
     {
         var c = new Circle
         {
             Px = CellQ8(x, g.OriginX, g.ScaleQ8),
             Py = CellQ8(y, g.OriginY, g.ScaleQ8),
-            R = ReachQ8(reach, g.ScaleQ8),
+            R = ReachQ8(reach, g.ScaleQ8)
         };
         c.Cx = (int)(c.Px >> 8);
         c.Cy = (int)(c.Py >> 8);
@@ -1522,7 +1498,9 @@ internal sealed unsafe class ReferenceWorld
     }
 
     private static bool Contains(GridData g, long qx, long qy)
-        => qx >= 0 && qy >= 0 && (qx >> 8) < g.Size && (qy >> 8) < g.Size;
+    {
+        return qx >= 0 && qy >= 0 && qx >> 8 < g.Size && qy >> 8 < g.Size;
+    }
 
     private static long ReachQ8(float reach, int scaleQ8)
     {
@@ -1531,7 +1509,10 @@ internal sealed unsafe class ReferenceWorld
         return q >= MaxReachQ8 ? MaxReachQ8 : (long)MathF.Floor(q);
     }
 
-    private static long CeilCell(long q8) => -(-q8 >> 8);
+    private static long CeilCell(long q8)
+    {
+        return -(-q8 >> 8);
+    }
 
     private static long SquareRoot(long value)
     {
@@ -1547,5 +1528,83 @@ internal sealed unsafe class ReferenceWorld
         var num = cells * 65536;
         var magnitude = ((num < 0 ? -num : num) + den / 2) / den;
         return num < 0 ? -magnitude : magnitude;
+    }
+
+    internal struct Source
+    {
+        public float X;
+        public float Y;
+        public byte Stamp;
+        public byte Layer;
+        public sbyte Gain;
+        public ushort Angle;
+        public ushort Scale;
+        public bool Alive;
+        public uint Gen;
+        public byte Timed;
+        public sbyte FadeFrom;
+        public sbyte FadeTo;
+        public int FadeStart;
+        public int FadeTicks;
+        public int ExpireAt;
+    }
+
+    private struct ScheduleState
+    {
+        public byte Timed;
+        public sbyte FadeFrom;
+        public sbyte FadeTo;
+        public int FadeStart;
+        public int FadeTicks;
+        public int ExpireAt;
+    }
+
+    private sealed class LayerData
+    {
+        public readonly List<int> Changed = new();
+        public readonly HashSet<int> Marked = new();
+        public int[]? Epochs;
+        public short[]? Field;
+        public bool MaxInit;
+    }
+
+    private sealed class GridData
+    {
+        public readonly LayerData?[] Layers = new LayerData?[World.MaxLayers];
+        public float OriginX;
+        public float OriginY;
+        public int ScaleQ8;
+        public int Size;
+        public int TileCount;
+        public int TilesPerSide;
+    }
+
+    private struct Recipe
+    {
+        public LayerOp Op;
+        public byte A;
+        public byte B;
+        public byte Shift;
+        public int WeightA;
+        public int WeightB;
+        public short Low;
+        public short High;
+        public uint Reads;
+        public Layer.Precision Precision;
+        public bool Transient;
+    }
+
+    private struct Circle
+    {
+        public long Px;
+        public long Py;
+        public long R;
+        public int Cx;
+        public int Cy;
+        public int X0;
+        public int Y0;
+        public int X1;
+        public int Y1;
+        public bool Clipped;
     }
 }

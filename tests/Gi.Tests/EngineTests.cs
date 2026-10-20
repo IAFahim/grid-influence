@@ -1,3 +1,5 @@
+using System.Numerics;
+using Gi.Stats;
 using Xunit;
 
 namespace Gi.Tests;
@@ -5,11 +7,8 @@ namespace Gi.Tests;
 public sealed class EngineTests
 {
     private static int RoundQ16(int value)
-        => value < 0 ? -((-value + 32768) >> 16) : (value + 32768) >> 16;
-
-    private readonly struct Band(int start, int end, int w)
     {
-        public readonly int Start = start, End = end, W = w;
+        return value < 0 ? -((-value + 32768) >> 16) : (value + 32768) >> 16;
     }
 
     private static Band[] Bands(long phase, long extent)
@@ -18,7 +17,10 @@ public sealed class EngineTests
         var full = (int)(end >> 8);
         var tail = (int)(end & 255);
         var bands = new List<Band>();
-        if (phase == 0) bands.Add(new Band(0, full, 256));
+        if (phase == 0)
+        {
+            bands.Add(new Band(0, full, 256));
+        }
         else
         {
             bands.Add(new Band(0, 1, 256 - (int)phase));
@@ -31,146 +33,8 @@ public sealed class EngineTests
     }
 
     private static sbyte Average(int sum, int n)
-        => (sbyte)(sum < 0 ? -((-sum + (n >> 1)) / n) : (sum + (n >> 1)) / n);
-
-    private sealed class Oracle
     {
-        private int _px, _py, _fx, _fy, _gain;
-        private sbyte[]? _samples;
-        private int _w, _h;
-        private sbyte _constant;
-        private bool _raster;
-        private int _scaleQ8 = 256;
-        private long _extX, _extY;
-        private List<(int w, int h, sbyte[] data)> _mips = [];
-
-        public static Oracle Box(float wx, float wy, float ox, float oy, float scale,
-            int w, int h, sbyte value, int gain)
-        {
-            var o = new Oracle { _w = w, _h = h, _constant = value, _gain = gain };
-            o.Position(wx, wy, ox, oy, scale);
-            return o;
-        }
-
-        public static Oracle Rast(float wx, float wy, float ox, float oy, float scale,
-            sbyte[] samples, int w, int h, int gain)
-        {
-            var o = new Oracle { _w = w, _h = h, _samples = samples, _gain = gain, _raster = true };
-            o.Position(wx, wy, ox, oy, scale);
-            o.BuildMips();
-            return o;
-        }
-
-        private void Position(float wx, float wy, float ox, float oy, float scale)
-        {
-            _scaleQ8 = (int)(scale * 256f);
-            var leadX = (int)MathF.Floor((wx - ox) * _scaleQ8) + ((long)-(_w * 128) * _scaleQ8 >> 8);
-            var leadY = (int)MathF.Floor((wy - oy) * _scaleQ8) + ((long)-(_h * 128) * _scaleQ8 >> 8);
-            _px = (int)(leadX >> 8);
-            _py = (int)(leadY >> 8);
-            _fx = (int)(leadX & 255);
-            _fy = (int)(leadY & 255);
-            _extX = (long)_w * _scaleQ8;
-            _extY = (long)_h * _scaleQ8;
-        }
-
-        private void BuildMips()
-        {
-            var sw = _w;
-            var sh = _h;
-            var source = _samples!;
-            while (sw > 1 || sh > 1)
-            {
-                var dw = (sw + 1) >> 1;
-                var dh = (sh + 1) >> 1;
-                var down = new sbyte[dw * dh];
-                for (var y = 0; y < dh; y++)
-                for (var x = 0; x < dw; x++)
-                {
-                    var sum = 0;
-                    for (var dy = 0; dy < 2; dy++)
-                    for (var dx = 0; dx < 2; dx++)
-                    {
-                        var sx = x * 2 + dx;
-                        var sy = y * 2 + dy;
-                        if (sx < sw && sy < sh) sum += source[sy * sw + sx];
-                    }
-
-                    down[y * dw + x] = Average(sum, 4);
-                }
-
-                _mips.Add((dw, dh, down));
-                source = down;
-                sw = dw;
-                sh = dh;
-            }
-        }
-
-        private int Sample(int ix, int iy)
-            => (uint)ix < (uint)_w && (uint)iy < (uint)_h && _samples != null ? _samples[iy * _w + ix] : 0;
-
-        public long Contribution(int cx, int cy)
-        {
-            var sx = cx - _px;
-            var sy = cy - _py;
-            if (_raster) return RasterContribution(sx, sy);
-
-            var xw = 0;
-            foreach (var b in Bands(_fx, _extX))
-                if (sx >= b.Start && sx < b.End) { xw = b.W; break; }
-            var yw = 0;
-            foreach (var b in Bands(_fy, _extY))
-                if (sy >= b.Start && sy < b.End) { yw = b.W; break; }
-            if (xw == 0 || yw == 0) return 0;
-            return (long)RoundQ16(_constant * xw * yw) * _gain;
-        }
-
-        private long RasterContribution(int sx, int sy)
-        {
-            var spanX = (int)((_fx + _extX + 255) >> 8);
-            var spanY = (int)((_fy + _extY + 255) >> 8);
-            if ((uint)sx >= (uint)spanX || (uint)sy >= (uint)spanY) return 0;
-
-            if (_scaleQ8 == 256)
-            {
-                var w00 = (256 - _fx) * (256 - _fy);
-                var w10 = _fx * (256 - _fy);
-                var w01 = (256 - _fx) * _fy;
-                var w11 = _fx * _fy;
-                return (long)RoundQ16(
-                    Sample(sx, sy) * w00 + Sample(sx - 1, sy) * w10 +
-                    Sample(sx, sy - 1) * w01 + Sample(sx - 1, sy - 1) * w11) * _gain;
-            }
-
-            var step = 256L * 65536 / _scaleQ8;
-            var level = 0;
-            while (level < _mips.Count && (step >> (level + 1)) >= 65536) level++;
-            int w, h;
-            sbyte[] data;
-            if (level == 0)
-            {
-                w = _w;
-                h = _h;
-                data = _samples!;
-            }
-            else
-            {
-                (w, h, data) = _mips[level - 1];
-            }
-
-            int Tap(int ix, int iy)
-                => (uint)ix < (uint)w && (uint)iy < (uint)h ? data[iy * w + ix] : 0;
-
-            var uq = (-(long)_fx * 65536 / _scaleQ8 + sx * step) >> level;
-            var vq = (-(long)_fy * 65536 / _scaleQ8 + sy * step) >> level;
-            var ix = (int)(uq >> 16);
-            var iy = (int)(vq >> 16);
-            var fx2 = (int)((uq >> 8) & 255);
-            var fy2 = (int)((vq >> 8) & 255);
-            var top = Tap(ix, iy) * (256 - fx2) + Tap(ix + 1, iy) * fx2;
-            var bottom = Tap(ix, iy + 1) * (256 - fx2) + Tap(ix + 1, iy + 1) * fx2;
-            return (long)RoundQ16(top * (256 - fy2) + bottom * fy2) * _gain;
-        }
+        return (sbyte)(sum < 0 ? -((-sum + (n >> 1)) / n) : (sum + (n >> 1)) / n);
     }
 
     private static short Expected(List<Oracle> sources, int cx, int cy)
@@ -184,7 +48,7 @@ public sealed class EngineTests
     public void Box_MatchesOracle()
     {
         var w = World.New();
-        var g = Grid.New(w, power: 8, x: 0f, y: 0f, size: 256f);
+        var g = Grid.New(w, 8, 0f, 0f, 256f);
         var l = Layer.New(w);
         var stamp = Stamp.Box(16, 16, 100);
         var sources = new List<Oracle>();
@@ -210,10 +74,10 @@ public sealed class EngineTests
     public void Raster_MatchesOracle()
     {
         var w = World.New();
-        var g = Grid.New(w, power: 8, x: 0f, y: 0f, size: 256f);
+        var g = Grid.New(w, 8, 0f, 0f, 256f);
         var l = Layer.New(w);
         var samples = new sbyte[7 * 9];
-        for (var i = 0; i < samples.Length; i++) samples[i] = (sbyte)((i * 37 % 21) - 10);
+        for (var i = 0; i < samples.Length; i++) samples[i] = (sbyte)(i * 37 % 21 - 10);
         var stamp = Stamp.New(samples, 7, 9);
         var sources = new List<Oracle>();
         var rng = new Random(7);
@@ -239,7 +103,7 @@ public sealed class EngineTests
     public void MixedStamps_CrossTile_MatchesOracle()
     {
         var w = World.New();
-        var g = Grid.New(w, power: 8, x: 0f, y: 0f, size: 256f);
+        var g = Grid.New(w, 8, 0f, 0f, 256f);
         var l = Layer.New(w);
         var box = Stamp.Box(20, 12, 40);
         var samples = new sbyte[40 * 5];
@@ -250,7 +114,7 @@ public sealed class EngineTests
             Oracle.Box(31.4f, 30.9f, 0f, 0f, 1f, 20, 12, 40, 16),
             Oracle.Rast(30.7f, 33.2f, 0f, 0f, 1f, samples, 40, 5, 5),
             Oracle.Box(0.2f, 0.4f, 0f, 0f, 1f, 20, 12, 40, 16),
-            Oracle.Box(255.8f, 250.1f, 0f, 0f, 1f, 20, 12, 40, 16),
+            Oracle.Box(255.8f, 250.1f, 0f, 0f, 1f, 20, 12, 40, 16)
         };
         World.Place(w, l, 31.4f, 30.9f, box, 16);
         World.Place(w, l, 30.7f, 33.2f, raster, 5);
@@ -267,8 +131,8 @@ public sealed class EngineTests
     public void MultiGrid_DifferentResolutions_MatchOracles()
     {
         var w = World.New();
-        var gFine = Grid.New(w, power: 8, x: 0f, y: 0f, size: 256f);
-        var gCoarse = Grid.New(w, power: 5, x: 0f, y: 0f, size: 256f);
+        var gFine = Grid.New(w, 8, 0f, 0f, 256f);
+        var gCoarse = Grid.New(w, 5, 0f, 0f, 256f);
         var l = Layer.New(w);
         var stamp = Stamp.Box(8, 8, 90);
         var sources = new List<Oracle>();
@@ -290,6 +154,7 @@ public sealed class EngineTests
             var cy = rng.Next(256);
             Assert.Equal(Expected(sources, cx, cy), World.Query(w, gFine, l, cx, cy));
         }
+
         for (var i = 0; i < 100; i++)
         {
             var cx = rng.Next(32);
@@ -302,13 +167,13 @@ public sealed class EngineTests
     public void RasterStamps_MatchOracle_AcrossGridScales()
     {
         var w = World.New();
-        var gOne = Grid.New(w, power: 8, x: 0f, y: 0f, size: 256f);
-        var gDouble = Grid.New(w, power: 9, x: 0f, y: 0f, size: 256f);
-        var gHalf = Grid.New(w, power: 7, x: 0f, y: 0f, size: 256f);
-        var gQuarter = Grid.New(w, power: 6, x: 0f, y: 0f, size: 256f);
+        var gOne = Grid.New(w, 8, 0f, 0f, 256f);
+        var gDouble = Grid.New(w, 9, 0f, 0f, 256f);
+        var gHalf = Grid.New(w, 7, 0f, 0f, 256f);
+        var gQuarter = Grid.New(w, 6, 0f, 0f, 256f);
         var l = Layer.New(w);
         var samples = new sbyte[9 * 7];
-        for (var i = 0; i < samples.Length; i++) samples[i] = (sbyte)((i * 29 % 37) - 18);
+        for (var i = 0; i < samples.Length; i++) samples[i] = (sbyte)(i * 29 % 37 - 18);
         var stamp = Stamp.New(samples, 9, 7);
 
         var one = new List<Oracle>();
@@ -339,7 +204,8 @@ public sealed class EngineTests
                 var cy = rng.Next(size);
                 var expected = Expected(list, cx, cy);
                 var actual = World.Query(w, grid, l, cx, cy);
-                Assert.True(expected == actual, $"grid{q} size={size} cell=({cx},{cy}) expected={expected} actual={actual}");
+                Assert.True(expected == actual,
+                    $"grid{q} size={size} cell=({cx},{cy}) expected={expected} actual={actual}");
             }
 
             for (var cy = 0; cy < size; cy++)
@@ -347,7 +213,8 @@ public sealed class EngineTests
             {
                 var expected = Expected(list, cx, cy);
                 var actual = World.Query(w, grid, l, cx, cy);
-                Assert.True(expected == actual, $"grid{q} size={size} cell=({cx},{cy}) expected={expected} actual={actual}");
+                Assert.True(expected == actual,
+                    $"grid{q} size={size} cell=({cx},{cy}) expected={expected} actual={actual}");
             }
         }
     }
@@ -356,13 +223,13 @@ public sealed class EngineTests
     public void BoxStamps_CrossGridSums_ConserveWorldIntegral()
     {
         var w = World.New();
-        var gFine = Grid.New(w, power: 8, x: 0f, y: 0f, size: 256f);
-        var gHalf = Grid.New(w, power: 7, x: 0f, y: 0f, size: 256f);
-        var gQuarter = Grid.New(w, power: 6, x: 0f, y: 0f, size: 256f);
+        var gFine = Grid.New(w, 8, 0f, 0f, 256f);
+        var gHalf = Grid.New(w, 7, 0f, 0f, 256f);
+        var gQuarter = Grid.New(w, 6, 0f, 0f, 256f);
         var l = Layer.New(w);
         var stamp = Stamp.Box(16, 16, 100);
         for (var i = 0; i < 12; i++)
-            World.Place(w, l, 20f + i * 16, 24f + (i % 5) * 32, stamp, 8);
+            World.Place(w, l, 20f + i * 16, 24f + i % 5 * 32, stamp, 8);
 
         World.Process(w);
         var fine = World.Query(w, gFine, l, 0, 0, 256, 256);
@@ -380,7 +247,7 @@ public sealed class EngineTests
             100, 60, 20, -20,
             60, 20, -20, -60,
             20, -20, -60, -100,
-            -20, -60, -100, 127,
+            -20, -60, -100, 127
         };
         var stamp = Stamp.New(samples, 4, 4);
         var v = StampCatalog.Get(stamp);
@@ -396,7 +263,7 @@ public sealed class EngineTests
     public void Saturation_SticksAtInt16Bounds()
     {
         var w = World.New();
-        var g = Grid.New(w, power: 6, x: 0f, y: 0f, size: 64f);
+        var g = Grid.New(w, 6, 0f, 0f, 64f);
         var l = Layer.New(w);
         var stamp = Stamp.Box(4, 4, 127);
         for (var i = 0; i < 200; i++) World.Place(w, l, 32f, 32f, stamp, 16);
@@ -413,7 +280,7 @@ public sealed class EngineTests
     public void Remove_RebuildsWithoutSource()
     {
         var w = World.New();
-        var g = Grid.New(w, power: 6, x: 0f, y: 0f, size: 64f);
+        var g = Grid.New(w, 6, 0f, 0f, 64f);
         var l = Layer.New(w);
         var stamp = Stamp.Box(8, 8, 100);
         var a = World.Place(w, l, 32f, 32f, stamp, 8);
@@ -436,7 +303,7 @@ public sealed class EngineTests
     public void Move_RelocatesContributionExactly()
     {
         var w = World.New();
-        var g = Grid.New(w, power: 6, x: 0f, y: 0f, size: 64f);
+        var g = Grid.New(w, 6, 0f, 0f, 64f);
         var l = Layer.New(w);
         var stamp = Stamp.Box(8, 8, 100);
         var s = World.Place(w, l, 32f, 32f, stamp, 8);
@@ -453,7 +320,7 @@ public sealed class EngineTests
     public void SetGain_AdjustsContributionExactly()
     {
         var w = World.New();
-        var g = Grid.New(w, power: 6, x: 0f, y: 0f, size: 64f);
+        var g = Grid.New(w, 6, 0f, 0f, 64f);
         var l = Layer.New(w);
         var stamp = Stamp.Box(8, 8, 100);
         var s = World.Place(w, l, 32f, 32f, stamp, 8);
@@ -473,7 +340,7 @@ public sealed class EngineTests
     public void PlaceGain_ClampsToSignedSixteen()
     {
         var w = World.New();
-        var g = Grid.New(w, power: 6, x: 0f, y: 0f, size: 64f);
+        var g = Grid.New(w, 6, 0f, 0f, 64f);
         var l = Layer.New(w);
         var stamp = Stamp.Box(3, 3, 10);
         World.Place(w, l, 16.5f, 16.5f, stamp, 100);
@@ -487,7 +354,7 @@ public sealed class EngineTests
     public void SubCellPlacement_SpreadsEdgeWeights()
     {
         var w = World.New();
-        var g = Grid.New(w, power: 6, x: 0f, y: 0f, size: 64f);
+        var g = Grid.New(w, 6, 0f, 0f, 64f);
         var l = Layer.New(w);
         var stamp = Stamp.Box(4, 4, 64);
 
@@ -497,7 +364,7 @@ public sealed class EngineTests
         Assert.Equal(0, World.Query(w, g, l, 34, 32));
 
         var w2 = World.New();
-        var g2 = Grid.New(w2, power: 6, x: 0f, y: 0f, size: 64f);
+        var g2 = Grid.New(w2, 6, 0f, 0f, 64f);
         var l2 = Layer.New(w2);
         World.Place(w2, l2, 32.5f, 32f, stamp, 1);
         World.Process(w2);
@@ -511,7 +378,7 @@ public sealed class EngineTests
     public void NegativeOrigin_RoutesCells()
     {
         var w = World.New();
-        var g = Grid.New(w, power: 6, x: -128f, y: -128f, size: 256f);
+        var g = Grid.New(w, 6, -128f, -128f, 256f);
         var l = Layer.New(w);
         var stamp = Stamp.Box(8, 8, 50);
         World.Place(w, l, -64f, -64f, stamp, 4);
@@ -525,7 +392,7 @@ public sealed class EngineTests
     public void RegionQuery_SumsCells()
     {
         var w = World.New();
-        var g = Grid.New(w, power: 7, x: 0f, y: 0f, size: 128f);
+        var g = Grid.New(w, 7, 0f, 0f, 128f);
         var l = Layer.New(w);
         var stamp = Stamp.Box(16, 16, 25);
         World.Place(w, l, 40f, 40f, stamp, 4);
@@ -543,7 +410,7 @@ public sealed class EngineTests
     public unsafe void Process_RepeatedIsDeterministic()
     {
         var w = World.New();
-        var g = Grid.New(w, power: 7, x: 0f, y: 0f, size: 128f);
+        var g = Grid.New(w, 7, 0f, 0f, 128f);
         var l = Layer.New(w);
         var stamp = Stamp.Box(12, 12, 77);
         var rng = new Random(3);
@@ -552,10 +419,18 @@ public sealed class EngineTests
 
         World.Process(w);
         var first = new short[128 * 128];
-        fixed (short* p = first) World.QueryRegion(w, g, l, 0, 0, 128, 128, p);
+        fixed (short* p = first)
+        {
+            World.QueryRegion(w, g, l, 0, 0, 128, 128, p);
+        }
+
         World.Process(w);
         var second = new short[128 * 128];
-        fixed (short* p = second) World.QueryRegion(w, g, l, 0, 0, 128, 128, p);
+        fixed (short* p = second)
+        {
+            World.QueryRegion(w, g, l, 0, 0, 128, 128, p);
+        }
+
         Assert.Equal(first, second);
     }
 
@@ -563,7 +438,7 @@ public sealed class EngineTests
     public void Clear_RemovesAllInfluence()
     {
         var w = World.New();
-        var g = Grid.New(w, power: 6, x: 0f, y: 0f, size: 64f);
+        var g = Grid.New(w, 6, 0f, 0f, 64f);
         var l = Layer.New(w);
         var stamp = Stamp.Box(8, 8, 100);
         World.Place(w, l, 32f, 32f, stamp, 8);
@@ -579,7 +454,7 @@ public sealed class EngineTests
     public void Layers_AreIndependent()
     {
         var w = World.New();
-        var g = Grid.New(w, power: 6, x: 0f, y: 0f, size: 64f);
+        var g = Grid.New(w, 6, 0f, 0f, 64f);
         var l0 = Layer.New(w);
         var l1 = Layer.New(w);
         var stamp = Stamp.Box(8, 8, 60);
@@ -593,7 +468,7 @@ public sealed class EngineTests
     public void QueryAt_MapsWorldToCell()
     {
         var w = World.New();
-        var g = Grid.New(w, power: 7, x: 0f, y: 0f, size: 256f);
+        var g = Grid.New(w, 7, 0f, 0f, 256f);
         var l = Layer.New(w);
         var stamp = Stamp.Box(8, 8, 100);
         World.Place(w, l, 128f, 128f, stamp, 4);
@@ -605,7 +480,7 @@ public sealed class EngineTests
     [Fact]
     public void InvalidWorld_DoesNotAccessNativeArena()
     {
-        Assert.Equal(default(World.SourceId), World.Place(255, 0, 0f, 0f, 1, 1));
+        Assert.Equal(default, World.Place(255, 0, 0f, 0f, 1, 1));
         Assert.Equal(0, World.Query(255, 0, 0, 0, 0));
         Assert.Equal(0, World.Query(255, 0, 0, 0, 0, 32, 32));
         Assert.Equal(0, World.QueryAt(255, 0, 0, 0f, 0f));
@@ -617,7 +492,7 @@ public sealed class EngineTests
         World.Clear(255);
         Assert.Throws<ArgumentOutOfRangeException>(() => Grid.New(255, 5, 0f, 0f, 32f));
         Assert.Throws<ArgumentOutOfRangeException>(() => Layer.New(255));
-        Assert.False(Stats.Inspection.Read(255).Valid);
+        Assert.False(Inspection.Read(255).Valid);
     }
 
     [Theory]
@@ -635,7 +510,7 @@ public sealed class EngineTests
         var stamp = Stamp.Box(4, 4, 100);
         try
         {
-            Assert.Equal(default(World.SourceId), World.Place(w, l, x, y, stamp, 2));
+            Assert.Equal(default, World.Place(w, l, x, y, stamp, 2));
             var source = World.Place(w, l, 32f, 32f, stamp, 2);
             World.Move(w, source, x, y);
             World.Process(w);
@@ -660,7 +535,7 @@ public sealed class EngineTests
             var commands = new[]
             {
                 World.SourceCommand.Place(l, float.NaN, 8f, stamp, 2),
-                World.SourceCommand.Place(l, 8f, float.PositiveInfinity, stamp, 2),
+                World.SourceCommand.Place(l, 8f, float.PositiveInfinity, stamp, 2)
             };
             var results = new World.SourceResult[commands.Length];
             Assert.Equal(World.BatchStatus.Applied, World.ApplyBatch(w, commands, results));
@@ -697,10 +572,10 @@ public sealed class EngineTests
         var l = Layer.New(w);
         var source = World.Place(w, l, 32.25f, 32.5f, Stamp.Box(8, 8, 60), 4);
         World.Process(w);
-        var before = Stats.Inspection.Read(w);
+        var before = Inspection.Read(w);
         var sum = World.Query(w, g, l, 0, 0, 64, 64);
         World.Move(w, source, 32.25f, 32.5f);
-        var after = Stats.Inspection.Read(w);
+        var after = Inspection.Read(w);
         Assert.Equal(0, after.DirtyTiles);
         Assert.Equal(before.WorldBytes, after.WorldBytes);
         Assert.Equal(sum, World.Query(w, g, l, 0, 0, 64, 64));
@@ -724,7 +599,7 @@ public sealed class EngineTests
 
             var survivor = (int*)slab.Unit(first);
             survivor[0] = 0x12345678;
-            var grown = 40;
+            const int grown = 40;
             for (var i = 0; i < grown; i++) slab.Take(PlaneStore.PageUnit);
             Assert.Equal(0x12345678, ((int*)slab.Unit(first))[0]);
             Assert.True(slab.Bytes >= (2 + grown) * (long)PlaneStore.PageUnit);
@@ -741,25 +616,26 @@ public sealed class EngineTests
         var w = World.New();
         var g = Grid.New(w, 6, 0f, 0f, 64f);
         var l = Layer.New(w);
-        var empty = Stats.Inspection.Read(w);
+        var empty = Inspection.Read(w);
         World.Place(w, l, 16f, 16f, Stamp.Box(4, 4, 60), 2);
-        var pending = Stats.Inspection.Read(w);
+        var pending = Inspection.Read(w);
         Assert.Equal(1, pending.LiveSources);
         Assert.Equal(0, pending.LiveTiles);
         Assert.Equal(0, pending.DirtyTiles);
         Assert.Equal(1_048_576, pending.SourceBytes);
         Assert.Equal(0, pending.DirectoryBytes + pending.SlabBytes + pending.Int32Bytes + pending.PageBytes);
         World.Process(w);
-        var processed = Stats.Inspection.Read(w);
+        var processed = Inspection.Read(w);
         Assert.Equal(1, processed.LiveTiles);
         Assert.Equal(0, processed.DirtyTiles);
         var unitBytes = PlaneStore.PageUnit + PlaneStore.Int32Unit + TileSummary.Bytes + sizeof(TilePlanes);
-        Assert.Equal(unitBytes, processed.PageBytes + processed.Int32Bytes + processed.SummaryBytes + processed.SetBytes);
+        Assert.Equal(unitBytes,
+            processed.PageBytes + processed.Int32Bytes + processed.SummaryBytes + processed.SetBytes);
         Assert.Equal(16 * unitBytes, processed.SlabBytes);
         Assert.Equal(32, processed.DirtyFlagBytes);
         Assert.Equal(1920, World.Query(w, g, l, 0, 0, 64, 64));
         World.Clear(w);
-        var cleared = Stats.Inspection.Read(w);
+        var cleared = Inspection.Read(w);
         Assert.Equal(0, cleared.SourceSlots);
         Assert.Equal(16_384, cleared.SourceCapacity);
         Assert.Equal(0, cleared.LiveTiles);
@@ -767,8 +643,8 @@ public sealed class EngineTests
         Assert.Equal(16, cleared.DirectoryBytes);
         Assert.Equal(16 * unitBytes + 4 * 64, cleared.SlabBytes);
         Assert.Equal(empty.WorldBytes + 1_048_576 + 32 + 16 * sizeof(int) + 16 * sizeof(TileRect) +
-            16 * sizeof(int) + 16 * sizeof(JournalEntry) + 16_384L * sizeof(DepositRecord) +
-            16 + 16 * unitBytes + 4 * 64 + processed.KernelBytes + cleared.EpochTreeBytes, cleared.WorldBytes);
+                     16 * sizeof(int) + 16 * sizeof(JournalEntry) + 16_384L * sizeof(DepositRecord) +
+                     16 + 16 * unitBytes + 4 * 64 + processed.KernelBytes + cleared.EpochTreeBytes, cleared.WorldBytes);
     }
 
     [Fact]
@@ -780,14 +656,14 @@ public sealed class EngineTests
         World.Place(w, l, 16f, 16f, Stamp.Box(4, 4, 60), 2);
         World.Place(w, l, 40f, 40f, Stamp.Tent(4, 4, 60), 2);
 
-        var pending = Stats.Inspection.Read(w);
+        var pending = Inspection.Read(w);
         Assert.Equal(0, pending.LiveTiles);
         Assert.Equal(0, pending.TentTiles);
         Assert.Equal(0, pending.TentBytes);
         Assert.Equal(0, pending.Int32Bytes);
 
         World.Process(w);
-        var processed = Stats.Inspection.Read(w);
+        var processed = Inspection.Read(w);
         Assert.Equal(2, processed.LiveTiles);
         Assert.Equal(1, processed.TentTiles);
         Assert.Equal(PlaneStore.Int64Unit, processed.TentBytes);
@@ -795,7 +671,7 @@ public sealed class EngineTests
         Assert.True(World.Query(w, g, l, 40, 40) > 0);
 
         World.Clear(w);
-        var cleared = Stats.Inspection.Read(w);
+        var cleared = Inspection.Read(w);
         Assert.Equal(0, cleared.TentTiles);
         Assert.Equal(0, cleared.TentBytes);
         Assert.Equal(0, cleared.Int32Bytes);
@@ -822,7 +698,7 @@ public sealed class EngineTests
     public unsafe void QueryRegion_MatchesCellQuery_AcrossTileBoundaries()
     {
         var w = World.New();
-        var g = Grid.New(w, power: 7, x: 0f, y: 0f, size: 128f);
+        var g = Grid.New(w, 7, 0f, 0f, 128f);
         var l = Layer.New(w);
         var box = Stamp.Box(12, 8, 90);
         var samples = new sbyte[5 * 5];
@@ -831,7 +707,8 @@ public sealed class EngineTests
         var rng = new Random(31);
         for (var i = 0; i < 80; i++)
         {
-            World.Place(w, l, (float)(rng.NextDouble() * 128), (float)(rng.NextDouble() * 128), box, (sbyte)(6 + rng.Next(11)));
+            World.Place(w, l, (float)(rng.NextDouble() * 128), (float)(rng.NextDouble() * 128), box,
+                (sbyte)(6 + rng.Next(11)));
             World.Place(w, l, (float)(rng.NextDouble() * 128), (float)(rng.NextDouble() * 128), raster, 4);
         }
 
@@ -844,13 +721,17 @@ public sealed class EngineTests
             (126, 126, 5, 5),
             (-3, -4, 10, 9),
             (60, 120, 8, 20),
-            (31, 31, 2, 2),
+            (31, 31, 2, 2)
         };
 
         foreach (var (x, y, width, height) in regions)
         {
             var buffer = new short[width * height];
-            fixed (short* p = buffer) World.QueryRegion(w, g, l, x, y, width, height, p);
+            fixed (short* p = buffer)
+            {
+                World.QueryRegion(w, g, l, x, y, width, height, p);
+            }
+
             for (var row = 0; row < height; row++)
             for (var col = 0; col < width; col++)
                 Assert.Equal(World.Query(w, g, l, x + col, y + row), buffer[row * width + col]);
@@ -861,23 +742,35 @@ public sealed class EngineTests
     public unsafe void QueryRegion_ZeroesUntouchedAndFreedPages()
     {
         var w = World.New();
-        var g = Grid.New(w, power: 6, x: 0f, y: 0f, size: 64f);
+        var g = Grid.New(w, 6, 0f, 0f, 64f);
         var l = Layer.New(w);
 
         var untouched = new short[64 * 64];
-        fixed (short* p = untouched) World.QueryRegion(w, g, l, 0, 0, 64, 64, p);
+        fixed (short* p = untouched)
+        {
+            World.QueryRegion(w, g, l, 0, 0, 64, 64, p);
+        }
+
         Assert.All(untouched, v => Assert.Equal(0, v));
 
         var source = World.Place(w, l, 32f, 32f, Stamp.Box(8, 8, 50), 6);
         World.Process(w);
         var placed = new short[64 * 64];
-        fixed (short* p = placed) World.QueryRegion(w, g, l, 0, 0, 64, 64, p);
+        fixed (short* p = placed)
+        {
+            World.QueryRegion(w, g, l, 0, 0, 64, 64, p);
+        }
+
         Assert.Equal(300, placed[32 * 64 + 32]);
 
         World.Remove(w, source);
         World.Process(w);
         var freed = new short[64 * 64];
-        fixed (short* p = freed) World.QueryRegion(w, g, l, 0, 0, 64, 64, p);
+        fixed (short* p = freed)
+        {
+            World.QueryRegion(w, g, l, 0, 0, 64, 64, p);
+        }
+
         Assert.All(freed, v => Assert.Equal(0, v));
     }
 
@@ -885,7 +778,7 @@ public sealed class EngineTests
     public void RegionQuery_PartialSumsMatchCellScan()
     {
         var w = World.New();
-        var g = Grid.New(w, power: 8, x: 0f, y: 0f, size: 256f);
+        var g = Grid.New(w, 8, 0f, 0f, 256f);
         var l = Layer.New(w);
         var box = Stamp.Box(14, 14, 80);
         var samples = new sbyte[6 * 9];
@@ -910,7 +803,7 @@ public sealed class EngineTests
             (33, 65, 1, 1),
             (5, 250, 200, 10),
             (-10, -10, 300, 300),
-            (250, 250, 10, 10),
+            (250, 250, 10, 10)
         };
 
         foreach (var (x, y, width, height) in regions)
@@ -1007,7 +900,7 @@ public sealed class EngineTests
             World.Remove(w, id);
         }
 
-        Assert.InRange(Stats.Inspection.Read(w).SourceSlots, 1, 8);
+        Assert.InRange(Inspection.Read(w).SourceSlots, 1, 8);
         var reused = World.Place(w, l, 40f, 40f, stamp, 3);
         Assert.NotEqual(first, reused);
         World.Process(w);
@@ -1162,12 +1055,12 @@ public sealed class EngineTests
         var stamp = Stamp.Box(12, 12, 40);
         var ids = new World.SourceId[200];
         for (var i = 0; i < ids.Length; i++)
-            ids[i] = World.Place(w, l, (i * 13.7f) % 240f + 8f, (i * 7.3f) % 240f + 8f, stamp, 7);
+            ids[i] = World.Place(w, l, i * 13.7f % 240f + 8f, i * 7.3f % 240f + 8f, stamp, 7);
         for (var i = 0; i < ids.Length; i++) World.Remove(w, ids[i]);
-        var before = Stats.Inspection.Read(w);
+        var before = Inspection.Read(w);
         Assert.Equal(0, before.LiveSources);
         World.Process(w);
-        var after = Stats.Inspection.Read(w);
+        var after = Inspection.Read(w);
         Assert.Equal(0, after.LiveTiles);
         Assert.Equal(0, after.DirectoryBytes);
         Assert.Equal(0, after.SlabBytes);
@@ -1178,24 +1071,14 @@ public sealed class EngineTests
     }
 
     private static int RoundQ40Kernel(long value)
-        => (int)((value + 549755813888L + (value >> 63)) >> 40);
-
-    private readonly record struct KernelAxis(long Centre, long Half, int Shift, bool Bell)
     {
-        public long Peak => Bell ? Half * Half : Half;
-
-        public long Weight(int cell)
-        {
-            var d = ((cell * 256L + 128) >> Shift) - (Centre >> Shift);
-            var w = Bell ? Half * Half - d * d : Half - Math.Abs(d);
-            return Math.Max(0, w);
-        }
+        return (int)((value + 549755813888L + (value >> 63)) >> 40);
     }
 
     private static KernelAxis KernelAxisOf(bool bell, int origin, int phase, int extent)
     {
         var half = Math.Max(256L, extent >> 1);
-        var bits = 64 - System.Numerics.BitOperations.LeadingZeroCount((ulong)half);
+        var bits = 64 - BitOperations.LeadingZeroCount((ulong)half);
         var shift = Math.Clamp(bits - (bell ? 8 : 15), 0, 7);
         return new KernelAxis(((long)origin << 8) + phase + (extent >> 1), half >> shift, shift, bell);
     }
@@ -1222,12 +1105,14 @@ public sealed class EngineTests
 
     private static void AccumulateTent(long[] field, int size, int px, int py, int fx, int fy,
         int width, int height, int constant, int gain)
-        => AccumulateKernel(field, size, false, px, py, fx, fy, width, height, constant, gain);
+    {
+        AccumulateKernel(field, size, false, px, py, fx, fy, width, height, constant, gain);
+    }
 
     private static (int px, int py, int fx, int fy) TentLead(float wx, float wy, int width, int height)
     {
-        var leadX = (int)MathF.Floor(wx * 256f) + ((long)-(width * 128) * 256 >> 8);
-        var leadY = (int)MathF.Floor(wy * 256f) + ((long)-(height * 128) * 256 >> 8);
+        var leadX = (int)MathF.Floor(wx * 256f) + (((long)-(width * 128) * 256) >> 8);
+        var leadY = (int)MathF.Floor(wy * 256f) + (((long)-(height * 128) * 256) >> 8);
         return ((int)(leadX >> 8), (int)(leadY >> 8), (int)(leadX & 255), (int)(leadY & 255));
     }
 
@@ -1251,6 +1136,7 @@ public sealed class EngineTests
 
         var field = new int[256 * 256];
         var tentField = new long[256 * 256];
+
         void RebuildOracle(int[] target)
         {
             Array.Clear(tentField);
@@ -1315,7 +1201,8 @@ public sealed class EngineTests
             }
         }
 
-        Assert.Equal((short)Math.Clamp(field.Max(), short.MinValue, short.MaxValue), World.QueryMax(w, g, l, out var mx, out var my));
+        Assert.Equal((short)Math.Clamp(field.Max(), short.MinValue, short.MaxValue),
+            World.QueryMax(w, g, l, out var mx, out var my));
         Assert.Equal(World.Query(w, g, l, mx, my), World.QueryMax(w, g, l, out _, out _));
     }
 
@@ -1346,6 +1233,7 @@ public sealed class EngineTests
 
         var field = new int[256 * 256];
         var bellField = new long[256 * 256];
+
         void RebuildOracle(int[] target)
         {
             Array.Clear(bellField);
@@ -1448,7 +1336,8 @@ public sealed class EngineTests
         World.Process(w);
         count = World.ChangedTiles(w, g, red, boxes);
         Assert.Equal(2, count);
-        for (var i = 0; i < count; i++) Assert.Equal(0, World.Query(w, g, red, (boxes[i] & 1) * 32, (boxes[i] >> 1) * 32));
+        for (var i = 0; i < count; i++)
+            Assert.Equal(0, World.Query(w, g, red, (boxes[i] & 1) * 32, (boxes[i] >> 1) * 32));
 
         World.Clear(w);
         Assert.Equal(0, World.ChangedTiles(w, g, red, null));
@@ -1459,12 +1348,16 @@ public sealed class EngineTests
         var field = new short[size * size];
         unsafe
         {
-            fixed (short* p = field) World.QueryRegion(w, g, l, 0, 0, size, size, p);
+            fixed (short* p = field)
+            {
+                World.QueryRegion(w, g, l, 0, 0, size, size, p);
+            }
         }
 
         var max = short.MinValue;
         for (var i = 0; i < field.Length; i++)
-            if (field[i] > max) max = field[i];
+            if (field[i] > max)
+                max = field[i];
         return max;
     }
 
@@ -1489,11 +1382,16 @@ public sealed class EngineTests
         var box = Stamp.Box(12, 12, 40);
         var rng = new Random(37);
         for (var i = 0; i < 40; i++)
-            World.Place(w, l, (float)(rng.NextDouble() * 244 + 6), (float)(rng.NextDouble() * 244 + 6), box, (sbyte)rng.Next(-6, 12));
+            World.Place(w, l, (float)(rng.NextDouble() * 244 + 6), (float)(rng.NextDouble() * 244 + 6), box,
+                (sbyte)rng.Next(-6, 12));
         World.Process(w);
 
         var scan = new short[256 * 256];
-        fixed (short* p = scan) World.QueryRegion(w, g, l, 0, 0, 256, 256, p);
+        fixed (short* p = scan)
+        {
+            World.QueryRegion(w, g, l, 0, 0, 256, 256, p);
+        }
+
         for (var t = 0; t < 20; t++)
         {
             var x0 = rng.Next(240);
@@ -1503,7 +1401,8 @@ public sealed class EngineTests
             short expected = 0;
             for (var y = y0; y < y0 + height; y++)
             for (var x = x0; x < x0 + width; x++)
-                if (scan[y * 256 + x] > expected) expected = scan[y * 256 + x];
+                if (scan[y * 256 + x] > expected)
+                    expected = scan[y * 256 + x];
 
             var best = World.QueryMax(w, g, l, x0, y0, width, height, out var bx, out var by);
             Assert.Equal(expected, best);
@@ -1524,7 +1423,8 @@ public sealed class EngineTests
         var box = Stamp.Box(10, 10, 60);
         var rng = new Random(41);
         for (var i = 0; i < 30; i++)
-            World.Place(w, l, (float)(rng.NextDouble() * 236 + 10), (float)(rng.NextDouble() * 236 + 10), box, (sbyte)rng.Next(1, 9));
+            World.Place(w, l, (float)(rng.NextDouble() * 236 + 10), (float)(rng.NextDouble() * 236 + 10), box,
+                (sbyte)rng.Next(1, 9));
         World.Process(w);
 
         for (var t = 0; t < 8; t++)
@@ -1583,12 +1483,11 @@ public sealed class EngineTests
             AssertMaxAgreesWithScan(w, g, l, 256);
 
             for (var i = round % 3; i < ids.Length; i += 3)
-            {
                 if (rng.Next(4) == 0) World.Remove(w, ids[i]);
-                else World.Move(w, ids[i],
-                    (float)(rng.NextDouble() * 244 + 6),
-                    (float)(rng.NextDouble() * 244 + 6));
-            }
+                else
+                    World.Move(w, ids[i],
+                        (float)(rng.NextDouble() * 244 + 6),
+                        (float)(rng.NextDouble() * 244 + 6));
 
             World.Place(w, l,
                 (float)(rng.NextDouble() * 244 + 6),
@@ -1721,7 +1620,11 @@ public sealed class EngineTests
     private static unsafe short[] Snapshot(byte w, byte g, byte l, int size)
     {
         var cells = new short[size * size];
-        fixed (short* dst = cells) World.QueryRegion(w, g, l, 0, 0, size, size, dst);
+        fixed (short* dst = cells)
+        {
+            World.QueryRegion(w, g, l, 0, 0, size, size, dst);
+        }
+
         return cells;
     }
 
@@ -1910,11 +1813,12 @@ public sealed class EngineTests
         Assert.True(World.TrySense(w, threat, 100.4f, 100.7f, other, out var nobody));
         Assert.Equal(0, nobody);
     }
+
     [Fact]
     public void StopRecording_DiscardsTheJournal()
     {
         var w = World.New();
-        var g = Grid.New(w, power: 6, x: 0f, y: 0f, size: 64f);
+        var g = Grid.New(w, 6, 0f, 0f, 64f);
         var l = Layer.New(w);
         var s = World.Place(w, l, 20f, 20f, Stamp.Box(4, 4, 50), 2);
         World.Process(w);
@@ -1928,4 +1832,174 @@ public sealed class EngineTests
         Assert.Equal(0, World.Query(w, g, l, 20, 20));
     }
 
+    private readonly struct Band(int start, int end, int w)
+    {
+        public readonly int Start = start, End = end, W = w;
+    }
+
+    private sealed class Oracle
+    {
+        private readonly List<(int w, int h, sbyte[] data)> _mips = [];
+        private sbyte _constant;
+        private long _extX, _extY;
+        private int _px, _py, _fx, _fy, _gain;
+        private bool _raster;
+        private sbyte[]? _samples;
+        private int _scaleQ8 = 256;
+        private int _w, _h;
+
+        public static Oracle Box(float wx, float wy, float ox, float oy, float scale,
+            int w, int h, sbyte value, int gain)
+        {
+            var o = new Oracle { _w = w, _h = h, _constant = value, _gain = gain };
+            o.Position(wx, wy, ox, oy, scale);
+            return o;
+        }
+
+        public static Oracle Rast(float wx, float wy, float ox, float oy, float scale,
+            sbyte[] samples, int w, int h, int gain)
+        {
+            var o = new Oracle { _w = w, _h = h, _samples = samples, _gain = gain, _raster = true };
+            o.Position(wx, wy, ox, oy, scale);
+            o.BuildMips();
+            return o;
+        }
+
+        private void Position(float wx, float wy, float ox, float oy, float scale)
+        {
+            _scaleQ8 = (int)(scale * 256f);
+            var leadX = (int)MathF.Floor((wx - ox) * _scaleQ8) + (((long)-(_w * 128) * _scaleQ8) >> 8);
+            var leadY = (int)MathF.Floor((wy - oy) * _scaleQ8) + (((long)-(_h * 128) * _scaleQ8) >> 8);
+            _px = (int)(leadX >> 8);
+            _py = (int)(leadY >> 8);
+            _fx = (int)(leadX & 255);
+            _fy = (int)(leadY & 255);
+            _extX = (long)_w * _scaleQ8;
+            _extY = (long)_h * _scaleQ8;
+        }
+
+        private void BuildMips()
+        {
+            var sw = _w;
+            var sh = _h;
+            var source = _samples!;
+            while (sw > 1 || sh > 1)
+            {
+                var dw = (sw + 1) >> 1;
+                var dh = (sh + 1) >> 1;
+                var down = new sbyte[dw * dh];
+                for (var y = 0; y < dh; y++)
+                for (var x = 0; x < dw; x++)
+                {
+                    var sum = 0;
+                    for (var dy = 0; dy < 2; dy++)
+                    for (var dx = 0; dx < 2; dx++)
+                    {
+                        var sx = x * 2 + dx;
+                        var sy = y * 2 + dy;
+                        if (sx < sw && sy < sh) sum += source[sy * sw + sx];
+                    }
+
+                    down[y * dw + x] = Average(sum, 4);
+                }
+
+                _mips.Add((dw, dh, down));
+                source = down;
+                sw = dw;
+                sh = dh;
+            }
+        }
+
+        private int Sample(int ix, int iy)
+        {
+            return (uint)ix < (uint)_w && (uint)iy < (uint)_h && _samples != null ? _samples[iy * _w + ix] : 0;
+        }
+
+        public long Contribution(int cx, int cy)
+        {
+            var sx = cx - _px;
+            var sy = cy - _py;
+            if (_raster) return RasterContribution(sx, sy);
+
+            var xw = 0;
+            foreach (var b in Bands(_fx, _extX))
+                if (sx >= b.Start && sx < b.End)
+                {
+                    xw = b.W;
+                    break;
+                }
+
+            var yw = 0;
+            foreach (var b in Bands(_fy, _extY))
+                if (sy >= b.Start && sy < b.End)
+                {
+                    yw = b.W;
+                    break;
+                }
+
+            if (xw == 0 || yw == 0) return 0;
+            return (long)RoundQ16(_constant * xw * yw) * _gain;
+        }
+
+        private long RasterContribution(int sx, int sy)
+        {
+            var spanX = (int)((_fx + _extX + 255) >> 8);
+            var spanY = (int)((_fy + _extY + 255) >> 8);
+            if ((uint)sx >= (uint)spanX || (uint)sy >= (uint)spanY) return 0;
+
+            if (_scaleQ8 == 256)
+            {
+                var w00 = (256 - _fx) * (256 - _fy);
+                var w10 = _fx * (256 - _fy);
+                var w01 = (256 - _fx) * _fy;
+                var w11 = _fx * _fy;
+                return (long)RoundQ16(
+                    Sample(sx, sy) * w00 + Sample(sx - 1, sy) * w10 +
+                    Sample(sx, sy - 1) * w01 + Sample(sx - 1, sy - 1) * w11) * _gain;
+            }
+
+            var step = 256L * 65536 / _scaleQ8;
+            var level = 0;
+            while (level < _mips.Count && step >> (level + 1) >= 65536) level++;
+            int w, h;
+            sbyte[] data;
+            if (level == 0)
+            {
+                w = _w;
+                h = _h;
+                data = _samples!;
+            }
+            else
+            {
+                (w, h, data) = _mips[level - 1];
+            }
+
+            int Tap(int ix, int iy)
+            {
+                return (uint)ix < (uint)w && (uint)iy < (uint)h ? data[iy * w + ix] : 0;
+            }
+
+            var uq = (-(long)_fx * 65536 / _scaleQ8 + sx * step) >> level;
+            var vq = (-(long)_fy * 65536 / _scaleQ8 + sy * step) >> level;
+            var ix = (int)(uq >> 16);
+            var iy = (int)(vq >> 16);
+            var fx2 = (int)((uq >> 8) & 255);
+            var fy2 = (int)((vq >> 8) & 255);
+            var top = Tap(ix, iy) * (256 - fx2) + Tap(ix + 1, iy) * fx2;
+            var bottom = Tap(ix, iy + 1) * (256 - fx2) + Tap(ix + 1, iy + 1) * fx2;
+            return (long)RoundQ16(top * (256 - fy2) + bottom * fy2) * _gain;
+        }
+    }
+
+    private readonly record struct KernelAxis(long Centre, long Half, int Shift, bool Bell)
+    {
+        public long Peak => Bell ? Half * Half : Half;
+
+        public long Weight(int cell)
+        {
+            var d = ((cell * 256L + 128) >> Shift) - (Centre >> Shift);
+            var w = Bell ? Half * Half - d * d : Half - Math.Abs(d);
+            return Math.Max(0, w);
+        }
+    }
 }

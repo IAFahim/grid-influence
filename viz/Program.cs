@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using Gi;
@@ -90,11 +91,13 @@ void BrushZoo()
     World.Place(w, brushes, 70f, 84f, Gaussian(48, 110), 14);
     scene.Mark(70f, 84f, brushes, "gaussian");
 
-    var diamond = Shape(25, 25, (dx, dy, r) => (sbyte)(Math.Abs(dx) + Math.Abs(dy) <= r ? 70 - 5 * (Math.Abs(dx) + Math.Abs(dy)) : 0));
+    var diamond = Shape(25, 25,
+        (dx, dy, r) => (sbyte)(Math.Abs(dx) + Math.Abs(dy) <= r ? 70 - 5 * (Math.Abs(dx) + Math.Abs(dy)) : 0));
     World.Place(w, brushes, 158f, 66f, diamond, 12);
     scene.Mark(158f, 66f, brushes, "diamond");
 
-    var streak = Shape(28, 9, (x, y, _) => (sbyte)(Math.Abs(x - 3.2 * y - 2) < 1.5 ? 70 : Math.Abs(x - 3.2 * y - 2) < 3 ? 35 : 0));
+    var streak = Shape(28, 9,
+        (x, y, _) => (sbyte)(Math.Abs(x - 3.2 * y - 2) < 1.5 ? 70 : Math.Abs(x - 3.2 * y - 2) < 3 ? 35 : 0));
     World.Place(w, brushes, 52f, 190f, streak, 10);
     scene.Mark(52f, 190f, brushes, "streak");
 
@@ -145,6 +148,7 @@ void SubCellEdges()
         var tail = World.Query(w, g, phases, b, 40);
         scene.Receipt($"x={x.ToString("F3", CultureInfo.InvariantCulture)} → cells {a}..{b}, tail cell = {tail}");
     }
+
     scene.Receipt("edges slide by exact Q8 phases — no snapping to the cell grid");
     scenes.Add(scene);
 }
@@ -206,6 +210,7 @@ void MultiGridLod()
         var y = (rng.Next(54) + 1) * 4;
         World.Place(w, boxes, x, y, box, (sbyte)(4 + rng.Next(9)));
     }
+
     World.Place(w, brush, 128f, 128f, Gaussian(32, 90), 10);
 
     World.Process(w);
@@ -238,7 +243,8 @@ void SparseWorld()
     (float, float)[] clusters = [(700f, 700f), (2200f, 1500f), (3200f, 3400f)];
     foreach (var (cx, cy) in clusters)
         for (var i = 0; i < 60; i++)
-            World.Place(w, cover, cx + (float)(rng.NextDouble() * 360 - 180), cy + (float)(rng.NextDouble() * 360 - 180),
+            World.Place(w, cover, cx + (float)(rng.NextDouble() * 360 - 180),
+                cy + (float)(rng.NextDouble() * 360 - 180),
                 stamp, (sbyte)(6 + rng.Next(9)));
     for (var i = 0; i < 30; i++)
         World.Place(w, cover, 600 + rng.Next(2900), 600 + rng.Next(2900), stamp, 8);
@@ -250,11 +256,12 @@ void SparseWorld()
     var nonzero = 0;
     for (var y = 0; y < 256; y++)
     for (var x = 0; x < 256; x++)
-        if (World.Query(w, g, cover, x * 16, y * 16, 16, 16) != 0) nonzero++;
+        if (World.Query(w, g, cover, x * 16, y * 16, 16, 16) != 0)
+            nonzero++;
     scene.Receipt($"full-world query = {full} (baked per-tile sums, 65,536 cells read in O(live tiles))");
     scene.Receipt($"empty corner query [0,0,512,512] = {empty}");
     scene.Receipt($"{nonzero.ToString("N0", CultureInfo.InvariantCulture)} / 65,536 region blocks nonzero — "
-        + (nonzero * 100.0 / 65536).ToString("F1", CultureInfo.InvariantCulture) + "% of the world");
+                  + (nonzero * 100.0 / 65536).ToString("F1", CultureInfo.InvariantCulture) + "% of the world");
     scenes.Add(scene);
 }
 
@@ -270,30 +277,31 @@ void ThousandSources()
     var stamps = new byte[12];
     for (var i = 0; i < stamps.Length; i++)
         stamps[i] = Stamp.Box((ushort)(4 + i), (ushort)(4 + i), (sbyte)(20 + i * 4));
-    var placeSw = System.Diagnostics.Stopwatch.StartNew();
+    var placeSw = Stopwatch.StartNew();
     for (var i = 0; i < 5000; i++)
         World.Place(w, density, (float)(rng.NextDouble() * 1024), (float)(rng.NextDouble() * 1024),
             stamps[rng.Next(stamps.Length)], (sbyte)(1 + rng.Next(8)));
     var placeMs = placeSw.Elapsed.TotalMilliseconds;
 
-    var processSw = System.Diagnostics.Stopwatch.StartNew();
+    var processSw = Stopwatch.StartNew();
     World.Process(w);
     var processMs = processSw.Elapsed.TotalMilliseconds;
 
     scene.Panel(w, g, "1024² · 4×4 cells/px", 256, 1024f, 4, density);
     var full = World.Query(w, g, density, 0, 0, 1024, 1024);
     Console.WriteLine($"  5,000 sources: places {placeMs.ToString("F1", CultureInfo.InvariantCulture)} ms, "
-        + $"process {processMs.ToString("F1", CultureInfo.InvariantCulture)} ms (single pass, informal)");
+                      + $"process {processMs.ToString("F1", CultureInfo.InvariantCulture)} ms (single pass, informal)");
     scene.Receipt("5,000 places + full Process + region query, all in one frame budget");
     scene.Receipt($"full 1024² region query = {full}");
 
     for (var i = 0; i < 200_000; i++) World.Query(w, g, density, i & 1023, (i * 37) & 1023);
     var gc0 = GC.GetAllocatedBytesForCurrentThread();
-    var querySw = System.Diagnostics.Stopwatch.StartNew();
+    var querySw = Stopwatch.StartNew();
     for (var i = 0; i < 1_000_000; i++) World.Query(w, g, density, i & 1023, (i * 37) & 1023);
     var queryMs = querySw.Elapsed.TotalMilliseconds;
     var alloc = GC.GetAllocatedBytesForCurrentThread() - gc0;
-    Console.WriteLine($"  5,000 sources: 1M warm queries {queryMs:F0} ms ({queryMs:F1} ns/query), managed alloc {alloc} B");
+    Console.WriteLine(
+        $"  5,000 sources: 1M warm queries {queryMs:F0} ms ({queryMs:F1} ns/query), managed alloc {alloc} B");
     scenes.Add(scene);
 }
 
@@ -313,10 +321,10 @@ void RoundTurntable()
     scene.Mark(96.5f, 44.5f, shapes, "cone");
     World.Place(w, shapes, 156f, 44f, Stamp.Dome(20, 100), 9);
     scene.Mark(156f, 44f, shapes, "dome");
-    World.Place(w, shapes, 218f, 44f, Stamp.Cone(22, 100, arc: 60), 9);
+    World.Place(w, shapes, 218f, 44f, Stamp.Cone(22, 100, 60), 9);
     scene.Mark(218f, 44f, shapes, "60-degree arc");
 
-    var cone = Stamp.Cone(22, 100, arc: 80);
+    var cone = Stamp.Cone(22, 100, 80);
     var spun = new World.SourceId[8];
     for (var i = 0; i < 8; i++)
     {
@@ -350,7 +358,7 @@ void RoundTurntable()
     World.Turn(w, spun[1], MathF.PI / 4f);
     World.Process(w);
     var roundTrip = sumBefore == World.Query(w, g, turnedL, 0, 0, 256, 256) &&
-        probeBefore == World.Query(w, g, turnedL, 30, 132);
+                    probeBefore == World.Query(w, g, turnedL, 30, 132);
     scene.Receipt(roundTrip
         ? "turned away and back: region sum and probe cells bit-identical (angle 0 keeps the exact path)"
         : "turn round-trip MISMATCH");
@@ -394,7 +402,7 @@ void CombinedLayers()
         scene.Mark(x, y, food, "berries");
     }
 
-    var fang = Stamp.Cone(26, 110, arc: 70);
+    var fang = Stamp.Cone(26, 110, 70);
     for (var i = 0; i < 3; i++)
     {
         var x = 60f + i * 68f;
@@ -437,9 +445,10 @@ void CombinedLayers()
     var grazingCells = 0;
     for (var y = 0; y < 256; y++)
     for (var x = 0; x < 256; x++)
-        if (World.Query(w, g, grazing, x, y) != 0) grazingCells++;
+        if (World.Query(w, g, grazing, x, y) != 0)
+            grazingCells++;
     scene.Receipt("grazing holds " + grazingCells.ToString("N0", CultureInfo.InvariantCulture)
-        + " cells — food masked by comfort, maintained with the same per-tile upkeep");
+                                   + " cells — food masked by comfort, maintained with the same per-tile upkeep");
     scenes.Add(scene);
 }
 
@@ -514,6 +523,7 @@ byte Gaussian(int size, int peak)
         var v = peak * Math.Exp(-(dx * dx + dy * dy) / (2 * sigma * sigma));
         s[y * size + x] = (sbyte)Math.Clamp(Math.Round(v), -128, 127);
     }
+
     return Stamp.New(s, (ushort)size, (ushort)size);
 }
 
@@ -544,20 +554,22 @@ byte Letters()
         "G...G .I..",
         "G.GGG .I..",
         "G...G .I..",
-        "GGGG. .I..",
+        "GGGG. .I.."
     ];
     var width = rows[0].Length;
     var s = new sbyte[rows.Length * width];
     for (var y = 0; y < rows.Length; y++)
     for (var x = 0; x < width; x++)
-        if (rows[y][x] != '.') s[y * width + x] = 100;
+        if (rows[y][x] != '.')
+            s[y * width + x] = 100;
     return Stamp.New(s, (ushort)width, (ushort)rows.Length);
 }
 
 int FirstCovered(byte w, byte g, byte layer, int y, int x0, int x1)
 {
     for (var x = x0; x <= x1; x++)
-        if (World.Query(w, g, layer, x, y) != 0) return x;
+        if (World.Query(w, g, layer, x, y) != 0)
+            return x;
     return x0;
 }
 
@@ -565,7 +577,8 @@ int LastCovered(byte w, byte g, byte layer, int y, int x0, int x1)
 {
     var last = x0;
     for (var x = x0; x <= Math.Min(x1, 255); x++)
-        if (World.Query(w, g, layer, x, y) != 0) last = x;
+        if (World.Query(w, g, layer, x, y) != 0)
+            last = x;
     return last;
 }
 
@@ -574,7 +587,8 @@ int CountNonZero(byte w, byte g, byte layer)
     var n = 0;
     for (var y = 0; y < 256; y++)
     for (var x = 0; x < 256; x++)
-        if (World.Query(w, g, layer, x, y) != 0) n++;
+        if (World.Query(w, g, layer, x, y) != 0)
+            n++;
     return n;
 }
 
@@ -594,6 +608,7 @@ string Serialize(List<Scene> list)
             builder.Append("{\"name\":\"").Append(s.Layers[li].name).Append("\",\"color\":\"")
                 .Append(s.Layers[li].color).Append("\"}");
         }
+
         builder.Append("],\"panels\":[");
         for (var pi = 0; pi < s.Panels.Count; pi++)
         {
@@ -608,11 +623,14 @@ string Serialize(List<Scene> list)
                 builder.Append('[');
                 var vals = p.Layers[li];
                 for (var i = 0; i < vals.Length; i++)
-                    builder.Append(vals[i].ToString(CultureInfo.InvariantCulture)).Append(i == vals.Length - 1 ? "" : ",");
+                    builder.Append(vals[i].ToString(CultureInfo.InvariantCulture))
+                        .Append(i == vals.Length - 1 ? "" : ",");
                 builder.Append(']');
             }
+
             builder.Append("]}");
         }
+
         builder.Append("],\"sources\":[");
         for (var i = 0; i < s.Sources.Count; i++)
         {
@@ -623,26 +641,29 @@ string Serialize(List<Scene> list)
                 .Append(",\"layer\":").Append(m.layer)
                 .Append(",\"label\":\"").Append(m.label).Append("\"}");
         }
+
         builder.Append("],\"receipts\":[");
         for (var i = 0; i < s.Receipts.Count; i++)
         {
             if (i > 0) builder.Append(',');
             builder.Append('"').Append(s.Receipts[i]).Append('"');
         }
+
         builder.Append("]}");
     }
+
     builder.Append("]}");
     return builder.ToString();
 }
 
 internal sealed class Scene
 {
-    public readonly string Name;
     public readonly string Caption;
     public readonly List<(string name, string color)> Layers = [];
-    public readonly List<(float x, float y, int layer, string label)> Sources = [];
-    public readonly List<string> Receipts = [];
+    public readonly string Name;
     public readonly List<Panel> Panels = [];
+    public readonly List<string> Receipts = [];
+    public readonly List<(float x, float y, int layer, string label)> Sources = [];
 
     public Scene(string name, string caption)
     {
@@ -662,8 +683,15 @@ internal sealed class Scene
         return id;
     }
 
-    public void Mark(float x, float y, int layer, string label) => Sources.Add((x, y, layer, label));
-    public void Receipt(string line) => Receipts.Add(line);
+    public void Mark(float x, float y, int layer, string label)
+    {
+        Sources.Add((x, y, layer, label));
+    }
+
+    public void Receipt(string line)
+    {
+        Receipts.Add(line);
+    }
 
     public void Panel(byte world, byte grid, string label, int cells, float size, int down, params int[] layers)
     {
@@ -676,26 +704,22 @@ internal sealed class Scene
     {
         var vals = new int[cells * cells];
         if (down == 0 || down == 1)
-        {
             for (var y = 0; y < cells; y++)
             for (var x = 0; x < cells; x++)
                 vals[y * cells + x] = World.Query(world, grid, layer, x, y);
-        }
         else
-        {
             for (var y = 0; y < cells; y++)
             for (var x = 0; x < cells; x++)
                 vals[y * cells + x] = (int)World.Query(world, grid, layer, x * down, y * down, down, down);
-        }
         return vals;
     }
 }
 
 internal sealed class Panel(string label, int cells, float size, int down)
 {
-    public readonly string Label = label;
     public readonly int Cells = cells;
-    public readonly float Size = size;
     public readonly int Down = down;
+    public readonly string Label = label;
     public readonly List<int[]> Layers = [];
+    public readonly float Size = size;
 }

@@ -12,7 +12,7 @@ internal enum ResolveOutcome : byte
 {
     None = 0,
     Empty = 1,
-    Changed = 2,
+    Changed = 2
 }
 
 internal static unsafe partial class TileBake
@@ -22,15 +22,15 @@ internal static unsafe partial class TileBake
     internal const int DiffPitch = 33;
     internal const int DiffRows = 33;
 
+    internal const int LaneCount = 8;
+
+    internal const long MaxExtent = 1L << 30;
+    private const float MaxPositionQ8 = 1073741824f;
+    private const long MaxTentExtent = (1L << 23) - 2;
+
 #if NET
     private static bool Vector => Sse2.IsSupported || AdvSimd.IsSupported;
 #endif
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static int RoundQ16(int value)
-        => (value + 32768 + (value >> 31)) >> 16;
-
-    internal const int LaneCount = 8;
 
     internal static bool LanesSupported
     {
@@ -46,6 +46,12 @@ internal static unsafe partial class TileBake
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static int RoundQ16(int value)
+    {
+        return (value + 32768 + (value >> 31)) >> 16;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static void LaneWeights(int* lo, int* hi, int* weight, int live, int column, int* output)
     {
 #if NET
@@ -54,16 +60,16 @@ internal static unsafe partial class TileBake
         for (var band = 0; band < live; band++)
         {
             var inside = Vector256.GreaterThanOrEqual(iota, Vector256.Create(lo[band] - column))
-                & Vector256.LessThan(iota, Vector256.Create(hi[band] - column));
+                         & Vector256.LessThan(iota, Vector256.Create(hi[band] - column));
             lanes = Vector256.ConditionalSelect(inside, Vector256.Create(weight[band]), lanes);
         }
 
-        Vector256.Store(lanes, output);
+        lanes.Store(output);
 #else
         for (var lane = 0; lane < LaneCount; lane++) output[lane] = 0;
         for (var band = 0; band < live; band++)
-            for (var lane = lo[band] - column; lane < hi[band] - column; lane++)
-                output[lane] = weight[band];
+        for (var lane = lo[band] - column; lane < hi[band] - column; lane++)
+            output[lane] = weight[band];
 #endif
     }
 
@@ -74,15 +80,18 @@ internal static unsafe partial class TileBake
 #if NET
         var iota = Vector256.Create(0, 1, 2, 3, 4, 5, 6, 7);
         var lanes = Vector256.ConditionalSelect(
-            Vector256.GreaterThanOrEqual(iota, Vector256.Create(lo0 - column)) & Vector256.LessThan(iota, Vector256.Create(hi0 - column)),
+            Vector256.GreaterThanOrEqual(iota, Vector256.Create(lo0 - column)) &
+            Vector256.LessThan(iota, Vector256.Create(hi0 - column)),
             Vector256.Create(w0), Vector256<int>.Zero);
         lanes = Vector256.ConditionalSelect(
-            Vector256.GreaterThanOrEqual(iota, Vector256.Create(lo1 - column)) & Vector256.LessThan(iota, Vector256.Create(hi1 - column)),
+            Vector256.GreaterThanOrEqual(iota, Vector256.Create(lo1 - column)) &
+            Vector256.LessThan(iota, Vector256.Create(hi1 - column)),
             Vector256.Create(w1), lanes);
         lanes = Vector256.ConditionalSelect(
-            Vector256.GreaterThanOrEqual(iota, Vector256.Create(lo2 - column)) & Vector256.LessThan(iota, Vector256.Create(hi2 - column)),
+            Vector256.GreaterThanOrEqual(iota, Vector256.Create(lo2 - column)) &
+            Vector256.LessThan(iota, Vector256.Create(hi2 - column)),
             Vector256.Create(w2), lanes);
-        Vector256.Store(lanes, output);
+        lanes.Store(output);
 #else
         for (var lane = 0; lane < LaneCount; lane++)
         {
@@ -98,8 +107,9 @@ internal static unsafe partial class TileBake
 #if NET
         var product = Vector256.Load(weights) * Vector256.Create(scaled);
         var rounded = Vector256.ShiftRightArithmetic(
-            product + Vector256.Create(32768) + Vector256.ShiftRightArithmetic(product, 31), 16) * Vector256.Create(gain);
-        Vector256.Store(rounded, lanes);
+                          product + Vector256.Create(32768) + Vector256.ShiftRightArithmetic(product, 31), 16) *
+                      Vector256.Create(gain);
+        rounded.Store(lanes);
         return !Vector256.EqualsAll(rounded, Vector256<int>.Zero);
 #else
         var any = 0;
@@ -121,19 +131,20 @@ internal static unsafe partial class TileBake
         for (var row = rowFirst; row < rowEnd; row++)
         {
             var at = plane + row * TileSize + column;
-            Vector256.Store(Vector256.Load(at) + add, at);
+            (Vector256.Load(at) + add).Store(at);
         }
 #else
         for (var row = rowFirst; row < rowEnd; row++)
-            for (var lane = 0; lane < LaneCount; lane++)
-                plane[row * TileSize + column + lane] += lanes[lane];
+        for (var lane = 0; lane < LaneCount; lane++)
+            plane[row * TileSize + column + lane] += lanes[lane];
 #endif
     }
 
     internal static bool AnyNonZero(int* values, int count)
     {
         for (var i = 0; i < count; i++)
-            if (values[i] != 0) return true;
+            if (values[i] != 0)
+                return true;
 
         return false;
     }
@@ -141,7 +152,8 @@ internal static unsafe partial class TileBake
     internal static bool AnyNonZero(long* values, int count)
     {
         for (var i = 0; i < count; i++)
-            if (values[i] != 0) return true;
+            if (values[i] != 0)
+                return true;
 
         return false;
     }
@@ -154,7 +166,7 @@ internal static unsafe partial class TileBake
         {
             var scale = Vector256.Create(gain);
             for (; i + 8 <= count; i += 8)
-                Vector256.Store(Vector256.Load(destination + i) + Vector256.Load(source + i) * scale, destination + i);
+                (Vector256.Load(destination + i) + Vector256.Load(source + i) * scale).Store(destination + i);
         }
 #endif
         for (; i < count; i++) destination[i] += source[i] * gain;
@@ -172,7 +184,7 @@ internal static unsafe partial class TileBake
             for (; i <= limit; i += 8)
             {
                 var current = Vector256.Load(cells + i);
-                Vector256.Store(current + add, cells + i);
+                (current + add).Store(cells + i);
             }
 
             for (; i < end; i++) cells[i] += value;
@@ -184,11 +196,9 @@ internal static unsafe partial class TileBake
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static int RoundQ40(long value)
-        => (int)((value + 549755813888L + (value >> 63)) >> 40);
-
-    internal const long MaxExtent = 1L << 30;
-    private const float MaxPositionQ8 = 1073741824f;
-    private const long MaxTentExtent = (1L << 23) - 2;
+    {
+        return (int)((value + 549755813888L + (value >> 63)) >> 40);
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static int AnchorQ8(float value, float origin, int scaleQ8, int anchorMask)
@@ -196,20 +206,24 @@ internal static unsafe partial class TileBake
         var position = (value - origin) * scaleQ8;
         var bounded = MathF.Abs(position) <= MaxPositionQ8
             ? position
-            : position > 0f ? MaxPositionQ8 : -MaxPositionQ8;
+            : position > 0f
+                ? MaxPositionQ8
+                : -MaxPositionQ8;
         return (int)MathF.Floor(bounded) & anchorMask;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static void FootprintAnchored(
+    private static void FootprintAnchored(
         int anchorX, int anchorY, int sampling, int size, StampVariant* v, bool clip,
         out int px, out int py, out int fx, out int fy,
         out int extentX, out int extentY,
         out int x0, out int y0, out int x1, out int y1)
     {
         var cap = v->Kind == StampKind.Tent ? MaxTentExtent : MaxExtent;
-        SpanAnchored(anchorX, v->OriginQ8X, v->Width, sampling, size, clip, cap, out px, out fx, out extentX, out x0, out x1);
-        SpanAnchored(anchorY, v->OriginQ8Y, v->Height, sampling, size, clip, cap, out py, out fy, out extentY, out y0, out y1);
+        SpanAnchored(anchorX, v->OriginQ8X, v->Width, sampling, size, clip, cap, out px, out fx, out extentX, out x0,
+            out x1);
+        SpanAnchored(anchorY, v->OriginQ8Y, v->Height, sampling, size, clip, cap, out py, out fy, out extentY, out y0,
+            out y1);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -217,7 +231,7 @@ internal static unsafe partial class TileBake
         int anchor, int originQ8, int length, int sampling, int size, bool clip, long cap,
         out int cell, out int phase, out int extent, out int first, out int end)
     {
-        var lead = anchor + ((long)originQ8 * sampling >> 8);
+        var lead = anchor + (((long)originQ8 * sampling) >> 8);
         var full = Math.Min((long)length * sampling, cap);
         if (clip)
         {
@@ -238,12 +252,12 @@ internal static unsafe partial class TileBake
     {
         var cap = v->Kind == StampKind.Tent ? MaxTentExtent : MaxExtent;
         return p->ExtentX == (int)Math.Min((long)v->Width * p->Sampling, cap)
-            && p->ExtentY == (int)Math.Min((long)v->Height * p->Sampling, cap);
+               && p->ExtentY == (int)Math.Min((long)v->Height * p->Sampling, cap);
     }
 
-    #if NET
+#if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    #endif
+#endif
     internal static void EmitBox(
         int* difference, int tileX0, int tileY0,
         int px, int py, int fx, int fy, int extentX, int extentY, StampVariant* v, int gain)
@@ -294,7 +308,9 @@ internal static unsafe partial class TileBake
         var tail = end & 255;
         var live = 0;
         if (phase == 0)
+        {
             live = Band(origin, 0, full, 256, tileLo, tileHi, bandLo, bandHi, bandWeight, live);
+        }
         else
         {
             live = Band(origin, 0, 1, 256 - phase, tileLo, tileHi, bandLo, bandHi, bandWeight, live);
@@ -326,16 +342,20 @@ internal static unsafe partial class TileBake
     internal static void EmitTent(
         long* tent, int tileX0, int tileY0,
         int px, int py, int fx, int fy, int extentX, int extentY, StampVariant* v, int gain)
-        => EmitSmooth(tent, StampKind.Tent, tileX0, tileY0, px, py, fx, fy, extentX, extentY, v, gain);
+    {
+        EmitSmooth(tent, StampKind.Tent, tileX0, tileY0, px, py, fx, fy, extentX, extentY, v, gain);
+    }
 
     internal static void EmitBell(
         long* bell, int tileX0, int tileY0,
         int px, int py, int fx, int fy, int extentX, int extentY, StampVariant* v, int gain)
-        => EmitSmooth(bell, StampKind.Bell, tileX0, tileY0, px, py, fx, fy, extentX, extentY, v, gain);
+    {
+        EmitSmooth(bell, StampKind.Bell, tileX0, tileY0, px, py, fx, fy, extentX, extentY, v, gain);
+    }
 
-    #if NET
+#if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    #endif
+#endif
     internal static void EmitRaster(
         int* dense, int tileX0, int tileY0,
         int px, int py, int fx, int fy, int x1, int y1, int scaleQ8,
@@ -359,7 +379,7 @@ internal static unsafe partial class TileBake
 
         var step = 256L * 65536 / scaleQ8;
         var level = 0;
-        while (level < v->MipCount && (step >> (level + 1)) >= 65536) level++;
+        while (level < v->MipCount && step >> (level + 1) >= 65536) level++;
         var data = v->Data;
         var w = v->Width;
         var h = v->Height;
@@ -435,7 +455,6 @@ internal static unsafe partial class TileBake
             var x = 0;
 #if NET
             if (vector)
-            {
                 for (; x + 4 <= width; x += 4)
                 {
                     var numerator =
@@ -447,7 +466,6 @@ internal static unsafe partial class TileBake
                         numerator + Vector128.ShiftRightArithmetic(numerator, 31) + vhalf, 16);
                     Store128(dst + x, Load128(dst + x) + rounded * vgain);
                 }
-            }
 #endif
 
             for (; x < width; x++)
@@ -465,7 +483,9 @@ internal static unsafe partial class TileBake
 #if NET
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static Vector128<int> Tap4(sbyte* p)
-        => Vector128.Widen(Vector128.Widen(Vector128.CreateScalarUnsafe(*(int*)p).AsSByte()).Item1).Item1;
+    {
+        return Vector128.Widen(Vector128.Widen(Vector128.CreateScalarUnsafe(*(int*)p).AsSByte()).Item1).Item1;
+    }
 #endif
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -475,13 +495,16 @@ internal static unsafe partial class TileBake
         for (var x = 0; x < TileSize; x++) output[x] = RoundQ40(row[x]);
     }
 
+    internal static ResolveOutcome Outcome(bool any, bool changed)
+    {
+        return (any ? ResolveOutcome.None : ResolveOutcome.Empty) |
+               (changed ? ResolveOutcome.Changed : ResolveOutcome.None);
+    }
+
 #if NET
     private const int ExactBound = 1 << 29;
     private const int ExactMask = int.MinValue | (1 << 30);
 #endif
-
-    internal static ResolveOutcome Outcome(bool any, bool changed)
-        => (any ? ResolveOutcome.None : ResolveOutcome.Empty) | (changed ? ResolveOutcome.Changed : ResolveOutcome.None);
 
 #if NET
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

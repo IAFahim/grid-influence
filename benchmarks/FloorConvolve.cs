@@ -28,7 +28,7 @@ internal static unsafe class FloorConvolveKernel
             for (var x = 0; x < Side; x += 8)
             {
                 var d = Vector256.Load(row + x) - Vector256.Load(row + x - BoxSide)
-                        - Vector256.Load(above + x) + Vector256.Load(above + x - BoxSide);
+                                                - Vector256.Load(above + x) + Vector256.Load(above + x - BoxSide);
                 d += Avx2.ShiftLeftLogical128BitLane(d, 4);
                 d += Avx2.ShiftLeftLogical128BitLane(d, 8);
                 d += Avx2.Blend(Vector256<int>.Zero, Avx2.PermuteVar8x32(d, fourth), 0xF0);
@@ -139,7 +139,9 @@ internal static unsafe class FloorConvolveKernel
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static Vector256<int> BroadcastWeight(int* weights, int tap, int taps)
-        => tap < taps ? Vector256.Create((long)weights[tap]).AsInt32() : Vector256<int>.Zero;
+    {
+        return tap < taps ? Vector256.Create((long)weights[tap]).AsInt32() : Vector256<int>.Zero;
+    }
 
     public static void Separable(int* origin, long* output, long* ring, int* weights, int taps, int rows)
     {
@@ -161,15 +163,15 @@ internal sealed unsafe class FloorConvolveSuite : FloorSuite
 
     private static readonly int[] TentWeights = [87381, 174763, 262144, 262144, 174763, 87381];
     private static readonly int[] BellWeights = [16384, 81920, 180224, 245760, 245760, 180224, 81920, 16384];
+    private readonly int* _bell;
+    private readonly int* _boxOutput;
+    private readonly FloorCase[] _cases;
 
     private readonly int* _origin;
-    private readonly int* _zeroRow;
-    private readonly int* _boxOutput;
-    private readonly long* _smoothOutput;
     private readonly long* _ring;
+    private readonly long* _smoothOutput;
     private readonly int* _tent;
-    private readonly int* _bell;
-    private readonly FloorCase[] _cases;
+    private readonly int* _zeroRow;
 
     public FloorConvolveSuite()
     {
@@ -210,7 +212,7 @@ internal sealed unsafe class FloorConvolveSuite : FloorSuite
                     return FloorHash.Of(_boxOutput, BlockRows * FloorConvolveKernel.Side);
                 }),
             SmoothBlocks("tent6-int64-L2-resident", _tent, TentWeights.Length),
-            SmoothBlocks("bell8-int64-L2-resident", _bell, BellWeights.Length),
+            SmoothBlocks("bell8-int64-L2-resident", _bell, BellWeights.Length)
         ];
     }
 
@@ -256,25 +258,32 @@ internal sealed unsafe class FloorConvolveSuite : FloorSuite
             new Span<int>(_boxOutput, FloorShape.Cells).Clear();
             FloorConvolveKernel.Box(_origin, _boxOutput, _zeroRow, BlockRows);
             receipts.Check("floor-p4-box-block-matches-leading-rows",
-                new ReadOnlySpan<int>(_boxOutput, BlockRows * side).SequenceEqual(boxExpected.AsSpan(0, BlockRows * side)));
+                new ReadOnlySpan<int>(_boxOutput, BlockRows * side).SequenceEqual(
+                    boxExpected.AsSpan(0, BlockRows * side)));
         }
-        else receipts.Skip("floor-p4-box-vector-matches-direct-emission", "avx2 unavailable");
+        else
+        {
+            receipts.Skip("floor-p4-box-vector-matches-direct-emission", "avx2 unavailable");
+        }
 
         SmoothReceipt(receipts, "tent6", TentWeights, _tent);
         SmoothReceipt(receipts, "bell8", BellWeights, _bell);
     }
 
     private FloorCase Smooth(string variant, int* weights, int taps)
-        => new("P4", variant, FloorShape.Cells,
+    {
+        return new FloorCase("P4", variant, FloorShape.Cells,
             () => FloorConvolveKernel.Separable(_origin, _smoothOutput, _ring, weights, taps, FloorConvolveKernel.Side),
             () =>
             {
                 FloorConvolveKernel.Separable(_origin, _smoothOutput, _ring, weights, taps, FloorConvolveKernel.Side);
                 return FloorHash.Of(_smoothOutput, FloorShape.Cells);
             });
+    }
 
     private FloorCase SmoothBlocks(string variant, int* weights, int taps)
-        => new("P4", variant, BlockRows * Blocks * FloorConvolveKernel.Side,
+    {
+        return new FloorCase("P4", variant, BlockRows * Blocks * FloorConvolveKernel.Side,
             () =>
             {
                 for (var b = 0; b < Blocks; b++)
@@ -285,6 +294,7 @@ internal sealed unsafe class FloorConvolveSuite : FloorSuite
                 FloorConvolveKernel.Separable(_origin, _smoothOutput, _ring, weights, taps, BlockRows);
                 return FloorHash.Of(_smoothOutput, BlockRows * FloorConvolveKernel.Side);
             });
+    }
 
     private void SmoothReceipt(FloorReceipts receipts, string name, int[] weights, int* native)
     {
@@ -312,14 +322,22 @@ internal sealed unsafe class FloorConvolveSuite : FloorSuite
             new Span<long>(_smoothOutput, FloorShape.Cells).Clear();
             FloorConvolveKernel.SeparableVector(_origin, _smoothOutput, _ring, native, weights.Length, BlockRows);
             receipts.Check($"floor-p4-{name}-block-matches-leading-rows",
-                new ReadOnlySpan<long>(_smoothOutput, BlockRows * side).SequenceEqual(expected.AsSpan(0, BlockRows * side)));
+                new ReadOnlySpan<long>(_smoothOutput, BlockRows * side).SequenceEqual(expected.AsSpan(0,
+                    BlockRows * side)));
         }
-        else receipts.Skip($"floor-p4-{name}-vector-matches-direct-emission", "avx2 unavailable");
+        else
+        {
+            receipts.Skip($"floor-p4-{name}-vector-matches-direct-emission", "avx2 unavailable");
+        }
     }
 
     private static bool Equal(int* actual, int[] expected)
-        => new ReadOnlySpan<int>(actual, FloorShape.Cells).SequenceEqual(expected);
+    {
+        return new ReadOnlySpan<int>(actual, FloorShape.Cells).SequenceEqual(expected);
+    }
 
     private static bool Equal(long* actual, long[] expected)
-        => new ReadOnlySpan<long>(actual, FloorShape.Cells).SequenceEqual(expected);
+    {
+        return new ReadOnlySpan<long>(actual, FloorShape.Cells).SequenceEqual(expected);
+    }
 }

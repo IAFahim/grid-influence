@@ -5,7 +5,7 @@ internal enum KernelShape : byte
     Box,
     Separable,
     Spans,
-    Dense,
+    Dense
 }
 
 internal readonly unsafe struct KernelTaps
@@ -47,7 +47,7 @@ internal readonly struct KernelKey
 
     internal KernelKey(byte stamp, int sampling, int grid, int phaseX, int phaseY, int angle)
     {
-        Main = stamp | (ulong)sampling << 8 | (ulong)grid << 36 | (ulong)phaseX << 41 | (ulong)phaseY << 49;
+        Main = stamp | ((ulong)sampling << 8) | ((ulong)grid << 36) | ((ulong)phaseX << 41) | ((ulong)phaseY << 49);
         Turn = (ulong)angle & 0xFFFFul;
     }
 }
@@ -96,7 +96,8 @@ internal unsafe struct KernelCache
 
             var count = 0;
             for (var i = 0; i < EntryCount; i++)
-                if (entries[i].Key != 0 || entries[i].Turn != 0) count++;
+                if (entries[i].Key != 0 || entries[i].Turn != 0)
+                    count++;
 
             return count;
         }
@@ -130,7 +131,10 @@ internal unsafe struct KernelCache
     public readonly bool CanInsert => !InsertsDisabled && _inserts < FrameInsertCap;
 
 
-    public void BeginFrame() => _inserts = 0;
+    public void BeginFrame()
+    {
+        _inserts = 0;
+    }
 
     public void Clear()
     {
@@ -274,7 +278,8 @@ internal static unsafe class KernelFactory
             q.Y1 = p->Py + ry1;
         }
 
-        Capture(&q, p->Plane, ints, longs, p->Px + rx0, p->Py + ry0, p->Px + rx1, p->Py + ry1, width, rasterX1, rasterY1);
+        Capture(&q, p->Plane, ints, longs, p->Px + rx0, p->Py + ry0, p->Px + rx1, p->Py + ry1, width, rasterX1,
+            rasterY1);
 
         var extents = cache->CanvasRows(height);
         Measure(ints, longs, width, height, extents,
@@ -302,8 +307,9 @@ internal static unsafe class KernelFactory
         return true;
     }
 
-    internal static void EmitTaps(
-        Placement* p, int* difference, int* dense, long* smooth, int tileX0, int tileY0, int gain, int rasterX1, int rasterY1)
+    private static void EmitTaps(
+        Placement* p, int* difference, int* dense, long* smooth, int tileX0, int tileY0, int gain, int rasterX1,
+        int rasterY1)
     {
         if (p->Turned)
         {
@@ -315,16 +321,20 @@ internal static unsafe class KernelFactory
         switch (p->Plane)
         {
             case Plane.Difference:
-                TileBake.EmitBox(difference, tileX0, tileY0, p->Px, p->Py, p->Fx, p->Fy, p->ExtentX, p->ExtentY, p->V, gain);
+                TileBake.EmitBox(difference, tileX0, tileY0, p->Px, p->Py, p->Fx, p->Fy, p->ExtentX, p->ExtentY, p->V,
+                    gain);
                 return;
             case Plane.Dense:
-                TileBake.EmitRaster(dense, tileX0, tileY0, p->Px, p->Py, p->Fx, p->Fy, rasterX1, rasterY1, p->Sampling, p->V, gain);
+                TileBake.EmitRaster(dense, tileX0, tileY0, p->Px, p->Py, p->Fx, p->Fy, rasterX1, rasterY1, p->Sampling,
+                    p->V, gain);
                 return;
             case Plane.Tent:
-                TileBake.EmitTent(smooth, tileX0, tileY0, p->Px, p->Py, p->Fx, p->Fy, p->ExtentX, p->ExtentY, p->V, gain);
+                TileBake.EmitTent(smooth, tileX0, tileY0, p->Px, p->Py, p->Fx, p->Fy, p->ExtentX, p->ExtentY, p->V,
+                    gain);
                 return;
             default:
-                TileBake.EmitBell(smooth, tileX0, tileY0, p->Px, p->Py, p->Fx, p->Fy, p->ExtentX, p->ExtentY, p->V, gain);
+                TileBake.EmitBell(smooth, tileX0, tileY0, p->Px, p->Py, p->Fx, p->Fy, p->ExtentX, p->ExtentY, p->V,
+                    gain);
                 return;
         }
     }
@@ -336,20 +346,23 @@ internal static unsafe class KernelFactory
         {
             Plane.Difference => KernelShape.Box,
             Plane.Tent or Plane.Bell => KernelShape.Separable,
-            _ => KernelShape.Dense,
+            _ => KernelShape.Dense
         };
     }
 
     private static void RelativeRect(
-        Placement* p, int maskedAngle, out int rx0, out int ry0, out int rx1, out int ry1, out int rasterX1, out int rasterY1)
+        Placement* p, int maskedAngle, out int rx0, out int ry0, out int rx1, out int ry1, out int rasterX1,
+        out int rasterY1)
     {
         if (p->Turned)
         {
             long bx0, by0, bx1, by1;
             if (p->Kind >= StampKind.Disk)
-                TileBake.RoundFootprintCells(p->Arc, p->CentreX, p->CentreY, p->Bound, p->V, maskedAngle, out bx0, out by0, out bx1, out by1);
+                TileBake.RoundFootprintCells(p->Arc, p->CentreX, p->CentreY, p->Bound, p->V, maskedAngle, out bx0,
+                    out by0, out bx1, out by1);
             else
-                TileBake.TurnedFootprintCells(p->CentreX, p->CentreY, p->Cos, p->Sin, p->SupportU, p->SupportV, out bx0, out by0, out bx1, out by1);
+                TileBake.TurnedFootprintCells(p->CentreX, p->CentreY, p->Cos, p->Sin, p->SupportU, p->SupportV, out bx0,
+                    out by0, out bx1, out by1);
             TileBake.KernelCells(bx0, bx1, out var fx0, out var fx1);
             TileBake.KernelCells(by0, by1, out var fy0, out var fy1);
             rx0 = fx0 - p->Px;
@@ -510,7 +523,8 @@ internal static unsafe class KernelFactory
         }
     }
 
-    private static void Compact(int* ints, long* longs, int width, int minX, int minY, int kernelWidth, int kernelHeight)
+    private static void Compact(int* ints, long* longs, int width, int minX, int minY, int kernelWidth,
+        int kernelHeight)
     {
         if (minX == 0 && minY == 0 && kernelWidth == width) return;
 
@@ -518,8 +532,11 @@ internal static unsafe class KernelFactory
         {
             var source = (long)(minY + j) * width + minX;
             var target = (long)j * kernelWidth;
-            if (ints != null) Buffer.MemoryCopy(ints + source, ints + target, kernelWidth * sizeof(int), kernelWidth * sizeof(int));
-            else Buffer.MemoryCopy(longs + source, longs + target, kernelWidth * sizeof(long), kernelWidth * sizeof(long));
+            if (ints != null)
+                Buffer.MemoryCopy(ints + source, ints + target, kernelWidth * sizeof(int), kernelWidth * sizeof(int));
+            else
+                Buffer.MemoryCopy(longs + source, longs + target, kernelWidth * sizeof(long),
+                    kernelWidth * sizeof(long));
         }
     }
 }

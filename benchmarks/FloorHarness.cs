@@ -13,10 +13,15 @@ internal static class FloorShape
     public const int Cells = Size * Size;
 
     public static int Paged(int cx, int cy, int tilesPerSide)
-        => (((cy >> TileBits) * tilesPerSide + (cx >> TileBits)) * TileCells)
-           + (cy & (TileSize - 1)) * TileSize + (cx & (TileSize - 1));
+    {
+        return ((cy >> TileBits) * tilesPerSide + (cx >> TileBits)) * TileCells
+               + (cy & (TileSize - 1)) * TileSize + (cx & (TileSize - 1));
+    }
 
-    public static uint Morton(int x, int y) => Spread((uint)x) | (Spread((uint)y) << 1);
+    public static uint Morton(int x, int y)
+    {
+        return Spread((uint)x) | (Spread((uint)y) << 1);
+    }
 
     private static uint Spread(uint value)
     {
@@ -33,7 +38,10 @@ internal struct FloorRandom
 {
     private ulong _state;
 
-    public FloorRandom(ulong seed) => _state = seed;
+    public FloorRandom(ulong seed)
+    {
+        _state = seed;
+    }
 
     public ulong Next()
     {
@@ -44,16 +52,22 @@ internal struct FloorRandom
         return z ^ (z >> 31);
     }
 
-    public int Below(int bound) => (int)(((Next() >> 32) * (uint)bound) >> 32);
+    public int Below(int bound)
+    {
+        return (int)(((Next() >> 32) * (uint)bound) >> 32);
+    }
 
-    public float Unit() => (Next() >> 40) * (1f / 16777216f);
+    public float Unit()
+    {
+        return (Next() >> 40) * (1f / 16777216f);
+    }
 }
 
 internal static unsafe class FloorHash
 {
-    public const ulong Seed = 0xCBF29CE484222325UL;
+    private const ulong Seed = 0xCBF29CE484222325UL;
 
-    public static ulong Add(ulong hash, ulong word)
+    internal static ulong Add(ulong hash, ulong word)
     {
         hash = (hash ^ word) * 0x9E3779B97F4A7C15UL;
         return hash ^ (hash >> 32);
@@ -71,12 +85,20 @@ internal static unsafe class FloorHash
     }
 
     public static ulong Of<T>(T* data, long count) where T : unmanaged
-        => Add(Seed, data, count * sizeof(T));
+    {
+        return Add(Seed, data, count * sizeof(T));
+    }
 }
 
 internal sealed unsafe class FloorArena : IDisposable
 {
     private readonly List<nint> _blocks = [];
+
+    public void Dispose()
+    {
+        foreach (var block in _blocks) NativeMemory.AlignedFree((void*)block);
+        _blocks.Clear();
+    }
 
     public T* Alloc<T>(long count) where T : unmanaged
     {
@@ -85,12 +107,6 @@ internal sealed unsafe class FloorArena : IDisposable
         NativeMemory.Clear(block, bytes);
         _blocks.Add((nint)block);
         return (T*)block;
-    }
-
-    public void Dispose()
-    {
-        foreach (var block in _blocks) NativeMemory.AlignedFree((void*)block);
-        _blocks.Clear();
     }
 }
 
@@ -113,9 +129,15 @@ internal sealed class FloorReceipts
 
     public IReadOnlyList<(string Name, bool Ok, string Note)> Items => _items;
 
-    public void Check(string name, bool ok) => _items.Add((name, ok, ""));
+    public void Check(string name, bool ok)
+    {
+        _items.Add((name, ok, ""));
+    }
 
-    public void Skip(string name, string reason) => _items.Add((name, true, reason));
+    public void Skip(string name, string reason)
+    {
+        _items.Add((name, true, reason));
+    }
 }
 
 internal abstract class FloorSuite : IDisposable
@@ -126,9 +148,12 @@ internal abstract class FloorSuite : IDisposable
 
     public abstract IReadOnlyList<FloorCase> Cases { get; }
 
-    public abstract void Receipt(FloorReceipts receipts);
+    public void Dispose()
+    {
+        Arena.Dispose();
+    }
 
-    public void Dispose() => Arena.Dispose();
+    public abstract void Receipt(FloorReceipts receipts);
 }
 
 internal sealed class FloorResult
@@ -157,7 +182,8 @@ internal static class FloorTimer
         var calibration = Stopwatch.GetTimestamp();
         for (var i = 0; i < 6; i++) floor.Pass();
         var perPass = Stopwatch.GetElapsedTime(calibration).TotalMilliseconds / 6;
-        var iterations = (int)Math.Clamp(BudgetMs / Math.Max(perPass, 1e-6), Math.Min(MinIterations, maxIterations), maxIterations);
+        var iterations = (int)Math.Clamp(BudgetMs / Math.Max(perPass, 1e-6), Math.Min(MinIterations, maxIterations),
+            maxIterations);
         var samples = new long[iterations];
         GC.Collect();
         GC.WaitForPendingFinalizers();
@@ -184,7 +210,7 @@ internal static class FloorTimer
             P99Ms = samples[Math.Min(iterations - 1, (int)Math.Ceiling(0.99 * iterations) - 1)] * toMs,
             MinMs = samples[0] * toMs,
             AllocatedBytes = allocated,
-            Checksum = floor.Checksum(),
+            Checksum = floor.Checksum()
         };
     }
 }

@@ -4,10 +4,10 @@ namespace Gi.Tests;
 
 public sealed class SlotRingTests : IDisposable
 {
-    private readonly byte _world = World.New();
-    private readonly byte _mirror = World.New();
     private readonly byte _layer;
+    private readonly byte _mirror = World.New();
     private readonly byte _stamp = Stamp.Box(2, 2, 3);
+    private readonly byte _world = World.New();
 
     public SlotRingTests()
     {
@@ -27,11 +27,20 @@ public sealed class SlotRingTests : IDisposable
         Assert.True(Stamp.Free(_stamp));
     }
 
-    private static uint SlotOf(World.SourceId id) => id.Slot;
+    private static uint SlotOf(World.SourceId id)
+    {
+        return id.Slot;
+    }
 
-    private World.SourceId Place(byte world) => World.Place(world, _layer, 10f, 10f, _stamp, 1);
+    private World.SourceId Place(byte world)
+    {
+        return World.Place(world, _layer, 10f, 10f, _stamp, 1);
+    }
 
-    private World.SourceId Place() => Place(_world);
+    private World.SourceId Place()
+    {
+        return Place(_world);
+    }
 
     private World.SourceId[] PlaceMany(int count)
     {

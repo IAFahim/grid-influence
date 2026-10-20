@@ -31,13 +31,18 @@ public unsafe class RegionQueryTests
                 var width = rng.Next(1, 160);
                 var height = rng.Next(1, 160);
                 var region = new short[width * height];
-                fixed (short* p = region) World.QueryRegion(world, grid, layer, x, y, width, height, p);
+                fixed (short* p = region)
+                {
+                    World.QueryRegion(world, grid, layer, x, y, width, height, p);
+                }
+
                 long expectedSum = 0;
                 for (var row = 0; row < height; row++)
                 for (var col = 0; col < width; col++)
                 {
                     var expected = World.Query(world, grid, layer, x + col, y + row);
-                    Assert.True(region[row * width + col] == expected, $"({x},{y}) {width}x{height} cell ({col},{row})");
+                    Assert.True(region[row * width + col] == expected,
+                        $"({x},{y}) {width}x{height} cell ({col},{row})");
                     expectedSum += expected;
                 }
 

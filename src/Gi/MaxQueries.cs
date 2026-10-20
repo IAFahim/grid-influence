@@ -5,7 +5,8 @@ internal static unsafe class MaxQueries
     private const int FanOut = Pyramid<short, ShortMaxOp>.FanOut;
     private const int NodeSlots = Pyramid<short, ShortMaxOp>.NodeSlots;
 
-    public static short Best(in Pyramid<short, ShortMaxOp> pyramid, int tilesPerSide, LayerData* ld, out int x, out int y)
+    public static short Best(in Pyramid<short, ShortMaxOp> pyramid, int tilesPerSide, LayerData* ld, out int x,
+        out int y)
     {
         if (pyramid.Levels == 0)
         {
@@ -35,7 +36,7 @@ internal static unsafe class MaxQueries
                 var page = ld->PageOf(childY * tilesPerSide + childX);
                 if (page == null) return target;
 
-                var count = TileBake.TileSize * TileBake.TileSize;
+                const int count = TileBake.TileSize * TileBake.TileSize;
                 var index = FirstEqualFlat(page, target, count);
                 if (index == count)
                 {
@@ -150,7 +151,8 @@ internal static unsafe class MaxQueries
         {
             var row = slots + y * FanOut;
             for (var x = 0; x < vx; x++)
-                if (row[x] == target) return y * FanOut + x;
+                if (row[x] == target)
+                    return y * FanOut + x;
         }
 
         return NodeSlots;
@@ -163,7 +165,8 @@ internal static unsafe class MaxQueries
             return SimdOps.FirstEqualFlat(values, target, count);
 #endif
         for (var i = 0; i < count; i++)
-            if (values[i] == target) return i;
+            if (values[i] == target)
+                return i;
         return count;
     }
 }

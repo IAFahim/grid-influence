@@ -8,6 +8,8 @@ namespace Gi.Entities.Columns.Tests;
 
 public sealed unsafe class GiContractTests : IDisposable
 {
+
+    private static readonly int[] ExpectedTiles = new[] { 0, 1, 2, 3 };
     private readonly List<byte> _worlds = [];
     private readonly List<byte> _stamps = [];
 
@@ -288,7 +290,7 @@ public sealed unsafe class GiContractTests : IDisposable
                 for (var i = 0; i < groups; i++) groupOrder[i] = i;
                 rng.Shuffle(groupOrder, groups);
 
-                var splatCount = 8;
+                const int splatCount = 8;
                 for (var i = 0; i < splatCount; i++)
                 {
                     splatXs[i] = 4f + rng.Next(56);
@@ -1000,7 +1002,7 @@ public sealed unsafe class GiContractTests : IDisposable
         int count;
         fixed (int* p = tiles) count = World.ChangedTiles(world, grid, layer, 0, p);
         Assert.Equal(4, count);
-        Assert.Equal(new[] { 0, 1, 2, 3 }, tiles.AsSpan(0, count).ToArray());
+        Assert.Equal(ExpectedTiles, tiles.AsSpan(0, count).ToArray());
         Assert.True(Ascending(tiles, count));
         fixed (int* p = tiles) Assert.Equal(0, World.ChangedTiles(world, grid, layer, 1, p));
         Assert.Equal(count, World.ChangedTiles(world, grid, layer, 0, null));
@@ -1010,7 +1012,7 @@ public sealed unsafe class GiContractTests : IDisposable
         Assert.Equal(2, World.Tick(world));
         fixed (int* p = tiles) count = World.ChangedTiles(world, grid, layer, 1, p);
         Assert.Equal(4, count);
-        Assert.Equal(new[] { 0, 1, 2, 3 }, tiles.AsSpan(0, count).ToArray());
+        Assert.Equal(ExpectedTiles, tiles.AsSpan(0, count).ToArray());
         fixed (int* p = tiles) Assert.Equal(0, World.ChangedTiles(world, grid, layer, 2, p));
 
         World.Place(world, layer, 10f, 52f, stamp, 4);

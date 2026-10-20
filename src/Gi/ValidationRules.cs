@@ -24,22 +24,85 @@ internal static class ValidationRules
     internal const int MaxFootprint = 512;
     internal const int MaxReachCells = 4096;
 
-    internal static bool IsAxis(int axis) => axis >= 1 && axis <= MaxAxis;
-    internal static bool IsRadius(int radius) => radius >= 1 && radius <= MaxRadius;
-    internal static bool IsArc(int arc) => arc >= 1 && arc <= FullArc;
-    internal static bool IsValue(int value) => value >= MinValue && value <= MaxValue;
-    internal static bool IsGain(int gain) => gain >= -MaxGain && gain <= MaxGain;
-    internal static bool IsCount(int count, int maximum) => count >= 0 && count <= maximum;
-    internal static bool IsIndex(int index, int maximum) => index >= 0 && index < maximum;
-    internal static bool IsPower(int power) => power >= MinPower && power <= MaxPower;
-    internal static bool IsWeight(int weight) => weight >= -MaxWeight && weight <= MaxWeight;
-    internal static bool IsShift(int shift) => shift >= 0 && shift <= MaxShift;
-    internal static bool IsPhaseBits(int phaseBits) => phaseBits >= 0 && phaseBits <= MaxPhaseBits;
-    internal static bool IsTurnBits(int turnBits) => turnBits >= 0 && turnBits <= MaxTurnBits;
-    internal static bool IsFootprint(long cells) => cells >= 0 && cells <= MaxFootprint;
-    internal static bool IsReachCells(float cells) => cells >= 0f && cells <= MaxReachCells;
-    internal static bool IsGridSize(float size) => float.IsFinite(size) && size > 0f;
-    internal static bool IsGridOrigin(float origin) => float.IsFinite(origin);
+    internal static bool IsAxis(int axis)
+    {
+        return axis >= 1 && axis <= MaxAxis;
+    }
+
+    internal static bool IsRadius(int radius)
+    {
+        return radius >= 1 && radius <= MaxRadius;
+    }
+
+    internal static bool IsArc(int arc)
+    {
+        return arc >= 1 && arc <= FullArc;
+    }
+
+    internal static bool IsValue(int value)
+    {
+        return value >= MinValue && value <= MaxValue;
+    }
+
+    internal static bool IsGain(int gain)
+    {
+        return gain >= -MaxGain && gain <= MaxGain;
+    }
+
+    internal static bool IsCount(int count, int maximum)
+    {
+        return count >= 0 && count <= maximum;
+    }
+
+    internal static bool IsIndex(int index, int maximum)
+    {
+        return index >= 0 && index < maximum;
+    }
+
+    internal static bool IsPower(int power)
+    {
+        return power >= MinPower && power <= MaxPower;
+    }
+
+    internal static bool IsWeight(int weight)
+    {
+        return weight >= -MaxWeight && weight <= MaxWeight;
+    }
+
+    internal static bool IsShift(int shift)
+    {
+        return shift >= 0 && shift <= MaxShift;
+    }
+
+    internal static bool IsPhaseBits(int phaseBits)
+    {
+        return phaseBits >= 0 && phaseBits <= MaxPhaseBits;
+    }
+
+    internal static bool IsTurnBits(int turnBits)
+    {
+        return turnBits >= 0 && turnBits <= MaxTurnBits;
+    }
+
+    internal static bool IsFootprint(long cells)
+    {
+        return cells >= 0 && cells <= MaxFootprint;
+    }
+
+    internal static bool IsReachCells(float cells)
+    {
+        return cells >= 0f && cells <= MaxReachCells;
+    }
+
+    internal static bool IsGridSize(float size)
+    {
+        return float.IsFinite(size) && size > 0f;
+    }
+
+    internal static bool IsGridOrigin(float origin)
+    {
+        return float.IsFinite(origin);
+    }
 
     internal static bool TryGridScaleQ8(int power, float size, out int scaleQ8)
     {

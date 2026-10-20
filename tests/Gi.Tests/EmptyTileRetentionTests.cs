@@ -11,8 +11,8 @@ public class EmptyTileRetentionTests
     [InlineData(1, 6)]
     public void SubUnitResiduesSurviveAPublishThatLeavesTheTileEmpty(int kind, int later)
     {
-        var split = Read(kind, later, processBetween: true);
-        var together = Read(kind, later, processBetween: false);
+        var split = Read(kind, later, true);
+        var together = Read(kind, later, false);
         Assert.Equal(together, split);
         Assert.Contains(split, value => value > 0);
     }

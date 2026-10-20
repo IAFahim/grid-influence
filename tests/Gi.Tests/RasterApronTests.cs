@@ -56,7 +56,8 @@ public unsafe class RasterApronTests
             foreach (var fractionX in Fractions)
             foreach (var fractionY in Fractions)
             {
-                if (!TileBake.Place(20f + fractionX, 20f + fractionY, 0f, 0f, 256, 64, &copy, 0, scale, out var p)) continue;
+                if (!TileBake.Place(20f + fractionX, 20f + fractionY, 0f, 0f, 256, 64, &copy, 0, scale,
+                        out var p)) continue;
                 if (p.Turned || p.Plane != Plane.Dense) continue;
 
                 var x0 = Math.Max(p.X0, 0);

@@ -12,7 +12,8 @@ internal static class ViewTiming
         var box = Stamp.Box(4, 4, 7);
         var rng = new Random(7);
         for (var i = 0; i < 200_000; i++)
-            World.Place(world, layer, (float)(rng.NextDouble() * 1000.0 + 12.0), (float)(rng.NextDouble() * 1000.0 + 12.0), box, 1);
+            World.Place(world, layer, (float)(rng.NextDouble() * 1000.0 + 12.0),
+                (float)(rng.NextDouble() * 1000.0 + 12.0), box, 1);
         World.Process(world);
 
         var best = double.MaxValue;
@@ -27,9 +28,11 @@ internal static class ViewTiming
 
         var reference = 0L;
         for (var y = 0; y < 1024; y++)
-        for (var x = 0; x < 1024; x++) reference += World.Query(world, 0, layer, x, y);
+        for (var x = 0; x < 1024; x++)
+            reference += World.Query(world, 0, layer, x, y);
         var ok = reference * 12 == checksum;
-        Console.WriteLine($"view coherent cell read: {best:F2} ns/cell over 1,048,576 cells, checksum {(ok ? "matches Query" : "MISMATCH")}");
+        Console.WriteLine(
+            $"view coherent cell read: {best:F2} ns/cell over 1,048,576 cells, checksum {(ok ? "matches Query" : "MISMATCH")}");
         World.Free(world);
         Stamp.Free(box);
         return ok ? 0 : 1;
@@ -41,7 +44,8 @@ internal static class ViewTiming
         var view = World.View(world, 0, layer);
         long total = 0;
         for (var y = 0; y < 1024; y++)
-        for (var x = 0; x < 1024; x++) total += view[x, y];
+        for (var x = 0; x < 1024; x++)
+            total += view[x, y];
         return total;
     }
 }

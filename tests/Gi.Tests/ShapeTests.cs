@@ -70,8 +70,16 @@ public sealed class ShapeTests
         World.Process(w);
         var a = new short[128 * 128];
         var b = new short[128 * 128];
-        fixed (short* pa = a) World.QueryRegion(w, g, scaled, 0, 0, 128, 128, pa);
-        fixed (short* pb = b) World.QueryRegion(w, g, resized, 0, 0, 128, 128, pb);
+        fixed (short* pa = a)
+        {
+            World.QueryRegion(w, g, scaled, 0, 0, 128, 128, pa);
+        }
+
+        fixed (short* pb = b)
+        {
+            World.QueryRegion(w, g, resized, 0, 0, 128, 128, pb);
+        }
+
         Assert.Equal(b, a);
     }
 
@@ -113,13 +121,13 @@ public sealed class ShapeTests
         World.Process(w);
         Assert.True(Stamp.Free(stamp));
         Assert.False(Stamp.Free(stamp));
-        Assert.Equal(default(World.SourceId), World.Place(w, l, 20f, 20f, stamp, 2));
+        Assert.Equal(default, World.Place(w, l, 20f, 20f, stamp, 2));
 
         for (var i = 0; i < 600; i++)
         {
             var transient = Stamp.Dome((ushort)(1 + i % 100), 40);
             var source = World.Place(w, l, 30f, 30f, transient, 1);
-            Assert.NotEqual(default(World.SourceId), source);
+            Assert.NotEqual(default, source);
             World.Remove(w, source);
             World.Process(w);
             Assert.True(Stamp.Free(transient));
@@ -136,6 +144,7 @@ public sealed class ShapeTests
         World.Process(w);
         Assert.Equal(32 * 32 * 20, World.Query(w, g, l, 0, 0, 32, 32));
     }
+
     [Fact]
     public void New_RejectsShortSampleSpans()
     {
@@ -148,7 +157,11 @@ public sealed class ShapeTests
         var samples = new sbyte[6];
         for (var i = 0; i < samples.Length; i++) samples[i] = 5;
         byte stamp;
-        fixed (sbyte* p = samples) stamp = Stamp.New(p, 3, 2);
+        fixed (sbyte* p = samples)
+        {
+            stamp = Stamp.New(p, 3, 2);
+        }
+
         var w = World.New();
         var g = Grid.New(w, 5, 0f, 0f, 32f);
         var l = Layer.New(w);
@@ -156,5 +169,4 @@ public sealed class ShapeTests
         World.Process(w);
         Assert.Equal(10, World.Query(w, g, l, 16, 16));
     }
-
 }

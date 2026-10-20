@@ -10,7 +10,7 @@ public static unsafe partial class World
         return w->Grids[grid].Layers[layer].Hash;
     }
 
-    internal static void RefreshTileHash(GridCtx* g, LayerData* ld, int tile)
+    private static void RefreshTileHash(GridCtx* g, LayerData* ld, int tile)
     {
         if (ld->TileHashes == null)
             ld->TileHashes = (ulong*)NativeHeap.AllocZeroed((nuint)g->TileCount * sizeof(ulong));

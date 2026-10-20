@@ -1,4 +1,5 @@
 using System.Globalization;
+using Gi;
 
 internal static unsafe class FrameReceipts
 {
@@ -19,15 +20,24 @@ internal static unsafe class FrameReceipts
         Check("frames-percentile-is-nearest-rank", PercentileIsNearestRank());
         Check("frames-json-is-culture-invariant", JsonIsCultureInvariant());
         Check("frames-morton-sort-is-an-ordered-permutation", MortonSortIsAnOrderedPermutation());
-        Check("frames-b1-legacy-deterministic-and-matches-rebuild", Scenario(() => new FrameLegacy(Entities, Power, 7), 12, log));
-        Check("frames-b2-one-mover-deterministic-and-matches-rebuild", Scenario(() => new FrameSparse(Entities, Power, 7, 1), 60, log));
-        Check("frames-b2-200-movers-deterministic-and-matches-rebuild", Scenario(() => new FrameSparse(Entities, Power, 7, 200), 60, log));
-        Check("frames-b4-idle-deterministic-and-matches-rebuild", Scenario(() => new FrameIdle(Entities, Power, 7), 12, log));
-        Check("frames-c-crowd-deterministic-and-matches-rebuild", Scenario(() => new FrameCrowd(Entities, Power, 7), 140, log));
-        Check("frames-w-world-deterministic-and-matches-rebuild", Scenario(() => new FrameWorld(Entities, Power, 7), 130, log));
-        Check("frames-b1-cell-deterministic-and-matches-rebuild", Scenario(() => new FrameLegacy(Entities, Power, 7, true), 12, log));
-        Check("frames-c-cell-deterministic-and-matches-rebuild", Scenario(() => new FrameCrowd(Entities, Power, 7, true), 140, log));
-        Check("frames-w-cell-deterministic-and-matches-rebuild", Scenario(() => new FrameWorld(Entities, Power, 7, true), 130, log));
+        Check("frames-b1-legacy-deterministic-and-matches-rebuild",
+            Scenario(() => new FrameLegacy(Entities, Power, 7), 12, log));
+        Check("frames-b2-one-mover-deterministic-and-matches-rebuild",
+            Scenario(() => new FrameSparse(Entities, Power, 7, 1), 60, log));
+        Check("frames-b2-200-movers-deterministic-and-matches-rebuild",
+            Scenario(() => new FrameSparse(Entities, Power, 7, 200), 60, log));
+        Check("frames-b4-idle-deterministic-and-matches-rebuild",
+            Scenario(() => new FrameIdle(Entities, Power, 7), 12, log));
+        Check("frames-c-crowd-deterministic-and-matches-rebuild",
+            Scenario(() => new FrameCrowd(Entities, Power, 7), 140, log));
+        Check("frames-w-world-deterministic-and-matches-rebuild",
+            Scenario(() => new FrameWorld(Entities, Power, 7), 130, log));
+        Check("frames-b1-cell-deterministic-and-matches-rebuild",
+            Scenario(() => new FrameLegacy(Entities, Power, 7, true), 12, log));
+        Check("frames-c-cell-deterministic-and-matches-rebuild",
+            Scenario(() => new FrameCrowd(Entities, Power, 7, true), 140, log));
+        Check("frames-w-cell-deterministic-and-matches-rebuild",
+            Scenario(() => new FrameWorld(Entities, Power, 7, true), 130, log));
         return failures;
     }
 
@@ -43,17 +53,20 @@ internal static unsafe class FrameReceipts
 
     private static bool JsonIsCultureInvariant()
     {
-        string Sample() => new FrameJson().BeginObject()
-            .Text("name", "a\"b\\cé")
-            .Number("float", 1234.56789, 3)
-            .Number("negative_zero", -0.0000001, 3)
-            .Number("not_finite", double.NaN, 3)
-            .Integer("big", 1234567890123L)
-            .Flag("flag", true)
-            .BeginArray("list").BeginObject().Integer("n", 1).EndObject().EndArray()
-            .Null("none")
-            .EndObject()
-            .ToString();
+        string Sample()
+        {
+            return new FrameJson().BeginObject()
+                .Text("name", "a\"b\\cé")
+                .Number("float", 1234.56789, 3)
+                .Number("negative_zero", -0.0000001, 3)
+                .Number("not_finite", double.NaN, 3)
+                .Integer("big", 1234567890123L)
+                .Flag("flag", true)
+                .BeginArray("list").BeginObject().Integer("n", 1).EndObject().EndArray()
+                .Null("none")
+                .EndObject()
+                .ToString();
+        }
 
         const string expected =
             "{\"name\":\"a\\\"b\\\\c\\u00e9\",\"float\":1234.568,\"negative_zero\":0.000,\"not_finite\":null,\"big\":1234567890123," +
@@ -145,25 +158,25 @@ internal static unsafe class FrameReceipts
 
     private static bool FieldMatchesRebuild(FrameScenario scenario)
     {
-        var source = Gi.World.GetContext(scenario.World);
+        var source = World.GetContext(scenario.World);
         if (source == null) return false;
 
-        var fresh = Gi.World.New();
+        var fresh = World.New();
         try
         {
-            Gi.Grid.New(fresh, scenario.Power, 0f, 0f, scenario.Size);
+            Grid.New(fresh, scenario.Power, 0f, 0f, scenario.Size);
             foreach (var layer in scenario.LayerIds)
             {
-                if (!Gi.Layer.TryGetRecipe(scenario.World, layer, out var recipe)) return false;
+                if (!Layer.TryGetRecipe(scenario.World, layer, out var recipe)) return false;
                 byte made;
-                if (recipe.Op == Gi.Layer.Derivation.Base)
+                if (recipe.Op == Layer.Derivation.Base)
                 {
-                    if (!Gi.Layer.TryGetPrecision(scenario.World, layer, out var precision)) return false;
-                    made = Gi.Layer.New(fresh, precision);
+                    if (!Layer.TryGetPrecision(scenario.World, layer, out var precision)) return false;
+                    made = Layer.New(fresh, precision);
                 }
-                else if (recipe.Op == Gi.Layer.Derivation.Sum)
+                else if (recipe.Op == Layer.Derivation.Sum)
                 {
-                    made = Gi.Layer.Sum(fresh, recipe.FirstLayer, recipe.FirstWeight, recipe.SecondLayer,
+                    made = Layer.Sum(fresh, recipe.FirstLayer, recipe.FirstWeight, recipe.SecondLayer,
                         recipe.SecondWeight, recipe.Shift);
                 }
                 else
@@ -179,12 +192,12 @@ internal static unsafe class FrameReceipts
             {
                 if (sources->Alive[slot] == 0) continue;
                 if (sources->Angle[slot] != 0 || sources->Scale[slot] != 256) return false;
-                var id = Gi.World.Place(fresh, sources->Layer[slot], sources->X[slot], sources->Y[slot],
+                var id = World.Place(fresh, sources->Layer[slot], sources->X[slot], sources->Y[slot],
                     sources->Stamp[slot], (sbyte)sources->Gain[slot]);
                 if (id == default) return false;
             }
 
-            Gi.World.Process(fresh);
+            World.Process(fresh);
             var cells = scenario.Size * scenario.Size;
             var left = new short[cells];
             var right = new short[cells];
@@ -192,8 +205,8 @@ internal static unsafe class FrameReceipts
             {
                 foreach (var layer in scenario.LayerIds)
                 {
-                    Gi.World.QueryRegion(scenario.World, scenario.Grid, layer, 0, 0, scenario.Size, scenario.Size, l);
-                    Gi.World.QueryRegion(fresh, 0, layer, 0, 0, scenario.Size, scenario.Size, r);
+                    World.QueryRegion(scenario.World, scenario.Grid, layer, 0, 0, scenario.Size, scenario.Size, l);
+                    World.QueryRegion(fresh, 0, layer, 0, 0, scenario.Size, scenario.Size, r);
                     if (!left.AsSpan().SequenceEqual(right)) return false;
                 }
             }
@@ -202,7 +215,7 @@ internal static unsafe class FrameReceipts
         }
         finally
         {
-            Gi.World.Free(fresh);
+            World.Free(fresh);
         }
     }
 }

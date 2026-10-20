@@ -1,4 +1,5 @@
 using Xunit;
+using Xunit.Sdk;
 
 namespace Gi.Tests;
 
@@ -24,7 +25,7 @@ public class StreamDifferentialTests
             if (mismatch == null) continue;
 
             var minimized = StreamMinimizer.Minimize(setup, setup.Commands, null);
-            throw new Xunit.Sdk.XunitException(
+            throw new XunitException(
                 $"{mismatch.Message}\nminimized to {minimized.Count} commands\n{StreamMinimizer.PrintAsCSharpTest(setup, minimized)}");
         }
     }
@@ -39,7 +40,7 @@ public class StreamDifferentialTests
             if (mismatch == null) continue;
 
             var minimized = StreamMinimizer.Minimize(setup, setup.Commands, null);
-            throw new Xunit.Sdk.XunitException(
+            throw new XunitException(
                 $"{mismatch.Message}\nminimized to {minimized.Count} commands\n{StreamMinimizer.PrintAsCSharpTest(setup, minimized)}");
         }
     }
@@ -51,12 +52,13 @@ public class StreamDifferentialTests
     {
         for (var i = 0; i < 200; i++)
         {
-            var setup = StreamGenerator.Generate(TransientSeedBase + 70_000 + i, (PrecisionMode)(i % 3), StreamProfile.Transient);
+            var setup = StreamGenerator.Generate(TransientSeedBase + 70_000 + i, (PrecisionMode)(i % 3),
+                StreamProfile.Transient);
             var mismatch = StreamRunner.TryRun(setup, setup.Commands, convolveCost: convolveCost);
             if (mismatch == null) continue;
 
             var minimized = StreamMinimizer.Minimize(setup, setup.Commands, null);
-            throw new Xunit.Sdk.XunitException(
+            throw new XunitException(
                 $"cost {convolveCost} seed {TransientSeedBase + 70_000 + i}: {mismatch.Message}\nminimized to {minimized.Count} commands");
         }
     }
@@ -71,7 +73,7 @@ public class StreamDifferentialTests
             var mismatch = StreamRunner.TryRun(setup, setup.Commands, uncached: true);
             if (mismatch == null) continue;
 
-            throw new Xunit.Sdk.XunitException($"seed {KindSeedBase + 50_000 + i}: {mismatch.Message}");
+            throw new XunitException($"seed {KindSeedBase + 50_000 + i}: {mismatch.Message}");
         }
     }
 
@@ -80,12 +82,13 @@ public class StreamDifferentialTests
     {
         for (var i = 0; i < TransientStreams; i++)
         {
-            var setup = StreamGenerator.Generate(TransientSeedBase + i, (PrecisionMode)(i % 3), StreamProfile.Transient);
+            var setup = StreamGenerator.Generate(TransientSeedBase + i, (PrecisionMode)(i % 3),
+                StreamProfile.Transient);
             var mismatch = StreamRunner.TryRun(setup, setup.Commands);
             if (mismatch == null) continue;
 
             var minimized = StreamMinimizer.Minimize(setup, setup.Commands, null);
-            throw new Xunit.Sdk.XunitException(
+            throw new XunitException(
                 $"{mismatch.Message}\nminimized to {minimized.Count} commands\n{StreamMinimizer.PrintAsCSharpTest(setup, minimized)}");
         }
     }
@@ -101,7 +104,7 @@ public class StreamDifferentialTests
             if (mismatch == null) continue;
 
             var minimized = StreamMinimizer.Minimize(setup, setup.Commands, null);
-            throw new Xunit.Sdk.XunitException(
+            throw new XunitException(
                 $"{mismatch.Message}\nminimized to {minimized.Count} commands\n{StreamMinimizer.PrintAsCSharpTest(setup, minimized)}");
         }
     }
@@ -121,7 +124,7 @@ public class StreamDifferentialTests
             if (mismatch == null) continue;
 
             var minimized = StreamMinimizer.Minimize(setup, setup.Commands, null, (limitI, limitQ40));
-            throw new Xunit.Sdk.XunitException(
+            throw new XunitException(
                 $"seed {seed} limits {limitI}/{limitQ40}: {mismatch.Message}\nminimized to {minimized.Count} commands\n{StreamMinimizer.PrintAsCSharpTest(setup, minimized)}");
         }
 
@@ -133,7 +136,7 @@ public class StreamDifferentialTests
             if (mismatch == null) continue;
 
             var minimized = StreamMinimizer.Minimize(setup, setup.Commands, null, (limitI, limitQ40));
-            throw new Xunit.Sdk.XunitException(
+            throw new XunitException(
                 $"transient seed {seed} limits {limitI}/{limitQ40}: {mismatch.Message}\nminimized to {minimized.Count} commands\n{StreamMinimizer.PrintAsCSharpTest(setup, minimized)}");
         }
 
@@ -144,7 +147,7 @@ public class StreamDifferentialTests
             var mismatch = StreamRunner.TryRun(setup, setup.Commands, fold: (limitI, limitQ40));
             if (mismatch == null) continue;
 
-            throw new Xunit.Sdk.XunitException($"heavy seed {seed} limits {limitI}/{limitQ40}: {mismatch.Message}");
+            throw new XunitException($"heavy seed {seed} limits {limitI}/{limitQ40}: {mismatch.Message}");
         }
     }
 
@@ -184,11 +187,11 @@ public class StreamDifferentialTests
                 Grid = cell.Grid,
                 Layer = cell.Layer,
                 Cell = cell.Cell,
-                Delta = 1,
+                Delta = 1
             });
         }
 
-        throw new Xunit.Sdk.XunitException($"no stream with a nonzero page from seed {startSeed}");
+        throw new XunitException($"no stream with a nonzero page from seed {startSeed}");
     }
 
     private static (int Process, byte Grid, byte Layer, int Cell)? FindNonzeroCell(StreamSetup setup)

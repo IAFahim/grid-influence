@@ -11,11 +11,15 @@ public sealed unsafe class MemoryReadoutTests
     private const int CoarseCells = 1 << CoarsePower;
     private const int FineCells = 1 << FinePower;
 
-    private static void Read(byte world, out long storeBytes, out int liveTiles, out int pages, out int kernelEntries, out int liveSources)
-        => World.Memory(world, out storeBytes, out liveTiles, out pages, out kernelEntries, out liveSources);
+    private static void Read(byte world, out long storeBytes, out int liveTiles, out int pages, out int kernelEntries,
+        out int liveSources)
+    {
+        World.Memory(world, out storeBytes, out liveTiles, out pages, out kernelEntries, out liveSources);
+    }
 
     private static void WalkInternals(
-        byte world, out long storeBytes, out int directoryTiles, out int counterTiles, out int pages, out int liveSources)
+        byte world, out long storeBytes, out int directoryTiles, out int counterTiles, out int pages,
+        out int liveSources)
     {
         storeBytes = 0;
         directoryTiles = 0;
@@ -49,13 +53,14 @@ public sealed unsafe class MemoryReadoutTests
 
         var s = &w->Sources;
         for (var i = 0; i < s->Count; i++)
-            if (s->Alive[i] != 0) liveSources++;
+            if (s->Alive[i] != 0)
+                liveSources++;
     }
 
     private static float Coordinate(StampVariant* v, bool xAxis, int cell, int phase)
     {
         var origin = xAxis ? v->OriginQ8X : v->OriginQ8Y;
-        return (((long)cell << 8) + phase - ((long)origin * 256 >> 8) + 0.5f) / 256f;
+        return (((long)cell << 8) + phase - (((long)origin * 256) >> 8) + 0.5f) / 256f;
     }
 
     [Fact]
@@ -64,7 +69,8 @@ public sealed unsafe class MemoryReadoutTests
         var world = World.New();
         try
         {
-            Read(world, out var storeBytes, out var liveTiles, out var pages, out var kernelEntries, out var liveSources);
+            Read(world, out var storeBytes, out var liveTiles, out var pages, out var kernelEntries,
+                out var liveSources);
             Assert.Equal(0L, storeBytes);
             Assert.Equal(0, liveTiles);
             Assert.Equal(0, pages);
@@ -88,7 +94,8 @@ public sealed unsafe class MemoryReadoutTests
             World.Free(world);
         }
 
-        Read(byte.MaxValue, out var unreachableBytes, out var unreachableTiles, out var unreachablePages, out var unreachableKernels, out var unreachableSources);
+        Read(byte.MaxValue, out var unreachableBytes, out var unreachableTiles, out var unreachablePages,
+            out var unreachableKernels, out var unreachableSources);
         Assert.Equal(0L, unreachableBytes);
         Assert.Equal(0, unreachableTiles);
         Assert.Equal(0, unreachablePages);
@@ -114,14 +121,20 @@ public sealed unsafe class MemoryReadoutTests
             var variant = StampCatalog.Get(tent);
             var tents = new[]
             {
-                World.Place(world, persistent, Coordinate(variant, true, 40, 128), Coordinate(variant, false, 40, 128), tent, 3),
-                World.Place(world, persistent, Coordinate(variant, true, 100, 128), Coordinate(variant, false, 20, 128), tent, 2),
-                World.Place(world, persistent, Coordinate(variant, true, 20, 128), Coordinate(variant, false, 90, 128), tent, 1),
-                World.Place(world, persistent, Coordinate(variant, true, 150, 128), Coordinate(variant, false, 130, 128), tent, -2),
-                World.Place(world, persistent, Coordinate(variant, true, 70, 128), Coordinate(variant, false, 160, 128), tent, 1),
-                World.Place(world, persistent, Coordinate(variant, true, 180, 128), Coordinate(variant, false, 70, 128), tent, 2),
+                World.Place(world, persistent, Coordinate(variant, true, 40, 128), Coordinate(variant, false, 40, 128),
+                    tent, 3),
+                World.Place(world, persistent, Coordinate(variant, true, 100, 128), Coordinate(variant, false, 20, 128),
+                    tent, 2),
+                World.Place(world, persistent, Coordinate(variant, true, 20, 128), Coordinate(variant, false, 90, 128),
+                    tent, 1),
+                World.Place(world, persistent, Coordinate(variant, true, 150, 128),
+                    Coordinate(variant, false, 130, 128), tent, -2),
+                World.Place(world, persistent, Coordinate(variant, true, 70, 128), Coordinate(variant, false, 160, 128),
+                    tent, 1),
+                World.Place(world, persistent, Coordinate(variant, true, 180, 128), Coordinate(variant, false, 70, 128),
+                    tent, 2)
             };
-            Assert.NotEqual(default(World.SourceId), tents[0]);
+            Assert.NotEqual(default, tents[0]);
             Assert.Equal(World.WriteStatus.Applied, World.Remove(world, tents[3]));
             Assert.Equal(World.WriteStatus.Applied, World.Remove(world, tents[4]));
             World.Place(world, persistent, 60.5f, 60.5f, box, 2, out var firstBoxStatus);
@@ -140,8 +153,10 @@ public sealed unsafe class MemoryReadoutTests
             Assert.Equal(20, World.Splat(world, transient, xs, ys, tent, 2));
             World.Process(world);
 
-            Read(world, out var storeBytes, out var liveTiles, out var pages, out var kernelEntries, out var liveSources);
-            WalkInternals(world, out var expectedBytes, out var directoryTiles, out var counterTiles, out var expectedPages, out var expectedSources);
+            Read(world, out var storeBytes, out var liveTiles, out var pages, out var kernelEntries,
+                out var liveSources);
+            WalkInternals(world, out var expectedBytes, out var directoryTiles, out var counterTiles,
+                out var expectedPages, out var expectedSources);
             Assert.Equal(expectedBytes, storeBytes);
             Assert.Equal(directoryTiles, liveTiles);
             Assert.Equal(counterTiles, liveTiles);
@@ -185,7 +200,8 @@ public sealed unsafe class MemoryReadoutTests
             World.Splat(world, transient, new[] { 30.5f, 90.5f }, new[] { 30.5f, 80.5f }, tent, 2);
             World.Process(world);
 
-            Read(world, out var bytesBefore, out var tilesBefore, out var pagesBefore, out var kernelsBefore, out var sourcesBefore);
+            Read(world, out var bytesBefore, out var tilesBefore, out var pagesBefore, out var kernelsBefore,
+                out var sourcesBefore);
             Assert.True(bytesBefore > 0);
             Assert.True(tilesBefore > 0);
             Assert.True(pagesBefore > 0);
@@ -193,13 +209,15 @@ public sealed unsafe class MemoryReadoutTests
             Assert.Equal(2, sourcesBefore);
 
             World.Clear(world);
-            Read(world, out var bytesAfter, out var tilesAfter, out var pagesAfter, out var kernelsAfter, out var sourcesAfter);
+            Read(world, out var bytesAfter, out var tilesAfter, out var pagesAfter, out var kernelsAfter,
+                out var sourcesAfter);
             Assert.Equal(0, tilesAfter);
             Assert.Equal(0, pagesAfter);
             Assert.Equal(0, sourcesAfter);
             Assert.Equal(kernelsBefore, kernelsAfter);
             Assert.True(bytesAfter >= bytesBefore, $"{bytesAfter} < {bytesBefore}");
-            WalkInternals(world, out var expectedBytes, out var directoryTiles, out var counterTiles, out var expectedPages, out var expectedSources);
+            WalkInternals(world, out var expectedBytes, out var directoryTiles, out var counterTiles,
+                out var expectedPages, out var expectedSources);
             Assert.Equal(expectedBytes, bytesAfter);
             Assert.Equal(0, directoryTiles);
             Assert.Equal(0, counterTiles);
@@ -241,14 +259,16 @@ public sealed unsafe class MemoryReadoutTests
             Assert.Equal(1, secondSources);
 
             Assert.True(World.Free(second));
-            Read(second, out var freedBytes, out var freedTiles, out var freedPages, out var freedKernels, out var freedSources);
+            Read(second, out var freedBytes, out var freedTiles, out var freedPages, out var freedKernels,
+                out var freedSources);
             Assert.Equal(0L, freedBytes);
             Assert.Equal(0, freedTiles);
             Assert.Equal(0, freedPages);
             Assert.Equal(0, freedKernels);
             Assert.Equal(0, freedSources);
 
-            Read(first, out var bytesAgain, out var tilesAgain, out var pagesAgain, out var kernelsAgain, out var sourcesAgain);
+            Read(first, out var bytesAgain, out var tilesAgain, out var pagesAgain, out var kernelsAgain,
+                out var sourcesAgain);
             Assert.Equal(bytes, bytesAgain);
             Assert.Equal(tiles, tilesAgain);
             Assert.Equal(pages, pagesAgain);
@@ -282,7 +302,8 @@ public sealed unsafe class MemoryReadoutTests
             {
                 var x = Coordinate(variant, true, 35, phase);
                 var y = Coordinate(variant, false, 41, 128);
-                Assert.True(TileBake.Place(x, y, 0f, 0f, 256, FineCells, variant, 0, 256, Layer.Precision.Exact, out var p));
+                Assert.True(TileBake.Place(x, y, 0f, 0f, 256, FineCells, variant, 0, 256, Layer.Precision.Exact,
+                    out var p));
                 keys.Add(new KernelKey(tent, p.Sampling, grid, p.Fx, p.Fy, 0));
                 var source = World.Place(world, layer, x, y, tent, 2);
                 Assert.NotEqual(default, source);
@@ -294,7 +315,8 @@ public sealed unsafe class MemoryReadoutTests
                 var kernels = &World.GetContext(world)->Kernels;
                 var present = 0;
                 foreach (var key in keys)
-                    if (kernels->Find(key.Main, key.Turn) != null) present++;
+                    if (kernels->Find(key.Main, key.Turn) != null)
+                        present++;
 
                 return present;
             }
@@ -327,7 +349,8 @@ public sealed unsafe class MemoryReadoutTests
             if (World.TrySenseGradient(world, layer, 35.5f, 41.5f, out var senseGx, out var senseGy))
                 checksum += (long)(senseGx + senseGy);
             if (World.TrySenseArea(world, layer, 35.5f, 41.5f, 16f, out var area)) checksum += area;
-            if (World.TrySenseNearest(world, layer, 35.5f, 41.5f, 16f, 0, out var nearest, out var nearestX, out var nearestY))
+            if (World.TrySenseNearest(world, layer, 35.5f, 41.5f, 16f, 0, out var nearest, out var nearestX,
+                    out var nearestY))
                 checksum += nearest + (long)(nearestX + nearestY);
             var xs = stackalloc float[8];
             var ys = stackalloc float[8];

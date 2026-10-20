@@ -18,7 +18,7 @@ public unsafe class TransientLayerTests
         var stamps = new List<byte>
         {
             Stamp.Box(3, 3, 40), Stamp.Box(6, 4, -25), Stamp.Tent(6, 6, 35), Stamp.Bell(7, 7, -30),
-            Stamp.Disk(4, 50), Stamp.Cone(5, 60), Stamp.Dome(6, 45), Stamp.Disk(5, 55, 200),
+            Stamp.Disk(4, 50), Stamp.Cone(5, 60), Stamp.Dome(6, 45), Stamp.Disk(5, 55, 200)
         };
         ReadOnlySpan<sbyte> raster = [12, -25, 30, 45, -60, 15, 80, -10, 20, 35, -40, 50, -15, 25, -30, 60];
         stamps.Add(Stamp.New(raster, 4, 4));
@@ -106,7 +106,7 @@ public unsafe class TransientLayerTests
             var g = Grid.New(w, 6, 0f, 0f, 64f);
             var persistent = Layer.New(w);
             var transient = Layer.New(w, Layer.Residency.Transient, Layer.Precision.Exact);
-            Assert.Equal(default(World.SourceId), World.Place(w, transient, 10f, 10f, box, 1));
+            Assert.Equal(default, World.Place(w, transient, 10f, 10f, box, 1));
             Span<World.SourceResult> results = stackalloc World.SourceResult[1];
             ReadOnlySpan<World.SourceCommand> commands = [World.SourceCommand.Place(transient, 10f, 10f, box, 1)];
             Assert.Equal(World.BatchStatus.Applied, World.ApplyBatch(w, commands, results));
@@ -234,7 +234,7 @@ public unsafe class TransientLayerTests
 
     private static void CompareLayers(byte w, byte left, byte right)
     {
-        foreach (byte grid in new byte[] { 0, 1 })
+        foreach (var grid in new byte[] { 0, 1 })
         {
             Grid.TryGetSpec(w, grid, out var power, out _, out _, out _);
             var size = 1 << power;

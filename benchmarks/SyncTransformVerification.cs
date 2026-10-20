@@ -3,10 +3,6 @@ using Gi;
 
 internal static unsafe partial class Verification
 {
-    private readonly record struct SyncTransformMeasurement(
-        double SerialMicroseconds, double BatchMicroseconds, double SyncMicroseconds,
-        long AllocatedBytes, long Checksum, bool Matches);
-
     private static bool SyncTransformsMatchOrderedCallsAndAllocateNothing()
     {
         var measurement = MeasureSyncTransforms(16384, 4, 8);
@@ -38,9 +34,9 @@ internal static unsafe partial class Verification
             }
 
             Console.WriteLine($"{count} borrowed transform rows: serial {measurement.SerialMicroseconds:F1} us, " +
-                $"batch {measurement.BatchMicroseconds:F1} us, borrowed {measurement.SyncMicroseconds:F1} us, " +
-                $"{count / measurement.SyncMicroseconds:F1} million rows/s, " +
-                $"{measurement.AllocatedBytes} B, checksum {measurement.Checksum}");
+                              $"batch {measurement.BatchMicroseconds:F1} us, borrowed {measurement.SyncMicroseconds:F1} us, " +
+                              $"{count / measurement.SyncMicroseconds:F1} million rows/s, " +
+                              $"{measurement.AllocatedBytes} B, checksum {measurement.Checksum}");
         }
 
         return 0;
@@ -87,12 +83,13 @@ internal static unsafe partial class Verification
                 ax[index] = idle ? x : x + 0.25f;
                 ay[index] = idle ? y : y + 0.25f;
                 ah[index] = idle ? 0f : 0.25f * (index % 4);
-                aScale[index] = idle ? 1f : 0.75f + (index % 5) * 0.25f;
+                aScale[index] = idle ? 1f : 0.75f + index % 5 * 0.25f;
                 bx[index] = x;
                 by[index] = y;
                 bh[index] = 0f;
                 bScale[index] = 1f;
-                firstCommands[index] = World.SourceCommand.UpdateTransform(source, ax[index], ay[index], ah[index], aScale[index]);
+                firstCommands[index] =
+                    World.SourceCommand.UpdateTransform(source, ax[index], ay[index], ah[index], aScale[index]);
                 secondCommands[index] = World.SourceCommand.UpdateTransform(source, bx[index], by[index], 0f, 1f);
             }
 
@@ -112,7 +109,7 @@ internal static unsafe partial class Verification
                 events[frame / 8 - 1] = new[]
                 {
                     World.SourceCommand.Remove(removed),
-                    World.SourceCommand.Fade(fadeTarget, 1, 60),
+                    World.SourceCommand.Fade(fadeTarget, 1, 60)
                 };
             }
 
@@ -152,7 +149,6 @@ internal static unsafe partial class Verification
 
                     var start = Stopwatch.GetTimestamp();
                     for (var index = 0; index < count; index++)
-                    {
                         if (first)
                         {
                             World.Move(serialWorld, ids[index], ax[index], ay[index]);
@@ -165,7 +161,6 @@ internal static unsafe partial class Verification
                             World.Turn(serialWorld, ids[index], 0f);
                             World.Scale(serialWorld, ids[index], 1f);
                         }
-                    }
 
                     var end = Stopwatch.GetTimestamp();
                     if (frame >= warmFrames) serialTicks += end - start;
@@ -226,4 +221,12 @@ internal static unsafe partial class Verification
             Stamp.Free(stamp);
         }
     }
+
+    private readonly record struct SyncTransformMeasurement(
+        double SerialMicroseconds,
+        double BatchMicroseconds,
+        double SyncMicroseconds,
+        long AllocatedBytes,
+        long Checksum,
+        bool Matches);
 }

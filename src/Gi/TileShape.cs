@@ -7,7 +7,7 @@ internal enum Plane : byte
     Difference,
     Dense,
     Tent,
-    Bell,
+    Bell
 }
 
 internal unsafe struct Placement
@@ -58,7 +58,10 @@ internal unsafe struct Placement
     public int Pitch;
     public int Level;
 
-    public readonly bool Reaches(int cx, int cy) => cx >= X0 && cy >= Y0 && cx < X1 && cy < Y1;
+    public readonly bool Reaches(int cx, int cy)
+    {
+        return cx >= X0 && cy >= Y0 && cx < X1 && cy < Y1;
+    }
 }
 
 internal static unsafe partial class TileBake
@@ -80,24 +83,31 @@ internal static unsafe partial class TileBake
         return quadrant >= 2 ? -s : s;
     }
 
-    internal static int Cos(int angle) => Sin(angle + QuarterTurn);
+    internal static int Cos(int angle)
+    {
+        return Sin(angle + QuarterTurn);
+    }
 
     internal static bool Place(float x, float y, float originX, float originY, int scaleQ8, int size,
         StampVariant* v, int angle, int scale, out Placement p)
-        => Place(x, y, originX, originY, scaleQ8, size, v, angle, scale, Layer.Precision.Exact, out p);
+    {
+        return Place(x, y, originX, originY, scaleQ8, size, v, angle, scale, Layer.Precision.Exact, out p);
+    }
 
     internal static bool Place(float x, float y, float originX, float originY, int scaleQ8, int size,
         StampVariant* v, int angle, int scale, Layer.Precision precision, out Placement p)
-        => PlaceAnchored(
+    {
+        return PlaceAnchored(
             AnchorQ8(x, originX, scaleQ8, precision.AnchorMask),
             AnchorQ8(y, originY, scaleQ8, precision.AnchorMask),
             scaleQ8, size, v, angle, scale, precision, out p);
+    }
 
     internal static bool PlaceAnchored(int anchorX, int anchorY, int scaleQ8, int size,
         StampVariant* v, int angle, int scale, Layer.Precision precision, out Placement p)
     {
         p = default;
-        var sampling = (int)Math.Min((long)scaleQ8 * scale >> 8, int.MaxValue);
+        var sampling = (int)Math.Min(((long)scaleQ8 * scale) >> 8, int.MaxValue);
         if (sampling == 0) return false;
 
         angle &= precision.TurnMask;
@@ -115,7 +125,7 @@ internal static unsafe partial class TileBake
             StampKind.ConstantRectangle => turned ? Plane.Dense : Plane.Difference,
             StampKind.Tent => Plane.Tent,
             StampKind.Bell => Plane.Bell,
-            _ => Plane.Dense,
+            _ => Plane.Dense
         };
 
         if (!turned)
@@ -144,7 +154,9 @@ internal static unsafe partial class TileBake
             p.Bound = p.Kind == StampKind.Disk ? p.Reach + CellHalf / 2 : p.Reach;
             if (p.Kind == StampKind.Disk)
             {
-                p.Inner = p.Reach > CellHalf / 2 - 1 ? (p.Reach - (CellHalf / 2 - 1)) * (p.Reach - (CellHalf / 2 - 1)) : 0;
+                p.Inner = p.Reach > CellHalf / 2 - 1
+                    ? (p.Reach - (CellHalf / 2 - 1)) * (p.Reach - (CellHalf / 2 - 1))
+                    : 0;
                 p.Outer = p.Bound * p.Bound;
             }
             else if (p.Kind == StampKind.Cone)
@@ -158,7 +170,8 @@ internal static unsafe partial class TileBake
                 p.Inverse = ((1L << 62) - 1) / reduced + 1;
             }
 
-            RoundFootprintCells(p.Arc, p.CentreX, p.CentreY, p.Bound, v, angle, out var rx0, out var ry0, out var rx1, out var ry1);
+            RoundFootprintCells(p.Arc, p.CentreX, p.CentreY, p.Bound, v, angle, out var rx0, out var ry0, out var rx1,
+                out var ry1);
             Cells(rx0, rx1, size, out p.X0, out p.X1);
             Cells(ry0, ry1, size, out p.Y0, out p.Y1);
             return true;
@@ -187,7 +200,7 @@ internal static unsafe partial class TileBake
             var w = v->Width;
             var h = v->Height;
             var mips = v->Mips;
-            while (p.Level < v->MipCount && (step >> (p.Level + 1)) >= 65536)
+            while (p.Level < v->MipCount && step >> (p.Level + 1) >= 65536)
             {
                 w = (w + 1) >> 1;
                 h = (h + 1) >> 1;
@@ -210,7 +223,8 @@ internal static unsafe partial class TileBake
             p.SampleV0 = ((long)v->Height << 47) - FloorDiv(1L << 55, sampling);
         }
 
-        TurnedFootprintCells(p.CentreX, p.CentreY, p.Cos, p.Sin, p.SupportU, p.SupportV, out var tx0, out var ty0, out var tx1, out var ty1);
+        TurnedFootprintCells(p.CentreX, p.CentreY, p.Cos, p.Sin, p.SupportU, p.SupportV, out var tx0, out var ty0,
+            out var tx1, out var ty1);
         Cells(tx0, tx1, size, out p.X0, out p.X1);
         Cells(ty0, ty1, size, out p.Y0, out p.Y1);
         return true;
@@ -279,7 +293,8 @@ internal static unsafe partial class TileBake
         }
     }
 
-    private static void Extend(long cx, long cy, long reach, int angle, ref long x0, ref long y0, ref long x1, ref long y1)
+    private static void Extend(long cx, long cy, long reach, int angle, ref long x0, ref long y0, ref long x1,
+        ref long y1)
     {
         var x = cx + ((reach * Cos(angle)) >> 14);
         var y = cy + ((reach * Sin(angle)) >> 14);
@@ -326,9 +341,9 @@ internal static unsafe partial class TileBake
         return maxU >= -mu && minU <= mu && maxV >= -mv && minV <= mv;
     }
 
-    #if NET
+#if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    #endif
+#endif
     internal static void EmitTurnedDense(int* dense, int tileX0, int tileY0, Placement* p, int gain)
     {
         var x0 = Math.Max(p->X0, tileX0);
@@ -347,9 +362,9 @@ internal static unsafe partial class TileBake
         }
     }
 
-    #if NET
+#if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    #endif
+#endif
     internal static void EmitTurnedSmooth(long* sums, int tileX0, int tileY0, Placement* p, int gain)
     {
         var x0 = Math.Max(p->X0, tileX0);
@@ -369,10 +384,16 @@ internal static unsafe partial class TileBake
     }
 
     internal static int TurnedDenseAt(Placement* p, int cx, int cy)
-        => DenseAt(p, (long)cx * CellHalf + CellHalf / 2 - p->CentreX, (long)cy * CellHalf + CellHalf / 2 - p->CentreY);
+    {
+        return DenseAt(p, (long)cx * CellHalf + CellHalf / 2 - p->CentreX,
+            (long)cy * CellHalf + CellHalf / 2 - p->CentreY);
+    }
 
     internal static long TurnedSmoothAt(Placement* p, int cx, int cy)
-        => SmoothAt(p, (long)cx * CellHalf + CellHalf / 2 - p->CentreX, (long)cy * CellHalf + CellHalf / 2 - p->CentreY);
+    {
+        return SmoothAt(p, (long)cx * CellHalf + CellHalf / 2 - p->CentreX,
+            (long)cy * CellHalf + CellHalf / 2 - p->CentreY);
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int DenseAt(Placement* p, long dx, long dy)
@@ -395,8 +416,8 @@ internal static unsafe partial class TileBake
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int SampleAt(Placement* p, long dx, long dy)
     {
-        var tx = ((dx * p->SampleUx + dy * p->SampleUy + p->SampleU0) >> 32) >> p->Level;
-        var ty = ((dx * p->SampleVx + dy * p->SampleVy + p->SampleV0) >> 32) >> p->Level;
+        var tx = (dx * p->SampleUx + dy * p->SampleUy + p->SampleU0) >> 32 >> p->Level;
+        var ty = (dx * p->SampleVx + dy * p->SampleVy + p->SampleV0) >> 32 >> p->Level;
         var ix = tx >> 16;
         var iy = ty >> 16;
         if (ix < -1 || iy < -1 || ix >= p->Width || iy >= p->Height) return 0;
@@ -452,8 +473,8 @@ internal static unsafe partial class TileBake
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static long SmoothAt(Placement* p, long dx, long dy)
     {
-        var du = ((dx * p->Cos + dy * p->Sin) >> 14) >> (p->ShiftU + 1);
-        var dv = ((dy * p->Cos - dx * p->Sin) >> 14) >> (p->ShiftV + 1);
+        var du = (dx * p->Cos + dy * p->Sin) >> 14 >> (p->ShiftU + 1);
+        var dv = (dy * p->Cos - dx * p->Sin) >> 14 >> (p->ShiftV + 1);
         long wu;
         long wv;
         if (p->Kind == StampKind.Bell)
@@ -472,7 +493,10 @@ internal static unsafe partial class TileBake
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int RoundQ24(long value) => (int)((value + (1L << 23) + (value >> 63)) >> 24);
+    private static int RoundQ24(long value)
+    {
+        return (int)((value + (1L << 23) + (value >> 63)) >> 24);
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static long FloorDiv(long value, long divisor)

@@ -10,6 +10,8 @@ namespace Gi.Entities.Columns.Tests;
 
 public sealed class RecorderTests
 {
+
+    private static readonly int[] DiffLayers = new[] { 0, 3, 4 };
     private sealed class DeflateCodec : IGiCodec
     {
         public int Bound(int length) => length + length / 8 + 64;
@@ -42,7 +44,7 @@ public sealed class RecorderTests
         }
     }
 
-    private static readonly IGiCodec Deflate = new DeflateCodec();
+    private static readonly DeflateCodec Deflate = new();
 
     private static GiScenarioProfile WithoutRaster()
     {
@@ -341,7 +343,7 @@ public sealed class RecorderTests
                         if (source.Fading)
                             restoredFading++;
                     foreach (var tick in ticks) Assert.True(replay.Step(tick));
-                    var end = ticks.Count == 0 ? keyframe.Tick : ticks[ticks.Count - 1].Tick;
+                    var end = ticks.Count == 0 ? keyframe.Tick : ticks[^1].Tick;
                     Assert.Equal(target, end);
                     for (var l = 0; l < session.Setup.Layers.Length; l++)
                     {
@@ -402,7 +404,7 @@ public sealed class RecorderTests
             var diff = new List<GiTileDiff>();
             replay.Diff(recorder.Hashes, diff);
             Assert.NotEmpty(diff);
-            Assert.All(diff, d => Assert.Contains(d.Layer, new[] { 0, 3, 4 }));
+            Assert.All(diff, d => Assert.Contains(d.Layer, DiffLayers));
             var cellX = 40;
             var cellY = 24;
             Assert.Contains(diff, d => d.Grid == 0 && d.Layer == 0 && d.Tile == cellY / 32 * recorder.Hashes.TilesPerSide(0) + cellX / 32);
@@ -460,7 +462,7 @@ public sealed class RecorderTests
 
         Assert.Equal(10000, recorder.Count);
         var keyframes = recorder.Export().Keyframes;
-        Assert.True(keyframes[keyframes.Count - 1].Sources.Length > 60);
+        Assert.True(keyframes[^1].Sources.Length > 60);
         Assert.True(recorder.TryPlan(0, 10000, out var keyframe, out var ticks));
         Assert.Equal(0, keyframe.Tick);
         Assert.Equal(10000, ticks.Count);
@@ -526,8 +528,8 @@ public sealed class RecorderTests
 
         Assert.True(recorder.TryPlan(100, 190, out var keyframe, out var ticks));
         Assert.True(keyframe.Sources.Length > 10);
-        Assert.Equal(GiExportStatus.Exported, GiStreamExport.Write("Crowd_" + keyframe.Tick + "_" + ticks[ticks.Count - 1].Tick, recorder.Profile, keyframe, ticks, out var text));
+        Assert.Equal(GiExportStatus.Exported, GiStreamExport.Write("Crowd_" + keyframe.Tick + "_" + ticks[^1].Tick, recorder.Profile, keyframe, ticks, out var text));
         Directory.CreateDirectory(directory);
-        File.WriteAllText(Path.Combine(directory, GiStreamExport.Identifier("Crowd_" + keyframe.Tick + "_" + ticks[ticks.Count - 1].Tick) + ".cs"), text);
+        File.WriteAllText(Path.Combine(directory, GiStreamExport.Identifier("Crowd_" + keyframe.Tick + "_" + ticks[^1].Tick) + ".cs"), text);
     }
 }

@@ -4,10 +4,10 @@ namespace Gi.Tests;
 
 public sealed class SyncTransformTests : IDisposable
 {
-    private readonly byte _world = World.New();
     private readonly byte _grid;
     private readonly byte _layer;
     private readonly byte _stamp;
+    private readonly byte _world = World.New();
 
     public SyncTransformTests()
     {
@@ -183,7 +183,7 @@ public sealed class SyncTransformTests : IDisposable
                 var column = index / 61 % 60;
                 ys[index] = index % 13 == 0 ? 2f + row : 1f + column;
                 headings[index] = index % 7 == 0 ? float.NaN : 0.25f * (index % 4);
-                scales[index] = index % 17 == 0 ? 0.001f : 1f + (index % 5) * 0.25f;
+                scales[index] = index % 17 == 0 ? 0.001f : 1f + index % 5 * 0.25f;
             }
 
             ids[5] = mine[100];
@@ -320,7 +320,7 @@ public sealed class SyncTransformTests : IDisposable
                 ax[index] = Math.Min(x + 0.5f, 61.5f);
                 ay[index] = Math.Min(y + 0.5f, 60.5f);
                 ah[index] = 0.25f * (index % 4);
-                aScale[index] = 1f + (index % 5) * 0.25f;
+                aScale[index] = 1f + index % 5 * 0.25f;
             }
 
             var firstWords = (firstCount + 63) >> 6;
@@ -441,7 +441,7 @@ public sealed class SyncTransformTests : IDisposable
                 xs[index] = Math.Min(x + 0.5f, 61.5f);
                 ys[index] = Math.Min(y + 0.5f, 60.5f);
                 headings[index] = 0.25f * (index % 4);
-                scales[index] = 1f + (index % 5) * 0.25f;
+                scales[index] = 1f + index % 5 * 0.25f;
             }
 
             World.Process(world);
@@ -470,6 +470,7 @@ public sealed class SyncTransformTests : IDisposable
             World.Free(world);
         }
     }
+
     [Fact]
     public unsafe void WarmLargeSyncAndProcess_AllocateNothing()
     {
@@ -497,7 +498,7 @@ public sealed class SyncTransformTests : IDisposable
                 ax[index] = Math.Min(x + 0.5f, 61.5f);
                 ay[index] = Math.Min(y + 0.5f, 60.5f);
                 ah[index] = 0.25f * (index % 4);
-                aScale[index] = 1f + (index % 5) * 0.25f;
+                aScale[index] = 1f + index % 5 * 0.25f;
             }
 
             World.Process(world);
@@ -592,7 +593,8 @@ public sealed class SyncTransformTests : IDisposable
             fixed (float* yPointer = ys)
             {
                 var range = stackalloc World.TransformRange[1];
-                range[0] = new World.TransformRange { Sources = idPointer, Xs = xPointer, Ys = yPointer, Count = count };
+                range[0] = new World.TransformRange
+                    { Sources = idPointer, Xs = xPointer, Ys = yPointer, Count = count };
                 Assert.Equal(
                     World.BatchStatus.Applied,
                     World.SyncTransforms(World.Capture(_world), new ReadOnlySpan<World.TransformRange>(range, 1)));
@@ -730,7 +732,8 @@ public sealed class SyncTransformTests : IDisposable
             fixed (float* yPointer = ys)
             {
                 var range = stackalloc World.TransformRange[1];
-                range[0] = new World.TransformRange { Sources = idPointer, Xs = xPointer, Ys = yPointer, Count = count };
+                range[0] = new World.TransformRange
+                    { Sources = idPointer, Xs = xPointer, Ys = yPointer, Count = count };
                 Assert.Equal(
                     World.BatchStatus.Applied,
                     World.SyncTransforms(World.Capture(world), new ReadOnlySpan<World.TransformRange>(range, 1)));
@@ -765,6 +768,7 @@ public sealed class SyncTransformTests : IDisposable
             var lane = index / 60 % 60;
             mine[index] = World.Place(_world, _layer, 2f + index % 60, 2f + lane, _stamp, 1);
         }
+
         var stale = World.Place(_world, _layer, 5f, 5f, _stamp, 1);
         World.Remove(_world, stale);
         World.Process(_world);
@@ -844,7 +848,8 @@ public sealed class SyncTransformTests : IDisposable
             Invalid = mask, InvalidWords = 1, Count = 64
         };
         *mask = 0xAAAAAAAAAAAAAAAAUL;
-        Assert.Equal(World.BatchStatus.Applied, World.SyncTransforms(token, new ReadOnlySpan<World.TransformRange>(valid, 1)));
+        Assert.Equal(World.BatchStatus.Applied,
+            World.SyncTransforms(token, new ReadOnlySpan<World.TransformRange>(valid, 1)));
         Assert.Equal(0UL, *mask);
         World.Process(_world);
         var before = World.Query(_world, _grid, _layer, 0, 0, 64, 64);
@@ -876,15 +881,18 @@ public sealed class SyncTransformTests : IDisposable
 
         var negative = stackalloc World.TransformRange[1];
         negative[0] = new World.TransformRange { Sources = ids, Xs = columns, Ys = columns + 64, Count = -1 };
-        Assert.Equal(World.BatchStatus.InvalidRange, World.SyncTransforms(token, new ReadOnlySpan<World.TransformRange>(negative, 1)));
+        Assert.Equal(World.BatchStatus.InvalidRange,
+            World.SyncTransforms(token, new ReadOnlySpan<World.TransformRange>(negative, 1)));
 
         var missing = stackalloc World.TransformRange[1];
         missing[0] = new World.TransformRange { Sources = null, Xs = columns, Ys = columns + 64, Count = 3 };
-        Assert.Equal(World.BatchStatus.InvalidRange, World.SyncTransforms(token, new ReadOnlySpan<World.TransformRange>(missing, 1)));
+        Assert.Equal(World.BatchStatus.InvalidRange,
+            World.SyncTransforms(token, new ReadOnlySpan<World.TransformRange>(missing, 1)));
 
         var noY = stackalloc World.TransformRange[1];
         noY[0] = new World.TransformRange { Sources = ids, Xs = columns, Ys = null, Count = 3 };
-        Assert.Equal(World.BatchStatus.InvalidRange, World.SyncTransforms(token, new ReadOnlySpan<World.TransformRange>(noY, 1)));
+        Assert.Equal(World.BatchStatus.InvalidRange,
+            World.SyncTransforms(token, new ReadOnlySpan<World.TransformRange>(noY, 1)));
 
         var shortMask = stackalloc World.TransformRange[1];
         shortMask[0] = new World.TransformRange
@@ -892,14 +900,16 @@ public sealed class SyncTransformTests : IDisposable
             Sources = ids, Xs = columns, Ys = columns + 64,
             Invalid = mask, InvalidWords = 0, Count = 64
         };
-        Assert.Equal(World.BatchStatus.InvalidRange, World.SyncTransforms(token, new ReadOnlySpan<World.TransformRange>(shortMask, 1)));
+        Assert.Equal(World.BatchStatus.InvalidRange,
+            World.SyncTransforms(token, new ReadOnlySpan<World.TransformRange>(shortMask, 1)));
 
         var huge = stackalloc World.TransformRange[1];
         huge[0] = new World.TransformRange
         {
             Sources = ids, Xs = columns, Ys = columns + 64, Count = World.MaxSourceSlots + 1
         };
-        Assert.Equal(World.BatchStatus.TooManyCommands, World.SyncTransforms(token, new ReadOnlySpan<World.TransformRange>(huge, 1)));
+        Assert.Equal(World.BatchStatus.TooManyCommands,
+            World.SyncTransforms(token, new ReadOnlySpan<World.TransformRange>(huge, 1)));
 
         Assert.Equal(0xAAAAAAAAAAAAAAAAUL, *mask);
         World.Process(_world);
@@ -1043,7 +1053,8 @@ public sealed class SyncTransformTests : IDisposable
             fixed (float* yPointer = ys)
             {
                 var range = stackalloc World.TransformRange[1];
-                range[0] = new World.TransformRange { Sources = idPointer, Xs = xPointer, Ys = yPointer, Count = count };
+                range[0] = new World.TransformRange
+                    { Sources = idPointer, Xs = xPointer, Ys = yPointer, Count = count };
                 Assert.Equal(
                     World.BatchStatus.Applied,
                     World.SyncTransforms(World.Capture(_world), new ReadOnlySpan<World.TransformRange>(range, 1)));

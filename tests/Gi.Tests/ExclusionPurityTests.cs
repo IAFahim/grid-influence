@@ -1,4 +1,5 @@
 using Xunit;
+using Xunit.Sdk;
 
 namespace Gi.Tests;
 
@@ -9,7 +10,7 @@ public sealed unsafe class ExclusionPurityTests
 
     private static readonly Layer.Precision[] Precisions =
     {
-        Layer.Precision.Exact, Layer.Precision.Half, Layer.Precision.Quarter, Layer.Precision.Cell,
+        Layer.Precision.Exact, Layer.Precision.Half, Layer.Precision.Quarter, Layer.Precision.Cell
     };
 
     private static byte NewWorld()
@@ -22,103 +23,12 @@ public sealed unsafe class ExclusionPurityTests
     private static byte Raster(int width, int height, int salt)
     {
         var data = new sbyte[width * height];
-        for (var i = 0; i < data.Length; i++) data[i] = (sbyte)(((i * 37 + salt * 11) % 231) - 115);
+        for (var i = 0; i < data.Length; i++) data[i] = (sbyte)((i * 37 + salt * 11) % 231 - 115);
         return Stamp.New(data, (ushort)width, (ushort)height);
     }
 
-    private sealed class FieldPlan
-    {
-        public readonly List<byte> Stamps = [];
-        public byte Ghost;
-        public readonly byte[] StampOf = new byte[40];
-        public readonly float[] Xs = new float[40];
-        public readonly float[] Ys = new float[40];
-        public readonly sbyte[] Gains = new sbyte[40];
-        public readonly float[] Turns = new float[40];
-        public readonly float[] Scales = new float[40];
-        public int Count;
-
-        public FieldPlan(int scenario, SplitMix64 rng)
-        {
-            Stamps.Add(Stamp.Box(4, 4, 90));
-            Stamps.Add(Stamp.Box(6, 3, -70));
-            Stamps.Add(Raster(5, 4, 3));
-            Stamps.Add(Stamp.Tent(7, 7, 100));
-            Stamps.Add(Stamp.Bell(9, 9, -128));
-            Stamps.Add(Stamp.Disk(4, 60));
-            Stamps.Add(Stamp.Cone(5, 45, 90));
-            Stamps.Add(Stamp.Dome(6, -50, 270));
-            Stamps.Add(Stamp.Tent(8, 5, 127));
-            Stamps.Add(Stamp.Bell(70, 70, 90));
-            Ghost = scenario == 0 ? Stamp.Tent(5, 5, 40) : Raster(3, 3, 11);
-
-            Count = scenario == 6 ? 40 : 14;
-            for (var i = 0; i < Count; i++)
-            {
-                StampOf[i] = scenario == 9 ? Stamps[9] : Stamps[(scenario + i) % 9];
-
-                float x;
-                float y;
-                if (scenario == 6)
-                {
-                    x = WorldSize / 2 + 0.5f;
-                    y = WorldSize / 2 + 0.5f;
-                }
-                else if (scenario == 7)
-                {
-                    var row = i / 3;
-                    x = 1.5f + (i % 3) * 0.75f;
-                    y = 0.5f + row * 0.75f;
-                }
-                else if (scenario == 9)
-                {
-                    x = WorldSize / 2 + (i - Count / 2f) * 1.5f;
-                    y = WorldSize / 2 + (i % 5) * 2.5f;
-                }
-                else
-                {
-                    x = 12f + rng.NextUnit() * (WorldSize - 24f);
-                    y = 12f + rng.NextUnit() * (WorldSize - 24f);
-                }
-
-                var gain = scenario == 6 ? (sbyte)16 : (sbyte)rng.NextInt(-9, 10);
-                Xs[i] = x;
-                Ys[i] = y;
-                Gains[i] = gain == 0 ? (sbyte)4 : gain;
-                Turns[i] = i % 7 == 3 ? 0.25f + i * 0.37f : 0f;
-                Scales[i] = i % 11 == 5 ? 1.5f : 1f;
-            }
-        }
-    }
-
-    private sealed class FieldState
-    {
-        public byte Layer1;
-        public byte Layer2;
-        public byte Derived;
-        public byte Transient;
-        public readonly List<World.SourceId> Ids = [];
-
-        public FieldState(byte world, bool secondGrid, FieldPlan plan, Layer.Precision precision)
-        {
-            if (secondGrid) Grid.New(world, GridPower - 1, 0f, 0f, WorldSize);
-            Layer1 = Layer.New(world, Layer.Residency.Persistent, precision);
-            Layer2 = Layer.New(world, Layer.Residency.Persistent, precision);
-            Derived = Layer.Sum(world, Layer1, 3, Layer2, -2);
-            Transient = Layer.New(world, Layer.Residency.Transient, precision);
-            for (var i = 0; i < plan.Count; i++)
-            {
-                var id = World.Place(world, (byte)(i % 2), plan.Xs[i], plan.Ys[i], plan.StampOf[i], plan.Gains[i]);
-                if (!plan.Turns[i].Equals(0f)) World.Turn(world, id, plan.Turns[i]);
-                if (!plan.Scales[i].Equals(1f)) World.Scale(world, id, plan.Scales[i]);
-                Ids.Add(id);
-                if (i % 2 == 0)
-                    World.Splat(world, Transient, new[] { plan.Xs[i] }, new[] { plan.Ys[i] }, plan.StampOf[i], plan.Gains[i]);
-            }
-        }
-    }
-
-    private static ulong HashExcluded(byte world, byte layer, World.SourceId exclude, float x, float y, float reach, ulong seed)
+    private static ulong HashExcluded(byte world, byte layer, World.SourceId exclude, float x, float y, float reach,
+        ulong seed)
     {
         var hash = new CorpusHash(seed);
         hash.Mix(World.TrySense(world, layer, x, y, exclude, out var value));
@@ -131,7 +41,8 @@ public sealed unsafe class ExclusionPurityTests
         return hash.Value;
     }
 
-    private static ulong HashSplatExcluded(byte world, byte layer, byte stamp, sbyte gain, float x, float y, float reach, ulong seed)
+    private static ulong HashSplatExcluded(byte world, byte layer, byte stamp, sbyte gain, float x, float y,
+        float reach, ulong seed)
     {
         var hash = new CorpusHash(seed);
         hash.Mix(World.TrySense(world, layer, x, y, stamp, gain, out var value));
@@ -147,12 +58,12 @@ public sealed unsafe class ExclusionPurityTests
     private static ulong HashFieldReads(byte world, FieldState field, FieldPlan plan, ulong seed)
     {
         var hash = new CorpusHash(seed);
-        float* xs = stackalloc float[8];
-        float* ys = stackalloc float[8];
-        float* reaches = stackalloc float[8];
+        var xs = stackalloc float[8];
+        var ys = stackalloc float[8];
+        var reaches = stackalloc float[8];
         for (var i = 0; i < field.Ids.Count; i++)
         {
-            var count = 7;
+            const int count = 7;
             xs[0] = plan.Xs[i];
             ys[0] = plan.Ys[i];
             xs[1] = plan.Xs[i] + 1.75f;
@@ -182,8 +93,10 @@ public sealed unsafe class ExclusionPurityTests
                 hash.Mix(HashExcluded(world, field.Derived, id, xs[p], ys[p], reaches[p], hash.Value));
             }
 
-            hash.Mix(HashSplatExcluded(world, field.Transient, plan.StampOf[i], 5, plan.Xs[i], plan.Ys[i], 4f, hash.Value));
-            hash.Mix(HashSplatExcluded(world, field.Transient, plan.Ghost, -3, plan.Xs[i] + 1.5f, plan.Ys[i] - 1.5f, 12f, hash.Value));
+            hash.Mix(HashSplatExcluded(world, field.Transient, plan.StampOf[i], 5, plan.Xs[i], plan.Ys[i], 4f,
+                hash.Value));
+            hash.Mix(HashSplatExcluded(world, field.Transient, plan.Ghost, -3, plan.Xs[i] + 1.5f, plan.Ys[i] - 1.5f,
+                12f, hash.Value));
         }
 
         return hash.Value;
@@ -232,7 +145,8 @@ public sealed unsafe class ExclusionPurityTests
         }
     }
 
-    private static (ulong Main, ulong Turn) KeyOf(byte world, int grid, byte layer, byte stamp, float x, float y, Layer.Precision precision)
+    private static (ulong Main, ulong Turn) KeyOf(byte world, int grid, byte layer, byte stamp, float x, float y,
+        Layer.Precision precision)
     {
         var w = World.GetContext(world);
         var g = w->Grids + grid;
@@ -300,61 +214,6 @@ public sealed unsafe class ExclusionPurityTests
         }
     }
 
-    private sealed class ThreadField
-    {
-        public readonly List<byte> Stamps = [];
-        public byte Layer1;
-        public byte Layer2;
-        public byte Derived;
-        public byte Transient;
-        public byte Ghost;
-        public readonly List<World.SourceId> Ids = [];
-        public readonly List<float> Xs = [];
-        public readonly List<float> Ys = [];
-
-        public ThreadField(byte world, SplitMix64 rng)
-        {
-            Grid.New(world, GridPower - 1, 0f, 0f, WorldSize);
-            var precision = Layer.Precision.Quarter;
-            Layer1 = Layer.New(world, Layer.Residency.Persistent, precision);
-            Layer2 = Layer.New(world, Layer.Residency.Persistent, precision);
-            Derived = Layer.Sum(world, Layer1, 1, Layer2, 1);
-            Transient = Layer.New(world, Layer.Residency.Transient, precision);
-            Stamps.Add(Stamp.Box(5, 5, 90));
-            Stamps.Add(Stamp.Tent(8, 8, 110));
-            Stamps.Add(Stamp.Bell(10, 6, -95));
-            Stamps.Add(Raster(6, 5, 5));
-            Stamps.Add(Stamp.Cone(6, 70, 120));
-            Ghost = Stamp.Tent(4, 4, 55);
-
-            for (var i = 0; i < 96; i++)
-            {
-                var x = 14f + rng.NextUnit() * (WorldSize - 28f);
-                var y = 14f + rng.NextUnit() * (WorldSize - 28f);
-                var id = World.Place(world, (byte)(i % 2), x, y, Stamps[i % Stamps.Count], (sbyte)rng.NextInt(-8, 9));
-                if (i % 3 == 0) World.Turn(world, id, rng.NextUnit() * 3f);
-                Ids.Add(id);
-                Xs.Add(x);
-                Ys.Add(y);
-                if (i % 2 == 0) World.Splat(world, Transient, new[] { x }, new[] { y }, Stamps[i % Stamps.Count], 5);
-            }
-        }
-    }
-
-    private sealed class ReadOutcomes
-    {
-        public readonly short[] Points;
-        public readonly long[] Areas;
-        public readonly int[] GradientBits;
-
-        public ReadOutcomes(int count)
-        {
-            Points = new short[2 * count];
-            Areas = new long[2 * count];
-            GradientBits = new int[4 * count];
-        }
-    }
-
     private static void RunThreadReads(byte world, ThreadField field, ReadOutcomes outcomes)
     {
         for (var i = 0; i < field.Ids.Count; i++)
@@ -362,13 +221,16 @@ public sealed unsafe class ExclusionPurityTests
             var sourceLayer = (byte)(i % 2);
             var layer = i % 4 == 3 ? field.Derived : sourceLayer;
             World.TrySense(world, layer, field.Xs[i], field.Ys[i], field.Ids[i], out outcomes.Points[2 * i]);
-            World.TrySenseArea(world, layer, field.Xs[i], field.Ys[i], 3f + (i % 5) * 4f, field.Ids[i], out outcomes.Areas[2 * i]);
+            World.TrySenseArea(world, layer, field.Xs[i], field.Ys[i], 3f + i % 5 * 4f, field.Ids[i],
+                out outcomes.Areas[2 * i]);
             World.TrySenseGradient(world, layer, field.Xs[i], field.Ys[i], field.Ids[i], out var gx, out var gy);
             outcomes.GradientBits[4 * i] = BitConverter.SingleToInt32Bits(gx);
             outcomes.GradientBits[4 * i + 1] = BitConverter.SingleToInt32Bits(gy);
 
-            World.TrySense(world, field.Transient, field.Xs[i], field.Ys[i], field.Ghost, 6, out outcomes.Points[2 * i + 1]);
-            World.TrySenseArea(world, field.Transient, field.Xs[i], field.Ys[i], 7f, field.Ghost, -5, out outcomes.Areas[2 * i + 1]);
+            World.TrySense(world, field.Transient, field.Xs[i], field.Ys[i], field.Ghost, 6,
+                out outcomes.Points[2 * i + 1]);
+            World.TrySenseArea(world, field.Transient, field.Xs[i], field.Ys[i], 7f, field.Ghost, -5,
+                out outcomes.Areas[2 * i + 1]);
             World.TrySenseGradient(world, field.Transient, field.Xs[i], field.Ys[i], field.Ghost, 3, out gx, out gy);
             outcomes.GradientBits[4 * i + 2] = BitConverter.SingleToInt32Bits(gx);
             outcomes.GradientBits[4 * i + 3] = BitConverter.SingleToInt32Bits(gy);
@@ -391,7 +253,7 @@ public sealed unsafe class ExclusionPurityTests
                 read(index);
             })
             {
-                IsBackground = true,
+                IsBackground = true
             };
             workers[index].Start();
         }
@@ -428,7 +290,8 @@ public sealed unsafe class ExclusionPurityTests
             {
                 Assert.True(parallel[t].Points.AsSpan().SequenceEqual(serial.Points.AsSpan()), $"thread {t} points");
                 Assert.True(parallel[t].Areas.AsSpan().SequenceEqual(serial.Areas.AsSpan()), $"thread {t} areas");
-                Assert.True(parallel[t].GradientBits.AsSpan().SequenceEqual(serial.GradientBits.AsSpan()), $"thread {t} gradients");
+                Assert.True(parallel[t].GradientBits.AsSpan().SequenceEqual(serial.GradientBits.AsSpan()),
+                    $"thread {t} gradients");
             }
 
             HashSplatExcluded(world, transient, field.Ghost, 2, 64.5f, 96.5f, 9f, CorpusHash.Offset);
@@ -464,7 +327,7 @@ public sealed unsafe class ExclusionPurityTests
         {
             xs[i] = field.Xs[i % field.Ids.Count];
             ys[i] = field.Ys[i % field.Ids.Count];
-            excludes[i] = field.Ids[(i * 7) % field.Ids.Count];
+            excludes[i] = field.Ids[i * 7 % field.Ids.Count];
         }
 
         try
@@ -477,12 +340,14 @@ public sealed unsafe class ExclusionPurityTests
             var parallel = new (short[] Values, int[] Gradients, ulong[] Words)[8];
             for (var t = 0; t < 8; t++)
                 parallel[t] = (new short[count], new int[2 * count], new ulong[(count + 63) >> 6]);
-            RunEightThreads(t => ReadColumns(world, field, xs, ys, excludes, count, parallel[t].Values, parallel[t].Gradients, parallel[t].Words));
+            RunEightThreads(t => ReadColumns(world, field, xs, ys, excludes, count, parallel[t].Values,
+                parallel[t].Gradients, parallel[t].Words));
 
             for (var t = 0; t < 8; t++)
             {
                 Assert.True(parallel[t].Values.AsSpan().SequenceEqual(serialValues.AsSpan()), $"thread {t} values");
-                Assert.True(parallel[t].Gradients.AsSpan().SequenceEqual(serialGradients.AsSpan()), $"thread {t} gradients");
+                Assert.True(parallel[t].Gradients.AsSpan().SequenceEqual(serialGradients.AsSpan()),
+                    $"thread {t} gradients");
                 Assert.True(parallel[t].Words.AsSpan().SequenceEqual(serialWords.AsSpan()), $"thread {t} words");
             }
         }
@@ -528,17 +393,166 @@ public sealed unsafe class ExclusionPurityTests
             foreach (var command in setup.Commands)
             {
                 if (command.Op != StreamOp.Read) continue;
-                if (command.Read is ReadKind.SenseEx or ReadKind.SenseAreaEx or ReadKind.SenseGradientEx or ReadKind.SenseColumnEx)
+                if (command.Read is ReadKind.SenseEx or ReadKind.SenseAreaEx or ReadKind.SenseGradientEx
+                    or ReadKind.SenseColumnEx)
                     excludedReads++;
             }
 
             var insertable = StreamRunner.TryRun(setup, setup.Commands);
-            if (insertable != null) throw new Xunit.Sdk.XunitException($"seed {seedBase + i} insertable: {insertable.Message}");
+            if (insertable != null) throw new XunitException($"seed {seedBase + i} insertable: {insertable.Message}");
 
             var disabled = StreamRunner.TryRun(setup, setup.Commands, uncached: true);
-            if (disabled != null) throw new Xunit.Sdk.XunitException($"seed {seedBase + i} disabled: {disabled.Message}");
+            if (disabled != null) throw new XunitException($"seed {seedBase + i} disabled: {disabled.Message}");
         }
 
         Assert.True(excludedReads >= streams, $"only {excludedReads} excluded reads across {streams} streams");
+    }
+
+    private sealed class FieldPlan
+    {
+        public readonly int Count;
+        public readonly sbyte[] Gains = new sbyte[40];
+        public readonly byte Ghost;
+        public readonly float[] Scales = new float[40];
+        public readonly byte[] StampOf = new byte[40];
+        public readonly List<byte> Stamps = [];
+        public readonly float[] Turns = new float[40];
+        public readonly float[] Xs = new float[40];
+        public readonly float[] Ys = new float[40];
+
+        public FieldPlan(int scenario, SplitMix64 rng)
+        {
+            Stamps.Add(Stamp.Box(4, 4, 90));
+            Stamps.Add(Stamp.Box(6, 3, -70));
+            Stamps.Add(Raster(5, 4, 3));
+            Stamps.Add(Stamp.Tent(7, 7, 100));
+            Stamps.Add(Stamp.Bell(9, 9, -128));
+            Stamps.Add(Stamp.Disk(4, 60));
+            Stamps.Add(Stamp.Cone(5, 45, 90));
+            Stamps.Add(Stamp.Dome(6, -50, 270));
+            Stamps.Add(Stamp.Tent(8, 5, 127));
+            Stamps.Add(Stamp.Bell(70, 70, 90));
+            Ghost = scenario == 0 ? Stamp.Tent(5, 5, 40) : Raster(3, 3, 11);
+
+            Count = scenario == 6 ? 40 : 14;
+            for (var i = 0; i < Count; i++)
+            {
+                StampOf[i] = scenario == 9 ? Stamps[9] : Stamps[(scenario + i) % 9];
+
+                float x;
+                float y;
+                if (scenario == 6)
+                {
+                    x = WorldSize / 2 + 0.5f;
+                    y = WorldSize / 2 + 0.5f;
+                }
+                else if (scenario == 7)
+                {
+                    var row = i / 3;
+                    x = 1.5f + i % 3 * 0.75f;
+                    y = 0.5f + row * 0.75f;
+                }
+                else if (scenario == 9)
+                {
+                    x = WorldSize / 2 + (i - Count / 2f) * 1.5f;
+                    y = WorldSize / 2 + i % 5 * 2.5f;
+                }
+                else
+                {
+                    x = 12f + rng.NextUnit() * (WorldSize - 24f);
+                    y = 12f + rng.NextUnit() * (WorldSize - 24f);
+                }
+
+                var gain = scenario == 6 ? (sbyte)16 : (sbyte)rng.NextInt(-9, 10);
+                Xs[i] = x;
+                Ys[i] = y;
+                Gains[i] = gain == 0 ? (sbyte)4 : gain;
+                Turns[i] = i % 7 == 3 ? 0.25f + i * 0.37f : 0f;
+                Scales[i] = i % 11 == 5 ? 1.5f : 1f;
+            }
+        }
+    }
+
+    private sealed class FieldState
+    {
+        public readonly byte Derived;
+        public readonly List<World.SourceId> Ids = [];
+        public readonly byte Layer1;
+        public readonly byte Layer2;
+        public readonly byte Transient;
+
+        public FieldState(byte world, bool secondGrid, FieldPlan plan, Layer.Precision precision)
+        {
+            if (secondGrid) Grid.New(world, GridPower - 1, 0f, 0f, WorldSize);
+            Layer1 = Layer.New(world, Layer.Residency.Persistent, precision);
+            Layer2 = Layer.New(world, Layer.Residency.Persistent, precision);
+            Derived = Layer.Sum(world, Layer1, 3, Layer2, -2);
+            Transient = Layer.New(world, Layer.Residency.Transient, precision);
+            for (var i = 0; i < plan.Count; i++)
+            {
+                var id = World.Place(world, (byte)(i % 2), plan.Xs[i], plan.Ys[i], plan.StampOf[i], plan.Gains[i]);
+                if (!plan.Turns[i].Equals(0f)) World.Turn(world, id, plan.Turns[i]);
+                if (!plan.Scales[i].Equals(1f)) World.Scale(world, id, plan.Scales[i]);
+                Ids.Add(id);
+                if (i % 2 == 0)
+                    World.Splat(world, Transient, new[] { plan.Xs[i] }, new[] { plan.Ys[i] }, plan.StampOf[i],
+                        plan.Gains[i]);
+            }
+        }
+    }
+
+    private sealed class ThreadField
+    {
+        public readonly byte Derived;
+        public readonly byte Ghost;
+        public readonly List<World.SourceId> Ids = [];
+        public readonly byte Layer1;
+        public readonly byte Layer2;
+        public readonly List<byte> Stamps = [];
+        public readonly byte Transient;
+        public readonly List<float> Xs = [];
+        public readonly List<float> Ys = [];
+
+        public ThreadField(byte world, SplitMix64 rng)
+        {
+            Grid.New(world, GridPower - 1, 0f, 0f, WorldSize);
+            var precision = Layer.Precision.Quarter;
+            Layer1 = Layer.New(world, Layer.Residency.Persistent, precision);
+            Layer2 = Layer.New(world, Layer.Residency.Persistent, precision);
+            Derived = Layer.Sum(world, Layer1, 1, Layer2, 1);
+            Transient = Layer.New(world, Layer.Residency.Transient, precision);
+            Stamps.Add(Stamp.Box(5, 5, 90));
+            Stamps.Add(Stamp.Tent(8, 8, 110));
+            Stamps.Add(Stamp.Bell(10, 6, -95));
+            Stamps.Add(Raster(6, 5, 5));
+            Stamps.Add(Stamp.Cone(6, 70, 120));
+            Ghost = Stamp.Tent(4, 4, 55);
+
+            for (var i = 0; i < 96; i++)
+            {
+                var x = 14f + rng.NextUnit() * (WorldSize - 28f);
+                var y = 14f + rng.NextUnit() * (WorldSize - 28f);
+                var id = World.Place(world, (byte)(i % 2), x, y, Stamps[i % Stamps.Count], (sbyte)rng.NextInt(-8, 9));
+                if (i % 3 == 0) World.Turn(world, id, rng.NextUnit() * 3f);
+                Ids.Add(id);
+                Xs.Add(x);
+                Ys.Add(y);
+                if (i % 2 == 0) World.Splat(world, Transient, new[] { x }, new[] { y }, Stamps[i % Stamps.Count], 5);
+            }
+        }
+    }
+
+    private sealed class ReadOutcomes
+    {
+        public readonly long[] Areas;
+        public readonly int[] GradientBits;
+        public readonly short[] Points;
+
+        public ReadOutcomes(int count)
+        {
+            Points = new short[2 * count];
+            Areas = new long[2 * count];
+            GradientBits = new int[4 * count];
+        }
     }
 }

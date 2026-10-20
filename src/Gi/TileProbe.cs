@@ -6,10 +6,11 @@ namespace Gi;
 
 internal static unsafe partial class TileBake
 {
-    #if NET
+#if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    #endif
-    internal static int BoxAt(int px, int py, int fx, int fy, int extentX, int extentY, StampVariant* v, int gain, int cx, int cy)
+#endif
+    internal static int BoxAt(int px, int py, int fx, int fy, int extentX, int extentY, StampVariant* v, int gain,
+        int cx, int cy)
     {
         var xLo = stackalloc int[3];
         var xHi = stackalloc int[3];
@@ -26,21 +27,23 @@ internal static unsafe partial class TileBake
         return value;
     }
 
-    #if NET
+#if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    #endif
+#endif
     internal static void BoxCells(
-        int* cells, int tileX0, int tileY0, int px, int py, int fx, int fy, int extentX, int extentY, StampVariant* v, int gain)
+        int* cells, int tileX0, int tileY0, int px, int py, int fx, int fy, int extentX, int extentY, StampVariant* v,
+        int gain)
     {
         new Span<int>(cells, TileSize * TileSize).Clear();
         AccumulateBoxCells(cells, tileX0, tileY0, px, py, fx, fy, extentX, extentY, v, gain);
     }
 
-    #if NET
+#if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    #endif
-    internal static void AccumulateBoxCells(
-        int* cells, int tileX0, int tileY0, int px, int py, int fx, int fy, int extentX, int extentY, StampVariant* v, int gain)
+#endif
+    private static void AccumulateBoxCells(
+        int* cells, int tileX0, int tileY0, int px, int py, int fx, int fy, int extentX, int extentY, StampVariant* v,
+        int gain)
     {
         var xLo = stackalloc int[3];
         var xHi = stackalloc int[3];
@@ -62,47 +65,14 @@ internal static unsafe partial class TileBake
         }
     }
 
-    #if NET
+#if NET
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    #endif
-    internal static void SmoothWeights(StampKind kind, int origin, int phase, int extent, int lo, int count, long* weights)
+#endif
+    internal static void SmoothWeights(StampKind kind, int origin, int phase, int extent, int lo, int count,
+        long* weights)
     {
         var axis = Axis(kind, origin, phase, extent);
         for (var i = 0; i < count; i++) weights[i] = axis.Weight(lo + i);
     }
 
-    #if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    #endif
-    internal static long Quadrant(int* difference, int lx, int ly)
-    {
-        var sum = 0;
-        for (var y = 0; y <= ly; y++)
-        {
-            var row = difference + y * DiffPitch;
-            for (var x = 0; x <= lx; x++) sum += row[x];
-        }
-
-        return sum;
-    }
-
-    #if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    #endif
-    internal static void IntegrateBoxes(int* difference, int* dense, int rows, int cols, long* cells)
-    {
-        var previous = stackalloc int[TileSize];
-        new Span<int>(previous, TileSize).Clear();
-        for (var y = 0; y < rows; y++)
-        {
-            var row = difference + y * DiffPitch;
-            var carry = 0;
-            for (var x = 0; x < cols; x++)
-            {
-                carry += row[x];
-                previous[x] += carry;
-                cells[y * TileSize + x] = (long)previous[x] + dense[y * TileSize + x];
-            }
-        }
-    }
 }

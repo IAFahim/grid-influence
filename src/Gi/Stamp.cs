@@ -8,7 +8,7 @@ internal enum StampKind : byte
     Bell,
     Disk,
     Cone,
-    Dome,
+    Dome
 }
 
 internal unsafe struct StampVariant
@@ -34,13 +34,17 @@ internal static unsafe class StampCatalog
     internal const int MaxStamps = ValidationRules.MaxStamps;
     private const int FullArc = ValidationRules.FullArc;
 
-    private static int _count = 1;
+    internal static int Count { get; private set; } = 1;
 
-    internal static int Count => _count;
+    internal static StampVariant* Get(byte id)
+    {
+        return Runtime.Stamps + id;
+    }
 
-    internal static StampVariant* Get(byte id) => Runtime.Stamps + id;
-
-    internal static bool Valid(byte id) => id != 0 && id < _count && Runtime.Stamps[id].Live != 0;
+    internal static bool Valid(byte id)
+    {
+        return id != 0 && id < Count && Runtime.Stamps[id].Live != 0;
+    }
 
     internal static ulong Fingerprint(byte id)
     {
@@ -85,7 +89,7 @@ internal static unsafe class StampCatalog
 
     internal static void Release()
     {
-        for (var id = 1; id < _count; id++)
+        for (var id = 1; id < Count; id++)
         {
             var v = Runtime.Stamps + id;
             if (v->Data != null) NativeHeap.Free(v->Data - v->Pitch - 1);
@@ -93,7 +97,7 @@ internal static unsafe class StampCatalog
             *v = default;
         }
 
-        _count = 1;
+        Count = 1;
     }
 
     public static byte Bake(sbyte* data, int width, int height)
@@ -104,9 +108,11 @@ internal static unsafe class StampCatalog
         var uniform = true;
         var first = data[0];
         for (var i = 1; i < width * height; i++)
-        {
-            if (data[i] != first) { uniform = false; break; }
-        }
+            if (data[i] != first)
+            {
+                uniform = false;
+                break;
+            }
 
         if (uniform) return Box(width, height, first);
 
@@ -122,13 +128,11 @@ internal static unsafe class StampCatalog
         var pitch = width + 2;
         var basePtr = (sbyte*)NativeHeap.AllocZeroed((nuint)(pitch * (height + 2)));
         for (var y = 0; y < height; y++)
-        {
             Buffer.MemoryCopy(
                 data + (long)y * width,
                 basePtr + (long)(y + 1) * pitch + 1,
                 pitch * (height + 2) - ((long)(y + 1) * pitch + 1),
                 width);
-        }
 
         v->Width = width;
         v->Height = height;
@@ -195,7 +199,9 @@ internal static unsafe class StampCatalog
     }
 
     private static sbyte Average(int sum, int n)
-        => (sbyte)(sum < 0 ? -((-sum + (n >> 1)) / n) : (sum + (n >> 1)) / n);
+    {
+        return (sbyte)(sum < 0 ? -((-sum + (n >> 1)) / n) : (sum + (n >> 1)) / n);
+    }
 
     public static byte Box(int width, int height, sbyte value)
     {
@@ -278,11 +284,11 @@ internal static unsafe class StampCatalog
     private static int Reserve()
     {
         var id = 1;
-        while (id < _count && Runtime.Stamps[id].Live != 0) id++;
-        if (id == _count)
+        while (id < Count && Runtime.Stamps[id].Live != 0) id++;
+        if (id == Count)
         {
-            if (_count >= MaxStamps) throw new InvalidOperationException("Stamp catalog is full.");
-            _count++;
+            if (Count >= MaxStamps) throw new InvalidOperationException("Stamp catalog is full.");
+            Count++;
         }
 
         Runtime.Stamps[id] = new StampVariant { Live = 1 };
@@ -300,7 +306,88 @@ public static unsafe class Stamp
         Bell,
         Disk,
         Cone,
-        Dome,
+        Dome
+    }
+
+    public static bool TryGetSpec(byte stamp, out Spec spec)
+    {
+        spec = default;
+        if (!StampCatalog.Valid(stamp)) return false;
+
+        var v = StampCatalog.Get(stamp);
+        spec = new Spec(
+            ShapeOf(v->Kind),
+            v->Width,
+            v->Height,
+            v->Constant,
+            v->Arc == 0
+                ? ValidationRules.FullArc
+                : (v->Arc * ValidationRules.FullArc + ValidationRules.FullArc - 1) / 32768);
+        return true;
+    }
+
+    private static Shape ShapeOf(StampKind kind)
+    {
+        return kind switch
+        {
+            StampKind.ConstantRectangle => Shape.Box,
+            StampKind.Raster => Shape.Raster,
+            StampKind.Tent => Shape.Tent,
+            StampKind.Bell => Shape.Bell,
+            StampKind.Disk => Shape.Disk,
+            StampKind.Cone => Shape.Cone,
+            _ => Shape.Dome
+        };
+    }
+
+    public static byte New(sbyte* data, ushort width, ushort height)
+    {
+        return StampCatalog.Bake(data, width, height);
+    }
+
+    public static byte New(ReadOnlySpan<sbyte> data, ushort width, ushort height)
+    {
+        if (data.Length < width * height)
+            throw new ArgumentException("Sample span is smaller than width*height.", nameof(data));
+        fixed (sbyte* p = data)
+        {
+            return StampCatalog.Bake(p, width, height);
+        }
+    }
+
+    public static byte Box(ushort width, ushort height, sbyte value)
+    {
+        return StampCatalog.Box(width, height, value);
+    }
+
+    public static byte Tent(ushort width, ushort height, sbyte value)
+    {
+        return StampCatalog.Tent(width, height, value);
+    }
+
+    public static byte Bell(ushort width, ushort height, sbyte value)
+    {
+        return StampCatalog.Bell(width, height, value);
+    }
+
+    public static byte Disk(ushort radius, sbyte value, ushort arc = 360)
+    {
+        return StampCatalog.Round(StampKind.Disk, radius, value, arc);
+    }
+
+    public static byte Cone(ushort radius, sbyte value, ushort arc = 360)
+    {
+        return StampCatalog.Round(StampKind.Cone, radius, value, arc);
+    }
+
+    public static byte Dome(ushort radius, sbyte value, ushort arc = 360)
+    {
+        return StampCatalog.Round(StampKind.Dome, radius, value, arc);
+    }
+
+    public static bool Free(byte stamp)
+    {
+        return StampCatalog.Free(stamp);
     }
 
     public readonly struct Spec
@@ -320,59 +407,4 @@ public static unsafe class Stamp
             ArcDegrees = arcDegrees;
         }
     }
-
-    public static bool TryGetSpec(byte stamp, out Spec spec)
-    {
-        spec = default;
-        if (!StampCatalog.Valid(stamp)) return false;
-
-        var v = StampCatalog.Get(stamp);
-        spec = new Spec(
-            ShapeOf(v->Kind),
-            v->Width,
-            v->Height,
-            v->Constant,
-            v->Arc == 0 ? ValidationRules.FullArc : (v->Arc * ValidationRules.FullArc + ValidationRules.FullArc - 1) / 32768);
-        return true;
-    }
-
-    private static Shape ShapeOf(StampKind kind) => kind switch
-    {
-        StampKind.ConstantRectangle => Shape.Box,
-        StampKind.Raster => Shape.Raster,
-        StampKind.Tent => Shape.Tent,
-        StampKind.Bell => Shape.Bell,
-        StampKind.Disk => Shape.Disk,
-        StampKind.Cone => Shape.Cone,
-        _ => Shape.Dome,
-    };
-
-    public static byte New(sbyte* data, ushort width, ushort height)
-        => StampCatalog.Bake(data, width, height);
-
-    public static byte New(ReadOnlySpan<sbyte> data, ushort width, ushort height)
-    {
-        if (data.Length < width * height) throw new ArgumentException("Sample span is smaller than width*height.", nameof(data));
-        fixed (sbyte* p = data) return StampCatalog.Bake(p, width, height);
-    }
-
-    public static byte Box(ushort width, ushort height, sbyte value)
-        => StampCatalog.Box(width, height, value);
-
-    public static byte Tent(ushort width, ushort height, sbyte value)
-        => StampCatalog.Tent(width, height, value);
-
-    public static byte Bell(ushort width, ushort height, sbyte value)
-        => StampCatalog.Bell(width, height, value);
-
-    public static byte Disk(ushort radius, sbyte value, ushort arc = 360)
-        => StampCatalog.Round(StampKind.Disk, radius, value, arc);
-
-    public static byte Cone(ushort radius, sbyte value, ushort arc = 360)
-        => StampCatalog.Round(StampKind.Cone, radius, value, arc);
-
-    public static byte Dome(ushort radius, sbyte value, ushort arc = 360)
-        => StampCatalog.Round(StampKind.Dome, radius, value, arc);
-
-    public static bool Free(byte stamp) => StampCatalog.Free(stamp);
 }

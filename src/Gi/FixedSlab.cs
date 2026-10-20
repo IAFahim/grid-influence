@@ -6,7 +6,6 @@ internal unsafe struct FixedSlab
 {
     private const int GatherSlack = 64;
 
-    private byte* _region;
     private NativeBuffer<int> _free;
     private int _stride;
     private int _capacity;
@@ -18,17 +17,17 @@ internal unsafe struct FixedSlab
 
     public readonly int LiveCount => _taken - _free.Length;
 
-    public readonly byte* Region => _region;
+    public byte* Region { get; private set; }
 
     public readonly long ByteCapacity => (long)_capacity * _stride;
 
     public int Take(int stride)
     {
-        if (_region == null)
+        if (Region == null)
         {
             _stride = stride;
             _capacity = 16;
-            _region = (byte*)NativeHeap.AlignedAlloc((nuint)_capacity * (nuint)stride + GatherSlack);
+            Region = (byte*)NativeHeap.AlignedAlloc((nuint)_capacity * (nuint)stride + GatherSlack);
         }
 
         var freeCount = _free.Length;
@@ -44,7 +43,10 @@ internal unsafe struct FixedSlab
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public readonly byte* Unit(int index) => _region + (nuint)index * (nuint)_stride;
+    public readonly byte* Unit(int index)
+    {
+        return Region + (nuint)index * (nuint)_stride;
+    }
 
     public void Give(int index)
     {
@@ -55,9 +57,9 @@ internal unsafe struct FixedSlab
 
     public void Reset()
     {
-        if (_region != null) NativeHeap.AlignedFree(_region);
+        if (Region != null) NativeHeap.AlignedFree(Region);
 
-        _region = null;
+        Region = null;
         _stride = 0;
         _capacity = 0;
         _taken = 0;
@@ -68,9 +70,9 @@ internal unsafe struct FixedSlab
     {
         var capacity = _capacity * 2;
         var region = (byte*)NativeHeap.AlignedAlloc((nuint)capacity * (nuint)_stride + GatherSlack);
-        Buffer.MemoryCopy(_region, region, (long)capacity * _stride, (long)_capacity * _stride);
-        NativeHeap.AlignedFree(_region);
-        _region = region;
+        Buffer.MemoryCopy(Region, region, (long)capacity * _stride, (long)_capacity * _stride);
+        NativeHeap.AlignedFree(Region);
+        Region = region;
         _capacity = capacity;
     }
 }

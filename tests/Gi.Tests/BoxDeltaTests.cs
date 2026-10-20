@@ -7,17 +7,20 @@ public unsafe class BoxDeltaTests
     private static readonly (int Width, int Height, sbyte Value)[] Boxes =
     [
         (1, 1, 50), (3, 3, -40), (6, 4, 40), (5, 40, 33), (40, 5, -27),
-        (70, 70, 9), (33, 31, -11), (2, 64, 100), (64, 2, -100), (31, 33, 7),
+        (70, 70, 9), (33, 31, -11), (2, 64, 100), (64, 2, -100), (31, 33, 7)
     ];
 
     public static TheoryData<int> PrecisionKinds => [0, 1, 2];
 
-    private static Layer.Precision PrecisionOf(int kind) => kind switch
+    private static Layer.Precision PrecisionOf(int kind)
     {
-        0 => Layer.Precision.Exact,
-        1 => Layer.Precision.Quarter,
-        _ => Layer.Precision.Cell,
-    };
+        return kind switch
+        {
+            0 => Layer.Precision.Exact,
+            1 => Layer.Precision.Quarter,
+            _ => Layer.Precision.Cell
+        };
+    }
 
     [Theory]
     [MemberData(nameof(PrecisionKinds))]

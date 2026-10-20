@@ -11,7 +11,8 @@ internal static class AreaTiming
         var box = Stamp.Box(4, 4, 7);
         var rng = new Random(5);
         for (var i = 0; i < 400_000; i++)
-            World.Place(world, layer, (float)(rng.NextDouble() * 1000.0 + 12.0), (float)(rng.NextDouble() * 1000.0 + 12.0), box, 1);
+            World.Place(world, layer, (float)(rng.NextDouble() * 1000.0 + 12.0),
+                (float)(rng.NextDouble() * 1000.0 + 12.0), box, 1);
         World.Process(world);
 
         if (Environment.GetEnvironmentVariable("GI_EXC_ONLY") == "1")
@@ -78,7 +79,8 @@ internal static class AreaTiming
                 nearSum = n;
                 if (pass < 2) continue;
                 bestMax = Math.Min(bestMax, Stopwatch.GetElapsedTime(started, middle).TotalNanoseconds / count);
-                bestNearest = Math.Min(bestNearest, Stopwatch.GetElapsedTime(middle, finished).TotalNanoseconds / count);
+                bestNearest = Math.Min(bestNearest,
+                    Stopwatch.GetElapsedTime(middle, finished).TotalNanoseconds / count);
             }
 
             Console.WriteLine($"  max  r={reach,3}: {bestMax,7:F1} ns each, checksum {maxSum}");
@@ -122,7 +124,10 @@ internal static class AreaTiming
 
         foreach (var reach in new[] { 16f, 64f })
         {
-            double plain = double.MaxValue, excluded = double.MaxValue, point = double.MaxValue, pointExcluded = double.MaxValue;
+            double plain = double.MaxValue,
+                excluded = double.MaxValue,
+                point = double.MaxValue,
+                pointExcluded = double.MaxValue;
             double gradient = double.MaxValue, gradientExcluded = double.MaxValue;
             long guard = 0;
             for (var pass = 0; pass < 10; pass++)
@@ -176,10 +181,12 @@ internal static class AreaTiming
                 point = Math.Min(point, Stopwatch.GetElapsedTime(t2, t3).TotalNanoseconds / probes);
                 pointExcluded = Math.Min(pointExcluded, Stopwatch.GetElapsedTime(t3, t4).TotalNanoseconds / probes);
                 gradient = Math.Min(gradient, Stopwatch.GetElapsedTime(t4, t5).TotalNanoseconds / probes);
-                gradientExcluded = Math.Min(gradientExcluded, Stopwatch.GetElapsedTime(t5, t6).TotalNanoseconds / probes);
+                gradientExcluded = Math.Min(gradientExcluded,
+                    Stopwatch.GetElapsedTime(t5, t6).TotalNanoseconds / probes);
             }
 
-            Console.WriteLine($"exclusion r={reach,3}: area {plain,7:F1} -> {excluded,7:F1} ns; point {point:F1} -> {pointExcluded:F1}; gradient {gradient:F1} -> {gradientExcluded:F1} ({guard & 1})");
+            Console.WriteLine(
+                $"exclusion r={reach,3}: area {plain,7:F1} -> {excluded,7:F1} ns; point {point:F1} -> {pointExcluded:F1}; gradient {gradient:F1} -> {gradientExcluded:F1} ({guard & 1})");
         }
     }
 
@@ -193,7 +200,8 @@ internal static class AreaTiming
             var started = Stopwatch.GetTimestamp();
             for (var i = 0; i < 1_000_000; i++)
             {
-                TileBake.PlaceAnchored(256 * (100 + (i & 511)) + (i & 255), 256 * 300 + (i & 255), 256, 1024, v, 0, 256, Layer.Precision.Cell, out var p);
+                TileBake.PlaceAnchored(256 * (100 + (i & 511)) + (i & 255), 256 * 300 + (i & 255), 256, 1024, v, 0, 256,
+                    Layer.Precision.Cell, out var p);
                 guard += p.Px;
             }
 

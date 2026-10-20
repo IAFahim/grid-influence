@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Xunit;
 
 namespace Gi.Tests;
@@ -6,7 +7,7 @@ public sealed class FreeTests
 {
     private static long PrivateBytes()
     {
-        using var process = System.Diagnostics.Process.GetCurrentProcess();
+        using var process = Process.GetCurrentProcess();
         return process.PrivateMemorySize64;
     }
 
@@ -24,7 +25,7 @@ public sealed class FreeTests
         Assert.True(World.Free(world));
         Assert.False(World.Free(world));
 
-        Assert.Equal(default(World.SourceId), World.Place(world, layer, 10.5f, 10.5f, stamp, 1));
+        Assert.Equal(default, World.Place(world, layer, 10.5f, 10.5f, stamp, 1));
         Assert.Equal(0, World.QueryAt(world, grid, layer, 10.5f, 10.5f));
         Assert.Equal(0, World.Query(world, grid, layer, 10, 10));
         Assert.Equal(0, World.Query(world, grid, layer, 0, 0, 64, 64));
@@ -56,7 +57,7 @@ public sealed class FreeTests
         var second = World.New();
         Assert.True(second <= first);
         Assert.Equal(0, World.Tick(second));
-        Assert.Equal(default(World.SourceId), World.Place(second, 0, 10.5f, 10.5f, stamp, 1));
+        Assert.Equal(default, World.Place(second, 0, 10.5f, 10.5f, stamp, 1));
         Assert.Equal(0, Grid.New(second, 6, 0f, 0f, 64f));
         Assert.Equal(0, Layer.New(second));
         Assert.Equal(0, World.QueryAt(second, 0, 0, 10.5f, 10.5f));
@@ -122,12 +123,13 @@ public sealed class FreeTests
         var stamps = new[]
         {
             Stamp.Box(9, 9, 20), Stamp.Tent(12, 12, 40), Stamp.Bell(12, 12, 40), Stamp.Disk(8, 30),
-            Stamp.Cone(8, 30, 90), Stamp.Dome(8, 30), Stamp.New(samples, 16, 16),
+            Stamp.Cone(8, 30, 90), Stamp.Dome(8, 30), Stamp.New(samples, 16, 16)
         };
         var first = default(World.SourceId);
         for (var i = 0; i < 300; i++)
         {
-            var id = World.Place(world, (byte)(i % 2), i * 37 % 500, i * 91 % 500, stamps[i % stamps.Length], (sbyte)(1 + i % 4));
+            var id = World.Place(world, (byte)(i % 2), i * 37 % 500, i * 91 % 500, stamps[i % stamps.Length],
+                (sbyte)(1 + i % 4));
             Assert.True(id != default);
             if (first == default) first = id;
         }
@@ -164,6 +166,7 @@ public sealed class FreeTests
                 var row = i / 4;
                 World.Place(world, layer, 128f + column * 256f, 128f + row * 256, box, 1);
             }
+
             World.Process(world);
             Assert.True(World.Free(world));
         }

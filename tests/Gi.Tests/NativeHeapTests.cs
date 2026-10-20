@@ -12,14 +12,14 @@ public unsafe class NativeHeapTests
         var l = Layer.New(w);
         var box = Stamp.Box(8, 8, 40);
         var tent = Stamp.Tent(10, 10, 40);
-        var count = 64;
+        const int count = 64;
         var ids = new World.SourceId[count];
         var xs = new float[count];
         var ys = new float[count];
         for (var i = 0; i < count; i++)
         {
-            xs[i] = (i * 17.3f) % 240f + 12f;
-            ys[i] = (i * 9.1f) % 240f + 12f;
+            xs[i] = i * 17.3f % 240f + 12f;
+            ys[i] = i * 9.1f % 240f + 12f;
             ids[i] = World.Place(w, l, xs[i], ys[i], i % 2 == 0 ? box : tent, 3);
         }
 

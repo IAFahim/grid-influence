@@ -197,10 +197,13 @@ public sealed class SourceBatchTests : IDisposable
             World.SourceCommand.Remove(World.SourceTarget.CreatedBy(2)),
             World.SourceCommand.Place(0, 20.5f, 20.5f, _stamps[0], 2)
         ];
-        var results = Enumerable.Repeat(new World.SourceResult(new World.SourceId(123, 7), World.SourceResultStatus.InvalidStamp), commands.Length).ToArray();
+        var results = Enumerable
+            .Repeat(new World.SourceResult(new World.SourceId(123, 7), World.SourceResultStatus.InvalidStamp),
+                commands.Length).ToArray();
         Assert.Equal(World.BatchStatus.InvalidReference, World.ApplyBatch(_batchWorld, commands, results));
         Assert.All(results, result => Assert.Equal(new World.SourceId(123, 7), result.SourceId));
-        Assert.Equal(World.BatchStatus.InsufficientResults, World.ApplyBatch(_batchWorld, commands, results.AsSpan(0, 1)));
+        Assert.Equal(World.BatchStatus.InsufficientResults,
+            World.ApplyBatch(_batchWorld, commands, results.AsSpan(0, 1)));
         Assert.Equal(World.BatchStatus.InvalidCommand, World.ApplyBatch(_batchWorld,
             new[] { World.SourceCommand.Move(source, 40.5f, 40.5f), default(World.SourceCommand) }, results));
         ProcessAndCompare();
@@ -226,6 +229,7 @@ public sealed class SourceBatchTests : IDisposable
             creations[index] = World.SourceCommand.Place((byte)(index % 2), index % 60 + 0.5f,
                 row + 0.5f, _stamps[index % _stamps.Length], (sbyte)(index % 4 + 1));
         }
+
         var creationResults = ApplyAndReplay(creations);
         Assert.Equal(count, creationResults.Select(result => result.SourceId).Distinct().Count());
         ProcessAndCompare();
@@ -358,6 +362,7 @@ public sealed class SourceBatchTests : IDisposable
             var row = index / 60 % 60;
             creations[index] = World.SourceCommand.Place(0, index % 60 + 0.5f, row + 0.5f, _stamps[0], 1);
         }
+
         var firstResults = new World.SourceResult[count];
         var secondResults = new World.SourceResult[count];
 
@@ -383,6 +388,7 @@ public sealed class SourceBatchTests : IDisposable
             creations[index] = World.SourceCommand.Place(0, index % 60 + 0.5f,
                 row + 0.5f, _stamps[0], 2);
         }
+
         var sources = ApplyAndReplay(creations);
         ProcessAndCompare();
         var firstSource = sources[0].SourceId;
@@ -397,6 +403,7 @@ public sealed class SourceBatchTests : IDisposable
             commands[index] = World.SourceCommand.Update(sources[index].SourceId, index % 60 + 0.25f,
                 row + 0.25f, 0.25f, 0.75f, 4);
         }
+
         commands[count] = World.SourceCommand.Update(firstSource, 20.5f, 20.5f, 0f, 1f, 2);
         ApplyAndReplay(commands);
         for (var frame = 0; frame < 4; frame++) ProcessAndCompare();
@@ -422,7 +429,8 @@ public sealed class SourceBatchTests : IDisposable
     public void EmptyAndInvalidWorldBatches_DoNotWriteResults()
     {
         Assert.Equal(World.BatchStatus.Applied, World.ApplyBatch(_batchWorld, [], []));
-        var results = new[] { new World.SourceResult(new World.SourceId(123, 7), World.SourceResultStatus.InvalidStamp) };
+        var results = new[]
+            { new World.SourceResult(new World.SourceId(123, 7), World.SourceResultStatus.InvalidStamp) };
         Assert.Equal(World.BatchStatus.InvalidWorld, World.ApplyBatch(byte.MaxValue,
             new[] { World.SourceCommand.Place(0, 10.5f, 10.5f, _stamps[0], 1) }, results));
         Assert.Equal(new World.SourceId(123, 7), results[0].SourceId);
@@ -483,6 +491,7 @@ public sealed class SourceBatchTests : IDisposable
                 updates[index] = World.SourceCommand.Update(results[index].SourceId, index % 60 + 0.25f * frame,
                     row + 0.25f * frame, frame * 0.25f, 1f, 2);
             }
+
             Assert.Equal(World.BatchStatus.Applied, World.ApplyBatch(world, updates, results));
             World.Process(world);
         }
@@ -506,7 +515,8 @@ public sealed class SourceBatchTests : IDisposable
             var target = command.Target.Pending ? serialResults[command.Target.Command] : command.Target.Source;
             if (command.Kind == SourceCommandKind.Place)
             {
-                var source = World.Place(_serialWorld, command.Layer, command.PositionX, command.PositionY, command.Stamp, command.Gain);
+                var source = World.Place(_serialWorld, command.Layer, command.PositionX, command.PositionY,
+                    command.Stamp, command.Gain);
                 serialResults[index] = source;
                 Assert.Equal(source, results[index].SourceId);
                 World.Turn(_serialWorld, source, command.HeadingRadians);
@@ -523,7 +533,8 @@ public sealed class SourceBatchTests : IDisposable
                     World.Scale(_serialWorld, target, command.ScaleValue);
                     World.SetGain(_serialWorld, target, command.Gain);
                     break;
-                case SourceCommandKind.Move: World.Move(_serialWorld, target, command.PositionX, command.PositionY); break;
+                case SourceCommandKind.Move:
+                    World.Move(_serialWorld, target, command.PositionX, command.PositionY); break;
                 case SourceCommandKind.Turn: World.Turn(_serialWorld, target, command.HeadingRadians); break;
                 case SourceCommandKind.Scale: World.Scale(_serialWorld, target, command.ScaleValue); break;
                 case SourceCommandKind.SetGain: World.SetGain(_serialWorld, target, command.Gain); break;
@@ -598,7 +609,11 @@ public sealed class SourceBatchTests : IDisposable
     private static unsafe short[] ReadGrid(byte world, byte grid, byte layer, int size)
     {
         var cells = new short[size * size];
-        fixed (short* destination = cells) World.QueryRegion(world, grid, layer, 0, 0, size, size, destination);
+        fixed (short* destination = cells)
+        {
+            World.QueryRegion(world, grid, layer, 0, 0, size, size, destination);
+        }
+
         return cells;
     }
 }

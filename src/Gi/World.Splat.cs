@@ -7,22 +7,24 @@ namespace Gi;
 
 public static unsafe partial class World
 {
-    public static int Splat(byte world, byte layer, ReadOnlySpan<float> xs, ReadOnlySpan<float> ys, byte stamp, sbyte gain)
+    public static int Splat(byte world, byte layer, ReadOnlySpan<float> xs, ReadOnlySpan<float> ys, byte stamp,
+        sbyte gain)
     {
         var w = GetContext(world);
         if (w == null || !CanSplat(w, layer, stamp)) return 0;
 
         var count = Math.Min(xs.Length, ys.Length);
         if (w->Recipes[layer].PhaseBits == 0)
-        {
             fixed (float* px = xs)
             fixed (float* py = ys)
+            {
                 return SplatCells(w, layer, px, py, count, stamp, gain);
-        }
+            }
 
         var applied = 0;
         for (var i = 0; i < count; i++)
-            if (EmitSplat(w, layer, xs[i], ys[i], stamp, gain)) applied++;
+            if (EmitSplat(w, layer, xs[i], ys[i], stamp, gain))
+                applied++;
         return applied;
     }
 
@@ -50,11 +52,14 @@ public static unsafe partial class World
 
             hist->Total += charge;
             var cls = hist->Classes + stamp;
-            if (cls->Directory == null) cls->Directory = (int*)NativeHeap.AllocZeroed((nuint)g->TileCount * sizeof(int));
+            if (cls->Directory == null)
+                cls->Directory = (int*)NativeHeap.AllocZeroed((nuint)g->TileCount * sizeof(int));
 
             var done = 0;
 #if NET
-            if (Vector256.IsHardwareAccelerated) done = SplatBlocks(w, gi, g, ld, hist, cls, ref key, mask, xs, ys, count);
+            if (Vector256.IsHardwareAccelerated)
+                done =
+                    SplatBlocks(w, gi, g, ld, hist, cls, ref key, mask, xs, ys, count);
 #endif
             for (var i = done; i < count; i++)
                 SplatOne(w, gi, g, ld, hist, cls, ref key, mask, xs[i], ys[i]);
@@ -89,7 +94,8 @@ public static unsafe partial class World
         }
 
         var tile = (cy >> TileBake.TileBits) * g->TilesPerSide + (cx >> TileBake.TileBits);
-        HistPage(g, ld, hist, cls, tile)[(cy & (TileBake.TileSize - 1)) * TileBake.TileSize + (cx & (TileBake.TileSize - 1))] += key.Gain;
+        HistPage(g, ld, hist, cls, tile)[
+            (cy & (TileBake.TileSize - 1)) * TileBake.TileSize + (cx & (TileBake.TileSize - 1))] += key.Gain;
     }
 
     private static int CountFinite(float* xs, float* ys, int count)
@@ -103,13 +109,14 @@ public static unsafe partial class World
             for (; i + 8 <= count; i += 8)
             {
                 var both = Vector256.LessThan(Vector256.Abs(Vector256.Load(xs + i)), limit)
-                    & Vector256.LessThan(Vector256.Abs(Vector256.Load(ys + i)), limit);
+                           & Vector256.LessThan(Vector256.Abs(Vector256.Load(ys + i)), limit);
                 finite += BitOperations.PopCount(both.ExtractMostSignificantBits());
             }
         }
 #endif
         for (; i < count; i++)
-            if (float.IsFinite(xs[i]) && float.IsFinite(ys[i])) finite++;
+            if (float.IsFinite(xs[i]) && float.IsFinite(ys[i]))
+                finite++;
         return finite;
     }
 
@@ -123,7 +130,8 @@ public static unsafe partial class World
         var count = Math.Min(Math.Min(xs.Length, ys.Length), Math.Min(stamps.Length, gains.Length));
         var applied = 0;
         for (var i = 0; i < count; i++)
-            if (StampCatalog.Valid(stamps[i]) && EmitSplat(w, layer, xs[i], ys[i], stamps[i], gains[i])) applied++;
+            if (StampCatalog.Valid(stamps[i]) && EmitSplat(w, layer, xs[i], ys[i], stamps[i], gains[i]))
+                applied++;
         return applied;
     }
 
@@ -133,32 +141,10 @@ public static unsafe partial class World
         return w == null || layer >= w->LayerCount || !IsTransient(w, layer) ? default : new SplatWriter(w, layer);
     }
 
-    public ref struct SplatWriter
-    {
-        private readonly WorldCtx* _world;
-        private readonly byte _layer;
-        private int _count;
-
-        internal SplatWriter(WorldCtx* world, byte layer)
-        {
-            _world = world;
-            _layer = layer;
-            _count = 0;
-        }
-
-        public readonly int Count => _count;
-
-        public bool Add(float x, float y, byte stamp, sbyte gain)
-        {
-            if (_world == null || !StampCatalog.Valid(stamp) || !EmitSplat(_world, _layer, x, y, stamp, gain)) return false;
-
-            _count++;
-            return true;
-        }
-    }
-
     private static bool CanSplat(WorldCtx* w, byte layer, byte stamp)
-        => layer < w->LayerCount && IsTransient(w, layer) && StampCatalog.Valid(stamp);
+    {
+        return layer < w->LayerCount && IsTransient(w, layer) && StampCatalog.Valid(stamp);
+    }
 
     private static bool EmitSplat(WorldCtx* w, byte layer, float x, float y, byte stamp, sbyte gain)
     {
@@ -172,7 +158,7 @@ public static unsafe partial class World
             Stamp = stamp,
             Gain = (sbyte)Math.Clamp((int)gain, -MaxGain, MaxGain),
             Alive = 1,
-            Scale = UnitScale,
+            Scale = UnitScale
         };
         for (var gi = 0; gi < w->GridCount; gi++)
         {
@@ -186,14 +172,37 @@ public static unsafe partial class World
                 var cx = key.Ax >> 8;
                 var cy = key.Ay >> 8;
                 if ((uint)cx < (uint)g->Size && (uint)cy < (uint)g->Size)
-                {
-                    if (key.Gain == 0 || HistAdd(g, g->Layers + layer, stamp, cx, cy, key.Gain)) continue;
-                }
+                    if (key.Gain == 0 || HistAdd(g, g->Layers + layer, stamp, cx, cy, key.Gain))
+                        continue;
             }
 
             EmitDelta(w, gi, in key, 1);
         }
 
         return true;
+    }
+
+    public ref struct SplatWriter
+    {
+        private readonly WorldCtx* _world;
+        private readonly byte _layer;
+
+        internal SplatWriter(WorldCtx* world, byte layer)
+        {
+            _world = world;
+            _layer = layer;
+            Count = 0;
+        }
+
+        public int Count { get; private set; }
+
+        public bool Add(float x, float y, byte stamp, sbyte gain)
+        {
+            if (_world == null || !StampCatalog.Valid(stamp) || !EmitSplat(_world, _layer, x, y, stamp, gain))
+                return false;
+
+            Count++;
+            return true;
+        }
     }
 }

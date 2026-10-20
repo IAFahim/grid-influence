@@ -29,7 +29,8 @@ public sealed unsafe class TeardownTests
 
         var total = 0;
         int readCount;
-        while (total < 4096 && (readCount = read(descriptor, buffer + total, (nuint)(4096 - total))) > 0) total += readCount;
+        while (total < 4096 && (readCount = read(descriptor, buffer + total, (nuint)(4096 - total))) > 0)
+            total += readCount;
         _ = close(descriptor);
 
         var span = new ReadOnlySpan<byte>(buffer, total);
@@ -322,8 +323,8 @@ public sealed unsafe class TeardownTests
         var rasterStamp = Stamp.New(raster, 8, 8);
         for (var i = 0; i < 48; i++)
         {
-            xs[i] = (i * 37.7f) % 240f + 8f;
-            ys[i] = (i * 19.3f) % 240f + 8f;
+            xs[i] = i * 37.7f % 240f + 8f;
+            ys[i] = i * 19.3f % 240f + 8f;
             var shape = i % 4;
             ids[i] = World.Place(world, threat, xs[i], ys[i],
                 shape == 0 ? box : shape == 1 ? tent : shape == 2 ? cone : rasterStamp, 3);
@@ -338,7 +339,8 @@ public sealed unsafe class TeardownTests
 
         World.Sync(world, ids, xs, ys, 48);
         World.Process(world);
-        if (World.Query(world, 0, derived, 0, 0, 256, 256) >= 0) throw new InvalidOperationException("Derived sum must be negative.");
+        if (World.Query(world, 0, derived, 0, 0, 256, 256) >= 0)
+            throw new InvalidOperationException("Derived sum must be negative.");
 
         World.Free(world);
         callsAtFree = NativeHeap.Calls;

@@ -26,7 +26,8 @@ public unsafe class PyramidTests
 
                 var root = pyramid.Levels - 1;
                 var childSide = pyramid.ChildSide(root, side);
-                var reduced = Pyramid<short, ShortMaxOp>.ReduceMax(pyramid.Node(root, 0, 0), Math.Min(8, childSide), Math.Min(8, childSide));
+                var reduced = Pyramid<short, ShortMaxOp>.ReduceMax(pyramid.Node(root, 0, 0), Math.Min(8, childSide),
+                    Math.Min(8, childSide));
                 Assert.Equal(leaves.Max(), reduced);
             }
         }
@@ -64,13 +65,17 @@ public unsafe class PyramidTests
                 var since = tick - rng.Next(0, 6);
                 var expected = new List<int>();
                 for (var i = 0; i < leaves.Length; i++)
-                    if (leaves[i] - since > 0) expected.Add(i);
+                    if (leaves[i] - since > 0)
+                        expected.Add(i);
 
                 var found = new List<int>();
                 var count = 0;
                 var buffer = new int[leaves.Length];
                 fixed (int* pBuffer = buffer)
+                {
                     CollectLeaves(tree, side, tree.Levels - 1, 0, 0, since, pBuffer, ref count);
+                }
+
                 for (var i = 0; i < count; i++) found.Add(buffer[i]);
                 found.Sort();
                 Assert.Equal(expected, found);
@@ -85,7 +90,8 @@ public unsafe class PyramidTests
     }
 
     private static void CollectLeaves(
-        in Pyramid<int, EpochMaxOp> tree, int side, int level, int nodeX, int nodeY, int since, int* destination, ref int count)
+        in Pyramid<int, EpochMaxOp> tree, int side, int level, int nodeX, int nodeY, int since, int* destination,
+        ref int count)
     {
         var node = tree.Node(level, nodeX, nodeY);
         var childSide = tree.ChildSide(level, side);

@@ -1,19 +1,8 @@
+using System.Numerics;
+using Gi;
+
 internal static partial class Verification
 {
-    private sealed record OracleSource(int Kind, float X, float Y, int Width, int Height, sbyte Value, int Gain,
-        float Radians, int Scale, int ArcDegrees, sbyte[]? Samples)
-    {
-        public int Angle => SpecAngle(Radians);
-        public int Arc => ArcDegrees >= 360 ? 0 : ArcDegrees * 32768 / 360;
-    }
-
-    private static int SpecAngle(float radians)
-    {
-        var turns = radians * (1.0 / (2 * Math.PI));
-        turns -= Math.Floor(turns);
-        return (int)(turns * 65536.0) & 0xFFFF;
-    }
-
     private const int KindBox = 0;
     private const int KindRaster = 1;
     private const int KindTent = 2;
@@ -21,6 +10,13 @@ internal static partial class Verification
     private const int KindDisk = 4;
     private const int KindCone = 5;
     private const int KindDome = 6;
+
+    private static int SpecAngle(float radians)
+    {
+        var turns = radians * (1.0 / (2 * Math.PI));
+        turns -= Math.Floor(turns);
+        return (int)(turns * 65536.0) & 0xFFFF;
+    }
 
     private static int OracleSin(int angle)
     {
@@ -33,33 +29,47 @@ internal static partial class Verification
         return quadrant >= 2 ? -s : s;
     }
 
-    private static int OracleCos(int angle) => OracleSin(angle + 16384);
+    private static int OracleCos(int angle)
+    {
+        return OracleSin(angle + 16384);
+    }
 
     private static long OracleRoot(long value)
     {
         long root = 0;
         for (var bit = 1L << 31; bit > 0; bit >>= 1)
-            if ((root + bit) * (root + bit) <= value) root += bit;
+            if ((root + bit) * (root + bit) <= value)
+                root += bit;
         return root;
     }
 
-    private static long OracleFloorDiv(long a, long b) => (long)Math.Floor((decimal)a / b);
+    private static long OracleFloorDiv(long a, long b)
+    {
+        return (long)Math.Floor((decimal)a / b);
+    }
 
-    private static long OracleCeilDiv(long a, long b) => (long)Math.Ceiling((decimal)a / b);
+    private static long OracleCeilDiv(long a, long b)
+    {
+        return (long)Math.Ceiling((decimal)a / b);
+    }
 
-    private static int OracleRoundShift(long value, int bits) => (int)((value + (1L << (bits - 1)) + (value >> 63)) >> bits);
+    private static int OracleRoundShift(long value, int bits)
+    {
+        return (int)((value + (1L << (bits - 1)) + (value >> 63)) >> bits);
+    }
 
-    private static (long lead, long extent) OracleAxis(float position, float origin, int scaleQ8, int sampling, int length)
+    private static (long lead, long extent) OracleAxis(float position, float origin, int scaleQ8, int sampling,
+        int length)
     {
         var originQ8 = -(length * 128);
-        var lead = (int)MathF.Floor((position - origin) * scaleQ8) + ((long)originQ8 * sampling >> 8);
+        var lead = (int)MathF.Floor((position - origin) * scaleQ8) + (((long)originQ8 * sampling) >> 8);
         var extent = Math.Min((long)length * sampling, 1L << 30);
         return (lead, extent);
     }
 
     private static void OracleDeposit(OracleSource s, GridSpec g, int[] dense, long[] tents, long[] bells)
     {
-        var sampling = (int)Math.Min((long)g.ScaleQ8 * s.Scale >> 8, int.MaxValue);
+        var sampling = (int)Math.Min(((long)g.ScaleQ8 * s.Scale) >> 8, int.MaxValue);
         if (sampling == 0) return;
         var (leadX, extentX) = OracleAxis(s.X, g.X, g.ScaleQ8, sampling, s.Width);
         var (leadY, extentY) = OracleAxis(s.Y, g.Y, g.ScaleQ8, sampling, s.Height);
@@ -74,8 +84,8 @@ internal static partial class Verification
         {
             var hu = Math.Max(256L, extentX >> 1);
             var hv = Math.Max(256L, extentY >> 1);
-            shiftU = Math.Clamp(64 - System.Numerics.BitOperations.LeadingZeroCount((ulong)hu) - (bell ? 8 : 15), 0, 7);
-            shiftV = Math.Clamp(64 - System.Numerics.BitOperations.LeadingZeroCount((ulong)hv) - (bell ? 8 : 15), 0, 7);
+            shiftU = Math.Clamp(64 - BitOperations.LeadingZeroCount((ulong)hu) - (bell ? 8 : 15), 0, 7);
+            shiftV = Math.Clamp(64 - BitOperations.LeadingZeroCount((ulong)hv) - (bell ? 8 : 15), 0, 7);
             halfU = hu >> shiftU;
             halfV = hv >> shiftV;
             var peak = (bell ? halfU * halfU : halfU) * (bell ? halfV * halfV : halfV);
@@ -117,7 +127,12 @@ internal static partial class Verification
                     if (ix < -1 || iy < -1 || ix >= s.Width || iy >= s.Height) break;
                     var fx = (int)((tx >> 8) & 255);
                     var fy = (int)((ty >> 8) & 255);
-                    int Sample(int x, int y) => x < 0 || y < 0 || x >= s.Width || y >= s.Height ? 0 : s.Samples![y * s.Width + x];
+
+                    int Sample(int x, int y)
+                    {
+                        return x < 0 || y < 0 || x >= s.Width || y >= s.Height ? 0 : s.Samples![y * s.Width + x];
+                    }
+
                     var top = Sample(ix, iy) * (256 - fx) + Sample(ix + 1, iy) * fx;
                     var bottom = Sample(ix, iy + 1) * (256 - fx) + Sample(ix + 1, iy + 1) * fx;
                     dense[i] += RoundQ16(top * (256 - fy) + bottom * fy) * s.Gain;
@@ -148,11 +163,14 @@ internal static partial class Verification
                     else
                     {
                         if (d2 >= reach * reach) break;
-                        if (s.Kind == KindCone) weight = ((reach - OracleRoot(d2)) * OracleCeilDiv(1L << 48, reach)) >> 32;
+                        if (s.Kind == KindCone)
+                        {
+                            weight = ((reach - OracleRoot(d2)) * OracleCeilDiv(1L << 48, reach)) >> 32;
+                        }
                         else
                         {
                             var r2 = reach * reach;
-                            var reduce = Math.Max(0, 64 - System.Numerics.BitOperations.LeadingZeroCount((ulong)r2) - 46);
+                            var reduce = Math.Max(0, 64 - BitOperations.LeadingZeroCount((ulong)r2) - 46);
                             weight = (((r2 - d2) >> reduce) * OracleCeilDiv(1L << 62, r2 >> reduce)) >> 46;
                         }
                     }
@@ -180,21 +198,25 @@ internal static partial class Verification
         foreach (var s in sources) OracleDeposit(s, g, dense, tents, bells);
         var field = new short[n];
         for (var i = 0; i < n; i++)
-            field[i] = (short)Math.Clamp(dense[i] + (long)OracleRoundQ40(tents[i]) + OracleRoundQ40(bells[i]), short.MinValue, short.MaxValue);
+            field[i] = (short)Math.Clamp(dense[i] + (long)OracleRoundQ40(tents[i]) + OracleRoundQ40(bells[i]),
+                short.MinValue, short.MaxValue);
         return field;
     }
 
-    private static byte ShapeStamp(OracleSource s) => s.Kind switch
+    private static byte ShapeStamp(OracleSource s)
     {
-        KindBox => Gi.Stamp.Box((ushort)s.Width, (ushort)s.Height, s.Value),
-        KindRaster => Gi.Stamp.New(s.Samples!, (ushort)s.Width, (ushort)s.Height),
-        KindTent => Gi.Stamp.Tent((ushort)s.Width, (ushort)s.Height, s.Value),
-        KindBell => Gi.Stamp.Bell((ushort)s.Width, (ushort)s.Height, s.Value),
-        KindDisk => Gi.Stamp.Disk((ushort)(s.Width / 2), s.Value, (ushort)s.ArcDegrees),
-        KindCone => Gi.Stamp.Cone((ushort)(s.Width / 2), s.Value, (ushort)s.ArcDegrees),
-        KindDome => Gi.Stamp.Dome((ushort)(s.Width / 2), s.Value, (ushort)s.ArcDegrees),
-        _ => throw new ArgumentOutOfRangeException(nameof(s)),
-    };
+        return s.Kind switch
+        {
+            KindBox => Stamp.Box((ushort)s.Width, (ushort)s.Height, s.Value),
+            KindRaster => Stamp.New(s.Samples!, (ushort)s.Width, (ushort)s.Height),
+            KindTent => Stamp.Tent((ushort)s.Width, (ushort)s.Height, s.Value),
+            KindBell => Stamp.Bell((ushort)s.Width, (ushort)s.Height, s.Value),
+            KindDisk => Stamp.Disk((ushort)(s.Width / 2), s.Value, (ushort)s.ArcDegrees),
+            KindCone => Stamp.Cone((ushort)(s.Width / 2), s.Value, (ushort)s.ArcDegrees),
+            KindDome => Stamp.Dome((ushort)(s.Width / 2), s.Value, (ushort)s.ArcDegrees),
+            _ => throw new ArgumentOutOfRangeException(nameof(s))
+        };
+    }
 
     private static float TurnedRadians(Random rng, int kind)
     {
@@ -218,19 +240,20 @@ internal static partial class Verification
             for (var i = 0; i < samples.Length; i++) samples[i] = (sbyte)rng.Next(-90, 120);
         }
 
-        return new OracleSource(kind, (float)(rng.NextDouble() * (size + 20) - 10), (float)(rng.NextDouble() * (size + 20) - 10),
+        return new OracleSource(kind, (float)(rng.NextDouble() * (size + 20) - 10),
+            (float)(rng.NextDouble() * (size + 20) - 10),
             width, height, (sbyte)rng.Next(-100, 127), rng.Next(-16, 17), TurnedRadians(rng, kind),
             rng.Next(4) == 0 ? 256 : rng.Next(256, 640), rng.Next(3) == 0 ? 360 : rng.Next(10, 300), samples);
     }
 
     private static bool TurnedAndRoundStampsMatchOracle()
     {
-        var w = Gi.World.New();
+        var w = World.New();
         GridSpec[] grids = [new(0, 7, 0f, 0f, 128f), new(1, 8, 0f, 0f, 128f), new(2, 6, 16f, 8f, 96f)];
-        foreach (var g in grids) Gi.Grid.New(w, g.Power, g.X, g.Y, g.Size);
-        var l = Gi.Layer.New(w);
+        foreach (var g in grids) Grid.New(w, g.Power, g.X, g.Y, g.Size);
+        var l = Layer.New(w);
         var rng = new Random(1212);
-        var live = new List<(Gi.World.SourceId Id, OracleSource Source)>();
+        var live = new List<(World.SourceId Id, OracleSource Source)>();
         var palette = new List<(OracleSource Shape, byte Stamp)>();
         for (var i = 0; i < 21; i++)
         {
@@ -244,23 +267,26 @@ internal static partial class Verification
             return shape with
             {
                 X = (float)(rng.NextDouble() * 148 - 10), Y = (float)(rng.NextDouble() * 148 - 10),
-                Gain = rng.Next(-16, 17), Radians = TurnedRadians(rng, shape.Kind), Scale = rng.Next(4) == 0 ? 256 : rng.Next(256, 640),
+                Gain = rng.Next(-16, 17), Radians = TurnedRadians(rng, shape.Kind),
+                Scale = rng.Next(4) == 0 ? 256 : rng.Next(256, 640)
             };
         }
 
         void Add(OracleSource s)
         {
-            var id = Gi.World.Place(w, l, s.X, s.Y, palette.First(p => p.Shape.Kind == s.Kind && p.Shape.Width == s.Width &&
-                p.Shape.Height == s.Height && p.Shape.Value == s.Value && p.Shape.ArcDegrees == s.ArcDegrees && p.Shape.Samples == s.Samples).Stamp, (sbyte)s.Gain);
-            Gi.World.Turn(w, id, s.Radians);
-            Gi.World.Scale(w, id, s.Scale / 256f);
+            var id = World.Place(w, l, s.X, s.Y, palette.First(p =>
+                p.Shape.Kind == s.Kind && p.Shape.Width == s.Width &&
+                p.Shape.Height == s.Height && p.Shape.Value == s.Value && p.Shape.ArcDegrees == s.ArcDegrees &&
+                p.Shape.Samples == s.Samples).Stamp, (sbyte)s.Gain);
+            World.Turn(w, id, s.Radians);
+            World.Scale(w, id, s.Scale / 256f);
             live.Add((id, s));
         }
 
         for (var i = 0; i < 30; i++) Add(Pick());
         for (var round = 0; round < 3; round++)
         {
-            Gi.World.Process(w);
+            World.Process(w);
             foreach (var g in grids)
             {
                 var expected = OracleField(live.Select(e => e.Source), g);
@@ -268,7 +294,8 @@ internal static partial class Verification
                 for (var c = 0; c < expected.Length; c++)
                     if (actual[c] != expected[c])
                     {
-                        Console.WriteLine($"  shape mismatch round {round} grid {g.Id} cell ({c % g.Cells},{c / g.Cells}): {actual[c]} vs {expected[c]}");
+                        Console.WriteLine(
+                            $"  shape mismatch round {round} grid {g.Id} cell ({c % g.Cells},{c / g.Cells}): {actual[c]} vs {expected[c]}");
                         return false;
                     }
             }
@@ -280,35 +307,38 @@ internal static partial class Verification
                 switch (rng.Next(5))
                 {
                     case 0:
-                        Gi.World.Remove(w, id);
+                        World.Remove(w, id);
                         live.RemoveAt(index);
                         Add(Pick());
                         break;
                     case 1:
                     {
                         var turned = s with { Radians = TurnedRadians(rng, s.Kind) };
-                        Gi.World.Turn(w, id, turned.Radians);
+                        World.Turn(w, id, turned.Radians);
                         live[index] = (id, turned);
                         break;
                     }
                     case 2:
                     {
                         var scaled = s with { Scale = rng.Next(256, 768) };
-                        Gi.World.Scale(w, id, scaled.Scale / 256f);
+                        World.Scale(w, id, scaled.Scale / 256f);
                         live[index] = (id, scaled);
                         break;
                     }
                     case 3:
                     {
-                        var moved = s with { X = (float)(rng.NextDouble() * 140 - 6), Y = (float)(rng.NextDouble() * 140 - 6) };
-                        Gi.World.Move(w, id, moved.X, moved.Y);
+                        var moved = s with
+                        {
+                            X = (float)(rng.NextDouble() * 140 - 6), Y = (float)(rng.NextDouble() * 140 - 6)
+                        };
+                        World.Move(w, id, moved.X, moved.Y);
                         live[index] = (id, moved);
                         break;
                     }
                     default:
                     {
                         var gained = s with { Gain = rng.Next(-16, 17) };
-                        Gi.World.SetGain(w, id, (sbyte)gained.Gain);
+                        World.SetGain(w, id, (sbyte)gained.Gain);
                         live[index] = (id, gained);
                         break;
                     }
@@ -322,57 +352,59 @@ internal static partial class Verification
     private static bool ReleaseStamps(byte w, IEnumerable<byte> stamps)
     {
         var held = stamps.Distinct().ToArray();
-        Gi.World.Clear(w);
+        World.Clear(w);
         foreach (var stamp in held)
-            if (!Gi.Stamp.Free(stamp))
+            if (!Stamp.Free(stamp))
             {
                 Console.WriteLine($"  stamp {stamp} did not free after Clear");
                 return false;
             }
 
-        return !Gi.Stamp.Free(held[0]);
+        return !Stamp.Free(held[0]);
     }
 
     private static bool RoundKernelsShareBoxUnitsAndCentre()
     {
-        var w = Gi.World.New();
-        var g = Gi.Grid.New(w, 9, 0f, 0f, 512f);
-        var l = Gi.Layer.New(w);
+        var w = World.New();
+        var g = Grid.New(w, 9, 0f, 0f, 512f);
+        var l = Layer.New(w);
         foreach (var radius in new ushort[] { 1, 2, 3, 7, 16, 41, 90, 128 })
-        foreach (var make in new Func<ushort, sbyte, byte>[] { (r, v) => Gi.Stamp.Disk(r, v), (r, v) => Gi.Stamp.Cone(r, v), (r, v) => Gi.Stamp.Dome(r, v) })
+        foreach (var make in new Func<ushort, sbyte, byte>[]
+                     { (r, v) => Stamp.Disk(r, v), (r, v) => Stamp.Cone(r, v), (r, v) => Stamp.Dome(r, v) })
         {
             var stamp = make(radius, 90);
-            if (!RoundKernelHoldsCentre(w, g, l, stamp, radius) || !Gi.Stamp.Free(stamp)) return false;
+            if (!RoundKernelHoldsCentre(w, g, l, stamp, radius) || !Stamp.Free(stamp)) return false;
         }
 
-        return Gi.World.Query(w, g, l, 0, 0, 512, 512) == 0;
+        return World.Query(w, g, l, 0, 0, 512, 512) == 0;
     }
 
     private static bool RoundKernelHoldsCentre(byte w, byte g, byte l, byte stamp, int radius)
     {
         foreach (var gain in new sbyte[] { 16, -7 })
         {
-            var id = Gi.World.Place(w, l, 256.5f, 256.5f, stamp, gain);
-            Gi.World.Process(w);
-            var centre = Gi.World.Query(w, g, l, 256, 256);
+            var id = World.Place(w, l, 256.5f, 256.5f, stamp, gain);
+            World.Process(w);
+            var centre = World.Query(w, g, l, 256, 256);
             if (centre != 90 * gain) return Fail(radius, gain, stamp, centre);
             var support = 0;
             for (var d = 0; d <= radius + 2; d++)
             {
-                var right = Gi.World.Query(w, g, l, 256 + d, 256);
-                if (right != Gi.World.Query(w, g, l, 256 - d, 256) || right != Gi.World.Query(w, g, l, 256, 256 + d) ||
-                    right != Gi.World.Query(w, g, l, 256, 256 - d)) return Fail(radius, gain, stamp, d);
+                var right = World.Query(w, g, l, 256 + d, 256);
+                if (right != World.Query(w, g, l, 256 - d, 256) || right != World.Query(w, g, l, 256, 256 + d) ||
+                    right != World.Query(w, g, l, 256, 256 - d)) return Fail(radius, gain, stamp, d);
                 if (Math.Abs(right) > Math.Abs(centre)) return Fail(radius, gain, stamp, right);
-                if (d > 0 && Math.Abs(right) > Math.Abs(Gi.World.Query(w, g, l, 256 + d - 1, 256))) return Fail(radius, gain, stamp, -d);
+                if (d > 0 && Math.Abs(right) > Math.Abs(World.Query(w, g, l, 256 + d - 1, 256)))
+                    return Fail(radius, gain, stamp, -d);
                 if (right != 0) support = d;
             }
 
             for (var d = 1; d < radius; d++)
-                if (Gi.World.Query(w, g, l, 256 + d, 256 + d) != Gi.World.Query(w, g, l, 256 - d, 256 - d))
+                if (World.Query(w, g, l, 256 + d, 256 + d) != World.Query(w, g, l, 256 - d, 256 - d))
                     return Fail(radius, gain, stamp, -100 - d);
             if (support > radius) return Fail(radius, gain, stamp, support);
-            Gi.World.Remove(w, id);
-            Gi.World.Process(w);
+            World.Remove(w, id);
+            World.Process(w);
         }
 
         return true;
@@ -380,38 +412,39 @@ internal static partial class Verification
 
     private static bool StampsTurnAndScaleSmoothly()
     {
-        var w = Gi.World.New();
-        var g = Gi.Grid.New(w, 8, 0f, 0f, 256f);
-        var l = Gi.Layer.New(w);
+        var w = World.New();
+        var g = Grid.New(w, 8, 0f, 0f, 256f);
+        var l = Layer.New(w);
         var samples = new sbyte[20 * 12];
         for (var y = 0; y < 12; y++)
         for (var x = 0; x < 20; x++)
             samples[y * 20 + x] = (sbyte)(60 + 40 * Math.Sin(x * 0.4) * Math.Cos(y * 0.5));
         var stamps = new (byte Stamp, double Slope, double Radius)[]
         {
-            (Gi.Stamp.Box(24, 10, 100), 100, 14),
-            (Gi.Stamp.Tent(24, 16, 100), 100.0 / 8, 15),
-            (Gi.Stamp.Bell(24, 16, 100), 200.0 / 8, 15),
-            (Gi.Stamp.New(samples, 20, 12), 100, 12),
-            (Gi.Stamp.Disk(12, 100, 90), 100, 13),
-            (Gi.Stamp.Cone(14, 100, 120), 100, 15),
-            (Gi.Stamp.Dome(14, 100, 60), 100, 15),
+            (Stamp.Box(24, 10, 100), 100, 14),
+            (Stamp.Tent(24, 16, 100), 100.0 / 8, 15),
+            (Stamp.Bell(24, 16, 100), 200.0 / 8, 15),
+            (Stamp.New(samples, 20, 12), 100, 12),
+            (Stamp.Disk(12, 100, 90), 100, 13),
+            (Stamp.Cone(14, 100, 120), 100, 15),
+            (Stamp.Dome(14, 100, 60), 100, 15)
         };
         const int steps = 256;
         foreach (var (stamp, slope, radius) in stamps)
         {
-            var id = Gi.World.Place(w, l, 128.3f, 127.6f, stamp, 1);
-            Gi.World.Turn(w, id, 0.001f);
-            Gi.World.Process(w);
+            var id = World.Place(w, l, 128.3f, 127.6f, stamp, 1);
+            World.Turn(w, id, 0.001f);
+            World.Process(w);
             var previous = Read(w, g, l, 256);
             var turnBound = (int)Math.Ceiling(slope * radius * 1.5 * (2 * Math.PI / steps)) + 2;
             for (var step = 1; step <= steps; step++)
             {
-                Gi.World.Turn(w, id, (float)(step * 2 * Math.PI / steps) + 0.001f);
-                Gi.World.Process(w);
+                World.Turn(w, id, (float)(step * 2 * Math.PI / steps) + 0.001f);
+                World.Process(w);
                 var field = Read(w, g, l, 256);
                 for (var c = 0; c < field.Length; c++)
-                    if (Math.Abs(field[c] - previous[c]) > turnBound) return Fail(stamp, step, field[c] - previous[c], turnBound);
+                    if (Math.Abs(field[c] - previous[c]) > turnBound)
+                        return Fail(stamp, step, field[c] - previous[c], turnBound);
                 previous = field;
             }
 
@@ -419,16 +452,17 @@ internal static partial class Verification
             var scaleBound = (int)Math.Ceiling(slope * radius * 2 * 1.5 / scaleSteps) + 2;
             for (var step = 1; step <= scaleSteps; step++)
             {
-                Gi.World.Scale(w, id, 1f + (float)step / scaleSteps);
-                Gi.World.Process(w);
+                World.Scale(w, id, 1f + (float)step / scaleSteps);
+                World.Process(w);
                 var field = Read(w, g, l, 256);
                 for (var c = 0; c < field.Length; c++)
-                    if (Math.Abs(field[c] - previous[c]) > scaleBound) return Fail(stamp, 1000 + step, field[c] - previous[c], scaleBound);
+                    if (Math.Abs(field[c] - previous[c]) > scaleBound)
+                        return Fail(stamp, 1000 + step, field[c] - previous[c], scaleBound);
                 previous = field;
             }
 
-            Gi.World.Remove(w, id);
-            Gi.World.Process(w);
+            World.Remove(w, id);
+            World.Process(w);
         }
 
         return ReleaseStamps(w, stamps.Select(s => s.Stamp));
@@ -442,116 +476,118 @@ internal static partial class Verification
 
     private static bool TurnAndScaleRoundTripExactly()
     {
-        var w = Gi.World.New();
-        var g = Gi.Grid.New(w, 8, 0f, 0f, 256f);
-        var l = Gi.Layer.New(w);
+        var w = World.New();
+        var g = Grid.New(w, 8, 0f, 0f, 256f);
+        var l = Layer.New(w);
         var samples = new sbyte[9 * 7];
         for (var i = 0; i < samples.Length; i++) samples[i] = (sbyte)(i * 13 % 70 - 20);
-        byte[] stamps = [Gi.Stamp.Box(14, 9, 70), Gi.Stamp.Tent(17, 11, 80), Gi.Stamp.Bell(13, 19, 60), Gi.Stamp.New(samples, 9, 7)];
-        var ids = new Gi.World.SourceId[stamps.Length * 6];
+        byte[] stamps =
+            [Stamp.Box(14, 9, 70), Stamp.Tent(17, 11, 80), Stamp.Bell(13, 19, 60), Stamp.New(samples, 9, 7)];
+        var ids = new World.SourceId[stamps.Length * 6];
         for (var i = 0; i < ids.Length; i++)
-            ids[i] = Gi.World.Place(w, l, 20f + i * 9.3f, 30f + i * 7.1f, stamps[i % stamps.Length], (sbyte)(5 + i % 4));
-        Gi.World.Process(w);
+            ids[i] = World.Place(w, l, 20f + i * 9.3f, 30f + i * 7.1f, stamps[i % stamps.Length], (sbyte)(5 + i % 4));
+        World.Process(w);
         var baseline = Read(w, g, l, 256);
         for (var i = 0; i < ids.Length; i++)
         {
-            Gi.World.Turn(w, ids[i], 0.3f + i);
-            Gi.World.Scale(w, ids[i], 0.5f + i * 0.1f);
+            World.Turn(w, ids[i], 0.3f + i);
+            World.Scale(w, ids[i], 0.5f + i * 0.1f);
         }
 
-        Gi.World.Process(w);
+        World.Process(w);
         if (Read(w, g, l, 256).AsSpan().SequenceEqual(baseline)) return false;
         for (var i = 0; i < ids.Length; i++)
         {
-            Gi.World.Turn(w, ids[i], (float)(2 * Math.PI * (i % 3)));
-            Gi.World.Scale(w, ids[i], 1f);
+            World.Turn(w, ids[i], (float)(2 * Math.PI * (i % 3)));
+            World.Scale(w, ids[i], 1f);
         }
 
-        Gi.World.Process(w);
+        World.Process(w);
         if (!Read(w, g, l, 256).AsSpan().SequenceEqual(baseline)) return false;
 
-        byte[] small = [Gi.Stamp.Box(8, 8, 50), Gi.Stamp.Tent(8, 6, 50), Gi.Stamp.Disk(4, 50)];
-        var box = Gi.World.Place(w, l, 100.25f, 100.75f, small[0], 3);
-        var tent = Gi.World.Place(w, l, 150.5f, 60.5f, small[1], 3);
-        var disk = Gi.World.Place(w, l, 60.5f, 160.5f, small[2], 3);
+        byte[] small = [Stamp.Box(8, 8, 50), Stamp.Tent(8, 6, 50), Stamp.Disk(4, 50)];
+        var box = World.Place(w, l, 100.25f, 100.75f, small[0], 3);
+        var tent = World.Place(w, l, 150.5f, 60.5f, small[1], 3);
+        var disk = World.Place(w, l, 60.5f, 160.5f, small[2], 3);
         stamps = [.. stamps, .. small];
-        Gi.World.Scale(w, box, 2f);
-        Gi.World.Scale(w, tent, 2f);
-        Gi.World.Scale(w, disk, 2f);
-        Gi.World.Process(w);
+        World.Scale(w, box, 2f);
+        World.Scale(w, tent, 2f);
+        World.Scale(w, disk, 2f);
+        World.Process(w);
         var scaled = Read(w, g, l, 256);
-        Gi.World.Remove(w, box);
-        Gi.World.Remove(w, tent);
-        Gi.World.Remove(w, disk);
-        byte[] resized = [Gi.Stamp.Box(16, 16, 50), Gi.Stamp.Tent(16, 12, 50), Gi.Stamp.Disk(8, 50)];
-        Gi.World.Place(w, l, 100.25f, 100.75f, resized[0], 3);
-        Gi.World.Place(w, l, 150.5f, 60.5f, resized[1], 3);
-        Gi.World.Place(w, l, 60.5f, 160.5f, resized[2], 3);
-        Gi.World.Process(w);
+        World.Remove(w, box);
+        World.Remove(w, tent);
+        World.Remove(w, disk);
+        byte[] resized = [Stamp.Box(16, 16, 50), Stamp.Tent(16, 12, 50), Stamp.Disk(8, 50)];
+        World.Place(w, l, 100.25f, 100.75f, resized[0], 3);
+        World.Place(w, l, 150.5f, 60.5f, resized[1], 3);
+        World.Place(w, l, 60.5f, 160.5f, resized[2], 3);
+        World.Process(w);
         return Read(w, g, l, 256).AsSpan().SequenceEqual(scaled) && ReleaseStamps(w, stamps.Concat(resized));
     }
 
     private static bool StampsWiderThanGridCoverIt()
     {
-        var w = Gi.World.New();
-        var g = Gi.Grid.New(w, 5, 0f, 0f, 32f);
-        var l = Gi.Layer.New(w);
-        var wide = Gi.Stamp.Box(64, 64, 40);
-        var id = Gi.World.Place(w, l, 4f, 28f, wide, 2);
-        Gi.World.Process(w);
-        if (Gi.World.Query(w, g, l, 0, 0, 32, 32) != 32 * 32 * 80) return false;
-        Gi.World.Scale(w, id, 6f);
-        Gi.World.Move(w, id, 100f, -100f);
-        Gi.World.Process(w);
-        if (Gi.World.Query(w, g, l, 0, 0, 32, 32) != 32 * 32 * 80) return false;
-        Gi.World.Remove(w, id);
+        var w = World.New();
+        var g = Grid.New(w, 5, 0f, 0f, 32f);
+        var l = Layer.New(w);
+        var wide = Stamp.Box(64, 64, 40);
+        var id = World.Place(w, l, 4f, 28f, wide, 2);
+        World.Process(w);
+        if (World.Query(w, g, l, 0, 0, 32, 32) != 32 * 32 * 80) return false;
+        World.Scale(w, id, 6f);
+        World.Move(w, id, 100f, -100f);
+        World.Process(w);
+        if (World.Query(w, g, l, 0, 0, 32, 32) != 32 * 32 * 80) return false;
+        World.Remove(w, id);
         var samples = new sbyte[48 * 48];
         Array.Fill(samples, (sbyte)30);
         samples[0] = 31;
-        var sheet = Gi.Stamp.New(samples, 48, 48);
-        var raster = Gi.World.Place(w, l, 16f, 16f, sheet, 1);
-        Gi.World.Process(w);
+        var sheet = Stamp.New(samples, 48, 48);
+        var raster = World.Place(w, l, 16f, 16f, sheet, 1);
+        World.Process(w);
         for (var y = 0; y < 32; y++)
         for (var x = 0; x < 32; x++)
-            if (Gi.World.Query(w, g, l, x, y) != 30) return false;
-        Gi.World.Remove(w, raster);
-        Gi.World.Process(w);
-        return Gi.World.Query(w, g, l, 0, 0, 32, 32) == 0 && ReleaseStamps(w, [wide, sheet]);
+            if (World.Query(w, g, l, x, y) != 30)
+                return false;
+        World.Remove(w, raster);
+        World.Process(w);
+        return World.Query(w, g, l, 0, 0, 32, 32) == 0 && ReleaseStamps(w, [wide, sheet]);
     }
 
     private static bool TurnedExcludeMatchesRemoval()
     {
-        var w = Gi.World.New();
-        Gi.Grid.New(w, 8, 0f, 0f, 256f);
-        Gi.Grid.New(w, 7, 0f, 0f, 256f);
-        Gi.Grid.New(w, 10, 64f, 64f, 128f);
-        var l = Gi.Layer.New(w);
-        var mix = Gi.Layer.Sum(w, l, 2);
+        var w = World.New();
+        Grid.New(w, 8, 0f, 0f, 256f);
+        Grid.New(w, 7, 0f, 0f, 256f);
+        Grid.New(w, 10, 64f, 64f, 128f);
+        var l = Layer.New(w);
+        var mix = Layer.Sum(w, l, 2);
         var rng = new Random(1313);
         var palette = new List<byte>();
         for (var i = 0; i < 14; i++) palette.Add(ShapeStamp(RandomShape(rng, i % 7, 256f)));
-        var dome = Gi.Stamp.Dome(9, 120);
+        var dome = Stamp.Dome(9, 120);
         palette.Add(dome);
-        var ids = new List<Gi.World.SourceId>();
+        var ids = new List<World.SourceId>();
         for (var i = 0; i < 160; i++)
         {
             var s = RandomShape(rng, i % 7, 256f);
-            var id = Gi.World.Place(w, l, s.X, s.Y, palette[i % 14], (sbyte)s.Gain);
-            if (i % 5 != 0) Gi.World.Turn(w, id, s.Radians);
-            Gi.World.Scale(w, id, s.Scale / 256f);
+            var id = World.Place(w, l, s.X, s.Y, palette[i % 14], (sbyte)s.Gain);
+            if (i % 5 != 0) World.Turn(w, id, s.Radians);
+            World.Scale(w, id, s.Scale / 256f);
             ids.Add(id);
         }
 
-        var pile = new List<Gi.World.SourceId>();
+        var pile = new List<World.SourceId>();
         for (var i = 0; i < 30; i++)
         {
-            var id = Gi.World.Place(w, l, 120.3f, 90.6f, dome, 16);
-            Gi.World.Turn(w, id, i * 0.2f);
+            var id = World.Place(w, l, 120.3f, 90.6f, dome, 16);
+            World.Turn(w, id, i * 0.2f);
             pile.Add(id);
         }
 
         ids.AddRange(pile);
-        Gi.World.Process(w);
+        World.Process(w);
         byte[] layers = [l, mix];
         for (var trial = 0; trial < 50; trial++)
         {
@@ -560,35 +596,37 @@ internal static partial class Verification
             var ay = trial < 6 ? 90.6f : (float)(rng.NextDouble() * 256);
             var points = new (float x, float y, float r)[10];
             for (var p = 0; p < points.Length; p++)
-                points[p] = (ax + (float)(rng.NextDouble() * 24 - 12), ay + (float)(rng.NextDouble() * 24 - 12), (float)(rng.NextDouble() * 20));
+                points[p] = (ax + (float)(rng.NextDouble() * 24 - 12), ay + (float)(rng.NextDouble() * 24 - 12),
+                    (float)(rng.NextDouble() * 20));
             var excluded = new (short v, long a, float gx, float gy)[layers.Length, points.Length];
             for (var k = 0; k < layers.Length; k++)
             for (var p = 0; p < points.Length; p++)
             {
-                Gi.World.TrySense(w, layers[k], points[p].x, points[p].y, id, out var v);
-                Gi.World.TrySenseArea(w, layers[k], points[p].x, points[p].y, points[p].r, id, out var a);
-                Gi.World.TrySenseGradient(w, layers[k], points[p].x, points[p].y, id, out var gx, out var gy);
+                World.TrySense(w, layers[k], points[p].x, points[p].y, id, out var v);
+                World.TrySenseArea(w, layers[k], points[p].x, points[p].y, points[p].r, id, out var a);
+                World.TrySenseGradient(w, layers[k], points[p].x, points[p].y, id, out var gx, out var gy);
                 excluded[k, p] = (v, a, gx, gy);
             }
 
-            Gi.World.Record(w);
-            Gi.World.Remove(w, id);
-            Gi.World.Process(w);
+            World.Record(w);
+            World.Remove(w, id);
+            World.Process(w);
             for (var k = 0; k < layers.Length; k++)
             for (var p = 0; p < points.Length; p++)
             {
-                Gi.World.TrySense(w, layers[k], points[p].x, points[p].y, out var v);
-                Gi.World.TrySenseArea(w, layers[k], points[p].x, points[p].y, points[p].r, out var a);
-                Gi.World.TrySenseGradient(w, layers[k], points[p].x, points[p].y, out var gx, out var gy);
+                World.TrySense(w, layers[k], points[p].x, points[p].y, out var v);
+                World.TrySenseArea(w, layers[k], points[p].x, points[p].y, points[p].r, out var a);
+                World.TrySenseGradient(w, layers[k], points[p].x, points[p].y, out var gx, out var gy);
                 if ((v, a, gx, gy) != excluded[k, p])
                 {
-                    Console.WriteLine($"  turned exclusion trial {trial} layer {layers[k]} point {p}: {(v, a, gx, gy)} vs {excluded[k, p]}");
+                    Console.WriteLine(
+                        $"  turned exclusion trial {trial} layer {layers[k]} point {p}: {(v, a, gx, gy)} vs {excluded[k, p]}");
                     return false;
                 }
             }
 
-            Gi.World.Rewind(w);
-            Gi.World.Process(w);
+            World.Rewind(w);
+            World.Process(w);
         }
 
         return ReleaseStamps(w, palette);
@@ -596,22 +634,28 @@ internal static partial class Verification
 
     private static bool WarmTurnedProcessAllocationFree()
     {
-        var w = Gi.World.New();
-        Gi.Grid.New(w, 9, 0f, 0f, 512f);
-        var l = Gi.Layer.New(w);
-        byte[] stamps = [Gi.Stamp.Box(12, 6, 50), Gi.Stamp.Tent(16, 10, 60), Gi.Stamp.Cone(10, 70, 90), Gi.Stamp.Dome(8, 60), Gi.Stamp.Disk(6, 40, 200)];
-        var ids = new Gi.World.SourceId[200];
-        for (var i = 0; i < ids.Length; i++) ids[i] = Gi.World.Place(w, l, i * 2.3f % 500f, i * 4.7f % 500f, stamps[i % stamps.Length], 4);
+        var w = World.New();
+        Grid.New(w, 9, 0f, 0f, 512f);
+        var l = Layer.New(w);
+        byte[] stamps =
+        [
+            Stamp.Box(12, 6, 50), Stamp.Tent(16, 10, 60), Stamp.Cone(10, 70, 90), Stamp.Dome(8, 60),
+            Stamp.Disk(6, 40, 200)
+        ];
+        var ids = new World.SourceId[200];
+        for (var i = 0; i < ids.Length; i++)
+            ids[i] = World.Place(w, l, i * 2.3f % 500f, i * 4.7f % 500f, stamps[i % stamps.Length], 4);
+
         void Frame(int f)
         {
             for (var i = 0; i < ids.Length; i++)
             {
-                Gi.World.Turn(w, ids[i], f * 0.05f + i);
-                if (i % 3 == 0) Gi.World.Scale(w, ids[i], 1f + (f + i) % 8 / 8f);
-                if (i % 2 == 0) Gi.World.Move(w, ids[i], (i * 2.3f + f * 0.4f) % 500f, i * 4.7f % 500f);
+                World.Turn(w, ids[i], f * 0.05f + i);
+                if (i % 3 == 0) World.Scale(w, ids[i], 1f + (f + i) % 8 / 8f);
+                if (i % 2 == 0) World.Move(w, ids[i], (i * 2.3f + f * 0.4f) % 500f, i * 4.7f % 500f);
             }
 
-            Gi.World.Process(w);
+            World.Process(w);
         }
 
         for (var f = 0; f < 32; f++) Frame(f);
@@ -620,5 +664,22 @@ internal static partial class Verification
         var bytes = GC.GetAllocatedBytesForCurrentThread() - before;
         Console.WriteLine($"  warm turn/scale/move process over 64 frames: {bytes} B");
         return bytes == 0 && ReleaseStamps(w, stamps);
+    }
+
+    private sealed record OracleSource(
+        int Kind,
+        float X,
+        float Y,
+        int Width,
+        int Height,
+        sbyte Value,
+        int Gain,
+        float Radians,
+        int Scale,
+        int ArcDegrees,
+        sbyte[]? Samples)
+    {
+        public int Angle => SpecAngle(Radians);
+        public int Arc => ArcDegrees >= 360 ? 0 : ArcDegrees * 32768 / 360;
     }
 }

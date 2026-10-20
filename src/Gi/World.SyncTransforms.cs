@@ -2,25 +2,13 @@ namespace Gi;
 
 public static unsafe partial class World
 {
-    public struct TransformRange
-    {
-        public SourceId* Sources;
-        public float* Xs;
-        public float* Ys;
-        public float* Headings;
-        public float* Scales;
-        public ulong* Invalid;
-        public int Count;
-        public int InvalidWords;
-    }
-
     public static BatchStatus SyncTransforms(Token token, ReadOnlySpan<TransformRange> ranges)
     {
         var status = ValidateToken(token, out var context);
         return status != BatchStatus.Applied ? status : SyncTransformRanges(context, ranges);
     }
 
-    internal static BatchStatus SyncTransformRanges(WorldCtx* context, ReadOnlySpan<TransformRange> ranges)
+    private static BatchStatus SyncTransformRanges(WorldCtx* context, ReadOnlySpan<TransformRange> ranges)
     {
         long totalRows = 0;
         for (var index = 0; index < ranges.Length; index++)
@@ -109,5 +97,17 @@ public static unsafe partial class World
                     WriteScale(context, source, slot, QuantizeScale(scales[i]));
             }
         }
+    }
+
+    public struct TransformRange
+    {
+        public SourceId* Sources;
+        public float* Xs;
+        public float* Ys;
+        public float* Headings;
+        public float* Scales;
+        public ulong* Invalid;
+        public int Count;
+        public int InvalidWords;
     }
 }

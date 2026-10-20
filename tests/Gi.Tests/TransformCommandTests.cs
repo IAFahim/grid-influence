@@ -4,10 +4,10 @@ namespace Gi.Tests;
 
 public sealed class TransformCommandTests : IDisposable
 {
-    private readonly byte _world = World.New();
     private readonly byte _grid;
     private readonly byte _layer;
     private readonly byte _stamp;
+    private readonly byte _world = World.New();
 
     public TransformCommandTests()
     {
@@ -64,7 +64,7 @@ public sealed class TransformCommandTests : IDisposable
                 (12.5f, 14.5f, 0.25f + 2f * MathF.PI, 1f),
                 (12.5f, 14.5f, -0.75f, 0.001f),
                 (30.25f, 30.25f, float.PositiveInfinity, 300f),
-                (30.25f, 30.25f, 1.5f, 2f),
+                (30.25f, 30.25f, 1.5f, 2f)
             };
             for (var index = 0; index < cases.Length; index++)
             {
@@ -108,7 +108,7 @@ public sealed class TransformCommandTests : IDisposable
         {
             World.SourceCommand.UpdateTransform(source, 10.5f, 10.5f, 0.5f, 1.5f),
             World.SourceCommand.UpdateTransform(source, 10.5f, 10.5f, float.NaN, float.NaN),
-            World.SourceCommand.UpdateTransform(zero, -0.0f, 20.5f, 0f, 1f),
+            World.SourceCommand.UpdateTransform(zero, -0.0f, 20.5f, 0f, 1f)
         };
         var results = new World.SourceResult[3];
         Assert.Equal(World.BatchStatus.Applied, World.ApplyBatch(_world, commands, results));
@@ -134,12 +134,12 @@ public sealed class TransformCommandTests : IDisposable
             World.ApplyBatch(_world, new[]
             {
                 World.SourceCommand.Fade(source, 0, 8),
-                World.SourceCommand.Expire(source, 12),
+                World.SourceCommand.Expire(source, 12)
             }, new World.SourceResult[2]);
             World.ApplyBatch(twin, new[]
             {
                 World.SourceCommand.Fade(twinSource, 0, 8),
-                World.SourceCommand.Expire(twinSource, 12),
+                World.SourceCommand.Expire(twinSource, 12)
             }, new World.SourceResult[2]);
             World.Process(_world);
             World.Process(twin);
@@ -147,10 +147,10 @@ public sealed class TransformCommandTests : IDisposable
             for (var tick = 0; tick < 14; tick++)
             {
                 var x = 8.5f + tick * 1.25f;
-                var y = 8.5f + (tick % 3) * 2.5f;
+                var y = 8.5f + tick % 3 * 2.5f;
                 var commands = new[]
                 {
-                    World.SourceCommand.UpdateTransform(source, x, y, 0.25f * tick, 1f + tick * 0.1f),
+                    World.SourceCommand.UpdateTransform(source, x, y, 0.25f * tick, 1f + tick * 0.1f)
                 };
                 var results = new World.SourceResult[1];
                 if (tick != 9)
@@ -185,7 +185,7 @@ public sealed class TransformCommandTests : IDisposable
 
         World.ApplyBatch(_world, new[]
         {
-            World.SourceCommand.UpdateTransform(source, 12.5f, 12.5f, 0f, 1f),
+            World.SourceCommand.UpdateTransform(source, 12.5f, 12.5f, 0f, 1f)
         }, new World.SourceResult[1]);
         World.Process(_world);
         var fadedSum = World.Query(_world, _grid, _layer, 0, 0, 64, 64);
@@ -194,7 +194,7 @@ public sealed class TransformCommandTests : IDisposable
         World.ApplyBatch(_world, new[]
         {
             World.SourceCommand.UpdateTransform(source, 14.5f, 14.5f, 0f, 1f),
-            World.SourceCommand.SetGain(source, 6),
+            World.SourceCommand.SetGain(source, 6)
         }, new World.SourceResult[2]);
         World.Process(_world);
         var heldSum = World.Query(_world, _grid, _layer, 0, 0, 64, 64);
@@ -203,7 +203,7 @@ public sealed class TransformCommandTests : IDisposable
 
         World.ApplyBatch(_world, new[]
         {
-            World.SourceCommand.Update(source, 16.5f, 16.5f, 0f, 1f, 5),
+            World.SourceCommand.Update(source, 16.5f, 16.5f, 0f, 1f, 5)
         }, new World.SourceResult[1]);
         World.Process(_world);
         var updatedSum = World.Query(_world, _grid, _layer, 0, 0, 64, 64);
@@ -243,7 +243,7 @@ public sealed class TransformCommandTests : IDisposable
                 var row = index / 63 % 60;
                 var y = 1f + row;
                 commands[index] = World.SourceCommand.UpdateTransform(
-                    sources[index], x, y, 0.25f * (index % 4), 1f + (index % 5) * 0.25f);
+                    sources[index], x, y, 0.25f * (index % 4), 1f + index % 5 * 0.25f);
             }
 
             Assert.Equal(World.BatchStatus.Applied, World.ApplyBatch(_world, commands, results));
@@ -255,7 +255,7 @@ public sealed class TransformCommandTests : IDisposable
                 var row = index / 63 % 60;
                 World.Move(twin, twinSources[index], x, 1f + row);
                 World.Turn(twin, twinSources[index], 0.25f * (index % 4));
-                World.Scale(twin, twinSources[index], 1f + (index % 5) * 0.25f);
+                World.Scale(twin, twinSources[index], 1f + index % 5 * 0.25f);
             }
 
             World.Process(twin);
@@ -291,7 +291,7 @@ public sealed class TransformCommandTests : IDisposable
             World.SourceCommand.UpdateTransform(stale, 1.5f, 1.5f, 0f, 1f),
             World.SourceCommand.Fade(World.SourceTarget.CreatedBy(0), 0, 6),
             World.SourceCommand.Remove(other),
-            World.SourceCommand.UpdateTransform(other, 20.5f, 20.5f, 0f, 1f),
+            World.SourceCommand.UpdateTransform(other, 20.5f, 20.5f, 0f, 1f)
         };
         var results = new World.SourceResult[7];
         Assert.Equal(World.BatchStatus.Applied, World.ApplyBatch(_world, commands, results));

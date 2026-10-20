@@ -65,17 +65,19 @@ internal sealed unsafe class FloorQuantizeSuite : FloorSuite
     private const float OriginY = 0f;
     private const int Block = 32768;
     private const int Repeats = 30;
+
     private static readonly float[] EdgeValues =
     [
         0f, -0.0f, -1e-6f, 31.999998f, 32f, 1023.99994f, 1024f, -0.0001f,
-        1023.5f, 0.5f, 511.99997f, 512f, 31.5f, 1000f, -16f, 1039.99f,
+        1023.5f, 0.5f, 511.99997f, 512f, 31.5f, 1000f, -16f, 1039.99f
     ];
+
+    private readonly FloorCase[] _cases;
+    private readonly int* _expected;
+    private readonly int* _output;
 
     private readonly float* _xs;
     private readonly float* _ys;
-    private readonly int* _output;
-    private readonly int* _expected;
-    private readonly FloorCase[] _cases;
 
     public FloorQuantizeSuite()
     {
@@ -110,13 +112,14 @@ internal sealed unsafe class FloorQuantizeSuite : FloorSuite
             new FloorCase("P1", "quantize-L2-resident", Block * Repeats,
                 () =>
                 {
-                    for (var r = 0; r < Repeats; r++) FloorQuantizeKernel.Run(_xs, _ys, _output, Block, OriginX, OriginY);
+                    for (var r = 0; r < Repeats; r++)
+                        FloorQuantizeKernel.Run(_xs, _ys, _output, Block, OriginX, OriginY);
                 },
                 () =>
                 {
                     FloorQuantizeKernel.Run(_xs, _ys, _output, Block, OriginX, OriginY);
                     return FloorHash.Of(_output, Block);
-                }),
+                })
         ];
     }
 
@@ -128,12 +131,16 @@ internal sealed unsafe class FloorQuantizeSuite : FloorSuite
     {
         const int count = FloorShape.Splats;
         var outside = 0;
-        for (var i = 0; i < count; i++) if (_expected[i] < 0) outside++;
-        receipts.Check("floor-p1-reference-has-inside-and-outside-cells", outside > count / 100 && outside < count / 10);
+        for (var i = 0; i < count; i++)
+            if (_expected[i] < 0)
+                outside++;
+        receipts.Check("floor-p1-reference-has-inside-and-outside-cells",
+            outside > count / 100 && outside < count / 10);
 
         new Span<int>(_output, count).Clear();
         FloorQuantizeKernel.RunScalar(_xs, _ys, _output, 0, count, OriginX, OriginY);
-        receipts.Check("floor-p1-scalar-matches-reference", new ReadOnlySpan<int>(_output, count).SequenceEqual(new ReadOnlySpan<int>(_expected, count)));
+        receipts.Check("floor-p1-scalar-matches-reference",
+            new ReadOnlySpan<int>(_output, count).SequenceEqual(new ReadOnlySpan<int>(_expected, count)));
 
         new Span<int>(_output, count).Clear();
         FloorQuantizeKernel.Run(_xs, _ys, _output, Block, OriginX, OriginY);
@@ -149,6 +156,7 @@ internal sealed unsafe class FloorQuantizeSuite : FloorSuite
         new Span<int>(_output, count).Clear();
         var done = FloorQuantizeKernel.RunVector(_xs, _ys, _output, count, OriginX, OriginY);
         receipts.Check("floor-p1-vector-matches-reference",
-            done == count && new ReadOnlySpan<int>(_output, count).SequenceEqual(new ReadOnlySpan<int>(_expected, count)));
+            done == count &&
+            new ReadOnlySpan<int>(_output, count).SequenceEqual(new ReadOnlySpan<int>(_expected, count)));
     }
 }

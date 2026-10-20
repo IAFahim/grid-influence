@@ -26,9 +26,9 @@ public static unsafe partial class World
             var ld = g->Layers + rec->Layer;
             if (ld->Directory == null) continue;
 
-            var sampling = (long)g->ScaleQ8 * rec->Scale >> 8;
-            var cellX = (int)((rec->Ax + (v->OriginQ8X * sampling >> 8)) >> 8);
-            var cellY = (int)((rec->Ay + (v->OriginQ8Y * sampling >> 8)) >> 8);
+            var sampling = ((long)g->ScaleQ8 * rec->Scale) >> 8;
+            var cellX = (int)((rec->Ax + ((v->OriginQ8X * sampling) >> 8)) >> 8);
+            var cellY = (int)((rec->Ay + ((v->OriginQ8Y * sampling) >> 8)) >> 8);
             if ((uint)cellX >= (uint)g->Size || (uint)cellY >= (uint)g->Size) continue;
 
             var set = ld->SetOf((cellY >> TileBake.TileBits) * g->TilesPerSide + (cellX >> TileBake.TileBits));
@@ -36,7 +36,8 @@ public static unsafe partial class World
 
             var column = cellX & (TileBake.TileSize - 1);
             var row = cellY & (TileBake.TileSize - 1);
-            var rows = Math.Min(Math.Min(((v->Height * sampling + 255) >> 8) + 1, PrefetchRows), TileBake.TileSize - row);
+            var rows =
+                Math.Min(Math.Min(((v->Height * sampling + 255) >> 8) + 1, PrefetchRows), TileBake.TileSize - row);
             var span = Math.Min((int)((v->Width * sampling + 255) >> 8), TileBake.TileSize - 1 - column);
             var cells = ld->Store.Cells(*set).I + row * TileBake.TileSize + column;
             for (var r = 0; r < rows; r++)
