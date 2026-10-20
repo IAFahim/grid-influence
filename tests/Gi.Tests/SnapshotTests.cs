@@ -347,6 +347,47 @@ public unsafe class SnapshotTests
     }
 
     [Fact]
+    public void RestoredWorldKeepsAllocatedZeroEpochs()
+    {
+        var a = World.New();
+        var b = World.New();
+        var zero = Stamp.Box(2, 2, 0);
+        try
+        {
+            Grid.New(a, 5, 0f, 0f, 32f);
+            var layer = Layer.New(a, Layer.Residency.Transient, Layer.Precision.Cell);
+            var idle = Layer.New(a);
+            Assert.Equal(1, World.Splat(a, layer, new[] { 16f }, new[] { 16f }, zero, 5));
+            World.Process(a);
+
+            var buffer = Snapshot(a);
+            Assert.True(World.TryRestore(b, buffer));
+
+            var tiles = new int[4];
+            fixed (int* p = tiles)
+            {
+                var countA = World.ChangedTiles(a, 0, layer, -1, p);
+                var countB = World.ChangedTiles(b, 0, layer, -1, p);
+                Assert.Equal(countA, countB);
+                Assert.Equal(1, countB);
+                Assert.Equal(0, World.ChangedTiles(a, 0, idle, -1, p));
+                Assert.Equal(0, World.ChangedTiles(b, 0, idle, -1, p));
+            }
+
+            Assert.Equal(World.Changed(a, layer, 16f, 16f, 4f, -1), World.Changed(b, layer, 16f, 16f, 4f, -1));
+            Assert.True(World.Changed(b, layer, 16f, 16f, 4f, -1));
+            Assert.Equal(World.Changed(a, layer, 16f, 16f, 4f, 0), World.Changed(b, layer, 16f, 16f, 4f, 0));
+            Assert.False(World.Changed(b, layer, 16f, 16f, 4f, 0));
+        }
+        finally
+        {
+            World.Free(a);
+            World.Free(b);
+            Stamp.Free(zero);
+        }
+    }
+
+    [Fact]
     public void RestoredFreeRingReusesLowestDeadSlotAndHonorsRetiredSlots()
     {
         var a = World.New();

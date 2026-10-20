@@ -189,7 +189,7 @@ internal unsafe ref struct SnapshotReader
 public static unsafe partial class World
 {
     private const uint SnapshotMagic = 0x4E534947u;
-    private const ushort SnapshotVersion = 1;
+    private const ushort SnapshotVersion = 2;
     private const int SnapshotHeaderBytes = 32;
     private const int SnapshotRecipeBytes = 32;
     private const int SnapshotGridBytes = 13;
@@ -206,6 +206,8 @@ public static unsafe partial class World
     private const byte SnapshotHasLowT = 1 << 5;
     private const byte SnapshotHasHighB = 1 << 6;
     private const byte SnapshotHasLowB = 1 << 7;
+
+    private const byte SnapshotEpochsAllocated = 1;
 
     public static int SnapshotSize(byte world)
     {
@@ -277,7 +279,7 @@ public static unsafe partial class World
     {
         var ld = g->Layers + layer;
         var derived = ld->Derived != 0;
-        var size = 4L;
+        var size = 5L;
         if (ld->Directory != null)
             for (var tile = 0; tile < g->TileCount; tile++)
             {
@@ -432,6 +434,7 @@ public static unsafe partial class World
                 if (ld->Directory[tile] >= 0)
                     live++;
 
+        writer.Byte((byte)(ld->Epochs != null ? SnapshotEpochsAllocated : 0));
         writer.I32(live);
         if (ld->Directory != null)
             for (var tile = 0; tile < g->TileCount; tile++)
@@ -600,6 +603,7 @@ public static unsafe partial class World
             var tileCount = tileCounts[gi];
             for (var l = 0; l < layerCount; l++)
             {
+                if (!reader.Byte(out var layerFlags) || layerFlags > SnapshotEpochsAllocated) return false;
                 if (!reader.I32(out var live) || live < 0 || live > tileCount) return false;
                 var derived = derivedLayers[l] != 0;
                 var previous = -1;
@@ -823,6 +827,8 @@ public static unsafe partial class World
     {
         var ld = g->Layers + layer;
         var derived = ld->Derived != 0;
+        reader.Byte(out var sectionFlags);
+        if (sectionFlags != 0) EnsureEpochs(g, ld);
         reader.I32(out var live);
         if (live > 0)
         {

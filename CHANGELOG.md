@@ -8,7 +8,7 @@
   written)` serialize a whole world — grid specs, layer recipes, every source column including
   dead slots and generations, fade/expire schedules, deposit records, live-tile planes and
   summaries, change epochs, and the transient deferred-clear state — into a caller-supplied
-  little-endian buffer (`GISN` version 1) with zero managed allocation. Capture requires a
+  little-endian buffer (`GISN` version 2) with zero managed allocation. Capture requires a
   quiescent world: no mutation since the last `Process` and not recording. `World.TryRestore(world,
   data)` rebuilds that state into an empty world: two passes (validate, then apply) so a malformed
   or tampered buffer never half-mutates the target and never throws, hashes recomputed to equal the

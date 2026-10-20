@@ -514,13 +514,16 @@ before reading command payloads, writing
   both are O(state) arithmetic and blits with zero managed allocation. Capture is only defined on a
   quiescent world: no mutation since the last `Process` (the pending list is empty) and not
   recording, so derived layers are folded and there is no journal to carry; anything else returns 0
-  or `false`. The format (`GISN`, version 1, little-endian) stores the semantic state verbatim:
+  or `false`. The format (`GISN`, version 2, little-endian) stores the semantic state verbatim:
   the tick and mark epoch, the fold limits, the grid specs (power, origin, world size) and the
   recipe table, every source column up to the slot high-water mark including dead slots — so
   generations, retired `uint.MaxValue` slots and the free ring's rebuild are exact — the fade and
   expire schedules with their absolute anchors, the per-grid deposit records that make the next
   sweep a pure delta, and for every live tile its bounds, published page, `I`/`T`/`B` planes, wide
-  carry planes, summary, epoch, and the transient deferred-clear byte and list. Stamps are stored
+  carry planes, summary, epoch, and the transient deferred-clear byte and list. Each layer section
+  also carries one flag bit: whether its change-epoch array is allocated, so a layer that only ever
+  allocated it — epochs all zero, `ChangedTiles(since < 0)` and `Changed(..., since < 0)` still
+  answer like the capture world — restores identically. Stamps are stored
   as `(id, fingerprint)` pairs — an FNV-1a over the variant's kind, extents, origins, constant,
   arc and bordered raster — so a restore demands the same stamp content alive in the process
   catalog under the same id and refuses on drift instead of silently mis-emitting. Caches are
