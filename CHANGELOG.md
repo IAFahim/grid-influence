@@ -11,7 +11,10 @@
   little-endian buffer (`GISN` version 2) with zero managed allocation. Capture requires a
   quiescent world: no mutation since the last `Process` and not recording. `World.TryRestore(world,
   data)` rebuilds that state into an empty world: two passes (validate, then apply) so a malformed
-  or tampered buffer never half-mutates the target and never throws, hashes recomputed to equal the
+  or tampered buffer never half-mutates the target and never throws — refusing, beyond
+  structural checks, every state no API sequence can produce (alive columns or records on
+  transient/derived layers, mark epoch 0, out-of-range fold limits, impossible `Reads` masks,
+  sparse pairs naming live tiles, derived summaries disagreeing with their pages), hashes recomputed to equal the
   capture-time values, in-flight fades and expiries resuming on their original ticks, `Changed(since)`
   answering across the boundary, and the free ring rebuilt canonically like `Rewind`'s. Stamps are
   carried as id + content fingerprint; a restore refuses if the live catalog's stamp under that id
