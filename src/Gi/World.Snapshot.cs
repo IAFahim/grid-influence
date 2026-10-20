@@ -253,7 +253,22 @@ public static unsafe partial class World
     }
 
     private static bool SnapshotQuiescent(WorldCtx* w)
-        => w != null && w->Pending.Length == 0 && w->Changed.Length == 0 && w->Recording == 0;
+    {
+        if (w == null || w->Pending.Length != 0 || w->Changed.Length != 0 || w->Recording != 0) return false;
+        for (var gi = 0; gi < w->GridCount; gi++)
+        {
+            var g = w->Grids + gi;
+            for (var l = 0; l < w->LayerCount; l++)
+            {
+                var ld = g->Layers + l;
+                if (ld->Dirty.Length != 0) return false;
+                var hist = ld->Hist;
+                if (hist != null && (hist->Total != 0 || hist->Active.Length != 0)) return false;
+            }
+        }
+
+        return true;
+    }
 
     private static int SnapshotStampMap(WorldCtx* w, byte* usage)
     {

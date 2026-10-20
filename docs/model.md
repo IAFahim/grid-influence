@@ -512,7 +512,8 @@ before reading command payloads, writing
 - **Snapshot**: `World.SnapshotSize(world)` returns the exact byte count of a snapshot, and
   `World.TrySnapshot(world, destination, out written)` writes one into a caller-supplied buffer —
   both are O(state) arithmetic and blits with zero managed allocation. Capture is only defined on a
-  quiescent world: no mutation since the last `Process` (the pending list is empty) and not
+  quiescent world: no mutation since the last `Process` (the pending list is empty, and no transient
+  splat frame is waiting — neither as histogram charge nor as unpublished dirty tiles) and not
   recording, so derived layers are folded and there is no journal to carry; anything else returns 0
   or `false`. The format (`GISN`, version 1, little-endian) stores the semantic state verbatim:
   the tick and mark epoch, the fold limits, the grid specs (power, origin, world size) and the
