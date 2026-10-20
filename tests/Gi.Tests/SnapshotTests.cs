@@ -874,7 +874,7 @@ public unsafe class SnapshotTests
         return buffer;
     }
 
-    private static unsafe void SectionLayout(
+    private static void SectionLayout(
         byte[] buffer, int targetGrid, int targetLayer, out int firstTile, out int pairs)
     {
         var summary = stackalloc byte[TileSummary.Bytes];
