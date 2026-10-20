@@ -417,6 +417,57 @@ public unsafe class SnapshotTests
     }
 
     [Fact]
+    public void SnapshotsRejectInFlightTransientSplats()
+    {
+        var a = World.New();
+        var b = World.New();
+        var stamp = Stamp.Box(2, 2, 40);
+        try
+        {
+            Grid.New(a, 5, 0f, 0f, 32f);
+            var cell = Layer.New(a, Layer.Residency.Transient, Layer.Precision.Cell);
+            var exact = Layer.New(a, Layer.Residency.Transient, Layer.Precision.Exact);
+            World.Process(a);
+            Assert.True(World.SnapshotSize(a) > 0);
+
+            World.Splat(a, cell, new[] { 16f }, new[] { 16f }, stamp, 5);
+            Assert.Equal(0, World.SnapshotSize(a));
+            Assert.False(World.TrySnapshot(a, new byte[64], out var written));
+            Assert.Equal(0, written);
+
+            World.Splat(a, cell, new[] { 500f }, new[] { 500f }, stamp, 5);
+            World.Splat(a, cell, new[] { 16f }, new[] { 16f }, stamp, 0);
+            Assert.Equal(0, World.SnapshotSize(a));
+            World.Process(a);
+            Assert.True(World.SnapshotSize(a) > 0);
+
+            World.Splat(a, exact, new[] { 16.3f }, new[] { 16.7f }, stamp, 5);
+            Assert.Equal(0, World.SnapshotSize(a));
+            World.Process(a);
+
+            var size = World.SnapshotSize(a);
+            var buffer = new byte[size];
+            Assert.True(World.TrySnapshot(a, buffer, out _));
+            Assert.True(World.TryRestore(b, buffer));
+
+            World.Splat(a, exact, new[] { 16.9f }, new[] { 16.2f }, stamp, 3);
+            World.Splat(b, exact, new[] { 16.9f }, new[] { 16.2f }, stamp, 3);
+            World.Splat(a, cell, new[] { 8f }, new[] { 8f }, stamp, 4);
+            World.Splat(b, cell, new[] { 8f }, new[] { 8f }, stamp, 4);
+            World.Process(a);
+            World.Process(b);
+            Assert.Equal(World.LayerHash(a, 0, cell), World.LayerHash(b, 0, cell));
+            Assert.Equal(World.LayerHash(a, 0, exact), World.LayerHash(b, 0, exact));
+        }
+        finally
+        {
+            World.Free(a);
+            World.Free(b);
+            Stamp.Free(stamp);
+        }
+    }
+
+    [Fact]
     public void SnapshotsRejectDeadHandlesAndShortBuffers()
     {
         Assert.Equal(0, World.SnapshotSize(200));
