@@ -1,15 +1,18 @@
+using System.Runtime.CompilerServices;
 namespace Gi;
 
 public static unsafe partial class World
 {
     private const int EpochFan = Pyramid<int, EpochMaxOp>.FanOut;
 
+    [MethodImpl(Jit.Hot)]
     private static void StampEpoch(GridCtx* g, LayerData* ld, int tile, int epoch)
     {
         ld->Epochs[tile] = epoch;
         ld->EpochTree.Update(g->TilesPerSide, tile, epoch);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static int CollectNewer(GridCtx* g, LayerData* ld, int since, int* destination)
     {
         var tree = ld->EpochTree;
@@ -21,6 +24,7 @@ public static unsafe partial class World
         return count;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void CollectNode(
         in Pyramid<int, EpochMaxOp> tree, int tilesPerSide, int level, int nodeX, int nodeY, int since,
         int* destination, ref int count)
@@ -47,6 +51,7 @@ public static unsafe partial class World
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static bool AnyNewerInDisk(GridCtx* g, LayerData* ld, in Circle disk, int since)
     {
         var tree = ld->EpochTree;
@@ -55,6 +60,7 @@ public static unsafe partial class World
         return DiskNode(tree, g->TilesPerSide, disk, tree.Levels - 1, 0, 0, since);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static bool DiskNode(
         in Pyramid<int, EpochMaxOp> tree, int tilesPerSide, in Circle disk, int level, int nodeX, int nodeY, int since)
     {

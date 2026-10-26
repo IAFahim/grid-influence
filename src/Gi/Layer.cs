@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 namespace Gi;
 
 public static class Layer
@@ -17,31 +18,37 @@ public static class Layer
         Transient
     }
 
+    [MethodImpl(Jit.Hot)]
     public static byte New(byte world)
     {
         return World.AddLayer(world, Precision.Exact);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static byte New(byte world, Precision precision)
     {
         return World.AddLayer(world, precision);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static byte New(byte world, Residency residency, Precision precision)
     {
         return World.AddLayer(world, precision, residency == Residency.Transient);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static int Count(byte world)
     {
         return World.LayerCount(world);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static int CopyIds(byte world, Span<byte> destination)
     {
         return World.CopyLayerIds(world, destination);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static unsafe bool TryGetPrecision(byte world, byte layer, out Precision precision)
     {
         precision = default;
@@ -53,6 +60,7 @@ public static class Layer
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static unsafe bool TryGetRecipe(byte world, byte layer, out Recipe recipe)
     {
         recipe = default;
@@ -65,27 +73,32 @@ public static class Layer
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static byte Sum(byte world, byte a, int weightA, byte b, int weightB, int shift = 0)
     {
         return World.AddDerived(world, LayerOp.Sum, a, b, weightA, weightB, shift, 0, 0);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static byte Sum(byte world, byte a, int weight, int shift = 0)
     {
         if (!ValidationRules.IsWeight(weight)) throw new ArgumentOutOfRangeException(nameof(weight));
         return World.AddDerived(world, LayerOp.Sum, a, a, weight, 0, shift, 0, 0);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static byte Min(byte world, byte a, byte b)
     {
         return World.AddDerived(world, LayerOp.Min, a, b, 0, 0, 0, 0, 0);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static byte Max(byte world, byte a, byte b)
     {
         return World.AddDerived(world, LayerOp.Max, a, b, 0, 0, 0, 0, 0);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static byte Mask(byte world, byte a, byte b, short min, short max)
     {
         if (min > max) throw new ArgumentOutOfRangeException(nameof(min));
@@ -97,6 +110,7 @@ public static class Layer
         public readonly byte PhaseBits;
         public readonly byte TurnBits;
 
+        [MethodImpl(Jit.Hot)]
         internal Precision(byte phaseBits, byte turnBits)
         {
             PhaseBits = phaseBits;
@@ -112,6 +126,7 @@ public static class Layer
 
         internal ushort TurnMask => (ushort)(0xFFFF & ~((1 << (16 - TurnBits)) - 1));
 
+        [MethodImpl(Jit.Hot)]
         public static bool TryCreate(int phaseBits, int turnBits, out Precision precision)
         {
             if (!ValidationRules.IsPhaseBits(phaseBits) || !ValidationRules.IsTurnBits(turnBits))
@@ -136,6 +151,7 @@ public static class Layer
         public readonly short MaskLow;
         public readonly short MaskHigh;
 
+        [MethodImpl(Jit.Hot)]
         internal Recipe(Derivation op, byte firstLayer, byte secondLayer, int firstWeight, int secondWeight, int shift,
             short maskLow, short maskHigh)
         {

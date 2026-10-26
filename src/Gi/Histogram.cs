@@ -35,6 +35,7 @@ internal unsafe struct HistState
     public int* Strip;
     public int* Out;
 
+    [MethodImpl(Jit.Hot)]
     public void Release()
     {
         if (Classes != null)
@@ -61,6 +62,7 @@ internal unsafe struct HistState
 
 public static unsafe partial class World
 {
+    [MethodImpl(Jit.Hot)]
     private static HistState* EnsureHist(LayerData* ld)
     {
         if (ld->Hist != null) return ld->Hist;
@@ -74,6 +76,7 @@ public static unsafe partial class World
         return hist;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static bool HistAdd(GridCtx* g, LayerData* ld, byte stamp, int cx, int cy, int gain)
     {
         var hist = EnsureHist(ld);
@@ -90,7 +93,7 @@ public static unsafe partial class World
         return true;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static int* HistPage(GridCtx* g, LayerData* ld, HistState* hist, HistClass* cls, int tile)
     {
         var slot = cls->Directory[tile] - 1;
@@ -99,6 +102,7 @@ public static unsafe partial class World
         return TakeHistPage(g, ld, hist, cls, tile);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static int* TakeHistPage(GridCtx* g, LayerData* ld, HistState* hist, HistClass* cls, int tile)
     {
         EnsureEpochs(g, ld);
@@ -120,7 +124,7 @@ public static unsafe partial class World
     }
 
 #if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    [MethodImpl(Jit.Hot)]
     private static int SplatBlocks(
         WorldCtx* w, int gi, GridCtx* g, LayerData* ld, HistState* hist, HistClass* cls,
         ref DepositRecord key, int mask, float* xs, float* ys, int count)
@@ -212,6 +216,7 @@ public static unsafe partial class World
     }
 #endif
 
+    [MethodImpl(Jit.Hot)]
     private static void FlushHistogram(WorldCtx* w, int gi, GridCtx* g, LayerData* ld, byte layer)
     {
         var hist = ld->Hist;
@@ -246,6 +251,7 @@ public static unsafe partial class World
         hist->Total = 0;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void ResetHistogram(LayerData* ld)
     {
         var hist = ld->Hist;
@@ -268,6 +274,7 @@ public static unsafe partial class World
         hist->Total = 0;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static bool BoxKernel(
         WorldCtx* w, int gi, GridCtx* g, byte layer, byte stamp,
         out int value, out int ox, out int oy, out int width, out int height)
@@ -305,6 +312,7 @@ public static unsafe partial class World
                oy >= -TileBake.TileSize && oy + height <= TileBake.TileSize + 1;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void ReplayClass(WorldCtx* w, int gi, GridCtx* g, HistState* hist, HistClass* cls, byte layer,
         byte stamp)
     {
@@ -316,6 +324,7 @@ public static unsafe partial class World
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void ReplaySparse(
         WorldCtx* w, int gi, GridCtx* g, HistState* hist, HistClass* cls, byte layer, byte stamp, int footprint)
     {
@@ -341,6 +350,7 @@ public static unsafe partial class World
         cls->Tiles.Resize(0);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void ReplayTile(WorldCtx* w, int gi, GridCtx* g, ref DepositRecord key, int tile, int* page)
     {
         var tps = g->TilesPerSide;
@@ -363,6 +373,7 @@ public static unsafe partial class World
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static int CountNonZero(int* page)
     {
         var count = 0;
@@ -382,6 +393,7 @@ public static unsafe partial class World
         return count;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void BoxFilterClass(
         GridCtx* g, LayerData* ld, HistState* hist, HistClass* cls, int value, int ox, int oy, int width, int height)
     {
@@ -441,6 +453,7 @@ public static unsafe partial class World
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static long SumWindow(HistState* hist, int width, int height, int windowHeight)
     {
         var window = hist->Window;
@@ -503,6 +516,7 @@ public static unsafe partial class World
         return largest;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void AddScaled(int* plane, int* sums, int value)
     {
         var i = 0;
@@ -517,6 +531,7 @@ public static unsafe partial class World
         for (; i < TileBake.TileSize * TileBake.TileSize; i++) plane[i] += sums[i] * value;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void GatherWindow(
         HistState* hist, HistClass* cls, int tps, int size, int x0, int y0, int windowWidth, int windowHeight)
     {
@@ -565,7 +580,7 @@ public static unsafe partial class World
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static void CopyBlock(int* destination, int* source, int rows, int span)
     {
         for (var r = 0; r < rows; r++)
@@ -583,7 +598,7 @@ public static unsafe partial class World
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static void ClearBlock(int* destination, int rows, int span)
     {
         for (var r = 0; r < rows; r++)

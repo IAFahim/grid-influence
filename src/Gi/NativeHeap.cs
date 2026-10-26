@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace Gi;
@@ -12,6 +13,7 @@ internal static unsafe class NativeHeap
     internal static delegate* unmanaged[Cdecl]<void*, void> HookFree;
 
 #if NET
+    [MethodImpl(Jit.Hot)]
     public static void* AllocZeroed(nuint bytes)
     {
         Interlocked.Increment(ref Calls);
@@ -22,6 +24,7 @@ internal static unsafe class NativeHeap
         return pointer;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static void Free(void* pointer)
     {
         Interlocked.Increment(ref Calls);
@@ -30,6 +33,7 @@ internal static unsafe class NativeHeap
         else hook(pointer);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static void* AlignedAlloc(nuint bytes)
     {
         Interlocked.Increment(ref Calls);
@@ -37,6 +41,7 @@ internal static unsafe class NativeHeap
         return hook == null ? NativeMemory.AlignedAlloc(bytes, VectorAlignment) : hook(bytes, VectorAlignment);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static void AlignedFree(void* pointer)
     {
         Interlocked.Increment(ref Calls);
@@ -45,6 +50,7 @@ internal static unsafe class NativeHeap
         else hook(pointer);
     }
 #else
+    [MethodImpl(Jit.Hot)]
     public static void* AllocZeroed(nuint bytes)
     {
         Interlocked.Increment(ref Calls);
@@ -61,6 +67,7 @@ internal static unsafe class NativeHeap
         return hooked;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static void Free(void* pointer)
     {
         Interlocked.Increment(ref Calls);
@@ -69,6 +76,7 @@ internal static unsafe class NativeHeap
         else hook(pointer);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static void* AlignedAlloc(nuint bytes)
     {
         Interlocked.Increment(ref Calls);
@@ -77,6 +85,7 @@ internal static unsafe class NativeHeap
         return hook(bytes, VectorAlignment);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static void AlignedFree(void* pointer)
     {
         Interlocked.Increment(ref Calls);

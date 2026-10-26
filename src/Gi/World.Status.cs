@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 namespace Gi;
 
 public static unsafe partial class World
@@ -22,6 +23,7 @@ public static unsafe partial class World
         CapacityReached
     }
 
+    [MethodImpl(Jit.Hot)]
     public static ReadStatus SenseColumn(
         byte world, byte layer, float* xs, float* ys, SourceId* excludes, int count, short* values, ulong* whole)
     {
@@ -29,6 +31,7 @@ public static unsafe partial class World
             SenseColumnCore(world, layer, xs, ys, excludes, count, values, whole), whole);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static ReadStatus SenseColumn(byte world, byte layer, float* xs, float* ys, int count, short* values,
         ulong* whole)
     {
@@ -36,6 +39,7 @@ public static unsafe partial class World
             SenseColumnCore(world, layer, xs, ys, count, values, whole), whole);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static ReadStatus SenseGradientColumn(
         byte world, byte layer, float* xs, float* ys, SourceId* excludes, int count,
         float* gradientXs, float* gradientYs, ulong* whole)
@@ -44,6 +48,7 @@ public static unsafe partial class World
             SenseGradientColumnCore(world, layer, xs, ys, excludes, count, gradientXs, gradientYs, whole), whole);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static ReadStatus SenseGradientColumn(
         byte world, byte layer, float* xs, float* ys, SourceId* excludes, int count,
         short* values, float* gradientXs, float* gradientYs, ulong* whole)
@@ -54,6 +59,7 @@ public static unsafe partial class World
             whole);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static ReadStatus SenseAreaColumn(
         byte world, byte layer, float* xs, float* ys, float* reaches, SourceId* excludes, int count, long* totals,
         ulong* whole)
@@ -62,6 +68,7 @@ public static unsafe partial class World
             SenseAreaColumnCore(world, layer, xs, ys, reaches, excludes, count, totals, whole), whole);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static ReadStatus SenseMaxColumn(
         byte world, byte layer, float* xs, float* ys, float* reaches, int count,
         short* values, float* bestXs, float* bestYs, ulong* whole)
@@ -71,6 +78,7 @@ public static unsafe partial class World
             SenseMaxColumnCore(world, layer, xs, ys, reaches, count, values, bestXs, bestYs, whole), whole);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static ReadStatus SenseNearestColumn(
         byte world, byte layer, float* xs, float* ys, float* reaches, short* thresholds, int count,
         short* values, float* nearestXs, float* nearestYs, ulong* found)
@@ -83,6 +91,7 @@ public static unsafe partial class World
             null);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static ReadStatus ColumnStatus(byte world, byte layer, int count, bool missing, bool complete, ulong* whole)
     {
         var w = GetContext(world);

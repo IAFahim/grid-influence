@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 namespace Gi;
 
 internal enum StampKind : byte
@@ -36,16 +37,19 @@ internal static unsafe class StampCatalog
 
     internal static int Count { get; private set; } = 1;
 
+    [MethodImpl(Jit.Hot)]
     internal static StampVariant* Get(byte id)
     {
         return Runtime.Stamps + id;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static bool Valid(byte id)
     {
         return id != 0 && id < Count && Runtime.Stamps[id].Live != 0;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static ulong Fingerprint(byte id)
     {
         var v = Runtime.Stamps + id;
@@ -66,6 +70,7 @@ internal static unsafe class StampCatalog
         return hash;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static ulong Mix(ulong hash, int value)
     {
         hash = (hash ^ (ulong)(value & 0xFF)) * TileHash.Prime;
@@ -75,6 +80,7 @@ internal static unsafe class StampCatalog
         return hash;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static bool Free(byte id)
     {
         if (!Valid(id) || World.UsesStamp(id)) return false;
@@ -87,6 +93,7 @@ internal static unsafe class StampCatalog
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static void Release()
     {
         for (var id = 1; id < Count; id++)
@@ -100,6 +107,7 @@ internal static unsafe class StampCatalog
         Count = 1;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static byte Bake(sbyte* data, int width, int height)
     {
         Validate(width, height);
@@ -123,6 +131,7 @@ internal static unsafe class StampCatalog
         return (byte)id;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void StoreRaster(StampVariant* v, sbyte* data, int width, int height)
     {
         var pitch = width + 2;
@@ -143,6 +152,7 @@ internal static unsafe class StampCatalog
         BakeMips(v, basePtr);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void BakeMips(StampVariant* v, sbyte* basePtr)
     {
         var levels = stackalloc int[8];
@@ -198,11 +208,13 @@ internal static unsafe class StampCatalog
         v->Mips = mips;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static sbyte Average(int sum, int n)
     {
         return (sbyte)(sum < 0 ? -((-sum + (n >> 1)) / n) : (sum + (n >> 1)) / n);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static byte Box(int width, int height, sbyte value)
     {
         Validate(width, height);
@@ -219,6 +231,7 @@ internal static unsafe class StampCatalog
         return (byte)id;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static byte Tent(int width, int height, sbyte value)
     {
         Validate(width, height);
@@ -235,6 +248,7 @@ internal static unsafe class StampCatalog
         return (byte)id;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static byte Bell(int width, int height, sbyte value)
     {
         Validate(width, height);
@@ -251,6 +265,7 @@ internal static unsafe class StampCatalog
         return (byte)id;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static byte Round(StampKind kind, int radius, sbyte value, int arc)
     {
         if (!ValidationRules.IsRadius(radius)) throw new ArgumentOutOfRangeException(nameof(radius));
@@ -275,12 +290,14 @@ internal static unsafe class StampCatalog
         return (byte)id;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void Validate(int width, int height)
     {
         if (!ValidationRules.IsAxis(width)) throw new ArgumentOutOfRangeException(nameof(width));
         if (!ValidationRules.IsAxis(height)) throw new ArgumentOutOfRangeException(nameof(height));
     }
 
+    [MethodImpl(Jit.Hot)]
     private static int Reserve()
     {
         var id = 1;
@@ -309,6 +326,7 @@ public static unsafe class Stamp
         Dome
     }
 
+    [MethodImpl(Jit.Hot)]
     public static bool TryGetSpec(byte stamp, out Spec spec)
     {
         spec = default;
@@ -326,6 +344,7 @@ public static unsafe class Stamp
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static Shape ShapeOf(StampKind kind)
     {
         return kind switch
@@ -340,11 +359,13 @@ public static unsafe class Stamp
         };
     }
 
+    [MethodImpl(Jit.Hot)]
     public static byte New(sbyte* data, ushort width, ushort height)
     {
         return StampCatalog.Bake(data, width, height);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static byte New(ReadOnlySpan<sbyte> data, ushort width, ushort height)
     {
         if (data.Length < width * height)
@@ -355,36 +376,43 @@ public static unsafe class Stamp
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     public static byte Box(ushort width, ushort height, sbyte value)
     {
         return StampCatalog.Box(width, height, value);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static byte Tent(ushort width, ushort height, sbyte value)
     {
         return StampCatalog.Tent(width, height, value);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static byte Bell(ushort width, ushort height, sbyte value)
     {
         return StampCatalog.Bell(width, height, value);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static byte Disk(ushort radius, sbyte value, ushort arc = 360)
     {
         return StampCatalog.Round(StampKind.Disk, radius, value, arc);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static byte Cone(ushort radius, sbyte value, ushort arc = 360)
     {
         return StampCatalog.Round(StampKind.Cone, radius, value, arc);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static byte Dome(ushort radius, sbyte value, ushort arc = 360)
     {
         return StampCatalog.Round(StampKind.Dome, radius, value, arc);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static bool Free(byte stamp)
     {
         return StampCatalog.Free(stamp);
@@ -398,6 +426,7 @@ public static unsafe class Stamp
         public readonly sbyte Value;
         public readonly int ArcDegrees;
 
+        [MethodImpl(Jit.Hot)]
         internal Spec(Shape stampShape, int width, int height, sbyte value, int arcDegrees)
         {
             StampShape = stampShape;

@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 namespace Gi;
 
 internal static unsafe class MaxQueries
@@ -5,6 +6,7 @@ internal static unsafe class MaxQueries
     private const int FanOut = Pyramid<short, ShortMaxOp>.FanOut;
     private const int NodeSlots = Pyramid<short, ShortMaxOp>.NodeSlots;
 
+    [MethodImpl(Jit.Hot)]
     public static short Best(in Pyramid<short, ShortMaxOp> pyramid, int tilesPerSide, LayerData* ld, out int x,
         out int y)
     {
@@ -65,6 +67,7 @@ internal static unsafe class MaxQueries
         return target;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static short Best(in Pyramid<short, ShortMaxOp> pyramid, int tilesPerSide, LayerData* ld,
         int cellX0, int cellY0, int cellX1, int cellY1, out int x, out int y)
     {
@@ -82,6 +85,7 @@ internal static unsafe class MaxQueries
         return best == int.MinValue ? (short)0 : (short)best;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void Visit(in Pyramid<short, ShortMaxOp> pyramid, int tilesPerSide, LayerData* ld,
         int level, int nodeX, int nodeY,
         int tx0, int ty0, int tx1, int ty1, int cellX0, int cellY0, int cellX1, int cellY1,
@@ -142,6 +146,7 @@ internal static unsafe class MaxQueries
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static int FirstEqual(short* slots, short target, int vx, int vy)
     {
 #if NET
@@ -158,6 +163,7 @@ internal static unsafe class MaxQueries
         return NodeSlots;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static int FirstEqualFlat(short* values, short target, int count)
     {
 #if NET

@@ -8,7 +8,7 @@ internal static unsafe class SpatialOrder
     private const int DigitBits = 11;
     private const int Digits = 1 << DigitBits;
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static uint Spread(uint value)
     {
         value &= 0x0000FFFF;
@@ -18,7 +18,7 @@ internal static unsafe class SpatialOrder
         return (value | (value << 1)) & 0x55555555;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     internal static uint Key(int cellX, int cellY)
     {
         var tile = Spread((uint)(cellX >> TileBake.TileBits)) | (Spread((uint)(cellY >> TileBake.TileBits)) << 1);
@@ -27,6 +27,7 @@ internal static unsafe class SpatialOrder
         return (tile << (2 * TileBake.TileBits)) | local;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static bool Sort(ReadOnlySpan<uint> keys, Span<int> permutation, Span<ulong> scratch)
     {
         var count = keys.Length;
@@ -84,6 +85,7 @@ internal static unsafe class SpatialOrder
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static float Disorder(ReadOnlySpan<uint> keys)
     {
         if (keys.Length < 2) return 0f;

@@ -58,6 +58,7 @@ internal unsafe struct Placement
     public int Pitch;
     public int Level;
 
+    [MethodImpl(Jit.Hot)]
     public readonly bool Reaches(int cx, int cy)
     {
         return cx >= X0 && cy >= Y0 && cx < X1 && cy < Y1;
@@ -72,6 +73,7 @@ internal static unsafe partial class TileBake
     private const int SinA3 = -10583;
     private const int SinA5 = 1231;
 
+    [MethodImpl(Jit.Hot)]
     internal static int Sin(int angle)
     {
         var a = angle & 0xFFFF;
@@ -83,17 +85,20 @@ internal static unsafe partial class TileBake
         return quadrant >= 2 ? -s : s;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static int Cos(int angle)
     {
         return Sin(angle + QuarterTurn);
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static bool Place(float x, float y, float originX, float originY, int scaleQ8, int size,
         StampVariant* v, int angle, int scale, out Placement p)
     {
         return Place(x, y, originX, originY, scaleQ8, size, v, angle, scale, Layer.Precision.Exact, out p);
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static bool Place(float x, float y, float originX, float originY, int scaleQ8, int size,
         StampVariant* v, int angle, int scale, Layer.Precision precision, out Placement p)
     {
@@ -103,6 +108,7 @@ internal static unsafe partial class TileBake
             scaleQ8, size, v, angle, scale, precision, out p);
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static bool PlaceAnchored(int anchorX, int anchorY, int scaleQ8, int size,
         StampVariant* v, int angle, int scale, Layer.Precision precision, out Placement p)
     {
@@ -230,6 +236,7 @@ internal static unsafe partial class TileBake
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static void RoundFootprintCells(
         bool arc, long centreX, long centreY, long bound, StampVariant* v, int angle,
         out long x0, out long y0, out long x1, out long y1)
@@ -250,6 +257,7 @@ internal static unsafe partial class TileBake
         y1 = centreY + bound;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static void TurnedFootprintCells(
         long centreX, long centreY, int cos, int sin, long supportU, long supportV,
         out long x0, out long y0, out long x1, out long y1)
@@ -264,6 +272,7 @@ internal static unsafe partial class TileBake
         y1 = centreY + ay;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void Cells(long low, long high, int size, out int first, out int end)
     {
         KernelCells(low, high, out first, out end);
@@ -271,12 +280,14 @@ internal static unsafe partial class TileBake
         end = (int)Math.Clamp(end, -1, size + 1L);
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static void KernelCells(long low, long high, out int first, out int end)
     {
         first = (int)FloorDiv(low - CellHalf / 2, CellHalf);
         end = (int)FloorDiv(high - CellHalf / 2, CellHalf) + 1;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void SectorBounds(long cx, long cy, long reach, int facing, int half,
         out long x0, out long y0, out long x1, out long y1)
     {
@@ -293,6 +304,7 @@ internal static unsafe partial class TileBake
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void Extend(long cx, long cy, long reach, int angle, ref long x0, ref long y0, ref long x1,
         ref long y1)
     {
@@ -304,6 +316,7 @@ internal static unsafe partial class TileBake
         y1 = Math.Max(y1, y);
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static bool Touches(Placement* p, int tileX0, int tileY0)
     {
         if (!p->Turned) return true;
@@ -341,9 +354,7 @@ internal static unsafe partial class TileBake
         return maxU >= -mu && minU <= mu && maxV >= -mv && minV <= mv;
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     internal static void EmitTurnedDense(int* dense, int tileX0, int tileY0, Placement* p, int gain)
     {
         var x0 = Math.Max(p->X0, tileX0);
@@ -362,9 +373,7 @@ internal static unsafe partial class TileBake
         }
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     internal static void EmitTurnedSmooth(long* sums, int tileX0, int tileY0, Placement* p, int gain)
     {
         var x0 = Math.Max(p->X0, tileX0);
@@ -383,19 +392,21 @@ internal static unsafe partial class TileBake
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static int TurnedDenseAt(Placement* p, int cx, int cy)
     {
         return DenseAt(p, (long)cx * CellHalf + CellHalf / 2 - p->CentreX,
             (long)cy * CellHalf + CellHalf / 2 - p->CentreY);
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static long TurnedSmoothAt(Placement* p, int cx, int cy)
     {
         return SmoothAt(p, (long)cx * CellHalf + CellHalf / 2 - p->CentreX,
             (long)cy * CellHalf + CellHalf / 2 - p->CentreY);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static int DenseAt(Placement* p, long dx, long dy)
     {
         if (p->Kind >= StampKind.Disk) return RoundAt(p, dx, dy);
@@ -406,14 +417,14 @@ internal static unsafe partial class TileBake
         return RoundQ16(p->V->Constant * Overlap(u, p->ExtentX) * Overlap(v, p->ExtentY));
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static int Overlap(long offset, int extent)
     {
         var covered = Math.Min(extent, offset + CellHalf / 2) - Math.Max(-extent, offset - CellHalf / 2);
         return (int)(Math.Clamp(covered, 0, CellHalf) >> 1);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static int SampleAt(Placement* p, long dx, long dy)
     {
         var tx = (dx * p->SampleUx + dy * p->SampleUy + p->SampleU0) >> 32 >> p->Level;
@@ -431,7 +442,7 @@ internal static unsafe partial class TileBake
         return RoundQ16(top * (256 - fy) + bottom * fy);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static int RoundAt(Placement* p, long dx, long dy)
     {
         var cover = 256L;
@@ -470,7 +481,7 @@ internal static unsafe partial class TileBake
         return RoundQ24(p->V->Constant * weight * cover);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static long SmoothAt(Placement* p, long dx, long dy)
     {
         var du = (dx * p->Cos + dy * p->Sin) >> 14 >> (p->ShiftU + 1);
@@ -492,20 +503,20 @@ internal static unsafe partial class TileBake
         return p->V->Constant * p->Curve * wu * wv;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static int RoundQ24(long value)
     {
         return (int)((value + (1L << 23) + (value >> 63)) >> 24);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static long FloorDiv(long value, long divisor)
     {
         var q = value / divisor;
         return q * divisor > value ? q - 1 : q;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static long Root(long value)
     {
         var root = (long)Math.Sqrt(value);

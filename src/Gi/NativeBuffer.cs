@@ -14,7 +14,7 @@ internal unsafe struct NativeBuffer<T> where T : unmanaged
 
     public T* Pointer { get; private set; }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     public void Resize(int length)
     {
         if (length <= Capacity)
@@ -28,6 +28,7 @@ internal unsafe struct NativeBuffer<T> where T : unmanaged
         new Span<byte>(Pointer + oldLength, (int)((nuint)(Capacity - oldLength) * (nuint)sizeof(T))).Clear();
     }
 
+    [MethodImpl(Jit.Hot)]
     public void ResizeUninitialized(int length)
     {
         if (length <= Capacity)
@@ -39,6 +40,7 @@ internal unsafe struct NativeBuffer<T> where T : unmanaged
         Grow(length);
     }
 
+    [MethodImpl(Jit.Hot)]
     private void Grow(int length)
     {
         var capacity = (nuint)Math.Max(length, Math.Max(16, Capacity * 2)) * (nuint)sizeof(T);
@@ -54,6 +56,7 @@ internal unsafe struct NativeBuffer<T> where T : unmanaged
         Length = length;
     }
 
+    [MethodImpl(Jit.Hot)]
     public void Free()
     {
         if (Pointer == null) return;

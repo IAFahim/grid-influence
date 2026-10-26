@@ -1,19 +1,23 @@
+using System.Runtime.CompilerServices;
 namespace Gi;
 
 public static unsafe partial class World
 {
+    [MethodImpl(Jit.Hot)]
     public static Token Capture(byte world)
     {
         Runtime.Ensure();
         return new Token(world, GetContext(world) == null ? 0 : Runtime.WorldRevisions[world]);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static BatchStatus ApplyBatch(Token token, ReadOnlySpan<SourceCommand> commands, Span<SourceResult> results)
     {
         var status = ValidateToken(token, out var context);
         return status != BatchStatus.Applied ? status : ApplyBatchCommands(context, commands, results);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static BatchStatus Process(Token token)
     {
         var status = ValidateToken(token, out _);
@@ -23,6 +27,7 @@ public static unsafe partial class World
         return BatchStatus.Applied;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static BatchStatus Sync(Token token, SourceId* sources, float* xs, float* ys, int count)
     {
         var status = ValidateToken(token, out var context);
@@ -32,6 +37,7 @@ public static unsafe partial class World
         return BatchStatus.Applied;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static BatchStatus ValidateToken(Token token, out WorldCtx* context)
     {
         context = null;
@@ -50,6 +56,7 @@ public static unsafe partial class World
         public readonly byte WorldId;
         public readonly int RevisionAtCapture;
 
+        [MethodImpl(Jit.Hot)]
         internal Token(byte worldId, int revisionAtCapture)
         {
             WorldId = worldId;

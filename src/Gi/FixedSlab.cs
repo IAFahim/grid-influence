@@ -21,6 +21,7 @@ internal unsafe struct FixedSlab
 
     public readonly long ByteCapacity => (long)_capacity * _stride;
 
+    [MethodImpl(Jit.Hot)]
     public int Take(int stride)
     {
         if (Region == null)
@@ -42,12 +43,13 @@ internal unsafe struct FixedSlab
         return _taken++;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     public readonly byte* Unit(int index)
     {
         return Region + (nuint)index * (nuint)_stride;
     }
 
+    [MethodImpl(Jit.Hot)]
     public void Give(int index)
     {
         var freeCount = _free.Length;
@@ -55,6 +57,7 @@ internal unsafe struct FixedSlab
         _free.Pointer[freeCount] = index;
     }
 
+    [MethodImpl(Jit.Hot)]
     public void Reset()
     {
         if (Region != null) NativeHeap.AlignedFree(Region);
@@ -66,6 +69,7 @@ internal unsafe struct FixedSlab
         _free.Free();
     }
 
+    [MethodImpl(Jit.Hot)]
     private void Grow()
     {
         var capacity = _capacity * 2;

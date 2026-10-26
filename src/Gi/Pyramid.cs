@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 #if NET
 using System.Runtime.Intrinsics;
 #endif
@@ -13,11 +14,13 @@ internal unsafe interface IPyramidOp<T> where T : unmanaged
 
 internal struct ShortMaxOp : IPyramidOp<short>
 {
+    [MethodImpl(Jit.Hot)]
     public readonly bool Greater(short a, short b)
     {
         return a > b;
     }
 
+    [MethodImpl(Jit.Hot)]
     public readonly unsafe short Reduce(short* slots, int validX, int validY)
     {
         return Pyramid<short, ShortMaxOp>.ReduceMax(slots, validX, validY);
@@ -26,11 +29,13 @@ internal struct ShortMaxOp : IPyramidOp<short>
 
 internal struct EpochMaxOp : IPyramidOp<int>
 {
+    [MethodImpl(Jit.Hot)]
     public readonly bool Greater(int a, int b)
     {
         return a - b > 0;
     }
 
+    [MethodImpl(Jit.Hot)]
     public readonly unsafe int Reduce(int* slots, int validX, int validY)
     {
         var best = slots[0];
@@ -56,16 +61,19 @@ internal unsafe struct Pyramid<T, TOp> where T : unmanaged where TOp : struct, I
     public readonly long Bytes =>
         (long)_slots.Capacity * sizeof(T) + ((long)_offsets.Capacity + _sides.Capacity) * sizeof(int);
 
+    [MethodImpl(Jit.Hot)]
     public readonly T* Node(int level, int nodeX, int nodeY)
     {
         return _slots.Pointer + _offsets.Pointer[level] + (nodeY * _sides.Pointer[level] + nodeX) * NodeSlots;
     }
 
+    [MethodImpl(Jit.Hot)]
     public readonly int ChildSide(int level, int tilesPerSide)
     {
         return level == 0 ? tilesPerSide : _sides.Pointer[level - 1];
     }
 
+    [MethodImpl(Jit.Hot)]
     public void Ensure(int tilesPerSide)
     {
         if (Levels > 0) return;
@@ -90,6 +98,7 @@ internal unsafe struct Pyramid<T, TOp> where T : unmanaged where TOp : struct, I
         Levels = level;
     }
 
+    [MethodImpl(Jit.Hot)]
     public void Reset()
     {
         _slots.Free();
@@ -98,6 +107,7 @@ internal unsafe struct Pyramid<T, TOp> where T : unmanaged where TOp : struct, I
         Levels = 0;
     }
 
+    [MethodImpl(Jit.Hot)]
     public void Update(int tilesPerSide, int tile, T leaf)
     {
         if (Levels == 0) Ensure(tilesPerSide);
@@ -149,6 +159,7 @@ internal unsafe struct Pyramid<T, TOp> where T : unmanaged where TOp : struct, I
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static short ReduceMax(short* slots, int vx, int vy)
     {
         if (vx == FanOut && vy == FanOut)

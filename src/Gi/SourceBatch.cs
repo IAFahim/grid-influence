@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 namespace Gi;
 
 internal enum SourceCommandKind : byte
@@ -44,6 +45,7 @@ public static partial class World
         internal readonly int Command;
         internal readonly bool Pending;
 
+        [MethodImpl(Jit.Hot)]
         private SourceTarget(SourceId source, int command, bool pending)
         {
             Source = source;
@@ -51,16 +53,19 @@ public static partial class World
             Pending = pending;
         }
 
+        [MethodImpl(Jit.Hot)]
         public static SourceTarget Existing(SourceId sourceId)
         {
             return new SourceTarget(sourceId, 0, false);
         }
 
+        [MethodImpl(Jit.Hot)]
         public static SourceTarget CreatedBy(int commandIndex)
         {
             return new SourceTarget(default, commandIndex, true);
         }
 
+        [MethodImpl(Jit.Hot)]
         public static implicit operator SourceTarget(SourceId sourceId)
         {
             return Existing(sourceId);
@@ -80,6 +85,7 @@ public static partial class World
         internal readonly byte Layer;
         internal readonly byte Stamp;
 
+        [MethodImpl(Jit.Hot)]
         private SourceCommand(
             SourceCommandKind kind, SourceTarget target = default,
             float positionX = 0f, float positionY = 0f, float headingRadians = 0f,
@@ -97,6 +103,7 @@ public static partial class World
             Stamp = stamp;
         }
 
+        [MethodImpl(Jit.Hot)]
         public static SourceCommand Place(
             byte layer, float positionX, float positionY, byte stamp, sbyte gain,
             float headingRadians = 0f, float scale = 1f)
@@ -105,6 +112,7 @@ public static partial class World
                 headingRadians: headingRadians, scale: scale, gain: gain, layer: layer, stamp: stamp);
         }
 
+        [MethodImpl(Jit.Hot)]
         public static SourceCommand Update(
             SourceTarget source, float positionX, float positionY, float headingRadians, float scale, sbyte gain)
         {
@@ -112,6 +120,7 @@ public static partial class World
                 gain: gain);
         }
 
+        [MethodImpl(Jit.Hot)]
         public static SourceCommand UpdateTransform(
             SourceTarget source, float positionX, float positionY, float headingRadians, float scale)
         {
@@ -119,36 +128,43 @@ public static partial class World
                 scale);
         }
 
+        [MethodImpl(Jit.Hot)]
         public static SourceCommand Move(SourceTarget source, float positionX, float positionY)
         {
             return new SourceCommand(SourceCommandKind.Move, source, positionX, positionY);
         }
 
+        [MethodImpl(Jit.Hot)]
         public static SourceCommand Turn(SourceTarget source, float headingRadians)
         {
             return new SourceCommand(SourceCommandKind.Turn, source, headingRadians: headingRadians);
         }
 
+        [MethodImpl(Jit.Hot)]
         public static SourceCommand Scale(SourceTarget source, float scale)
         {
             return new SourceCommand(SourceCommandKind.Scale, source, scale: scale);
         }
 
+        [MethodImpl(Jit.Hot)]
         public static SourceCommand SetGain(SourceTarget source, sbyte gain)
         {
             return new SourceCommand(SourceCommandKind.SetGain, source, gain: gain);
         }
 
+        [MethodImpl(Jit.Hot)]
         public static SourceCommand Remove(SourceTarget source)
         {
             return new SourceCommand(SourceCommandKind.Remove, source);
         }
 
+        [MethodImpl(Jit.Hot)]
         public static SourceCommand Fade(SourceTarget source, sbyte gain, int ticks)
         {
             return new SourceCommand(SourceCommandKind.Fade, source, ticks: ticks, gain: gain);
         }
 
+        [MethodImpl(Jit.Hot)]
         public static SourceCommand Expire(SourceTarget source, int ticks)
         {
             return new SourceCommand(SourceCommandKind.Expire, source, ticks: ticks);
@@ -160,6 +176,7 @@ public static partial class World
         public readonly SourceId SourceId;
         public readonly SourceResultStatus Status;
 
+        [MethodImpl(Jit.Hot)]
         internal SourceResult(SourceId sourceId, SourceResultStatus status)
         {
             SourceId = sourceId;

@@ -4,6 +4,7 @@ namespace Gi;
 
 public static unsafe partial class World
 {
+    [MethodImpl(Jit.Hot)]
     private static ushort QuantizeAngle(float radians)
     {
         var turns = radians * (1.0 / (2 * Math.PI));
@@ -11,6 +12,7 @@ public static unsafe partial class World
         return (ushort)((int)(turns * 65536.0) & 0xFFFF);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static bool FootprintFits(WorldCtx* w, byte stamp, long scale)
     {
         var v = StampCatalog.Get(stamp);
@@ -28,12 +30,14 @@ public static unsafe partial class World
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static ushort QuantizeScale(float scale)
     {
         var quantized = Math.Floor(scale * 256.0);
         return (ushort)(quantized < 1 ? 1 : quantized > ushort.MaxValue ? ushort.MaxValue : quantized);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static SourceResultStatus PlaceSlot(
         WorldCtx* w, byte layer, float x, float y, byte stamp, sbyte gain, out SourceId id)
     {
@@ -70,7 +74,7 @@ public static unsafe partial class World
         return SourceResultStatus.Applied;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static void WriteMove(WorldCtx* w, SourceColumns* s, int i, float x, float y)
     {
         var oldX = s->X[i];
@@ -84,7 +88,7 @@ public static unsafe partial class World
         if (changed) MarkChanged(w, s, i);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static void WriteMoveExact(WorldCtx* w, SourceColumns* s, int i, float x, float y)
     {
         var oldX = s->X[i];
@@ -98,7 +102,7 @@ public static unsafe partial class World
         if (changed) MarkChanged(w, s, i);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static void WriteTurn(WorldCtx* w, SourceColumns* s, int i, ushort next)
     {
         var old = s->Angle[i];
@@ -110,7 +114,7 @@ public static unsafe partial class World
         if (changed) MarkChanged(w, s, i);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static void WriteScale(WorldCtx* w, SourceColumns* s, int i, ushort next)
     {
         if (next == s->Scale[i] || !FootprintFits(w, s->Stamp[i], next)) return;
@@ -120,6 +124,7 @@ public static unsafe partial class World
         MarkChanged(w, s, i);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void WriteGain(WorldCtx* w, SourceColumns* s, int i, sbyte gain)
     {
         var next = (byte)Math.Clamp((int)gain, -MaxGain, MaxGain);
@@ -136,6 +141,7 @@ public static unsafe partial class World
         MarkChanged(w, s, i);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void WriteRemove(WorldCtx* w, SourceColumns* s, int i)
     {
         BeforeWrite(w, s, i);

@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 namespace Gi;
 
 internal unsafe struct TileSummary
@@ -55,6 +56,7 @@ internal unsafe struct PlaneStore
 
     public readonly long Bytes => Pages.Bytes + Int32Planes.Bytes + Int64Planes.Bytes + Summaries.Bytes;
 
+    [MethodImpl(Jit.Hot)]
     public TilePlanes Take()
     {
         var pageIndex = Pages.Take(PageUnit);
@@ -79,6 +81,7 @@ internal unsafe struct PlaneStore
         };
     }
 
+    [MethodImpl(Jit.Hot)]
     public TilePlanes TakeDerived()
     {
         var pageIndex = Pages.Take(PageUnit);
@@ -99,6 +102,7 @@ internal unsafe struct PlaneStore
         };
     }
 
+    [MethodImpl(Jit.Hot)]
     public long* EnsureT(ref TilePlanes tile)
     {
         if (tile.T >= 0) return (long*)Int64Planes.Unit(tile.T);
@@ -106,6 +110,7 @@ internal unsafe struct PlaneStore
         return (long*)Int64Planes.Unit(tile.T);
     }
 
+    [MethodImpl(Jit.Hot)]
     public long* EnsureB(ref TilePlanes tile)
     {
         if (tile.B >= 0) return (long*)Int64Planes.Unit(tile.B);
@@ -113,6 +118,7 @@ internal unsafe struct PlaneStore
         return (long*)Int64Planes.Unit(tile.B);
     }
 
+    [MethodImpl(Jit.Hot)]
     public readonly bool PlanesZero(in TilePlanes tile)
     {
         var summary = (TileSummary*)Summaries.Unit(tile.Summary);
@@ -124,6 +130,7 @@ internal unsafe struct PlaneStore
         return tile.B < 0 || TileBake.AllZero((long*)Int64Planes.Unit(tile.B), count);
     }
 
+    [MethodImpl(Jit.Hot)]
     private readonly bool TotalsZero(in TilePlanes tile, TileSummary* summary)
     {
         var i32 = tile.I < 0 ? null : (int*)Int32Planes.Unit(tile.I);
@@ -146,11 +153,13 @@ internal unsafe struct PlaneStore
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static bool Q40Zero(long high, long low)
     {
         return high + (low >> 40) == 0 && (low & ((1L << 40) - 1)) == 0;
     }
 
+    [MethodImpl(Jit.Hot)]
     public readonly PlaneCells Cells(in TilePlanes tile)
     {
         return new PlaneCells
@@ -163,6 +172,7 @@ internal unsafe struct PlaneStore
         };
     }
 
+    [MethodImpl(Jit.Hot)]
     public void Give(in TilePlanes tile)
     {
         var summary = (TileSummary*)Summaries.Unit(tile.Summary);
@@ -178,6 +188,7 @@ internal unsafe struct PlaneStore
         Pages.Give(tile.Page);
     }
 
+    [MethodImpl(Jit.Hot)]
     public void Reset()
     {
         Pages.Reset();
@@ -186,11 +197,13 @@ internal unsafe struct PlaneStore
         Summaries.Reset();
     }
 
+    [MethodImpl(Jit.Hot)]
     public int TakeWide()
     {
         return TakeInt64() + 1;
     }
 
+    [MethodImpl(Jit.Hot)]
     public void ClearWide(TilePlanes* tile)
     {
         var summary = (TileSummary*)Summaries.Unit(tile->Summary);
@@ -209,16 +222,19 @@ internal unsafe struct PlaneStore
         tile->BoundB = 0;
     }
 
+    [MethodImpl(Jit.Hot)]
     public readonly long* Wide(int index)
     {
         return (long*)Int64Planes.Unit(index - 1);
     }
 
+    [MethodImpl(Jit.Hot)]
     private void GiveWide(int index)
     {
         if (index != 0) Int64Planes.Give(index - 1);
     }
 
+    [MethodImpl(Jit.Hot)]
     private int TakeInt64()
     {
         var index = Int64Planes.Take(Int64Unit);

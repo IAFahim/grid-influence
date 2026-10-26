@@ -1,5 +1,5 @@
-#if NET
 using System.Runtime.CompilerServices;
+#if NET
 using System.Runtime.Intrinsics;
 #endif
 
@@ -7,9 +7,7 @@ namespace Gi;
 
 public static unsafe partial class World
 {
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static bool SenseColumnCore(
         byte world, byte layer, float* xs, float* ys, SourceId* excludes, int count, short* values, ulong* whole)
     {
@@ -34,9 +32,7 @@ public static unsafe partial class World
         return complete;
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static bool SenseGradientColumnCore(
         byte world, byte layer, float* xs, float* ys, SourceId* excludes, int count,
         float* gradientXs, float* gradientYs, ulong* whole)
@@ -66,9 +62,7 @@ public static unsafe partial class World
         return complete;
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static bool SenseGradientColumnCore(
         byte world, byte layer, float* xs, float* ys, SourceId* excludes, int count,
         short* values, float* gradientXs, float* gradientYs, ulong* whole)
@@ -106,18 +100,14 @@ public static unsafe partial class World
         return complete;
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static bool GradientRange(WorldCtx* w, byte layer, float* xs, float* ys,
         float* gradientXs, float* gradientYs, ulong* whole, int from, int to)
     {
         return GradientRange(w, layer, xs, ys, null, gradientXs, gradientYs, whole, from, to);
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static bool GradientRange(WorldCtx* w, byte layer, float* xs, float* ys, short* values,
         float* gradientXs, float* gradientYs, ulong* whole, int from, int to)
     {
@@ -203,9 +193,7 @@ public static unsafe partial class World
         return complete;
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static bool SenseAreaColumnCore(
         byte world, byte layer, float* xs, float* ys, float* reaches, SourceId* excludes, int count, long* totals,
         ulong* whole)
@@ -232,9 +220,7 @@ public static unsafe partial class World
         return complete;
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static bool SenseMaxColumnCore(
         byte world, byte layer, float* xs, float* ys, float* reaches, int count,
         short* values, float* bestXs, float* bestYs, ulong* whole)
@@ -259,9 +245,7 @@ public static unsafe partial class World
         return complete;
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static bool SenseNearestColumnCore(
         byte world, byte layer, float* xs, float* ys, float* reaches, short* thresholds, int count,
         short* values, float* nearestXs, float* nearestYs, ulong* found)

@@ -10,6 +10,7 @@ public static unsafe partial class World
     private const long MaxReachQ8 = 1L << 24;
     private const float MaxCellQ8 = 1073741824f;
 
+    [MethodImpl(Jit.Hot)]
     public static bool Covers(byte world, float x, float y)
     {
         var w = GetContext(world);
@@ -25,9 +26,7 @@ public static unsafe partial class World
         return false;
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     public static bool TrySense(byte world, byte layer, float x, float y, out short value)
     {
         value = 0;
@@ -41,6 +40,7 @@ public static unsafe partial class World
         return complete;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static bool Own(WorldCtx* w, GridCtx* g, SourceId id, in SplatOwn own, byte layer, out Placed source)
     {
         if (!own.Active) return Applied(w, g, id, layer, out source);
@@ -61,34 +61,33 @@ public static unsafe partial class World
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static bool TrySense(byte world, byte layer, float x, float y, byte stamp, sbyte gain, out short value)
     {
         return SenseOwn(world, layer, x, y, default, new SplatOwn(stamp, gain, x, y), out value);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static bool TrySenseGradient(byte world, byte layer, float x, float y, byte stamp, sbyte gain, out float gx,
         out float gy)
     {
         return SenseGradientOwn(world, layer, x, y, default, new SplatOwn(stamp, gain, x, y), out gx, out gy);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static bool TrySenseArea(byte world, byte layer, float x, float y, float reach, byte stamp, sbyte gain,
         out long total)
     {
         return SenseArea(world, layer, x, y, reach, default, new SplatOwn(stamp, gain, x, y), out total);
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     public static bool TrySense(byte world, byte layer, float x, float y, SourceId exclude, out short value)
     {
         return SenseOwn(world, layer, x, y, exclude, default, out value);
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static bool SenseOwn(byte world, byte layer, float x, float y, SourceId exclude, in SplatOwn own,
         out short value)
     {
@@ -108,20 +107,20 @@ public static unsafe partial class World
         return complete;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static bool TrySenseArea(byte world, byte layer, float x, float y, float reach, out long total)
     {
         return SenseArea(world, layer, x, y, reach, default, default, out total);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static bool TrySenseArea(byte world, byte layer, float x, float y, float reach, SourceId exclude,
         out long total)
     {
         return SenseArea(world, layer, x, y, reach, exclude, default, out total);
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     public static bool TrySenseMax(byte world, byte layer, float x, float y, float reach,
         out short value, out float bestX, out float bestY)
     {
@@ -195,6 +194,7 @@ public static unsafe partial class World
         return complete;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static bool Changed(byte world, byte layer, float x, float y, float reach, int since)
     {
         var w = GetContext(world);
@@ -207,6 +207,7 @@ public static unsafe partial class World
         return AnyNewerInDisk(g, g->Layers + layer, Disk(g, x, y, reach), since);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static bool HoldsDiskCell(in Circle disk, int tx, int ty)
     {
         if (Outside(disk, tx, ty)) return false;
@@ -220,9 +221,7 @@ public static unsafe partial class World
         return false;
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     public static bool TrySenseNearest(byte world, byte layer, float x, float y, float reach, short threshold,
         out short value, out float nearestX, out float nearestY)
     {
@@ -281,6 +280,7 @@ public static unsafe partial class World
         return complete;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void NearestInTile(in Circle disk, short* page, int tx, int ty, short threshold, ref long best,
         ref int bx, ref int by)
     {
@@ -304,6 +304,7 @@ public static unsafe partial class World
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static bool NearestInRow(in Circle disk, short* page, int tileX, int tileY, int cy, short threshold,
         ref long best, ref int bx, ref int by)
     {
@@ -327,7 +328,7 @@ public static unsafe partial class World
         return true;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static bool NearestCell(in Circle disk, short* row, int cx, int cy, long dy2, short threshold,
         ref long best, ref int bx, ref int by)
     {
@@ -343,7 +344,7 @@ public static unsafe partial class World
         return true;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static void ConsiderTile(GridCtx* g, LayerData* ld, in Circle disk, int tx, int ty, bool summaries,
         ref bool found, ref short best, ref int bx, ref int by)
     {
@@ -367,9 +368,7 @@ public static unsafe partial class World
         by = ay;
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static void ScanDiskTile(GridCtx* g, LayerData* ld, in Circle disk, int tx, int ty, bool rowMaxima,
         ref bool found, ref short best, ref int bx, ref int by)
     {
@@ -410,7 +409,7 @@ public static unsafe partial class World
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static short SegmentMax(short* row, int a, int b)
     {
 #if NET
@@ -423,7 +422,7 @@ public static unsafe partial class World
         return best;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static int FirstEqual(short* row, int a, int b, short value)
     {
 #if NET
@@ -436,6 +435,7 @@ public static unsafe partial class World
         return b;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void Spans(in Circle disk, int rowLo, int rows, int* lo, int* hi)
     {
         for (var r = 0; r < rows; r++)
@@ -443,9 +443,7 @@ public static unsafe partial class World
                 hi[r] = lo[r];
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     public static bool TrySenseGradient(byte world, byte layer, float x, float y, out float gx, out float gy)
     {
         gx = 0f;
@@ -466,18 +464,14 @@ public static unsafe partial class World
         return complete;
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     public static bool TrySenseGradient(byte world, byte layer, float x, float y, SourceId exclude, out float gx,
         out float gy)
     {
         return SenseGradientOwn(world, layer, x, y, exclude, default, out gx, out gy);
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static bool SenseGradientOwn(byte world, byte layer, float x, float y, SourceId exclude, in SplatOwn own,
         out float gx, out float gy)
     {
@@ -500,6 +494,7 @@ public static unsafe partial class World
         return complete;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static short Others(WorldCtx* w, GridCtx* g, byte layer, bool excluding, byte source, Shape* shape, int cx,
         int cy)
     {
@@ -509,7 +504,7 @@ public static unsafe partial class World
         return ExcludedValue(w, g, layer, source, shape, cx, cy, value);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static short Cell(GridCtx* g, byte layer, int cx, int cy)
     {
         var page = g->Layers[layer].PageOf((cy >> TileBake.TileBits) * g->TilesPerSide + (cx >> TileBake.TileBits));
@@ -517,7 +512,7 @@ public static unsafe partial class World
         return page[(cy & (TileBake.TileSize - 1)) * TileBake.TileSize + (cx & (TileBake.TileSize - 1))];
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static short CellNear(GridCtx* g, LayerData* ld, int tile, short* page, int cx, int cy)
     {
         if ((uint)cx >= (uint)g->Size || (uint)cy >= (uint)g->Size) return 0;
@@ -526,9 +521,7 @@ public static unsafe partial class World
         return Cell(g, (byte)(ld - g->Layers), cx, cy);
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static short ExcludedValue(WorldCtx* w, GridCtx* g, byte layer, byte source, Shape* s, int cx, int cy,
         short page)
     {
@@ -541,9 +534,7 @@ public static unsafe partial class World
         return CombineCell(r, a, b);
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static long ExcludedMix(WorldCtx* w, GridCtx* g, byte layer, byte source, in Circle disk, Shape* s)
     {
         var fx0 = Math.Max(Math.Max(s->P.X0, 0), disk.X0);
@@ -566,9 +557,7 @@ public static unsafe partial class World
         return delta;
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static bool SenseArea(byte world, byte layer, float x, float y, float reach, SourceId exclude,
         in SplatOwn own, out long total)
     {
@@ -629,9 +618,7 @@ public static unsafe partial class World
         return complete;
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static long RaggedSum(short* rows0, int* rowSums, int tileX, int rows, int* lo, int* hi)
     {
 #if NET
@@ -658,9 +645,7 @@ public static unsafe partial class World
         return sum;
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static Shape ShapeOf(WorldCtx* w, GridCtx* g, in Placed source)
     {
         var shape = new Shape { Gain = source.Gain };
@@ -675,9 +660,7 @@ public static unsafe partial class World
         return shape;
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static void SourceAt(Shape* s, int cx, int cy, out int core, out long smooth)
     {
         core = 0;
@@ -728,9 +711,7 @@ public static unsafe partial class World
         }
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static short ExcludeCell(GridCtx* g, LayerData* ld, Shape* s, int cx, int cy, short page)
     {
         SourceAt(s, cx, cy, out var core, out var smooth);
@@ -780,9 +761,7 @@ public static unsafe partial class World
         return Saturate(Absent(boxes, tents, bells, tentHigh, bellHigh, plane, core, smooth));
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static long LinearDelta(short* page, int* core, int top, int rows, int* lo, int* hi)
     {
 #if NET
@@ -804,7 +783,7 @@ public static unsafe partial class World
         return delta;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static long Absent(long boxes, long tents, long bells, long tentHigh, long bellHigh, Plane plane, int core,
         long smooth)
     {
@@ -813,12 +792,13 @@ public static unsafe partial class World
                TileBake.RoundWide(bellHigh, bells - (plane == Plane.Bell ? smooth : 0));
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static short Saturate(long value)
     {
         return (short)Math.Clamp(value, short.MinValue, short.MaxValue);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void FillCore(Shape* s, int* core, int tileX, int tileY, int top, int rows, int* lo, int* hi)
     {
         const int n = TileBake.TileSize;
@@ -843,9 +823,7 @@ public static unsafe partial class World
         }
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static long ExcludedArea(GridCtx* g, byte layer, in Circle disk, Shape* s)
     {
         var p = &s->P;
@@ -1007,9 +985,7 @@ public static unsafe partial class World
         return delta;
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static bool Applied(WorldCtx* w, GridCtx* g, SourceId id, byte layer, out Placed source)
     {
         source = default;
@@ -1036,9 +1012,7 @@ public static unsafe partial class World
         return true;
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static bool Pick(WorldCtx* w, float x, float y, float reach, int margin, bool disk,
         out int grid, out bool complete)
     {
@@ -1081,9 +1055,7 @@ public static unsafe partial class World
         return grid >= 0;
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static Circle Disk(GridCtx* g, float x, float y, float reach)
     {
         var c = new Circle
@@ -1106,7 +1078,7 @@ public static unsafe partial class World
         return c;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static bool Span(in Circle c, int cy, out int lo, out int hi)
     {
         var dy = ((long)cy << 8) + 128 - c.Py;
@@ -1141,7 +1113,7 @@ public static unsafe partial class World
         return hi > lo;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static bool Inside(in Circle c, int tx, int ty)
     {
         var x0 = tx << TileBake.TileBits;
@@ -1153,7 +1125,7 @@ public static unsafe partial class World
         return Within(c, x0, y0) && Within(c, x1, y0) && Within(c, x0, y1) && Within(c, x1, y1);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static bool Outside(in Circle c, int tx, int ty)
     {
         var x0 = tx << TileBake.TileBits;
@@ -1168,7 +1140,7 @@ public static unsafe partial class World
         return nx * nx + ny * ny > c.R * c.R;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static bool Within(in Circle c, int cx, int cy)
     {
         var dx = ((long)cx << 8) + 128 - c.Px;
@@ -1176,7 +1148,7 @@ public static unsafe partial class World
         return dx * dx + dy * dy <= c.R * c.R;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static long CellQ8(float value, float origin, int scaleQ8)
     {
         var q = (value - origin) * scaleQ8;
@@ -1185,12 +1157,13 @@ public static unsafe partial class World
         return q > 0f ? (long)MaxCellQ8 : -(long)MaxCellQ8;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static bool Contains(GridCtx* g, long qx, long qy)
     {
         return qx >= 0 && qy >= 0 && qx >> 8 < g->Size && qy >> 8 < g->Size;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static long ReachQ8(float reach, int scaleQ8)
     {
         if (!(reach > 0f)) return 0;
@@ -1199,13 +1172,13 @@ public static unsafe partial class World
         return q >= MaxReachQ8 ? MaxReachQ8 : (long)MathF.Floor(q);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static long CeilCell(long q8)
     {
         return -(-q8 >> 8);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static long SquareRoot(long value)
     {
         var root = (long)Math.Sqrt(value);
@@ -1214,6 +1187,7 @@ public static unsafe partial class World
         return root;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static long WorldArea(long cells, int scaleQ8)
     {
         var den = (long)scaleQ8 * scaleQ8;
@@ -1230,6 +1204,7 @@ public static unsafe partial class World
         public readonly float X;
         public readonly float Y;
 
+        [MethodImpl(Jit.Hot)]
         public SplatOwn(byte stamp, sbyte gain, float x, float y)
         {
             Active = true;

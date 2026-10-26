@@ -1,5 +1,5 @@
-#if NET
 using System.Runtime.CompilerServices;
+#if NET
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
@@ -11,6 +11,7 @@ internal static unsafe partial class TileBake
 {
     private const int PublishWholeTile = TileSize * TileSize / 2;
 
+    [MethodImpl(Jit.Hot)]
     internal static ResolveOutcome Publish(PlaneStore* store, TilePlanes* tile, int x0, int y0, int x1, int y1,
         int tick)
     {
@@ -24,9 +25,7 @@ internal static unsafe partial class TileBake
         return PublishScalar(cells, x0, y0, x1, y1, tick);
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     internal static ResolveOutcome PublishScalar(PlaneCells t, int x0, int y0, int x1, int y1, int tick)
     {
         if ((x1 - x0) * (y1 - y0) >= PublishWholeTile)
@@ -56,6 +55,7 @@ internal static unsafe partial class TileBake
         return Outcome(PageAny(t.Page), changed);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static bool RowScalar(int* i, int* tentOut, int* bellOut, short* page, int x0, int x1)
     {
         var changed = false;
@@ -70,6 +70,7 @@ internal static unsafe partial class TileBake
         return changed;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static bool AllZero(int* values, int count)
     {
         var i = 0;
@@ -88,6 +89,7 @@ internal static unsafe partial class TileBake
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static bool AllZero(long* values, int count)
     {
         var i = 0;
@@ -106,9 +108,7 @@ internal static unsafe partial class TileBake
         return true;
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     internal static bool PageAny(short* page)
     {
 #if NET
@@ -132,7 +132,7 @@ internal static unsafe partial class TileBake
     }
 
 #if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    [MethodImpl(Jit.Hot)]
     internal static ResolveOutcome Publish128(PlaneCells t, int x0, int y0, int x1, int y1, int tick)
     {
         if ((x1 - x0) * (y1 - y0) >= PublishWholeTile)
@@ -188,7 +188,7 @@ internal static unsafe partial class TileBake
         return Outcome(PageAny(t.Page), changed);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    [MethodImpl(Jit.Hot)]
     internal static ResolveOutcome Publish256(PlaneCells t, int x0, int y0, int x1, int y1, int tick)
     {
         if ((x1 - x0) * (y1 - y0) >= PublishWholeTile)
@@ -245,7 +245,7 @@ internal static unsafe partial class TileBake
         return Outcome(PageAny(t.Page), changed);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static Vector128<short> PackCells(Vector128<int> lower, Vector128<int> upper)
     {
         if (Sse2.IsSupported) return Sse2.PackSignedSaturate(lower, upper).AsInt16();

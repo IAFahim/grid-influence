@@ -1,11 +1,10 @@
-#if NET
 using System.Runtime.CompilerServices;
-#endif
 
 namespace Gi;
 
 public static unsafe partial class World
 {
+    [MethodImpl(Jit.Hot)]
     private static bool SenseColumnCore(byte world, byte layer, float* xs, float* ys, int count, short* values,
         ulong* whole)
     {
@@ -19,6 +18,7 @@ public static unsafe partial class World
         return SenseRange(w, layer, xs, ys, values, whole, 0, count) == 0;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static int ChangedMask(byte world, byte layer, float* xs, float* ys, float reach, int since, int count,
         ulong* words)
     {
@@ -36,6 +36,7 @@ public static unsafe partial class World
         return ChangedRange(w, layer, xs, ys, reach, since, words, 0, count);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static void Sync(byte world, SourceId* sources, float* xs, float* ys, int count)
     {
         var w = GetContext(world);
@@ -44,9 +45,7 @@ public static unsafe partial class World
         SyncColumns(w, sources, xs, ys, count);
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static void SyncColumns(WorldCtx* w, SourceId* sources, float* xs, float* ys, int count)
     {
         if (count <= 0 || sources == null || xs == null || ys == null) return;
@@ -109,6 +108,7 @@ public static unsafe partial class World
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static int SenseRange(WorldCtx* w, byte layer, float* xs, float* ys, short* values, ulong* whole, int from,
         int to)
     {
@@ -194,6 +194,7 @@ public static unsafe partial class World
         return gaps;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static int ChangedRange(WorldCtx* w, byte layer, float* xs, float* ys, float reach, int since,
         ulong* words, int from, int to)
     {
@@ -208,6 +209,7 @@ public static unsafe partial class World
         return hits;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static bool ChangedOne(WorldCtx* w, byte layer, float x, float y, float reach, int since)
     {
         if (!Pick(w, x, y, reach, 0, true, out var gi, out _)) return false;

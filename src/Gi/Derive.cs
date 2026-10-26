@@ -34,6 +34,7 @@ internal struct LayerRecipe
 
 public static unsafe partial class World
 {
+    [MethodImpl(Jit.Hot)]
     internal static byte AddDerived(byte world, LayerOp op, byte a, byte b, int weightA, int weightB, int shift,
         short low, short high)
     {
@@ -72,20 +73,19 @@ public static unsafe partial class World
         return id;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     internal static bool IsDerived(WorldCtx* w, int layer)
     {
         return w->Recipes[layer].Op != LayerOp.Base;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static bool IsTransient(WorldCtx* w, int layer)
     {
         return w->Recipes[layer].Transient != 0;
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static void Derive(WorldCtx* w)
     {
         for (var d = 0; d < w->LayerCount; d++)
@@ -154,6 +154,7 @@ public static unsafe partial class World
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void MarkLive(GridCtx* g, byte layer, LayerData* source)
     {
         if (source->LivePages == 0) return;
@@ -165,6 +166,7 @@ public static unsafe partial class World
                 MarkDirty(g, target, tile);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void MarkAll(GridCtx* g, LayerData* target, LayerData* source)
     {
         var tiles = source->Dirty.Pointer;
@@ -172,7 +174,7 @@ public static unsafe partial class World
         for (var i = 0; i < count; i++) MarkDirty(g, target, tiles[i]);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static short CombineCell(LayerRecipe* r, int a, int b)
     {
         switch (r->Op)
@@ -192,9 +194,7 @@ public static unsafe partial class World
         }
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static ResolveOutcome Combine(LayerRecipe* r, short* inputA, short* inputB, short* output, long* pageSum,
         short* pageMax)
     {
@@ -224,9 +224,7 @@ public static unsafe partial class World
     }
 
 #if NET
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static ResolveOutcome Combine256(LayerRecipe* r, short* a, short* b, short* output, long* pageSum,
         short* pageMax)
     {
@@ -291,7 +289,7 @@ public static unsafe partial class World
             !Vector256.EqualsAll(differs, Vector256<short>.Zero));
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    [MethodImpl(Jit.Hot)]
     private static ResolveOutcome Combine128(LayerRecipe* r, short* a, short* b, short* output, long* pageSum,
         short* pageMax)
     {

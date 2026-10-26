@@ -1,7 +1,9 @@
+using System.Runtime.CompilerServices;
 namespace Gi;
 
 public static unsafe partial class World
 {
+    [MethodImpl(Jit.Hot)]
     public static ulong LayerHash(byte world, byte grid, byte layer)
     {
         var w = GetContext(world);
@@ -10,6 +12,7 @@ public static unsafe partial class World
         return w->Grids[grid].Layers[layer].Hash;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void RefreshTileHash(GridCtx* g, LayerData* ld, int tile)
     {
         if (ld->TileHashes == null)

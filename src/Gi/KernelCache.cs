@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 namespace Gi;
 
 internal enum KernelShape : byte
@@ -22,6 +23,7 @@ internal readonly unsafe struct KernelTaps
     public readonly int* Cells;
     public readonly long* Q40;
 
+    [MethodImpl(Jit.Hot)]
     internal KernelTaps(
         Plane plane, KernelShape shape, int originX, int originY, int width, int height,
         int maxTap, long maxTapQ40, int* rowExtents, int* cells, long* q40)
@@ -45,6 +47,7 @@ internal readonly struct KernelKey
     public readonly ulong Main;
     public readonly ulong Turn;
 
+    [MethodImpl(Jit.Hot)]
     internal KernelKey(byte stamp, int sampling, int grid, int phaseX, int phaseY, int angle)
     {
         Main = stamp | ((ulong)sampling << 8) | ((ulong)grid << 36) | ((ulong)phaseX << 41) | ((ulong)phaseY << 49);
@@ -103,6 +106,7 @@ internal unsafe struct KernelCache
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     public readonly KernelEntry* Find(ulong key, ulong turn)
     {
         var entries = _entries.Pointer;
@@ -115,6 +119,7 @@ internal unsafe struct KernelCache
         return null;
     }
 
+    [MethodImpl(Jit.Hot)]
     public readonly KernelTaps View(KernelEntry* entry)
     {
         var taps = _taps.Pointer + (long)entry->Slot * MaxCells;
@@ -131,11 +136,13 @@ internal unsafe struct KernelCache
     public readonly bool CanInsert => !InsertsDisabled && _inserts < FrameInsertCap;
 
 
+    [MethodImpl(Jit.Hot)]
     public void BeginFrame()
     {
         _inserts = 0;
     }
 
+    [MethodImpl(Jit.Hot)]
     public void Clear()
     {
         if (_entries.Pointer != null) new Span<KernelEntry>(_entries.Pointer, EntryCount).Clear();
@@ -143,6 +150,7 @@ internal unsafe struct KernelCache
         _inserts = 0;
     }
 
+    [MethodImpl(Jit.Hot)]
     public void Release()
     {
         _entries.Free();
@@ -153,6 +161,7 @@ internal unsafe struct KernelCache
         _cursor = 0;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal KernelEntry* Insert(
         ulong key, ulong turn, Plane plane, KernelShape shape,
         int originX, int originY, int width, int height, int maxTap, long maxTapQ40,
@@ -185,24 +194,28 @@ internal unsafe struct KernelCache
         return entry;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal int* CanvasInt(int cells)
     {
         _canvas.Resize(cells);
         return (int*)_canvas.Pointer;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal long* CanvasLong(int cells)
     {
         _canvas.Resize(cells);
         return _canvas.Pointer;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal int* CanvasRows(int rows)
     {
         _canvasRows.Resize(2 * rows);
         return _canvasRows.Pointer;
     }
 
+    [MethodImpl(Jit.Hot)]
     private void EnsureStorage()
     {
         if (_entries.Pointer != null) return;
@@ -215,6 +228,7 @@ internal unsafe struct KernelCache
 
 internal static unsafe class KernelFactory
 {
+    [MethodImpl(Jit.Hot)]
     public static bool TryFindTaps(
         WorldCtx* w, int grid, byte stamp, int angle, Layer.Precision precision, Placement* p, out KernelTaps taps)
     {
@@ -230,6 +244,7 @@ internal static unsafe class KernelFactory
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static bool TryGetTaps(
         WorldCtx* w, int grid, byte stamp, int angle, Layer.Precision precision, Placement* p, out KernelTaps taps)
     {
@@ -307,6 +322,7 @@ internal static unsafe class KernelFactory
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void EmitTaps(
         Placement* p, int* difference, int* dense, long* smooth, int tileX0, int tileY0, int gain, int rasterX1,
         int rasterY1)
@@ -339,6 +355,7 @@ internal static unsafe class KernelFactory
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static KernelShape ShapeOf(Placement* p)
     {
         if (p->Turned) return p->Kind >= StampKind.Disk && p->V->Arc == 0 ? KernelShape.Spans : KernelShape.Dense;
@@ -350,6 +367,7 @@ internal static unsafe class KernelFactory
         };
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void RelativeRect(
         Placement* p, int maskedAngle, out int rx0, out int ry0, out int rx1, out int ry1, out int rasterX1,
         out int rasterY1)
@@ -395,6 +413,7 @@ internal static unsafe class KernelFactory
         rasterY1 = p->Py + ry1;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void Capture(
         Placement* q, Plane plane, int* ints, long* longs,
         int ax0, int ay0, int ax1, int ay1, int width, int rasterX1, int rasterY1)
@@ -460,6 +479,7 @@ internal static unsafe class KernelFactory
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void Measure(
         int* ints, long* longs, int width, int height, int* extents,
         out int minX, out int minY, out int maxX, out int maxY, out long maxTap)
@@ -523,6 +543,7 @@ internal static unsafe class KernelFactory
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void Compact(int* ints, long* longs, int width, int minX, int minY, int kernelWidth,
         int kernelHeight)
     {

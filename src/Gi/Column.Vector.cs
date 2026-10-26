@@ -7,7 +7,7 @@ namespace Gi;
 
 public static unsafe partial class World
 {
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    [MethodImpl(Jit.Hot)]
     private static int GradientBlocks(
         GridCtx* g, LayerData* ld, float* xs, float* ys, short* values, float* gradientXs, float* gradientYs,
         ulong* whole, int from, int to, ref bool complete)
@@ -163,7 +163,7 @@ public static unsafe partial class World
         return i;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static Vector256<int> PageBases(
         int* directory, int* sets, Vector256<int> stride, Vector256<int> tile, out Vector256<int> present)
     {
@@ -173,7 +173,7 @@ public static unsafe partial class World
         return Vector256.ShiftLeft(Vector256.ConditionalSelect(present, pageIndex, Vector256<int>.Zero), 11);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static Vector256<int> GatherTap(
         int* directory, int* sets, int* pages, Vector256<int> stride, Vector256<int> tile, Vector256<int> cross,
         Vector256<int> invalid, Vector256<int> tileStep, Vector256<int> local, Vector256<int> baseBytes,
@@ -189,14 +189,14 @@ public static unsafe partial class World
         return GatherShort(pages, baseBytes + Vector256.ShiftLeft(local, 1)) & present;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static Vector256<int> GatherShort(int* pages, Vector256<int> byteOffset)
     {
         var raw = Avx2.GatherVector256(pages, byteOffset, 1);
         return Vector256.ShiftRightArithmetic(Vector256.ShiftLeft(raw, 16), 16);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static void OrBits(ulong* words, int at, uint bits)
     {
         var shift = at & 63;

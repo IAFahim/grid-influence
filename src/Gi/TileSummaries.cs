@@ -8,6 +8,7 @@ namespace Gi;
 
 internal static unsafe partial class TileBake
 {
+    [MethodImpl(Jit.Hot)]
     internal static void UpdateSummaries(PlaneCells t, int x0, int y0, int x1, int y1)
     {
         if (y1 <= y0) return;
@@ -60,6 +61,7 @@ internal static unsafe partial class TileBake
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void RescanMax(PlaneCells t, out short max, out int ax, out int ay)
     {
         var maxima = t.Summary->RowMaxima;
@@ -75,7 +77,7 @@ internal static unsafe partial class TileBake
         ax = FirstEqual(t.Page + ay * TileSize, max);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static void RowStats(short* row, out int sum, out short max)
     {
 #if NET
@@ -117,7 +119,7 @@ internal static unsafe partial class TileBake
         max = best;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static int FirstEqual(short* row, short value)
     {
 #if NET
@@ -145,13 +147,13 @@ internal static unsafe partial class TileBake
     }
 
 #if NET
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static short MaxLane(Vector256<short> v)
     {
         return MaxLane(Vector128.Max(v.GetLower(), v.GetUpper()));
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static short MaxLane(Vector128<short> v)
     {
         v = Vector128.Max(v, Vector128.Shuffle(v, Vector128.Create(4, 5, 6, 7, 0, 1, 2, 3)));

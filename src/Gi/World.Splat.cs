@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 #if NET
 using System.Numerics;
 using System.Runtime.Intrinsics;
@@ -7,6 +8,7 @@ namespace Gi;
 
 public static unsafe partial class World
 {
+    [MethodImpl(Jit.Hot)]
     public static int Splat(byte world, byte layer, ReadOnlySpan<float> xs, ReadOnlySpan<float> ys, byte stamp,
         sbyte gain)
     {
@@ -28,6 +30,7 @@ public static unsafe partial class World
         return applied;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static int SplatCells(WorldCtx* w, byte layer, float* xs, float* ys, int count, byte stamp, sbyte gain)
     {
         var applied = CountFinite(xs, ys, count);
@@ -68,6 +71,7 @@ public static unsafe partial class World
         return applied;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void SplatDirect(WorldCtx* w, int gi, GridCtx* g, ref DepositRecord key, int mask, float x, float y)
     {
         if (!float.IsFinite(x) || !float.IsFinite(y)) return;
@@ -77,6 +81,7 @@ public static unsafe partial class World
         EmitDelta(w, gi, in key, 1);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void SplatOne(
         WorldCtx* w, int gi, GridCtx* g, LayerData* ld, HistState* hist, HistClass* cls,
         ref DepositRecord key, int mask, float x, float y)
@@ -98,6 +103,7 @@ public static unsafe partial class World
             (cy & (TileBake.TileSize - 1)) * TileBake.TileSize + (cx & (TileBake.TileSize - 1))] += key.Gain;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static int CountFinite(float* xs, float* ys, int count)
     {
         var finite = 0;
@@ -120,6 +126,7 @@ public static unsafe partial class World
         return finite;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static int Splat(
         byte world, byte layer, ReadOnlySpan<float> xs, ReadOnlySpan<float> ys,
         ReadOnlySpan<byte> stamps, ReadOnlySpan<sbyte> gains)
@@ -135,17 +142,20 @@ public static unsafe partial class World
         return applied;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static SplatWriter BeginSplat(byte world, byte layer)
     {
         var w = GetContext(world);
         return w == null || layer >= w->LayerCount || !IsTransient(w, layer) ? default : new SplatWriter(w, layer);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static bool CanSplat(WorldCtx* w, byte layer, byte stamp)
     {
         return layer < w->LayerCount && IsTransient(w, layer) && StampCatalog.Valid(stamp);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static bool EmitSplat(WorldCtx* w, byte layer, float x, float y, byte stamp, sbyte gain)
     {
         if (!float.IsFinite(x) || !float.IsFinite(y)) return false;
@@ -187,6 +197,7 @@ public static unsafe partial class World
         private readonly WorldCtx* _world;
         private readonly byte _layer;
 
+        [MethodImpl(Jit.Hot)]
         internal SplatWriter(WorldCtx* world, byte layer)
         {
             _world = world;
@@ -196,6 +207,7 @@ public static unsafe partial class World
 
         public int Count { get; private set; }
 
+        [MethodImpl(Jit.Hot)]
         public bool Add(float x, float y, byte stamp, sbyte gain)
         {
             if (_world == null || !StampCatalog.Valid(stamp) || !EmitSplat(_world, _layer, x, y, stamp, gain))
