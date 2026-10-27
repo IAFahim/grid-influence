@@ -345,6 +345,27 @@ public static unsafe partial class World
 #if NET
         new Span<int>(slots, count).Sort();
 #else
+        if (count <= InsertionLimit)
+        {
+            InsertionSort(slots, count);
+            return;
+        }
+
+        for (var parent = (count >> 1) - 1; parent >= 0; parent--) SiftDown(slots, parent, count);
+        for (var end = count - 1; end > 0; end--)
+        {
+            (slots[0], slots[end]) = (slots[end], slots[0]);
+            SiftDown(slots, 0, end);
+        }
+#endif
+    }
+
+#if !NET
+    private const int InsertionLimit = 16;
+
+    [MethodImpl(Jit.Hot)]
+    private static void InsertionSort(int* slots, int count)
+    {
         for (var i = 1; i < count; i++)
         {
             var value = slots[i];
@@ -357,6 +378,25 @@ public static unsafe partial class World
 
             slots[j + 1] = value;
         }
-#endif
     }
+
+    [MethodImpl(Jit.Hot)]
+    private static void SiftDown(int* slots, int root, int count)
+    {
+        var value = slots[root];
+        while (true)
+        {
+            var child = (root << 1) + 1;
+            if (child >= count) break;
+
+            if (child + 1 < count && slots[child + 1] > slots[child]) child++;
+            if (slots[child] <= value) break;
+
+            slots[root] = slots[child];
+            root = child;
+        }
+
+        slots[root] = value;
+    }
+#endif
 }
