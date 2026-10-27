@@ -118,34 +118,8 @@ public static unsafe partial class World
         if (w->GridCount == 1)
         {
             var only = w->Grids;
-            var scaleQ8 = only->ScaleQ8;
-            if (scaleQ8 != 0)
-            {
-                var ox = only->OriginX;
-                var oy = only->OriginY;
-                var ld = only->Layers + layer;
-                for (var i = from; i < to; i++)
-                {
-                    var qx = CellQ8(xs[i], ox, scaleQ8);
-                    var qy = CellQ8(ys[i], oy, scaleQ8);
-                    if (!Contains(only, qx, qy))
-                    {
-                        values[i] = 0;
-                        gaps++;
-                        continue;
-                    }
-
-                    var cx = (int)(qx >> 8);
-                    var cy = (int)(qy >> 8);
-                    var page = ld->PageOf((cy >> TileBake.TileBits) * only->TilesPerSide + (cx >> TileBake.TileBits));
-                    values[i] = page == null
-                        ? (short)0
-                        : page[(cy & (TileBake.TileSize - 1)) * TileBake.TileSize + (cx & (TileBake.TileSize - 1))];
-                    if (whole != null) whole[i >> 6] |= 1ul << (i & 63);
-                }
-
-                return gaps;
-            }
+            if (only->ScaleQ8 != 0)
+                return SenseSingle(FieldOf(only, only->Layers + layer), xs, ys, values, whole, from, to);
         }
 
         for (var i = from; i < to; i++)
