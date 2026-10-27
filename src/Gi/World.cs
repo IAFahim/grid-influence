@@ -600,7 +600,7 @@ public static unsafe partial class World
         else if (!StampCatalog.Valid(stamp) || !FootprintFits(w, stamp, UnitScale)) status = WriteStatus.InvalidStamp;
         else if (!float.IsFinite(x) || !float.IsFinite(y)) status = WriteStatus.NonFinite;
         else
-            status = PlaceSlot(w, layer, x, y, stamp, gain, out id) == SourceResultStatus.Applied
+            status = PlaceSlot(w, layer, x, y, stamp, gain, UnitScale, out id) == SourceResultStatus.Applied
                 ? WriteStatus.Applied
                 : WriteStatus.CapacityReached;
         return id;

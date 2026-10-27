@@ -43,14 +43,14 @@ public static unsafe partial class World
         var s = &w->Sources;
         if (command.Kind == SourceCommandKind.Place)
         {
+            var scale = float.IsFinite(command.ScaleValue) ? QuantizeScale(command.ScaleValue) : UnitScale;
             var status = PlaceSlot(w, command.Layer, command.PositionX, command.PositionY, command.Stamp, command.Gain,
-                out var created);
+                scale, out var created);
             results[index] = new SourceResult(created, status);
             if (status != SourceResultStatus.Applied) return;
 
             var placed = (int)created.Slot;
             if (float.IsFinite(command.HeadingRadians)) s->Angle[placed] = QuantizeAngle(command.HeadingRadians);
-            if (float.IsFinite(command.ScaleValue)) s->Scale[placed] = QuantizeScale(command.ScaleValue);
             return;
         }
 

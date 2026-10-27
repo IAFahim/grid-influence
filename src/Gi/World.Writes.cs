@@ -39,12 +39,14 @@ public static unsafe partial class World
 
     [MethodImpl(Jit.Hot)]
     private static SourceResultStatus PlaceSlot(
-        WorldCtx* w, byte layer, float x, float y, byte stamp, sbyte gain, out SourceId id)
+        WorldCtx* w, byte layer, float x, float y, byte stamp, sbyte gain, ushort scale, out SourceId id)
     {
         id = default;
         if (layer >= w->LayerCount || IsDerived(w, layer) || IsTransient(w, layer))
             return SourceResultStatus.InvalidLayer;
-        if (!StampCatalog.Valid(stamp) || !FootprintFits(w, stamp, UnitScale)) return SourceResultStatus.InvalidStamp;
+        if (!StampCatalog.Valid(stamp) || !FootprintFits(w, stamp, UnitScale) ||
+            (scale != UnitScale && !FootprintFits(w, stamp, scale)))
+            return SourceResultStatus.InvalidStamp;
         if (!float.IsFinite(x) || !float.IsFinite(y)) return SourceResultStatus.InvalidSource;
 
         var s = &w->Sources;
@@ -65,7 +67,7 @@ public static unsafe partial class World
         s->Layer[i] = layer;
         s->Gain[i] = g;
         s->Angle[i] = 0;
-        s->Scale[i] = UnitScale;
+        s->Scale[i] = scale;
         JournalSchedule(w, s, i);
         s->Timed.Pointer[i] = 0;
         s->Alive[i] = 1;
