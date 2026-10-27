@@ -36,7 +36,7 @@ public static unsafe partial class World
                 ref readonly var columns = ref ranges[reader];
                 if (columns.Count == 0) continue;
                 var rowBytes = (long)columns.Count;
-                if (BorrowOverlap(mask.Invalid, maskBytes, columns.Sources, rowBytes * sizeof(int)) ||
+                if (BorrowOverlap(mask.Invalid, maskBytes, columns.Sources, rowBytes * sizeof(SourceId)) ||
                     BorrowOverlap(mask.Invalid, maskBytes, columns.Xs, rowBytes * sizeof(float)) ||
                     BorrowOverlap(mask.Invalid, maskBytes, columns.Ys, rowBytes * sizeof(float)) ||
                     BorrowOverlap(mask.Invalid, maskBytes, columns.Headings, rowBytes * sizeof(float)) ||
