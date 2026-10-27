@@ -52,7 +52,7 @@ internal static unsafe partial class TileBake
 
         UpdateSummaries(t, x0, y0, x1, y1);
         if (changed) t.Summary->Epoch = tick;
-        return Outcome(PageAny(t.Page), changed);
+        return Outcome(Occupied(t.Summary), changed);
     }
 
     [MethodImpl(Jit.Hot)]
@@ -185,7 +185,7 @@ internal static unsafe partial class TileBake
         UpdateSummaries(t, x0, y0, x1, y1);
         changed |= !Vector128.EqualsAll(differs, Vector128<short>.Zero);
         if (changed) t.Summary->Epoch = tick;
-        return Outcome(PageAny(t.Page), changed);
+        return Outcome(Occupied(t.Summary), changed);
     }
 
     [MethodImpl(Jit.Hot)]
@@ -198,6 +198,9 @@ internal static unsafe partial class TileBake
             x1 = TileSize;
             y1 = TileSize;
         }
+
+        var planes = t.T != null || t.B != null;
+        if (!planes && x0 == 0 && x1 == TileSize) return PublishRows256(t, y0, y1, tick);
 
         var tentOut = stackalloc int[TileSize];
         var bellOut = stackalloc int[TileSize];
@@ -217,12 +220,15 @@ internal static unsafe partial class TileBake
             var pageRow = t.Page + row;
             var vectorEnd = x1 - ((x1 - x0) & 7);
 
-            var wide = Vector256<int>.Zero;
-            for (var x = x0; x < vectorEnd; x += 8) wide |= Avx.LoadVector256(iRow + x) + bound;
-            if (!Vector256.EqualsAll(wide & guard, Vector256<int>.Zero))
+            if (planes)
             {
-                changed |= RowScalar(iRow, tentOut, bellOut, pageRow, x0, x1);
-                continue;
+                var wide = Vector256<int>.Zero;
+                for (var x = x0; x < vectorEnd; x += 8) wide |= Avx.LoadVector256(iRow + x) + bound;
+                if (!Vector256.EqualsAll(wide & guard, Vector256<int>.Zero))
+                {
+                    changed |= RowScalar(iRow, tentOut, bellOut, pageRow, x0, x1);
+                    continue;
+                }
             }
 
             for (var x = x0; x < vectorEnd; x += 8)
@@ -236,13 +242,84 @@ internal static unsafe partial class TileBake
                 Sse2.Store(pageRow + x, cells);
             }
 
-            changed |= RowScalar(iRow, tentOut, bellOut, pageRow, vectorEnd, x1);
+            if (vectorEnd < x1) changed |= RowScalar(iRow, tentOut, bellOut, pageRow, vectorEnd, x1);
         }
 
         UpdateSummaries(t, x0, y0, x1, y1);
         changed |= !Vector128.EqualsAll(differs, Vector128<short>.Zero);
         if (changed) t.Summary->Epoch = tick;
-        return Outcome(PageAny(t.Page), changed);
+        return Outcome(Occupied(t.Summary), changed);
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static ResolveOutcome PublishRows256(PlaneCells t, int y0, int y1, int tick)
+    {
+        var summary = t.Summary;
+        var differs = Vector256<short>.Zero;
+        var delta = Vector128<int>.Zero;
+        var tail = 0L;
+        var y = y0;
+        for (; y + 4 <= y1; y += 4)
+        {
+            PackRow(t.I + y * TileSize, t.Page + y * TileSize, ref differs, out var sums0, out var maxima0);
+            PackRow(t.I + (y + 1) * TileSize, t.Page + (y + 1) * TileSize, ref differs, out var sums1,
+                out var maxima1);
+            PackRow(t.I + (y + 2) * TileSize, t.Page + (y + 2) * TileSize, ref differs, out var sums2,
+                out var maxima2);
+            PackRow(t.I + (y + 3) * TileSize, t.Page + (y + 3) * TileSize, ref differs, out var sums3,
+                out var maxima3);
+            var folded = Avx2.HorizontalAdd(Avx2.HorizontalAdd(sums0, sums1), Avx2.HorizontalAdd(sums2, sums3));
+            var rowSums = folded.GetLower() + folded.GetUpper();
+            var previous = Sse2.LoadVector128(summary->RowSums + y);
+            Sse2.Store(summary->RowSums + y, rowSums);
+            delta += rowSums - previous;
+            summary->RowMaxima[y] = RowMaximum(maxima0);
+            summary->RowMaxima[y + 1] = RowMaximum(maxima1);
+            summary->RowMaxima[y + 2] = RowMaximum(maxima2);
+            summary->RowMaxima[y + 3] = RowMaximum(maxima3);
+        }
+
+        for (; y < y1; y++)
+        {
+            PackRow(t.I + y * TileSize, t.Page + y * TileSize, ref differs, out var sums, out var maxima);
+            var rowSum = Vector256.Sum(sums);
+            tail += rowSum - summary->RowSums[y];
+            summary->RowSums[y] = rowSum;
+            summary->RowMaxima[y] = RowMaximum(maxima);
+        }
+
+        CommitSummaries(t, 0, y0, TileSize, y1, summary->Sum + Vector128.Sum(delta) + tail);
+        var changed = !Vector256.EqualsAll(differs, Vector256<short>.Zero);
+        if (changed) summary->Epoch = tick;
+        return Outcome(Occupied(summary), changed);
+    }
+
+    [MethodImpl(Jit.Inline)]
+    private static void PackRow(int* iRow, short* pageRow, ref Vector256<short> differs, out Vector256<int> sums,
+        out Vector128<short> maxima)
+    {
+        var low = PackSixteen(Avx.LoadVector256(iRow), Avx.LoadVector256(iRow + 8));
+        var high = PackSixteen(Avx.LoadVector256(iRow + 16), Avx.LoadVector256(iRow + 24));
+        differs |= (low ^ Avx.LoadVector256(pageRow)) | (high ^ Avx.LoadVector256(pageRow + 16));
+        Avx.Store(pageRow, low);
+        Avx.Store(pageRow + 16, high);
+        var ones = Vector256.Create((short)1);
+        sums = Avx2.MultiplyAddAdjacent(low, ones) + Avx2.MultiplyAddAdjacent(high, ones);
+        var widest = Vector256.Max(low, high);
+        maxima = Vector128.Max(widest.GetLower(), widest.GetUpper());
+    }
+
+    [MethodImpl(Jit.Inline)]
+    private static Vector256<short> PackSixteen(Vector256<int> first, Vector256<int> second)
+    {
+        return Avx2.Permute4x64(Avx2.PackSignedSaturate(first, second).AsInt64(), 0xd8).AsInt16();
+    }
+
+    [MethodImpl(Jit.Inline)]
+    private static short RowMaximum(Vector128<short> maxima)
+    {
+        var flip = Vector128.Create((short)0x7FFF);
+        return (short)(Sse41.MinHorizontal((maxima ^ flip).AsUInt16()).ToScalar() ^ 0x7FFF);
     }
 
     [MethodImpl(Jit.Inline)]

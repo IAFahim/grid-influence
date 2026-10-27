@@ -49,6 +49,6 @@ internal static unsafe partial class TileBake
 
         UpdateSummaries(t, x0, y0, x1, y1);
         if (changed) t.Summary->Epoch = tick;
-        return Outcome(PageAny(t.Page), changed);
+        return Outcome(Occupied(t.Summary), changed);
     }
 }

@@ -159,7 +159,7 @@ internal unsafe struct PlaneStore
         return high + (low >> 40) == 0 && (low & ((1L << 40) - 1)) == 0;
     }
 
-    [MethodImpl(Jit.Hot)]
+    [MethodImpl(Jit.Inline)]
     public readonly PlaneCells Cells(in TilePlanes tile)
     {
         return new PlaneCells
