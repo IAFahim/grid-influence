@@ -78,6 +78,7 @@ public static unsafe partial class World
                     var dy = TileBake.AnchorQ8(oldY, oy, scaleQ8, mask) ^ TileBake.AnchorQ8(y, oy, scaleQ8, mask);
                     var changed = (dx | dy) != 0;
                     if (changed) BeforeWrite(w, s, slot);
+                    else JournalUnsnapshotted(w, s, slot);
                     s->X[slot] = x;
                     s->Y[slot] = y;
                     if (changed) MarkChanged(w, s, slot);
@@ -102,6 +103,7 @@ public static unsafe partial class World
             if (!float.IsFinite(x) || !float.IsFinite(y)) continue;
             var changed = PositionChanged(w, s->Layer[slot], oldX, oldY, x, y);
             if (changed) BeforeWrite(w, s, slot);
+            else JournalUnsnapshotted(w, s, slot);
             s->X[slot] = x;
             s->Y[slot] = y;
             if (changed) MarkChanged(w, s, slot);

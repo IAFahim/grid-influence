@@ -76,6 +76,33 @@ public static unsafe partial class World
         return SourceResultStatus.Applied;
     }
 
+    [MethodImpl(Jit.Hot)]
+    private static void JournalColumns(WorldCtx* w, SourceColumns* s, int slot)
+    {
+        s->HotStamp.Pointer[slot] = w->RecordEpoch;
+        var n = w->Journal.Length;
+        w->Journal.Resize(n + 1);
+        w->Journal.Pointer[n] = new JournalEntry
+        {
+            Slot = slot,
+            X = s->X[slot],
+            Y = s->Y[slot],
+            Stamp = s->Stamp[slot],
+            Layer = s->Layer[slot],
+            Gain = s->Gain[slot],
+            Alive = s->Alive[slot],
+            Angle = s->Angle[slot],
+            Scale = s->Scale[slot],
+            Gen = s->Gen[slot]
+        };
+    }
+
+    [MethodImpl(Jit.Inline)]
+    private static void JournalUnsnapshotted(WorldCtx* w, SourceColumns* s, int slot)
+    {
+        if (w->Recording != 0 && s->HotStamp.Pointer[slot] != w->RecordEpoch) JournalColumns(w, s, slot);
+    }
+
     [MethodImpl(Jit.Inline)]
     private static void WriteMove(WorldCtx* w, SourceColumns* s, int i, float x, float y)
     {
@@ -85,6 +112,7 @@ public static unsafe partial class World
 
         var changed = PositionChanged(w, s->Layer[i], oldX, oldY, x, y);
         if (changed) BeforeWrite(w, s, i);
+        else JournalUnsnapshotted(w, s, i);
         s->X[i] = x;
         s->Y[i] = y;
         if (changed) MarkChanged(w, s, i);
@@ -99,6 +127,7 @@ public static unsafe partial class World
 
         var changed = PositionChanged(w, s->Layer[i], oldX, oldY, x, y);
         if (changed) BeforeWrite(w, s, i);
+        else JournalUnsnapshotted(w, s, i);
         s->X[i] = x;
         s->Y[i] = y;
         if (changed) MarkChanged(w, s, i);
@@ -112,6 +141,7 @@ public static unsafe partial class World
 
         var changed = AngleChanged(w, s->Layer[i], old, next);
         if (changed) BeforeWrite(w, s, i);
+        else JournalUnsnapshotted(w, s, i);
         s->Angle[i] = next;
         if (changed) MarkChanged(w, s, i);
     }
