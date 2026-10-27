@@ -572,68 +572,56 @@ public static unsafe partial class World
         for (var gi = 0; gi < w->GridCount; gi++)
         {
             var g = w->Grids + gi;
-            var tps = g->TilesPerSide;
             for (var l = 0; l < w->LayerCount; l++)
             {
                 if (IsDerived(w, l)) continue;
 
                 var ld = g->Layers + l;
                 var transient = IsTransient(w, l);
-                if (transient)
-                {
-                    FlushHistogram(w, gi, g, ld, (byte)l);
-                    RestartStale(g, ld);
-                }
-
-                if (ld->InDirty == null) continue;
-
-                var dirty = ld->Dirty.Pointer;
-                var rects = ld->Rects.Pointer;
-                var kept = 0;
-                for (var i = 0; i < ld->Dirty.Length; i++)
-                {
-                    var tile = dirty[i];
-                    ld->InDirty[tile] = 0;
-                    var set = ld->SetOf(tile);
-                    if (set == null) continue;
-
-                    var rect = rects + i;
-                    if (transient) PrepareTransientSet(ld, set);
-                    var outcome = TileBake.Publish(&ld->Store, set, rect->X0, rect->Y0, rect->X1, rect->Y1, w->Tick);
-                    bool dropped;
-                    if ((outcome & ResolveOutcome.Empty) != 0 && (transient || ld->Store.PlanesZero(*set)))
-                    {
-                        DropPage(ld, tile);
-                        ld->Max.Update(tps, tile, 0);
-                        dropped = true;
-                    }
-                    else
-                    {
-                        ld->Max.Update(tps, tile, ld->Store.Cells(*set).Summary->Max);
-                        if (transient) RetireTransientTile(ld, set, tile);
-                        dropped = false;
-                    }
-
-                    if (dropped || (outcome & ResolveOutcome.Changed) != 0) RefreshTileHash(g, ld, tile);
-                    if ((outcome & ResolveOutcome.Changed) != 0) dirty[kept++] = tile;
-                }
-
-                ld->Dirty.Resize(kept);
-                ld->Rects.Resize(0);
+                if (transient) PlanTransient(w, gi, g, ld, (byte)l);
+                if (ld->InDirty != null) PublishTiles(w, g, ld, transient);
+                if (transient) CommitTransient(g, ld);
             }
         }
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void RestartStale(GridCtx* g, LayerData* ld)
+    private static void PublishTiles(WorldCtx* w, GridCtx* g, LayerData* ld, bool transient)
     {
-        for (var i = 0; i < ld->Stale.Length; i++)
+        var tps = g->TilesPerSide;
+        var dirty = ld->Dirty.Pointer;
+        var rects = ld->Rects.Pointer;
+        var kept = 0;
+        for (var i = 0; i < ld->Dirty.Length; i++)
         {
-            var dirty = DirtyIndex(g, ld, ld->Stale.Pointer[i]);
-            ld->Rects.Pointer[dirty] = new TileRect { X0 = 0, Y0 = 0, X1 = TileBake.TileSize, Y1 = TileBake.TileSize };
+            var tile = dirty[i];
+            ld->InDirty[tile] = 0;
+            var set = ld->SetOf(tile);
+            if (set == null) continue;
+
+            var rect = rects + i;
+            if (transient) PrepareTransientSet(ld, set);
+            var outcome = TileBake.Publish(&ld->Store, set, rect->X0, rect->Y0, rect->X1, rect->Y1, w->Tick);
+            bool dropped;
+            if ((outcome & ResolveOutcome.Empty) != 0 && (transient || ld->Store.PlanesZero(*set)))
+            {
+                DropPage(ld, tile);
+                ld->Max.Update(tps, tile, 0);
+                dropped = true;
+            }
+            else
+            {
+                ld->Max.Update(tps, tile, ld->Store.Cells(*set).Summary->Max);
+                if (transient) RetireTransientTile(ld, set, tile);
+                dropped = false;
+            }
+
+            if (dropped || (outcome & ResolveOutcome.Changed) != 0) RefreshTileHash(g, ld, tile);
+            if ((outcome & ResolveOutcome.Changed) != 0) dirty[kept++] = tile;
         }
 
-        ld->Stale.Resize(0);
+        ld->Dirty.Resize(kept);
+        ld->Rects.Resize(0);
     }
 
     [MethodImpl(Jit.Hot)]

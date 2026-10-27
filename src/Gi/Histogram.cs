@@ -7,6 +7,13 @@ using System.Runtime.Intrinsics.X86;
 
 namespace Gi;
 
+internal enum SplatStop : byte
+{
+    End,
+    Rejected,
+    Missing
+}
+
 internal unsafe struct HistClass
 {
     public int* Directory;
@@ -17,6 +24,7 @@ internal unsafe struct HistState
 {
     public const int PageBytes = TileBake.TileSize * TileBake.TileSize * sizeof(int);
     public const int PageShift = 10;
+    public const int PageInts = 1 << PageShift;
     public const long DefaultConvolveCost = 400_000;
     public const long DirectBaseCost = 400;
     public const long DirectCellCost = 12;
@@ -34,6 +42,10 @@ internal unsafe struct HistState
     public int* Window;
     public int* Strip;
     public int* Out;
+    public int* ZeroPage;
+    public NativeBuffer<FusedClass> FusedClasses;
+    public NativeBuffer<FusedTile> FusedTiles;
+    public NativeBuffer<int> Vanished;
 
     [MethodImpl(Jit.Hot)]
     public void Release()
@@ -56,6 +68,10 @@ internal unsafe struct HistState
         NativeHeap.Free(Window);
         NativeHeap.Free(Strip);
         NativeHeap.Free(Out);
+        NativeHeap.Free(ZeroPage);
+        FusedClasses.Free();
+        FusedTiles.Free();
+        Vanished.Free();
         this = default;
     }
 }
@@ -72,6 +88,7 @@ public static unsafe partial class World
         hist->Window = (int*)NativeHeap.AllocZeroed(HistState.WindowStride * HistState.WindowSide * sizeof(int));
         hist->Strip = (int*)NativeHeap.AllocZeroed(HistState.WindowSide * TileBake.TileSize * sizeof(int));
         hist->Out = (int*)NativeHeap.AllocZeroed(TileBake.TileSize * TileBake.TileSize * sizeof(int));
+        hist->ZeroPage = (int*)NativeHeap.AllocZeroed(HistState.PageBytes);
         ld->Hist = hist;
         return hist;
     }
@@ -127,89 +144,103 @@ public static unsafe partial class World
     [MethodImpl(Jit.Hot)]
     private static int SplatBlocks(
         WorldCtx* w, int gi, GridCtx* g, LayerData* ld, HistState* hist, HistClass* cls,
-        ref DepositRecord key, int mask, float* xs, float* ys, int count)
+        ref DepositRecord key, int mask, float* xs, float* ys, int count, ref int finite)
+    {
+        var tiles = stackalloc int[8];
+        var i = 0;
+        while (i + 8 <= count)
+        {
+            var next = SplatRun(g, cls->Directory, (int*)hist->Pages.Region - HistState.PageInts, key.Gain, xs, ys, i,
+                count, tiles, out var stop);
+            finite += next - i;
+            i = next;
+            if (stop == SplatStop.End) break;
+
+            if (stop == SplatStop.Missing)
+            {
+                for (var lane = 0; lane < 8; lane++) HistPage(g, ld, hist, cls, tiles[lane]);
+                continue;
+            }
+
+            for (var lane = 0; lane < 8; lane++)
+                if (SplatOne(w, gi, g, ld, hist, cls, ref key, mask, xs[i + lane], ys[i + lane]))
+                    finite++;
+            i += 8;
+        }
+
+        return i;
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static int SplatRun(
+        GridCtx* g, int* directory, int* rebased, int gain, float* xs, float* ys, int from, int count, int* tiles,
+        out SplatStop stop)
     {
         var originX = Vector256.Create(g->OriginX);
         var originY = Vector256.Create(g->OriginY);
         var scale = Vector256.Create((float)g->ScaleQ8);
-        var limit = Vector256.Create(g->Size - 1);
-        var infinity = Vector256.Create(float.PositiveInfinity);
-        var tilesPerSide = Vector256.Create(g->TilesPerSide);
+        var outside = Vector256.Create(~(g->Size - 1));
         var tileMask = Vector256.Create(TileBake.TileSize - 1);
-        var one = Vector256.Create(1);
-        var directory = cls->Directory;
-        var tiles = stackalloc int[8];
+        var tileShift = Vector256.Create((uint)BitOperations.TrailingZeroCount(g->TilesPerSide));
+        var zero = Vector256<int>.Zero;
         var offsets = stackalloc int[8];
-        var gain = (int)key.Gain;
-        var i = 0;
+        var pairs = (ulong*)offsets;
+        var pending = zero;
+        var settled = false;
+        var i = from;
+        stop = SplatStop.End;
         for (; i + 8 <= count; i += 8)
         {
-            var x = Vector256.Load(xs + i);
-            var y = Vector256.Load(ys + i);
-            var cx = Vector256.ShiftRightArithmetic(
-                Avx.ConvertToVector256Int32WithTruncation(Vector256.Floor((x - originX) * scale)), 8);
-            var cy = Vector256.ShiftRightArithmetic(
-                Avx.ConvertToVector256Int32WithTruncation(Vector256.Floor((y - originY) * scale)), 8);
-            var clampedX = Vector256.Min(Vector256.Max(cx, Vector256<int>.Zero), limit);
-            var clampedY = Vector256.Min(Vector256.Max(cy, Vector256<int>.Zero), limit);
-            var inside = Vector256.Equals(clampedX, cx) & Vector256.Equals(clampedY, cy)
-                                                        & (Vector256.LessThan(Vector256.Abs(x), infinity) &
-                                                           Vector256.LessThan(Vector256.Abs(y), infinity)).AsInt32();
-            var accepted = inside.AsSingle().ExtractMostSignificantBits();
-            var tileVector = Vector256.ShiftRightArithmetic(clampedY, TileBake.TileBits) * tilesPerSide
-                             + Vector256.ShiftRightArithmetic(clampedX, TileBake.TileBits);
-            var local = Vector256.ShiftLeft(clampedY & tileMask, TileBake.TileBits) + (clampedX & tileMask);
-            var firstTile = tileVector.GetElement(0);
-            if (accepted == 0xFF && Vector256.Equals(tileVector, Vector256.Create(firstTile)).AsSingle()
-                    .ExtractMostSignificantBits() == 0xFF)
+            var px = (Vector256.Load(xs + i) - originX) * scale;
+            var py = (Vector256.Load(ys + i) - originY) * scale;
+            var cx = Vector256.ShiftRightArithmetic(Avx.ConvertToVector256Int32WithTruncation(px), 8);
+            var cy = Vector256.ShiftRightArithmetic(Avx.ConvertToVector256Int32WithTruncation(py), 8);
+            var rejected = (Vector256.Equals((cx | cy) & outside, zero).AsSingle().ExtractMostSignificantBits() ^ 0xFFu)
+                           | (px | py).ExtractMostSignificantBits();
+            var next = zero;
+            var missing = false;
+            if (rejected == 0)
             {
-                var slot = directory[firstTile] - 1;
-                var page = slot >= 0 ? (int*)hist->Pages.Unit(slot) : HistPage(g, ld, hist, cls, firstTile);
-                local.Store(offsets);
-                page[offsets[0]] += gain;
-                page[offsets[1]] += gain;
-                page[offsets[2]] += gain;
-                page[offsets[3]] += gain;
-                page[offsets[4]] += gain;
-                page[offsets[5]] += gain;
-                page[offsets[6]] += gain;
-                page[offsets[7]] += gain;
-                continue;
+                var tile = Avx2.ShiftLeftLogicalVariable(Vector256.ShiftRightArithmetic(cy, TileBake.TileBits).AsUInt32(),
+                    tileShift).AsInt32() + Vector256.ShiftRightArithmetic(cx, TileBake.TileBits);
+                var slots = Avx2.GatherVector256(directory, tile, 4);
+                missing = Vector256.Equals(slots, zero).AsSingle().ExtractMostSignificantBits() != 0;
+                if (missing) tile.Store(tiles);
+                next = Vector256.ShiftLeft(slots, HistState.PageShift) +
+                       (Vector256.ShiftLeft(cy & tileMask, TileBake.TileBits) + (cx & tileMask));
             }
 
-            var slots = Avx2.GatherVector256(directory, tileVector, 4);
-            var missing =
-                Vector256.Equals(slots, Vector256<int>.Zero).AsSingle().ExtractMostSignificantBits() & accepted;
-            if (missing != 0)
+            if (settled)
             {
-                tileVector.Store(tiles);
-                for (var bits = missing; bits != 0; bits &= bits - 1)
-                    HistPage(g, ld, hist, cls, tiles[BitOperations.TrailingZeroCount(bits)]);
-
-                slots = Avx2.GatherVector256(directory, tileVector, 4);
+                pending.Store(offsets);
+                var a = pairs[0];
+                var b = pairs[1];
+                var c = pairs[2];
+                var d = pairs[3];
+                rebased[(uint)a] += gain;
+                rebased[a >> 32] += gain;
+                rebased[(uint)b] += gain;
+                rebased[b >> 32] += gain;
+                rebased[(uint)c] += gain;
+                rebased[c >> 32] += gain;
+                rebased[(uint)d] += gain;
+                rebased[d >> 32] += gain;
             }
 
-            var pages = (int*)hist->Pages.Region;
-            (Vector256.ShiftLeft(slots - one, HistState.PageShift) + local).Store(offsets);
-            if (accepted == 0xFF)
+            if (rejected != 0 || missing)
             {
-                pages[offsets[0]] += gain;
-                pages[offsets[1]] += gain;
-                pages[offsets[2]] += gain;
-                pages[offsets[3]] += gain;
-                pages[offsets[4]] += gain;
-                pages[offsets[5]] += gain;
-                pages[offsets[6]] += gain;
-                pages[offsets[7]] += gain;
-                continue;
+                stop = rejected != 0 ? SplatStop.Rejected : SplatStop.Missing;
+                return i;
             }
 
-            for (var bits = accepted; bits != 0; bits &= bits - 1)
-                pages[offsets[BitOperations.TrailingZeroCount(bits)]] += gain;
+            pending = next;
+            settled = true;
+        }
 
-            for (var lane = 0; lane < 8; lane++)
-                if (((accepted >> lane) & 1) == 0)
-                    SplatOne(w, gi, g, ld, hist, cls, ref key, mask, xs[i + lane], ys[i + lane]);
+        if (settled)
+        {
+            pending.Store(offsets);
+            for (var lane = 0; lane < 8; lane++) rebased[offsets[lane]] += gain;
         }
 
         return i;
@@ -217,38 +248,16 @@ public static unsafe partial class World
 #endif
 
     [MethodImpl(Jit.Hot)]
-    private static void FlushHistogram(WorldCtx* w, int gi, GridCtx* g, LayerData* ld, byte layer)
+    private static void ReleaseClass(HistState* hist, HistClass* cls)
     {
-        var hist = ld->Hist;
-        if (hist == null || hist->Active.Length == 0) return;
-
-        EnsureDirty(g, layer);
-        for (var a = 0; a < hist->Active.Length; a++)
+        for (var t = 0; t < cls->Tiles.Length; t++)
         {
-            var stamp = (byte)hist->Active.Pointer[a];
-            var cls = hist->Classes + stamp;
-            if (BoxKernel(w, gi, g, layer, stamp, out var value, out var ox, out var oy, out var width, out var height))
-            {
-                ReplaySparse(w, gi, g, hist, cls, layer, stamp, width * height);
-                if (cls->Tiles.Length != 0) BoxFilterClass(g, ld, hist, cls, value, ox, oy, width, height);
-            }
-            else
-            {
-                ReplayClass(w, gi, g, hist, cls, layer, stamp);
-            }
-
-            for (var t = 0; t < cls->Tiles.Length; t++)
-            {
-                var tile = cls->Tiles.Pointer[t];
-                hist->Pages.Give(cls->Directory[tile] - 1);
-                cls->Directory[tile] = 0;
-            }
-
-            cls->Tiles.Resize(0);
+            var tile = cls->Tiles.Pointer[t];
+            hist->Pages.Give(cls->Directory[tile] - 1);
+            cls->Directory[tile] = 0;
         }
 
-        hist->Active.Resize(0);
-        hist->Total = 0;
+        cls->Tiles.Resize(0);
     }
 
     [MethodImpl(Jit.Hot)]
@@ -257,18 +266,7 @@ public static unsafe partial class World
         var hist = ld->Hist;
         if (hist == null) return;
 
-        for (var a = 0; a < hist->Active.Length; a++)
-        {
-            var cls = hist->Classes + hist->Active.Pointer[a];
-            for (var t = 0; t < cls->Tiles.Length; t++)
-            {
-                var tile = cls->Tiles.Pointer[t];
-                hist->Pages.Give(cls->Directory[tile] - 1);
-                cls->Directory[tile] = 0;
-            }
-
-            cls->Tiles.Resize(0);
-        }
+        for (var a = 0; a < hist->Active.Length; a++) ReleaseClass(hist, hist->Classes + hist->Active.Pointer[a]);
 
         hist->Active.Resize(0);
         hist->Total = 0;
@@ -391,66 +389,6 @@ public static unsafe partial class World
                 count++;
 
         return count;
-    }
-
-    [MethodImpl(Jit.Hot)]
-    private static void BoxFilterClass(
-        GridCtx* g, LayerData* ld, HistState* hist, HistClass* cls, int value, int ox, int oy, int width, int height)
-    {
-        var tps = g->TilesPerSide;
-        var size = g->Size;
-        hist->MarkStamp++;
-        if (hist->OutMark == null) hist->OutMark = (int*)NativeHeap.AllocZeroed((nuint)g->TileCount * sizeof(int));
-        hist->OutTiles.Resize(0);
-        for (var t = 0; t < cls->Tiles.Length; t++)
-        {
-            var tile = cls->Tiles.Pointer[t];
-            var hx0 = (tile % tps) << TileBake.TileBits;
-            var hy0 = (tile / tps) << TileBake.TileBits;
-            var txLo = Math.Max((hx0 + ox) >> TileBake.TileBits, 0);
-            var txHi = Math.Min((hx0 + TileBake.TileSize - 1 + ox + width - 1) >> TileBake.TileBits, tps - 1);
-            var tyLo = Math.Max((hy0 + oy) >> TileBake.TileBits, 0);
-            var tyHi = Math.Min((hy0 + TileBake.TileSize - 1 + oy + height - 1) >> TileBake.TileBits, tps - 1);
-            for (var ty = tyLo; ty <= tyHi; ty++)
-            for (var tx = txLo; tx <= txHi; tx++)
-            {
-                var index = ty * tps + tx;
-                if (hist->OutMark[index] == hist->MarkStamp) continue;
-
-                hist->OutMark[index] = hist->MarkStamp;
-                var n = hist->OutTiles.Length;
-                hist->OutTiles.Resize(n + 1);
-                hist->OutTiles.Pointer[n] = index;
-            }
-        }
-
-        var windowWidth = TileBake.TileSize + width - 1;
-        var windowHeight = TileBake.TileSize + height - 1;
-        for (var o = 0; o < hist->OutTiles.Length; o++)
-        {
-            var outTile = hist->OutTiles.Pointer[o];
-            var tx0 = (outTile % tps) << TileBake.TileBits;
-            var ty0 = (outTile / tps) << TileBake.TileBits;
-            GatherWindow(hist, cls, tps, size, tx0 - ox - width + 1, ty0 - oy - height + 1, windowWidth, windowHeight);
-
-            var peak = SumWindow(hist, width, height, windowHeight);
-            if (peak == 0) continue;
-
-            var sums = hist->Out;
-            var set = EnsureSet(g, ld, outTile);
-            PrepareTransientSet(ld, set);
-            var dirty = DirtyIndex(g, ld, outTile);
-            ld->Rects.Pointer[dirty] = new TileRect { X0 = 0, Y0 = 0, X1 = TileBake.TileSize, Y1 = TileBake.TileSize };
-            var amount = peak * Math.Abs((long)value);
-            if (amount > PlaneFold.LimitI(&ld->Store))
-            {
-                PlaneFold.AddWideI(&ld->Store, set, sums, value);
-                continue;
-            }
-
-            PlaneFold.ChargeI(&ld->Store, set, amount);
-            AddScaled(ld->Store.Cells(*set).I, sums, value);
-        }
     }
 
     [MethodImpl(Jit.Hot)]
