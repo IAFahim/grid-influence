@@ -8,11 +8,13 @@ public static unsafe partial class World
     private static void PlanTransient(WorldCtx* w, int gi, GridCtx* g, LayerData* ld, byte layer)
     {
         var hist = ld->Hist;
-        if (hist == null && ld->Stale.Length == 0) return;
+        if (hist == null || hist->Active.Length == 0)
+        {
+            if (ld->Stale.Length != 0) RestartStale(g, ld);
+            return;
+        }
 
-        hist = EnsureHist(ld);
         EnsureDirty(g, layer);
-        EnsureEpochs(g, ld);
         hist->FusedClasses.Resize(0);
         hist->FusedTiles.Resize(0);
         hist->Vanished.Resize(0);
@@ -107,7 +109,7 @@ public static unsafe partial class World
 
         hist->Active.Resize(0);
         hist->Total = 0;
-        RestartStale(g, ld, hist, mark);
+        RetireStale(g, ld, hist, mark);
     }
 
     [MethodImpl(Jit.Hot)]
@@ -183,7 +185,19 @@ public static unsafe partial class World
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void RestartStale(GridCtx* g, LayerData* ld, HistState* hist, int mark)
+    private static void RestartStale(GridCtx* g, LayerData* ld)
+    {
+        for (var i = 0; i < ld->Stale.Length; i++)
+        {
+            var dirty = DirtyIndex(g, ld, ld->Stale.Pointer[i]);
+            ld->Rects.Pointer[dirty] = new TileRect { X0 = 0, Y0 = 0, X1 = TileBake.TileSize, Y1 = TileBake.TileSize };
+        }
+
+        ld->Stale.Resize(0);
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static void RetireStale(GridCtx* g, LayerData* ld, HistState* hist, int mark)
     {
         var outMark = hist->OutMark;
         for (var i = 0; i < ld->Stale.Length; i++)
