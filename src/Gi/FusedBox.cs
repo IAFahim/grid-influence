@@ -57,13 +57,43 @@ internal static unsafe class FusedBox
     internal static void Run(FusedPlan* plan, FusedTile* task)
     {
         var stage = stackalloc int[Size * StageStride];
-        var accumulator = stackalloc int[Cells];
         var pages = stackalloc int*[9];
         var tps = plan->TilesPerSide;
         var tx = task->Tile % tps;
         var ty = task->Tile / tps;
+        var page = task->Page;
+        var count = plan->ClassCount;
         long bound = 0;
-        for (var c = 0; c < plan->ClassCount; c++)
+#if NET
+        if (Avx2.IsSupported)
+        {
+            var difference = Vector256<short>.Zero;
+            for (var c = 0; c < count; c++)
+            {
+                var cl = plan->Classes + c;
+                Locate(plan, cl->Directory, tx, ty, pages);
+                var peak = Vertical(pages, stage, cl->OffsetY, cl->Height);
+                bound += (long)peak * cl->Width * Math.Abs((long)cl->Value);
+                if (bound > Limit)
+                {
+                    task->Fallback = 1;
+                    return;
+                }
+
+                if (c == count - 1)
+                {
+                    ApplyLastWide(stage, page, cl->OffsetX, cl->Width, cl->Value, c == 0, task, plan->Tick, ref difference);
+                    return;
+                }
+
+                difference |= ApplyWide(stage, page, cl->OffsetX, cl->Width, cl->Value, c == 0);
+            }
+
+            return;
+        }
+#endif
+        var scalarDifference = false;
+        for (var c = 0; c < count; c++)
         {
             var cl = plan->Classes + c;
             Locate(plan, cl->Directory, tx, ty, pages);
@@ -75,10 +105,14 @@ internal static unsafe class FusedBox
                 return;
             }
 
-            Horizontal(stage, accumulator, cl->OffsetX, cl->Width, cl->Value, c == 0);
-        }
+            if (c == count - 1)
+            {
+                ApplyLastScalar(stage, page, cl->OffsetX, cl->Width, cl->Value, c == 0, task, plan->Tick, ref scalarDifference);
+                return;
+            }
 
-        Settle(accumulator, task, plan->Tick);
+            scalarDifference |= ApplyScalar(stage, page, cl->OffsetX, cl->Width, cl->Value, c == 0);
+        }
     }
 
     [MethodImpl(Jit.Hot)]
@@ -196,61 +230,198 @@ internal static unsafe class FusedBox
         return peak;
     }
 
+#if NET
     [MethodImpl(Jit.Hot)]
-    private static void Horizontal(int* stage, int* accumulator, int offsetX, int width, int value, bool initial)
+    private static Vector256<short> ApplyWide(int* stage, short* page, int offsetX, int width, int value, bool initial)
     {
         var start = Edge - offsetX - width + 1;
-#if NET
-        if (Avx2.IsSupported)
-        {
-            var scale = Vector256.Create(value);
-            for (var y = 0; y < Size; y++)
-            {
-                var source = stage + y * StageStride + start;
-                var target = accumulator + y * Size;
-                for (var block = 0; block < Size; block += 8)
-                {
-                    var sum = Vector256.Load(source + block);
-                    for (var k = 1; k < width; k++) sum += Vector256.Load(source + block + k);
-                    sum *= scale;
-                    if (!initial) sum += Vector256.Load(target + block);
-                    sum.Store(target + block);
-                }
-            }
-
-            return;
-        }
-#endif
+        var scale = Vector256.Create(value);
+        var difference = Vector256<short>.Zero;
         for (var y = 0; y < Size; y++)
         {
             var source = stage + y * StageStride + start;
-            var target = accumulator + y * Size;
+            var target = page + y * Size;
+            var a = Vector256.Load(source);
+            var b = Vector256.Load(source + 8);
+            var c = Vector256.Load(source + 16);
+            var d = Vector256.Load(source + 24);
+            for (var k = 1; k < width; k++)
+            {
+                a += Vector256.Load(source + k);
+                b += Vector256.Load(source + 8 + k);
+                c += Vector256.Load(source + 16 + k);
+                d += Vector256.Load(source + 24 + k);
+            }
+
+            var low = Avx2.Permute4x64(
+                Avx2.PackSignedSaturate(a * scale, b * scale).AsInt64(), 0xd8).AsInt16();
+            var high = Avx2.Permute4x64(
+                Avx2.PackSignedSaturate(c * scale, d * scale).AsInt64(), 0xd8).AsInt16();
+            if (initial)
+            {
+                difference |= (low ^ Vector256.Load(target)) | (high ^ Vector256.Load(target + 16));
+                low.Store(target);
+                high.Store(target + 16);
+            }
+            else
+            {
+                var priorLow = Vector256.Load(target);
+                var priorHigh = Vector256.Load(target + 16);
+                low += priorLow;
+                high += priorHigh;
+                difference |= (priorLow ^ low) | (priorHigh ^ high);
+                low.Store(target);
+                high.Store(target + 16);
+            }
+        }
+
+        return difference;
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static void ApplyLastWide(int* stage, short* page, int offsetX, int width, int value, bool initial,
+        FusedTile* task, int tick, ref Vector256<short> difference)
+    {
+        var start = Edge - offsetX - width + 1;
+        var scale = Vector256.Create(value);
+        var ones = Vector256.Create((short)1);
+        var seen = Vector256<short>.Zero;
+        var summary = task->Summary;
+        for (var y = 0; y < Size; y++)
+        {
+            var source = stage + y * StageStride + start;
+            var target = page + y * Size;
+            var a = Vector256.Load(source);
+            var b = Vector256.Load(source + 8);
+            var c = Vector256.Load(source + 16);
+            var d = Vector256.Load(source + 24);
+            for (var k = 1; k < width; k++)
+            {
+                a += Vector256.Load(source + k);
+                b += Vector256.Load(source + 8 + k);
+                c += Vector256.Load(source + 16 + k);
+                d += Vector256.Load(source + 24 + k);
+            }
+
+            var low = Avx2.Permute4x64(
+                Avx2.PackSignedSaturate(a * scale, b * scale).AsInt64(), 0xd8).AsInt16();
+            var high = Avx2.Permute4x64(
+                Avx2.PackSignedSaturate(c * scale, d * scale).AsInt64(), 0xd8).AsInt16();
+            if (initial)
+            {
+                difference |= (low ^ Vector256.Load(target)) | (high ^ Vector256.Load(target + 16));
+            }
+            else
+            {
+                var priorLow = Vector256.Load(target);
+                var priorHigh = Vector256.Load(target + 16);
+                low += priorLow;
+                high += priorHigh;
+                difference |= (priorLow ^ low) | (priorHigh ^ high);
+            }
+
+            low.Store(target);
+            high.Store(target + 16);
+            seen |= low | high;
+            summary->RowSums[y] = Vector256.Sum(Avx2.MultiplyAddAdjacent(low, ones) + Avx2.MultiplyAddAdjacent(high, ones));
+            var peak = Vector256.Max(low, high);
+            var narrow = Vector128.Max(peak.GetLower(), peak.GetUpper());
+            narrow = Vector128.Max(narrow, Vector128.Shuffle(narrow, Vector128.Create(4, 5, 6, 7, 0, 1, 2, 3)));
+            narrow = Vector128.Max(narrow, Vector128.Shuffle(narrow, Vector128.Create(2, 3, 0, 1, 6, 7, 4, 5)));
+            narrow = Vector128.Max(narrow, Vector128.Shuffle(narrow, Vector128.Create(1, 0, 3, 2, 5, 4, 7, 6)));
+            summary->RowMaxima[y] = narrow.ToScalar();
+        }
+
+        FinishTile(page, summary, task, tick, seen != Vector256<short>.Zero, difference != Vector256<short>.Zero);
+    }
+#endif
+
+    [MethodImpl(Jit.Hot)]
+    private static bool ApplyScalar(int* stage, short* page, int offsetX, int width, int value, bool initial)
+    {
+        var start = Edge - offsetX - width + 1;
+        var changed = false;
+        for (var y = 0; y < Size; y++)
+        {
+            var source = stage + y * StageStride + start;
+            var target = page + y * Size;
             var sum = 0;
             for (var k = 0; k < width; k++) sum += source[k];
             for (var x = 0;;)
             {
-                target[x] = initial ? sum * value : target[x] + sum * value;
+                var cell = (short)Math.Clamp(sum * value, short.MinValue, short.MaxValue);
+                if (initial)
+                {
+                    changed |= target[x] != cell;
+                    target[x] = cell;
+                }
+                else
+                {
+                    var prior = target[x];
+                    var merged = (short)(prior + cell);
+                    changed |= prior != merged;
+                    target[x] = merged;
+                }
+
                 if (++x == Size) break;
 
                 sum += source[x + width - 1] - source[x - 1];
             }
         }
+
+        return changed;
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void Settle(int* accumulator, FusedTile* task, int tick)
+    private static void ApplyLastScalar(int* stage, short* page, int offsetX, int width, int value, bool initial,
+        FusedTile* task, int tick, ref bool changed)
     {
-        var page = task->Page;
+        var start = Edge - offsetX - width + 1;
+        var any = false;
         var summary = task->Summary;
-        bool any;
-        bool changed;
-#if NET
-        if (Avx2.IsSupported)
-            (any, changed) = SettleWide(accumulator, page, summary);
-        else
-#endif
-            (any, changed) = SettleScalar(accumulator, page, summary);
+        for (var y = 0; y < Size; y++)
+        {
+            var source = stage + y * StageStride + start;
+            var target = page + y * Size;
+            var window = 0;
+            var rowSum = 0;
+            var best = short.MinValue;
+            for (var k = 0; k < width; k++) window += source[k];
+            for (var x = 0;;)
+            {
+                var cell = (short)Math.Clamp(window * value, short.MinValue, short.MaxValue);
+                if (initial)
+                {
+                    changed |= target[x] != cell;
+                    target[x] = cell;
+                }
+                else
+                {
+                    var prior = target[x];
+                    var merged = (short)(prior + cell);
+                    changed |= prior != merged;
+                    target[x] = merged;
+                }
 
+                var final = target[x];
+                if (final != 0) any = true;
+                rowSum += final;
+                if (final > best) best = final;
+                if (++x == Size) break;
+
+                window += source[x + width - 1] - source[x - 1];
+            }
+
+            summary->RowSums[y] = rowSum;
+            summary->RowMaxima[y] = best;
+        }
+
+        FinishTile(page, summary, task, tick, any, changed);
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static void FinishTile(short* page, TileSummary* summary, FusedTile* task, int tick, bool any, bool changed)
+    {
         long total = 0;
         var best = summary->RowMaxima[0];
         var row = 0;
@@ -273,63 +444,5 @@ internal static unsafe class FusedBox
         if (changed) summary->Epoch = tick;
         task->Max = best;
         task->Outcome = TileBake.Outcome(any, changed);
-    }
-
-#if NET
-    [MethodImpl(Jit.Hot)]
-    private static (bool Any, bool Changed) SettleWide(int* accumulator, short* page, TileSummary* summary)
-    {
-        var ones = Vector256.Create((short)1);
-        var difference = Vector256<short>.Zero;
-        var seen = Vector256<short>.Zero;
-        for (var y = 0; y < Size; y++)
-        {
-            var source = accumulator + y * Size;
-            var target = page + y * Size;
-            var low = Avx2.Permute4x64(
-                Avx2.PackSignedSaturate(Vector256.Load(source), Vector256.Load(source + 8)).AsInt64(), 0xd8).AsInt16();
-            var high = Avx2.Permute4x64(
-                Avx2.PackSignedSaturate(Vector256.Load(source + 16), Vector256.Load(source + 24)).AsInt64(), 0xd8).AsInt16();
-            difference |= (low ^ Vector256.Load(target)) | (high ^ Vector256.Load(target + 16));
-            seen |= low | high;
-            low.Store(target);
-            high.Store(target + 16);
-            summary->RowSums[y] = Vector256.Sum(Avx2.MultiplyAddAdjacent(low, ones) + Avx2.MultiplyAddAdjacent(high, ones));
-            var peak = Vector256.Max(low, high);
-            var narrow = Vector128.Max(peak.GetLower(), peak.GetUpper());
-            narrow = Vector128.Max(narrow, Vector128.Shuffle(narrow, Vector128.Create(4, 5, 6, 7, 0, 1, 2, 3)));
-            narrow = Vector128.Max(narrow, Vector128.Shuffle(narrow, Vector128.Create(2, 3, 0, 1, 6, 7, 4, 5)));
-            narrow = Vector128.Max(narrow, Vector128.Shuffle(narrow, Vector128.Create(1, 0, 3, 2, 5, 4, 7, 6)));
-            summary->RowMaxima[y] = narrow.ToScalar();
-        }
-
-        return (seen != Vector256<short>.Zero, difference != Vector256<short>.Zero);
-    }
-#endif
-
-    [MethodImpl(Jit.Hot)]
-    private static (bool Any, bool Changed) SettleScalar(int* accumulator, short* page, TileSummary* summary)
-    {
-        var any = false;
-        var changed = false;
-        for (var y = 0; y < Size; y++)
-        {
-            var sum = 0;
-            var best = short.MinValue;
-            for (var x = 0; x < Size; x++)
-            {
-                var cell = (short)Math.Clamp(accumulator[y * Size + x], short.MinValue, short.MaxValue);
-                if (cell != page[y * Size + x]) changed = true;
-                if (cell != 0) any = true;
-                page[y * Size + x] = cell;
-                sum += cell;
-                if (cell > best) best = cell;
-            }
-
-            summary->RowSums[y] = sum;
-            summary->RowMaxima[y] = best;
-        }
-
-        return (any, changed);
     }
 }
