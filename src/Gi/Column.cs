@@ -220,11 +220,6 @@ public static unsafe partial class World
         var epochs = g->Layers[layer].Epochs;
         if (epochs == null) return false;
 
-        var disk = Disk(g, x, y, reach);
-        for (var ty = disk.Y0 >> TileBake.TileBits; ty <= disk.Y1 >> TileBake.TileBits; ty++)
-        for (var tx = disk.X0 >> TileBake.TileBits; tx <= disk.X1 >> TileBake.TileBits; tx++)
-            if (epochs[ty * g->TilesPerSide + tx] - since > 0 && HoldsDiskCell(disk, tx, ty))
-                return true;
-        return false;
+        return MaxQueries.AnyNewerInDisk(g, g->Layers + layer, Disk(g, x, y, reach), since);
     }
 }

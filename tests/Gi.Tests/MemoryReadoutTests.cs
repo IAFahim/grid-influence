@@ -377,12 +377,13 @@ public sealed unsafe class MemoryReadoutTests
             Assert.Equal(4, kernelEntries);
             Assert.Equal(4, PresentKeys());
 
-            for (var phase = 50; phase < 60; phase++) PlaceAt(phase);
+            var burst = KernelCache.FrameInsertCap + 2;
+            for (var phase = 50; phase < 50 + burst; phase++) PlaceAt(phase);
             World.Process(world);
             Read(world, out _, out _, out _, out kernelEntries, out _);
             Assert.Equal(4 + KernelCache.FrameInsertCap, kernelEntries);
             Assert.Equal(4 + KernelCache.FrameInsertCap, PresentKeys());
-            Assert.Equal(14, keys.Count);
+            Assert.Equal(4 + burst, keys.Count);
 
             World.FlushKernels();
             Read(world, out _, out _, out _, out kernelEntries, out _);

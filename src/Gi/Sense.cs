@@ -204,11 +204,11 @@ public static unsafe partial class World
         var epochs = g->Layers[layer].Epochs;
         if (epochs == null) return false;
 
-        return AnyNewerInDisk(g, g->Layers + layer, Disk(g, x, y, reach), since);
+        return MaxQueries.AnyNewerInDisk(g, g->Layers + layer, Disk(g, x, y, reach), since);
     }
 
     [MethodImpl(Jit.Hot)]
-    private static bool HoldsDiskCell(in Circle disk, int tx, int ty)
+    internal static bool HoldsDiskCell(in Circle disk, int tx, int ty)
     {
         if (Outside(disk, tx, ty)) return false;
 
@@ -1234,7 +1234,7 @@ public static unsafe partial class World
         public ushort Size;
     }
 
-    private struct Circle
+    internal struct Circle
     {
         public long Px;
         public long Py;
