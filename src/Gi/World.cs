@@ -502,6 +502,14 @@ public static unsafe partial class World
             if (IsDerived(w, l))
                 g->Layers[l].Derived = 1;
         g->Records.Resize(w->Sources.Slots);
+        var s = &w->Sources;
+        for (var i = 0; i < s->Count; i++)
+        {
+            if (s->Alive[i] == 0) continue;
+            BeforeWrite(w, s, i);
+            MarkChanged(w, s, i);
+        }
+
         return id;
     }
 

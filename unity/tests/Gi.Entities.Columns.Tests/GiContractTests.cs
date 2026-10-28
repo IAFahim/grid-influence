@@ -1070,7 +1070,7 @@ public sealed unsafe class GiContractTests : IDisposable
     }
 
     [Fact]
-    public void C15_AGridAddedAfterItsSourcesMissesThemUntilTheyChange()
+    public void C15_AGridAddedAfterItsSourcesReceivesThemOnTheNextProcess()
     {
         var world = NewWorld();
         var coarse = Grid.New(world, 6, 0f, 0f, 64f);
@@ -1082,8 +1082,9 @@ public sealed unsafe class GiContractTests : IDisposable
 
         var fine = Grid.New(world, 7, 0f, 0f, 64f);
         World.Process(world);
-        Assert.Equal(0, World.Query(world, fine, layer, 40, 40));
-        Assert.Equal(0L, World.Query(world, fine, layer, 0, 0, 128, 128));
+        Assert.True(World.Query(world, fine, layer, 40, 40) > 0);
+        Assert.True(World.Query(world, fine, layer, 0, 0, 128, 128) > 0);
+        Assert.True(World.Query(world, coarse, layer, 20, 20) > 0);
 
         World.SetGain(world, id, 6);
         World.Process(world);

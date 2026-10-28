@@ -104,7 +104,9 @@ before reading command payloads, writing
   `Grid.CopyIds(world, ids)` copies them into a span and returns the count, and
   `Grid.TryGetSpec(world, grid, out power, out x, out y, out size)` returns the exact
   constructor arguments — the world extent is stored, not recovered from the truncated
-  scale, so the spec round-trips bit-exact. `Layer.Count(world)` and
+  scale, so the spec round-trips bit-exact. A grid added after sources exist still receives
+  them: `Grid.New` marks every live source changed, so the next `Process` deposits into the new
+  grid exactly as if the grid had existed before the sources. `Layer.Count(world)` and
   `Layer.CopyIds(world, ids)` enumerate layers the same way, deposited and derived sharing
   one dense id space, and `Layer.TryGetRecipe(world, layer, out recipe)` inspects any live
   layer's `Layer.Recipe` (`Layer.Derivation` operator plus input layers, weights, shift, and
