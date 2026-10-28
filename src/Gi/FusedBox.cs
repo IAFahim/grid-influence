@@ -325,10 +325,8 @@ internal static unsafe class FusedBox
             low.Store(target);
             high.Store(target + 16);
             seen |= low | high;
-            var lowWords = low.AsUInt64();
-            for (var word = 0; word < 4; word++) hash = (hash ^ lowWords.GetElement(word)) * TileHash.Prime;
-            var highWords = high.AsUInt64();
-            for (var word = 0; word < 4; word++) hash = (hash ^ highWords.GetElement(word)) * TileHash.Prime;
+            var words = (ulong*)target;
+            for (var word = 0; word < 8; word++) hash = (hash ^ words[word]) * TileHash.Prime;
 
             summary->RowSums[y] = Vector256.Sum(Avx2.MultiplyAddAdjacent(low, ones) + Avx2.MultiplyAddAdjacent(high, ones));
             var peak = Vector256.Max(low, high);
