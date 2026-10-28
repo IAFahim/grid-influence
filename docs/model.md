@@ -56,7 +56,7 @@ The rest of this file derives from seven statements.
   (`PlaneStore.Bytes`, free lists included), the engine's live-tile counter (`LivePages`, one per
   directory entry), and the live plane units those slabs hold — every live tile's page, `I`,
   `T`/`B` and summary unit, folded tiles' wide temporaries included — then counts the kernel
-  cache's occupied entries out of 32 and the sources whose alive bit is set. It reads only
+  cache's occupied entries out of 128 and the sources whose alive bit is set. It reads only
   existing counters, allocates nothing, throws nothing, and returns all zeros for a dead or
   never-allocated handle; `Clear` empties the live counts while the slab bytes stay (regions are
   retained, free lists grow), and `Free` returns everything to zero. `World.LayerHash(world,
@@ -1122,11 +1122,18 @@ digits. Concurrency: single thread.
   out again only whole. `World.Clear` returns every unit to its slab's free list and retains the
   regions, so repopulating after a clear makes no heap calls. The shared zero page (an absent
   derived input) is allocated once with the arenas and never written afterwards. The per-world kernel
-  cache is fixed-capacity native storage held by value in `WorldCtx`: 32 entries, each owning a
-  4,096-`long` tap slot and 128 row-extent `int`s, plus a miss canvas and a row-extent scratch;
-  all five buffers are allocated zeroed together by the first insert and released exactly once
+  cache is fixed-capacity native storage held by value in `WorldCtx`: 128 entries, each owning a
+  4,096-`long` tap slot and 128 row-extent `int`s, a 256-head bucket directory hashed on the
+  full kernel key, plus a miss canvas and a row-extent scratch; all six buffers are allocated
+  zeroed together by the first insert and released exactly once
   by `World.Free` before the context is zeroed (`World.Clear` keeps entries, because stamps are
-  immutable and only a stamp id leaving the catalog can invalidate them). Entry taps are values
+  immutable and only a stamp id leaving the catalog can invalidate them). The table is fully
+  associative — any working set of at most 128 distinct keys stays resident however the keys
+  hash — and runs one FIFO hand once it is full, so a key is evicted only when a newer key
+  arrives past capacity; at most 64 kernels are inserted per frame (`FrameInsertCap`), and a
+  workload that churns more keys than that in a frame pays the exact per-kind emitters for the
+  remainder of the frame instead of unbounded rebuilds, the budget reopening at the next
+  `Process`. Entry taps are values
   copied out of the canvas, never pointers into stamp storage, so a freed stamp leaves no
   dangling reference; because a freed id can be re-baked as a different stamp, a successful
   `Stamp.Free` clears every live world's cache in the same process-wide scan that already

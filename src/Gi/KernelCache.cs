@@ -68,42 +68,45 @@ internal struct KernelEntry
     public int MaxTap;
     public long MaxTapQ40;
     public int Slot;
+    public int Next;
 }
 
 internal unsafe struct KernelCache
 {
-    internal const int EntryCount = 32;
+    internal const int EntryCount = 128;
+    internal const int BucketCount = 256;
     internal const int MaxSide = 64;
     internal const int MaxCells = MaxSide * MaxSide;
     internal const int CanvasCellLimit = 1 << 22;
-    internal const int FrameInsertCap = 8;
+    internal const int FrameInsertCap = 64;
 
     private NativeBuffer<KernelEntry> _entries;
     private NativeBuffer<long> _taps;
     private NativeBuffer<int> _rows;
     private NativeBuffer<long> _canvas;
     private NativeBuffer<int> _canvasRows;
-    private int _cursor;
+    private NativeBuffer<int> _buckets;
+    private int _live;
+    private int _hand;
     private int _inserts;
 
     public readonly long Bytes =>
         (long)_entries.Capacity * sizeof(KernelEntry) + (long)_taps.Capacity * sizeof(long) +
-        ((long)_rows.Capacity + _canvasRows.Capacity) * sizeof(int) + (long)_canvas.Capacity * sizeof(long);
+        ((long)_rows.Capacity + _canvasRows.Capacity + _buckets.Capacity) * sizeof(int) +
+        (long)_canvas.Capacity * sizeof(long);
 
-    public readonly int LiveEntries
+    public readonly int LiveEntries => _entries.Pointer == null ? 0 : _live;
+
+    [MethodImpl(Jit.Hot)]
+    private static int BucketOf(ulong key, ulong turn)
     {
-        get
-        {
-            var entries = _entries.Pointer;
-            if (entries == null) return 0;
-
-            var count = 0;
-            for (var i = 0; i < EntryCount; i++)
-                if (entries[i].Key != 0 || entries[i].Turn != 0)
-                    count++;
-
-            return count;
-        }
+        var hash = key ^ (turn * 0x9E3779B97F4A7C15ul);
+        hash ^= hash >> 33;
+        hash *= 0xFF51AFD7ED558CCDul;
+        hash ^= hash >> 33;
+        hash *= 0xC4CEB9FE1A85EC53ul;
+        hash ^= hash >> 33;
+        return (int)((hash >> 56) & (BucketCount - 1ul));
     }
 
     [MethodImpl(Jit.Hot)]
@@ -112,9 +115,13 @@ internal unsafe struct KernelCache
         var entries = _entries.Pointer;
         if (entries == null) return null;
 
-        for (var i = 0; i < EntryCount; i++)
-            if (entries[i].Key == key && entries[i].Turn == turn)
-                return entries + i;
+        var slot = _buckets.Pointer[BucketOf(key, turn)];
+        while (slot >= 0)
+        {
+            var entry = entries + slot;
+            if (entry->Key == key && entry->Turn == turn) return entry;
+            slot = entry->Next;
+        }
 
         return null;
     }
@@ -145,8 +152,14 @@ internal unsafe struct KernelCache
     [MethodImpl(Jit.Hot)]
     public void Clear()
     {
-        if (_entries.Pointer != null) new Span<KernelEntry>(_entries.Pointer, EntryCount).Clear();
-        _cursor = 0;
+        if (_entries.Pointer != null)
+        {
+            new Span<KernelEntry>(_entries.Pointer, EntryCount).Clear();
+            new Span<int>(_buckets.Pointer, BucketCount).Fill(-1);
+        }
+
+        _live = 0;
+        _hand = 0;
         _inserts = 0;
     }
 
@@ -158,7 +171,9 @@ internal unsafe struct KernelCache
         _rows.Free();
         _canvas.Free();
         _canvasRows.Free();
-        _cursor = 0;
+        _buckets.Free();
+        _live = 0;
+        _hand = 0;
     }
 
     [MethodImpl(Jit.Hot)]
@@ -169,10 +184,26 @@ internal unsafe struct KernelCache
     {
         EnsureStorage();
         _inserts++;
-        var slot = _cursor;
-        _cursor = slot + 1 == EntryCount ? 0 : slot + 1;
+        var entries = _entries.Pointer;
+        var buckets = _buckets.Pointer;
+        var slot = buckets[BucketOf(key, turn)];
+        while (slot >= 0 && !(entries[slot].Key == key && entries[slot].Turn == turn)) slot = entries[slot].Next;
 
-        var entry = _entries.Pointer + slot;
+        if (slot < 0)
+        {
+            if (_live < EntryCount) slot = _live++;
+            else
+            {
+                slot = _hand;
+                _hand = _hand + 1 == EntryCount ? 0 : _hand + 1;
+                Unlink(entries, buckets, slot);
+            }
+
+            entries[slot].Next = buckets[BucketOf(key, turn)];
+            buckets[BucketOf(key, turn)] = slot;
+        }
+
+        var entry = entries + slot;
         entry->Key = key;
         entry->Turn = turn;
         entry->Plane = plane;
@@ -192,6 +223,21 @@ internal unsafe struct KernelCache
         var rows = _rows.Pointer + (long)slot * (2 * MaxSide);
         Buffer.MemoryCopy(rowExtents, rows, 2 * MaxSide * sizeof(int), 2 * height * sizeof(int));
         return entry;
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static void Unlink(KernelEntry* entries, int* buckets, int slot)
+    {
+        var bucket = BucketOf(entries[slot].Key, entries[slot].Turn);
+        if (buckets[bucket] == slot)
+        {
+            buckets[bucket] = entries[slot].Next;
+            return;
+        }
+
+        var cursor = buckets[bucket];
+        while (entries[cursor].Next != slot) cursor = entries[cursor].Next;
+        entries[cursor].Next = entries[slot].Next;
     }
 
     [MethodImpl(Jit.Hot)]
@@ -223,6 +269,8 @@ internal unsafe struct KernelCache
         _entries.Resize(EntryCount);
         _taps.Resize(EntryCount * MaxCells);
         _rows.Resize(EntryCount * 2 * MaxSide);
+        _buckets.Resize(BucketCount);
+        new Span<int>(_buckets.Pointer, BucketCount).Fill(-1);
     }
 }
 
