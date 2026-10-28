@@ -114,16 +114,36 @@ internal static unsafe partial class TileBake
 #if NET
         if (Avx2.IsSupported)
         {
-            var wide = Vector256<short>.Zero;
-            for (var i = 0; i < TileSize * TileSize; i += 16) wide |= Avx.LoadVector256(page + i);
-            return !Vector256.EqualsAll(wide, Vector256<short>.Zero);
+            var a = Vector256<short>.Zero;
+            var b = Vector256<short>.Zero;
+            var c = Vector256<short>.Zero;
+            var d = Vector256<short>.Zero;
+            for (var i = 0; i < TileSize * TileSize; i += 64)
+            {
+                a |= Avx.LoadVector256(page + i);
+                b |= Avx.LoadVector256(page + i + 16);
+                c |= Avx.LoadVector256(page + i + 32);
+                d |= Avx.LoadVector256(page + i + 48);
+            }
+
+            return !Vector256.EqualsAll((a | b) | (c | d), Vector256<short>.Zero);
         }
 
         if (Vector)
         {
-            var wide = Vector128<short>.Zero;
-            for (var i = 0; i < TileSize * TileSize; i += 8) wide |= LoadShorts(page + i);
-            return !Vector128.EqualsAll(wide, Vector128<short>.Zero);
+            var a = Vector128<short>.Zero;
+            var b = Vector128<short>.Zero;
+            var c = Vector128<short>.Zero;
+            var d = Vector128<short>.Zero;
+            for (var i = 0; i < TileSize * TileSize; i += 32)
+            {
+                a |= LoadShorts(page + i);
+                b |= LoadShorts(page + i + 8);
+                c |= LoadShorts(page + i + 16);
+                d |= LoadShorts(page + i + 24);
+            }
+
+            return !Vector128.EqualsAll((a | b) | (c | d), Vector128<short>.Zero);
         }
 #endif
         var any = false;
@@ -201,6 +221,7 @@ internal static unsafe partial class TileBake
 
         var planes = t.T != null || t.B != null;
         if (!planes && x0 == 0 && x1 == TileSize) return PublishRows256(t, y0, y1, tick);
+        if (planes && x0 == 0 && x1 == TileSize) return PublishPlanes256(t, y0, y1, tick);
 
         var tentOut = stackalloc int[TileSize];
         var bellOut = stackalloc int[TileSize];
@@ -249,6 +270,70 @@ internal static unsafe partial class TileBake
         changed |= !Vector128.EqualsAll(differs, Vector128<short>.Zero);
         if (changed) t.Summary->Epoch = tick;
         return Outcome(Occupied(t.Summary), changed);
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static ResolveOutcome PublishPlanes256(PlaneCells t, int y0, int y1, int tick)
+    {
+        var summary = t.Summary;
+        var tentOut = stackalloc int[TileSize];
+        var bellOut = stackalloc int[TileSize];
+        if (t.T == null) new Span<int>(tentOut, TileSize).Clear();
+        if (t.B == null) new Span<int>(bellOut, TileSize).Clear();
+
+        var differs = Vector256<short>.Zero;
+        var bound = Vector256.Create(ExactBound);
+        var guard = Vector256.Create(ExactMask);
+        var changed = false;
+        var sum = summary->Sum;
+        for (var y = y0; y < y1; y++)
+        {
+            if (t.T != null) SmoothRow(t.T, y, tentOut);
+            if (t.B != null) SmoothRow(t.B, y, bellOut);
+            var iRow = t.I + y * TileSize;
+            var pageRow = t.Page + y * TileSize;
+
+            var wide = Vector256<int>.Zero;
+            for (var x = 0; x < TileSize; x += 8) wide |= Avx.LoadVector256(iRow + x) + bound;
+            if (!Vector256.EqualsAll(wide & guard, Vector256<int>.Zero))
+            {
+                changed |= RowScalar(iRow, tentOut, bellOut, pageRow, 0, TileSize);
+                RowStats(pageRow, out var scalarSum, out var scalarMax);
+                sum += scalarSum - summary->RowSums[y];
+                summary->RowSums[y] = scalarSum;
+                summary->RowMaxima[y] = scalarMax;
+                continue;
+            }
+
+            PublishPlaneRow(iRow, tentOut, bellOut, pageRow, ref differs, out var rowSum, out var rowMax);
+            sum += rowSum - summary->RowSums[y];
+            summary->RowSums[y] = rowSum;
+            summary->RowMaxima[y] = rowMax;
+        }
+
+        if (y1 > y0) CommitSummaries(t, 0, y0, TileSize, y1, sum);
+        changed |= !Vector256.EqualsAll(differs, Vector256<short>.Zero);
+        if (changed) summary->Epoch = tick;
+        return Outcome(Occupied(summary), changed);
+    }
+
+    [MethodImpl(Jit.Inline)]
+    private static void PublishPlaneRow(int* iRow, int* tentOut, int* bellOut, short* pageRow,
+        ref Vector256<short> differs, out int rowSum, out short rowMax)
+    {
+        var low = PackSixteen(
+            Avx.LoadVector256(iRow) + Avx.LoadVector256(tentOut) + Avx.LoadVector256(bellOut),
+            Avx.LoadVector256(iRow + 8) + Avx.LoadVector256(tentOut + 8) + Avx.LoadVector256(bellOut + 8));
+        var high = PackSixteen(
+            Avx.LoadVector256(iRow + 16) + Avx.LoadVector256(tentOut + 16) + Avx.LoadVector256(bellOut + 16),
+            Avx.LoadVector256(iRow + 24) + Avx.LoadVector256(tentOut + 24) + Avx.LoadVector256(bellOut + 24));
+        differs |= (low ^ Avx.LoadVector256(pageRow)) | (high ^ Avx.LoadVector256(pageRow + 16));
+        Avx.Store(pageRow, low);
+        Avx.Store(pageRow + 16, high);
+        var ones = Vector256.Create((short)1);
+        rowSum = Vector256.Sum(Avx2.MultiplyAddAdjacent(low, ones) + Avx2.MultiplyAddAdjacent(high, ones));
+        var widest = Vector256.Max(low, high);
+        rowMax = RowMaximum(Vector128.Max(widest.GetLower(), widest.GetUpper()));
     }
 
     [MethodImpl(Jit.Hot)]
