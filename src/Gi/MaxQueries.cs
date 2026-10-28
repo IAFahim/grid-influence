@@ -175,4 +175,50 @@ internal static unsafe class MaxQueries
                 return i;
         return count;
     }
+
+    [MethodImpl(Jit.Hot)]
+    public static bool AnyNewerInDisk(GridCtx* g, LayerData* ld, in World.Circle disk, int since)
+    {
+        var tree = ld->EpochTree;
+        if (tree.Levels == 0) return false;
+
+        return DiskNode(tree, g->TilesPerSide, disk, tree.Levels - 1, 0, 0, since);
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static bool DiskNode(
+        in Pyramid<int, EpochMaxOp> tree, int tilesPerSide, in World.Circle disk, int level, int nodeX, int nodeY,
+        int since)
+    {
+        var node = tree.Node(level, nodeX, nodeY);
+        var childSide = tree.ChildSide(level, tilesPerSide);
+        var vx = Math.Min(Pyramid<int, EpochMaxOp>.FanOut, childSide - (nodeX << 3));
+        var vy = Math.Min(Pyramid<int, EpochMaxOp>.FanOut, childSide - (nodeY << 3));
+        var shift = 3 * level;
+        var tx0 = disk.X0 >> TileBake.TileBits;
+        var ty0 = disk.Y0 >> TileBake.TileBits;
+        var tx1 = disk.X1 >> TileBake.TileBits;
+        var ty1 = disk.Y1 >> TileBake.TileBits;
+        var loX = Math.Max(0, (tx0 >> shift) - (nodeX << 3));
+        var loY = Math.Max(0, (ty0 >> shift) - (nodeY << 3));
+        var hiX = Math.Min(vx - 1, (tx1 >> shift) - (nodeX << 3));
+        var hiY = Math.Min(vy - 1, (ty1 >> shift) - (nodeY << 3));
+        for (var cy = loY; cy <= hiY; cy++)
+        for (var cx = loX; cx <= hiX; cx++)
+        {
+            if (node[cy * Pyramid<int, EpochMaxOp>.FanOut + cx] - since <= 0) continue;
+
+            var childX = (nodeX << 3) + cx;
+            var childY = (nodeY << 3) + cy;
+            if (level != 0)
+            {
+                if (DiskNode(tree, tilesPerSide, disk, level - 1, childX, childY, since)) return true;
+                continue;
+            }
+
+            if (World.HoldsDiskCell(disk, childX, childY)) return true;
+        }
+
+        return false;
+    }
 }

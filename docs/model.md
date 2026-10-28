@@ -360,7 +360,9 @@ before reading command payloads, writing
   the `whole` mask the conjunction of the two. Every column read overwrites its mask words, so
   bits never accumulate across calls. `World.ChangedMask(world, layer, xs, ys,
   reach, since, count, words)` writes one `ulong` per 64 agents — bit set when that agent's
-  disk changed since the tick — zeros for quiet words, and returns the changed count.
+  disk changed since the tick — zeros for quiet words, and returns the changed count; each row
+  answers through the same epoch-pyramid walk as `World.Changed`, so its cost is independent of
+  the disk's reach.
   `World.Sync(world, sources, xs, ys, count)` is the fused column form of `Move`: it
   validates generations, skips no-ops, ignores rows with a non-finite position, and marks
   the changed-list entries `Move` would, batch after batch, with zero managed allocation, in one serial loop.
@@ -562,8 +564,10 @@ its serialized page. Caches are
   `Query` central difference, read from the cached page when the cell is at least one cell from
   the page edge; `view.At(x, y)` and `view.TryCell(x, y, out cx, out cy)` map world floats the
   way `QueryAt` and the column reads do. An invalid handle yields a view of size 0 that reads 0.
-  A view is valid until the next `Process`, `Clear`, `Rewind` or `World.Free` — those can
-  allocate or free pages and directories — and is for the owning thread's read phase only;
+  A view is valid until the next `Process`, `Splat`, `Clear`, `Rewind`, `TryRestore` or
+  `World.Free` — those can allocate or free pages and directories, and a transient-layer
+  `Splat` emits directly into tile sets and can grow the page slab with no `Process` in between,
+  moving every published page — and is for the owning thread's read phase only;
   reads never write, so any number of views may read concurrently with each other and never with
   mutation or `Process`. It copies nothing and allocates nothing (a coherent read costs about
   0.8 ns; `benchmarks --view` pins it to `Query` on every cell).
@@ -1278,8 +1282,10 @@ digits. Concurrency: single thread.
   counters live in the tile set, are written only by the charge, and are zero in a fresh set.
   *Alignment*: units are 64-byte aligned. *Concurrency*: owning thread only.
 - **Field view**: *Lifetime*: a `FieldView` holds the layer and grid constants it was built from
-  and one cached page pointer; both name directory and slab storage that only `Process`, `Clear`,
-  `Rewind` and `World.Free` can grow, move or release, so a view must not be used across them (a
+  and one cached page pointer; both name directory and slab storage that only `Process`, `Splat`
+  (direct emission into transient tile sets, which grows the page slab with no `Process` in
+  between), `Clear`, `Rewind`, `TryRestore` and `World.Free` can grow, move or release, so a view
+  must not be used across them (a
   stale page pointer is the one hazard, and it is confined to the caller's read phase).
   *Aliasing*: the view only reads published `int16` pages. *Alignment*: page rows are 64 B
   aligned and every access is a naturally aligned `int16` load. *Bounds*: every cell read is
