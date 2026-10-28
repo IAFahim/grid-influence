@@ -64,6 +64,129 @@ public static unsafe partial class World
     }
 
     [MethodImpl(Jit.Hot)]
+    private static bool GradientWindowGroup(
+        in ColumnField f, ColumnBlock* b, int at, int l, short* values, float* gradientXs, float* gradientYs,
+        short* window, ref int shown)
+    {
+        if (!Avx2.IsSupported) return false;
+        if (((b->Accepted >> l) & 0xFFul) != 0xFFul) return false;
+
+        var tiles = b->Tiles;
+        var tile = tiles[l];
+        if (Vector256.Equals(Vector256.Load(tiles + l), Vector256.Create(tile)).AsSingle()
+                .ExtractMostSignificantBits() != 0xFF) return false;
+
+        if (tile != shown)
+        {
+            BuildWindow(f, tile, window);
+            shown = tile;
+        }
+
+        var bytes = Vector256.ShiftLeft(Vector256.Load(b->Windows + l), 1);
+        var pair = Vector256.Create(2);
+        var rows = Vector256.Create(WindowStride << 1);
+        var centre = WindowTap(window, bytes);
+        var right = WindowTap(window, bytes + pair);
+        var left = WindowTap(window, bytes - pair);
+        var below = WindowTap(window, bytes + rows);
+        var above = WindowTap(window, bytes - rows);
+        if (values != null) Vector256.Narrow(centre, centre).GetLower().Store(values + at + l);
+        var unit = Vector256.Create(f.Unit);
+        (Vector256.ConvertToSingle(right - left) * unit).Store(gradientXs + at + l);
+        (Vector256.ConvertToSingle(below - above) * unit).Store(gradientYs + at + l);
+        return true;
+    }
+
+    [MethodImpl(Jit.Inline)]
+    private static Vector256<int> WindowTap(short* window, Vector256<int> byteOffsets)
+    {
+        var raw = Avx2.GatherVector256((int*)window, byteOffsets, 1);
+        return Vector256.ShiftRightArithmetic(Vector256.ShiftLeft(raw, 16), 16);
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static bool GradientGatherLanes(
+        in ColumnField f, ColumnBlock* b, int at, int l, short* values, float* gradientXs, float* gradientYs)
+    {
+        if (!Avx2.IsSupported || f.Wide == 0 || f.Table == null) return false;
+        if (((b->Accepted >> l) & 0xFFul) != 0xFFul) return false;
+
+        var tiles = Vector256.Load(b->Tiles + l);
+        var local = Vector256.Load(b->Locals + l);
+        var tileMask = Vector256.Create(TileBake.TileSize - 1);
+        var one = Vector256.Create(1);
+        var minusOne = Vector256.Create(-1);
+        var zero = Vector256<int>.Zero;
+        var edge = tileMask;
+        var row = Vector256.Create(TileBake.TileSize);
+        var lx = Vector256.BitwiseAnd(local, tileMask);
+        var ly = Vector256.ShiftRightArithmetic(local, TileBake.TileBits);
+        var tx = Vector256.BitwiseAnd(tiles, Vector256.Create(f.TilesPerSide - 1));
+        var ty = Vector256.ShiftRightArithmetic(tiles, f.TileShift);
+        var cx = Vector256.ShiftLeft(tx, TileBake.TileBits) + lx;
+        var cy = Vector256.ShiftLeft(ty, TileBake.TileBits) + ly;
+        var inner = Vector256.Create(f.Size - 2);
+        var last = Vector256.Create(f.Size - 1);
+        var present = zero;
+        var baseBytes = PageTapBases(f, tiles, out present);
+        var centre = PageTap(f, baseBytes, Vector256.ShiftLeft(local, 1), present);
+
+        var rightCross = Vector256.Equals(lx, edge);
+        var rightInvalid = Vector256.Equals(cx, last);
+        var rightBase = PageTapBases(f, tiles + (Vector256.AndNot(rightCross, rightInvalid) & one),
+            out var rightPresent);
+        var right = PageTap(f, rightBase,
+            Vector256.ShiftLeft(local + one + (rightCross & Vector256.Create(-TileBake.TileSize)), 1),
+            Vector256.AndNot(rightPresent, rightInvalid));
+
+        var leftCross = Vector256.Equals(lx, zero);
+        var leftInvalid = Vector256.Equals(cx, zero);
+        var leftBase = PageTapBases(f, tiles + (Vector256.AndNot(leftCross, leftInvalid) & minusOne),
+            out var leftPresent);
+        var left = PageTap(f, leftBase,
+            Vector256.ShiftLeft(local - one + (leftCross & row), 1),
+            Vector256.AndNot(leftPresent, leftInvalid));
+
+        var belowCross = Vector256.Equals(ly, edge);
+        var belowInvalid = Vector256.Equals(cy, last);
+        var belowBase = PageTapBases(f, tiles + (Vector256.AndNot(belowCross, belowInvalid) & Vector256.Create(f.TilesPerSide)),
+            out var belowPresent);
+        var below = PageTap(f, belowBase,
+            Vector256.ShiftLeft(local + row + (belowCross & Vector256.Create(-Cells)), 1),
+            Vector256.AndNot(belowPresent, belowInvalid));
+
+        var aboveCross = Vector256.Equals(ly, zero);
+        var aboveInvalid = Vector256.Equals(cy, zero);
+        var aboveBase = PageTapBases(f, tiles - (Vector256.AndNot(aboveCross, aboveInvalid) & Vector256.Create(f.TilesPerSide)),
+            out var abovePresent);
+        var above = PageTap(f, aboveBase,
+            Vector256.ShiftLeft(local - row + (aboveCross & Vector256.Create(Cells)), 1),
+            Vector256.AndNot(abovePresent, aboveInvalid));
+
+        if (values != null) Vector256.Narrow(centre, centre).GetLower().Store(values + at + l);
+        var unit = Vector256.Create(f.Unit);
+        (Vector256.ConvertToSingle(right - left) * unit).Store(gradientXs + at + l);
+        (Vector256.ConvertToSingle(below - above) * unit).Store(gradientYs + at + l);
+        return true;
+    }
+
+    [MethodImpl(Jit.Inline)]
+    private static Vector256<int> PageTapBases(in ColumnField f, Vector256<int> tile, out Vector256<int> present)
+    {
+        var index = Avx2.GatherVector256(f.Table, tile, 4);
+        present = Vector256.GreaterThanOrEqual(index, Vector256<int>.Zero);
+        return Vector256.ShiftLeft(Vector256.ConditionalSelect(present, index, Vector256<int>.Zero), PageShift);
+    }
+
+    [MethodImpl(Jit.Inline)]
+    private static Vector256<int> PageTap(in ColumnField f, Vector256<int> baseBytes, Vector256<int> byteOffsets,
+        Vector256<int> present)
+    {
+        var raw = Avx2.GatherVector256((int*)f.Pages, baseBytes + byteOffsets, 1);
+        return Vector256.BitwiseAnd(Vector256.ShiftRightArithmetic(Vector256.ShiftLeft(raw, 16), 16), present);
+    }
+
+    [MethodImpl(Jit.Hot)]
     private static void PrefetchBlock(in ColumnField f, ColumnBlock* b, bool vertical)
     {
         if (!Sse.IsSupported || b->Changes < ScatterChanges || f.Table == null) return;

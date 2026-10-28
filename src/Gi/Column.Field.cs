@@ -28,6 +28,7 @@ public static unsafe partial class World
         public int TileShift;
         public int* Table;
         public byte* Pages;
+        public byte Wide;
 
         [MethodImpl(Jit.Inline)]
         public readonly short* PageAt(int tile)
@@ -79,7 +80,8 @@ public static unsafe partial class World
             TilesPerSide = g->TilesPerSide,
             TileShift = shift,
             Table = ld->PageIndex,
-            Pages = ld->Store.Pages.Region
+            Pages = ld->Store.Pages.Region,
+            Wide = (byte)(ld->Store.Pages.ByteCapacity <= int.MaxValue ? 1 : 0)
         };
     }
 

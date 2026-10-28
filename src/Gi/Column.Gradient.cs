@@ -151,6 +151,22 @@ public static unsafe partial class World
         var shown = windowTile;
         for (var l = 0; l < count; l++)
         {
+#if NET
+            if ((l & 7) == 0 && l + 8 <= count)
+            {
+                if (GradientWindowGroup(f, b, at, l, values, gradientXs, gradientYs, window, ref shown))
+                {
+                    l += 7;
+                    continue;
+                }
+
+                if (GradientGatherLanes(f, b, at, l, values, gradientXs, gradientYs))
+                {
+                    l += 7;
+                    continue;
+                }
+            }
+#endif
             var o = at + l;
             if (((accepted >> l) & 1) == 0)
             {
@@ -187,9 +203,20 @@ public static unsafe partial class World
         var unit = f.Unit;
         var cached = -1;
         short* page = null;
-        for (var l = 0; l < count; l++)
+        var l = 0;
+        while (l < count)
         {
-            var o = at + l;
+#if NET
+            if (l + 8 <= count && GradientGatherLanes(f, b, at, l, values, gradientXs, gradientYs))
+            {
+                l += 8;
+                continue;
+            }
+#endif
+            var end = Math.Min(l + 8, count);
+            for (; l < end; l++)
+            {
+                var o = at + l;
             if (((accepted >> l) & 1) == 0)
             {
                 if (values != null) values[o] = 0;
@@ -239,6 +266,7 @@ public static unsafe partial class World
             if (values != null) values[o] = centre;
             gradientXs[o] = dx;
             gradientYs[o] = dy;
+            }
         }
     }
 
