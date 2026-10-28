@@ -494,6 +494,21 @@ internal static unsafe partial class TileBake
     private static void SmoothRow(long* sums, int y, int* output)
     {
         var row = sums + y * TileSize;
+#if NET
+        if (Vector256.IsHardwareAccelerated)
+        {
+            var half = Vector256.Create(549755813888L);
+            for (var x = 0; x < TileSize; x += 4)
+            {
+                var value = Vector256.Load(row + x);
+                var rounded =
+                    Vector256.ShiftRightArithmetic(value + half + Vector256.ShiftRightArithmetic(value, 63), 40);
+                Vector128.Narrow(rounded.GetLower(), rounded.GetUpper()).Store(output + x);
+            }
+
+            return;
+        }
+#endif
         for (var x = 0; x < TileSize; x++) output[x] = RoundQ40(row[x]);
     }
 
