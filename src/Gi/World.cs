@@ -452,6 +452,7 @@ public static unsafe partial class World
         ld->Store.Reset();
         if (ld->Directory != null) NativeHeap.Free(ld->Directory);
         ld->Directory = null;
+        ld->PageIndex = null;
         ld->LivePages = 0;
         NativeHeap.Free(ld->InDirty);
         NativeHeap.Free(ld->Epochs);
