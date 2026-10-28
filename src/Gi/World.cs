@@ -141,6 +141,7 @@ internal unsafe struct LayerData
     public NativeBuffer<TileRect> Rects;
     public Pyramid<short, ShortMaxOp> Max;
     public Pyramid<int, EpochMaxOp> EpochTree;
+    public int* PageIndex;
 
     [MethodImpl(Jit.Inline)]
     public readonly TilePlanes* SetOf(int tile)
@@ -155,8 +156,11 @@ internal unsafe struct LayerData
     [MethodImpl(Jit.Inline)]
     public readonly short* PageOf(int tile)
     {
-        var set = SetOf(tile);
-        return set == null ? null : (short*)Store.Pages.Unit(set->Page);
+        var table = PageIndex;
+        if (table == null) return null;
+
+        var index = table[tile];
+        return index < 0 ? null : (short*)(Store.Pages.Region + ((nuint)index << World.PageShift));
     }
 
     [MethodImpl(Jit.Inline)]
@@ -258,6 +262,7 @@ public static unsafe partial class World
     internal const int MaxSourceSlots = 1 << 24;
     private const int Cells = TileBake.TileSize * TileBake.TileSize;
     internal const int PageBytes = Cells * sizeof(short);
+    internal const int PageShift = 11;
 
     private static int _worldCount;
 
@@ -447,6 +452,7 @@ public static unsafe partial class World
         ld->Store.Reset();
         if (ld->Directory != null) NativeHeap.Free(ld->Directory);
         ld->Directory = null;
+        ld->PageIndex = null;
         ld->LivePages = 0;
         NativeHeap.Free(ld->InDirty);
         NativeHeap.Free(ld->Epochs);
@@ -875,8 +881,9 @@ public static unsafe partial class World
     {
         if (ld->Directory != null) return;
 
-        ld->Directory = (int*)NativeHeap.AllocZeroed((nuint)g->TileCount * sizeof(int));
-        new Span<int>(ld->Directory, g->TileCount).Fill(-1);
+        ld->Directory = (int*)NativeHeap.AllocZeroed((nuint)g->TileCount * 2 * sizeof(int));
+        new Span<int>(ld->Directory, g->TileCount * 2).Fill(-1);
+        ld->PageIndex = ld->Directory + g->TileCount;
     }
 
     [MethodImpl(Jit.Hot)]
@@ -890,6 +897,7 @@ public static unsafe partial class World
         set = (TilePlanes*)ld->Sets.Unit(index);
         *set = ld->Derived != 0 ? ld->Store.TakeDerived() : ld->Store.Take();
         ld->Directory[tile] = index;
+        ld->PageIndex[tile] = set->Page;
         ld->LivePages++;
         return set;
     }
@@ -904,6 +912,7 @@ public static unsafe partial class World
         ld->Store.Give(*set);
         ld->Sets.Give(index);
         ld->Directory[tile] = -1;
+        ld->PageIndex[tile] = -1;
         ld->LivePages--;
     }
 

@@ -1,8 +1,4 @@
 using System.Runtime.CompilerServices;
-#if NET
-using System.Runtime.Intrinsics;
-#endif
-
 namespace Gi;
 
 public static unsafe partial class World
@@ -115,69 +111,10 @@ public static unsafe partial class World
         if (w->GridCount == 1)
         {
             var g = w->Grids;
-            var scaleQ8 = g->ScaleQ8;
-            if (scaleQ8 != 0)
+            if (g->ScaleQ8 != 0)
             {
-                var ox = g->OriginX;
-                var oy = g->OriginY;
-                var size = g->Size;
-                var ld = g->Layers + layer;
-                var perUnit = scaleQ8 / 512f;
-                var done = from;
-#if NET
-                if (Vector256.IsHardwareAccelerated)
-                    done =
-                        GradientBlocks(g, ld, xs, ys, values, gradientXs, gradientYs, whole, from, to, ref complete);
-#endif
-                for (var i = done; i < to; i++)
-                {
-                    var x = xs[i];
-                    var y = ys[i];
-                    var qx = CellQ8(x, ox, scaleQ8);
-                    var qy = CellQ8(y, oy, scaleQ8);
-                    if (!Contains(g, qx, qy))
-                    {
-                        if (values != null) values[i] = 0;
-                        gradientXs[i] = 0f;
-                        gradientYs[i] = 0f;
-                        complete = false;
-                        continue;
-                    }
-
-                    var cx = (int)(qx >> 8);
-                    var cy = (int)(qy >> 8);
-                    var tile = (cy >> TileBake.TileBits) * g->TilesPerSide + (cx >> TileBake.TileBits);
-                    var page = ld->PageOf(tile);
-                    var lx = cx & (TileBake.TileSize - 1);
-                    var ly = cy & (TileBake.TileSize - 1);
-                    if (page != null && (uint)(lx - 1) < TileBake.TileSize - 2 &&
-                        (uint)(ly - 1) < TileBake.TileSize - 2)
-                    {
-                        var at = page + ly * TileBake.TileSize + lx;
-                        if (values != null) values[i] = *at;
-                        gradientXs[i] = (at[1] - at[-1]) * perUnit;
-                        gradientYs[i] = (at[TileBake.TileSize] - at[-TileBake.TileSize]) * perUnit;
-                    }
-                    else
-                    {
-                        if (values != null) values[i] = page == null ? (short)0 : page[ly * TileBake.TileSize + lx];
-                        gradientXs[i] = (CellNear(g, ld, tile, page, cx + 1, cy) -
-                                         CellNear(g, ld, tile, page, cx - 1, cy)) * perUnit;
-                        gradientYs[i] = (CellNear(g, ld, tile, page, cx, cy + 1) -
-                                         CellNear(g, ld, tile, page, cx, cy - 1)) * perUnit;
-                    }
-
-                    if (cx - 1 >= 0 && cy - 1 >= 0 && cx + 1 < size && cy + 1 < size)
-                    {
-                        if (whole != null) whole[i >> 6] |= 1ul << (i & 63);
-                    }
-                    else
-                    {
-                        complete = false;
-                    }
-                }
-
-                return complete;
+                var field = FieldOf(g, g->Layers + layer);
+                return GradientSingle(field, xs, ys, values, gradientXs, gradientYs, whole, from, to);
             }
         }
 
