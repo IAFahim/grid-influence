@@ -310,6 +310,13 @@ public static unsafe partial class World
         short* page = null;
         for (var l = 0; l < count; l++)
         {
+#if NET
+            if ((l & 7) == 0 && l + 8 <= count && SenseGatherLanes(f, b, at, l, values))
+            {
+                l += 7;
+                continue;
+            }
+#endif
             var o = at + l;
             if (((accepted >> l) & 1) == 0)
             {

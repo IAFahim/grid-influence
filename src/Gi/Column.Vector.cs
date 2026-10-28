@@ -170,6 +170,37 @@ public static unsafe partial class World
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
+    private static bool SenseGatherLanes(in ColumnField f, ColumnBlock* b, int at, int l, short* values)
+    {
+        if (!Avx2.IsSupported || f.Wide == 0 || f.Table == null) return false;
+        if (((b->Accepted >> l) & 0xFFul) != 0xFFul) return false;
+
+        var tiles = Vector256.Load(b->Tiles + l);
+        var offsets = Vector256.ShiftLeft(Vector256.Load(b->Locals + l), 1);
+        var tile = tiles.GetElement(0);
+        Vector256<int> centre;
+        if (Vector256.Equals(tiles, Vector256.Create(tile)).AsSingle().ExtractMostSignificantBits() == 0xFF)
+        {
+            var page = f.PageAt(tile);
+            if (page == null)
+            {
+                Vector256.Narrow(Vector256<int>.Zero, Vector256<int>.Zero).GetLower().Store(values + at + l);
+                return true;
+            }
+
+            var raw = Avx2.GatherVector256((int*)page, offsets, 1);
+            centre = Vector256.ShiftRightArithmetic(Vector256.ShiftLeft(raw, 16), 16);
+        }
+        else
+        {
+            centre = PageTap(f, PageTapBases(f, tiles, out var present), offsets, present);
+        }
+
+        Vector256.Narrow(centre, centre).GetLower().Store(values + at + l);
+        return true;
+    }
+
     [MethodImpl(Jit.Inline)]
     private static Vector256<int> PageTapBases(in ColumnField f, Vector256<int> tile, out Vector256<int> present)
     {
