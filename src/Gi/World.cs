@@ -830,7 +830,7 @@ public static unsafe partial class World
         for (var wi = 0; wi < _worldCount; wi++)
         {
             var w = Runtime.Worlds + wi;
-            if (w->Grids != null) w->Kernels.Clear();
+            if (w->Grids != null) w->Kernels.RequestFlush();
         }
     }
 

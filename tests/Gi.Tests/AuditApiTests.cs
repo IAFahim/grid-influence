@@ -297,6 +297,79 @@ public sealed unsafe class AuditApiTests
     }
 
     [Fact]
+    public void StampFreeThenRebakeMustNotServeStaleKernels()
+    {
+        var world = World.New();
+        byte rebaked = 0;
+        var reference = World.New();
+        byte referenceStamp = 0;
+        var keeper = Stamp.Box(2, 2, 30);
+        try
+        {
+            Grid.New(world, 8, 0f, 0f, 256f);
+            var layer = Layer.New(world, Layer.Precision.Cell);
+
+            byte Bake(sbyte[] samples)
+            {
+                fixed (sbyte* data = samples)
+                {
+                    return Stamp.New(data, 12, 12);
+                }
+            }
+
+            var first = new sbyte[12 * 12];
+            var second = new sbyte[12 * 12];
+            for (var i = 0; i < first.Length; i++)
+            {
+                first[i] = 20;
+                second[i] = (sbyte)(i % 5 == 0 ? 40 : 5);
+            }
+
+            first[7] = 90;
+
+            var stamp = Bake(first);
+            var source = World.Place(world, layer, 32.5f, 32.5f, stamp, 1);
+            World.Place(world, layer, 32.5f, 32.5f, keeper, 1);
+            World.Process(world);
+            World.Remove(world, source);
+            World.Process(world);
+            World.Memory(world, out _, out _, out _, out var cached, out _);
+            Assert.True(cached > 0);
+
+            Assert.True(Stamp.Free(stamp));
+            rebaked = Bake(second);
+            Assert.Equal(stamp, rebaked);
+            World.Memory(world, out _, out _, out _, out var afterFree, out _);
+            Assert.Equal(0, afterFree);
+
+            Grid.New(reference, 8, 0f, 0f, 256f);
+            var referenceLayer = Layer.New(reference, Layer.Precision.Cell);
+            referenceStamp = Bake(second);
+            World.Place(reference, referenceLayer, 32.5f, 32.5f, keeper, 1);
+            World.Process(reference);
+            var replacement = World.Place(world, layer, 32.5f, 32.5f, rebaked, 1);
+            var referenceSource = World.Place(reference, referenceLayer, 32.5f, 32.5f, referenceStamp, 1);
+            World.Process(world);
+            World.Process(reference);
+
+            World.TrySense(world, layer, 32.5f, 32.5f, replacement, out var excluded);
+            World.TrySense(reference, referenceLayer, 32.5f, 32.5f, referenceSource, out var referenceExcluded);
+            Assert.Equal(referenceExcluded, excluded);
+            Assert.Equal(World.LayerHash(reference, 0, referenceLayer), World.LayerHash(world, 0, layer));
+            World.Memory(world, out _, out _, out _, out var rebuilt, out _);
+            Assert.True(rebuilt > 0);
+        }
+        finally
+        {
+            World.Free(reference);
+            World.Free(world);
+            if (referenceStamp != 0) Stamp.Free(referenceStamp);
+            if (rebaked != 0) Stamp.Free(rebaked);
+            Stamp.Free(keeper);
+        }
+    }
+
+    [Fact]
     [Trait("Audit", "Hazard")]
     public void WorldHandleIsReusedSoAStaleByteHandleReadsTheNewWorld()
     {

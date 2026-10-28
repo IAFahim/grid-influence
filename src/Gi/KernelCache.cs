@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Threading;
 namespace Gi;
 
 internal enum KernelShape : byte
@@ -89,13 +90,20 @@ internal unsafe struct KernelCache
     private int _live;
     private int _hand;
     private int _inserts;
+    private int _flushPending;
 
     public readonly long Bytes =>
         (long)_entries.Capacity * sizeof(KernelEntry) + (long)_taps.Capacity * sizeof(long) +
         ((long)_rows.Capacity + _canvasRows.Capacity + _buckets.Capacity) * sizeof(int) +
         (long)_canvas.Capacity * sizeof(long);
 
-    public readonly int LiveEntries => _entries.Pointer == null ? 0 : _live;
+    public readonly int LiveEntries => _entries.Pointer == null || _flushPending != 0 ? 0 : _live;
+
+    [MethodImpl(Jit.Hot)]
+    public void RequestFlush()
+    {
+        Volatile.Write(ref _flushPending, 1);
+    }
 
     [MethodImpl(Jit.Hot)]
     private static int BucketOf(ulong key, ulong turn)
@@ -110,10 +118,11 @@ internal unsafe struct KernelCache
     }
 
     [MethodImpl(Jit.Hot)]
-    public readonly KernelEntry* Find(ulong key, ulong turn)
+    public KernelEntry* Find(ulong key, ulong turn)
     {
         var entries = _entries.Pointer;
         if (entries == null) return null;
+        if (Volatile.Read(ref _flushPending) != 0) return null;
 
         var slot = _buckets.Pointer[BucketOf(key, turn)];
         while (slot >= 0)
@@ -147,6 +156,7 @@ internal unsafe struct KernelCache
     public void BeginFrame()
     {
         _inserts = 0;
+        if (Volatile.Read(ref _flushPending) != 0) Clear();
     }
 
     [MethodImpl(Jit.Hot)]
@@ -161,6 +171,7 @@ internal unsafe struct KernelCache
         _live = 0;
         _hand = 0;
         _inserts = 0;
+        _flushPending = 0;
     }
 
     [MethodImpl(Jit.Hot)]
@@ -174,6 +185,7 @@ internal unsafe struct KernelCache
         _buckets.Free();
         _live = 0;
         _hand = 0;
+        _flushPending = 0;
     }
 
     [MethodImpl(Jit.Hot)]
@@ -182,6 +194,7 @@ internal unsafe struct KernelCache
         int originX, int originY, int width, int height, int maxTap, long maxTapQ40,
         int* rowExtents, int* cells, long* q40)
     {
+        if (Volatile.Read(ref _flushPending) != 0) Clear();
         EnsureStorage();
         _inserts++;
         var entries = _entries.Pointer;
