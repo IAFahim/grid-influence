@@ -8,8 +8,6 @@ namespace Gi;
 
 public static unsafe partial class World
 {
-    internal static int Experiment = int.Parse(Environment.GetEnvironmentVariable("GI_EXP") ?? "0");
-
     [MethodImpl(Jit.Inline)]
     private static int CountBits(ulong value)
     {
@@ -67,7 +65,7 @@ public static unsafe partial class World
         b->Count = count;
         QuantizeBlock(f, xs, ys, b);
 #if NET
-        if (Experiment != 3 && Experiment != 4) PrefetchBlock(f, b, vertical);
+        PrefetchBlock(f, b, vertical);
 #endif
     }
 
@@ -86,22 +84,6 @@ public static unsafe partial class World
     private static bool GradientSingle(in ColumnField f, float* xs, float* ys, short* values, float* gradientXs,
         float* gradientYs, ulong* whole, int from, int to)
     {
-#if NET
-        if (Experiment == 5)
-        {
-            var acc = System.Runtime.Intrinsics.Vector256<float>.Zero;
-            for (var k = from; k + 8 <= to; k += 8) acc += System.Runtime.Intrinsics.Vector256.Load(xs + k) + System.Runtime.Intrinsics.Vector256.Load(ys + k);
-            if (values != null) values[0] = (short)System.Runtime.Intrinsics.Vector256.Sum(acc);
-            return true;
-        }
-        if (Experiment == 6)
-        {
-            var acc = System.Runtime.Intrinsics.Vector256<float>.Zero;
-            for (var k = from; k + 8 <= to; k += 8) { acc += System.Runtime.Intrinsics.Vector256.Load(xs + k) + System.Runtime.Intrinsics.Vector256.Load(ys + k); System.Runtime.Intrinsics.Vector256.Store(System.Runtime.Intrinsics.Vector256.Create((float)k), gradientXs + k); System.Runtime.Intrinsics.Vector256.Store(System.Runtime.Intrinsics.Vector256.Create((float)k), gradientYs + k); }
-            if (values != null) values[0] = (short)System.Runtime.Intrinsics.Vector256.Sum(acc);
-            return true;
-        }
-#endif
         var buffer = stackalloc int[2 * 3 * BlockLanes];
         var blocks = stackalloc ColumnBlock[2];
         var raw = stackalloc short[WindowCells + WindowAlign / sizeof(short)];
@@ -118,12 +100,7 @@ public static unsafe partial class World
             var next = at + current->Count;
             if (next < to) PrepareBlock(f, xs + next, ys + next, spare, Math.Min(BlockLanes, to - next), true);
 
-            if (Experiment == 1 || Experiment == 4) { }
-            else if (Experiment == 2)
-            {
-                for (var l = 0; l < current->Count; l++) { values[at + l] = (short)current->Locals[l]; gradientXs[at + l] = current->Tiles[l]; gradientYs[at + l] = current->Windows[l]; }
-            }
-            else if (current->Changes <= RunChanges)
+            if (current->Changes <= RunChanges)
                 GradientWindow(f, current, at, values, gradientXs, gradientYs, window, ref windowTile);
             else
                 GradientDirect(f, current, at, values, gradientXs, gradientYs);
