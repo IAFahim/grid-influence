@@ -133,32 +133,56 @@ public static unsafe partial class World
 
         var rightCross = Vector256.Equals(lx, edge);
         var rightInvalid = Vector256.Equals(cx, last);
-        var rightBase = PageTapBases(f, tiles + (Vector256.AndNot(rightCross, rightInvalid) & one),
-            out var rightPresent);
+        var rightBase = baseBytes;
+        var rightPresent = present;
+        if (rightCross.AsSingle().ExtractMostSignificantBits() != 0)
+        {
+            rightBase = PageTapBases(f, tiles + (Vector256.AndNot(rightCross, rightInvalid) & one),
+                out rightPresent);
+        }
+
         var right = PageTap(f, rightBase,
             Vector256.ShiftLeft(local + one + (rightCross & Vector256.Create(-TileBake.TileSize)), 1),
             Vector256.AndNot(rightPresent, rightInvalid));
 
         var leftCross = Vector256.Equals(lx, zero);
         var leftInvalid = Vector256.Equals(cx, zero);
-        var leftBase = PageTapBases(f, tiles + (Vector256.AndNot(leftCross, leftInvalid) & minusOne),
-            out var leftPresent);
+        var leftBase = baseBytes;
+        var leftPresent = present;
+        if (leftCross.AsSingle().ExtractMostSignificantBits() != 0)
+        {
+            leftBase = PageTapBases(f, tiles + (Vector256.AndNot(leftCross, leftInvalid) & minusOne),
+                out leftPresent);
+        }
+
         var left = PageTap(f, leftBase,
             Vector256.ShiftLeft(local - one + (leftCross & row), 1),
             Vector256.AndNot(leftPresent, leftInvalid));
 
         var belowCross = Vector256.Equals(ly, edge);
         var belowInvalid = Vector256.Equals(cy, last);
-        var belowBase = PageTapBases(f, tiles + (Vector256.AndNot(belowCross, belowInvalid) & Vector256.Create(f.TilesPerSide)),
-            out var belowPresent);
+        var belowBase = baseBytes;
+        var belowPresent = present;
+        if (belowCross.AsSingle().ExtractMostSignificantBits() != 0)
+        {
+            belowBase = PageTapBases(f, tiles + (Vector256.AndNot(belowCross, belowInvalid) & Vector256.Create(f.TilesPerSide)),
+                out belowPresent);
+        }
+
         var below = PageTap(f, belowBase,
             Vector256.ShiftLeft(local + row + (belowCross & Vector256.Create(-Cells)), 1),
             Vector256.AndNot(belowPresent, belowInvalid));
 
         var aboveCross = Vector256.Equals(ly, zero);
         var aboveInvalid = Vector256.Equals(cy, zero);
-        var aboveBase = PageTapBases(f, tiles - (Vector256.AndNot(aboveCross, aboveInvalid) & Vector256.Create(f.TilesPerSide)),
-            out var abovePresent);
+        var aboveBase = baseBytes;
+        var abovePresent = present;
+        if (aboveCross.AsSingle().ExtractMostSignificantBits() != 0)
+        {
+            aboveBase = PageTapBases(f, tiles - (Vector256.AndNot(aboveCross, aboveInvalid) & Vector256.Create(f.TilesPerSide)),
+                out abovePresent);
+        }
+
         var above = PageTap(f, aboveBase,
             Vector256.ShiftLeft(local - row + (aboveCross & Vector256.Create(Cells)), 1),
             Vector256.AndNot(abovePresent, aboveInvalid));
