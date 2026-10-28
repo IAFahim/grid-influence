@@ -34,6 +34,7 @@ internal unsafe struct FusedTile
     public short* Page;
     public TileSummary* Summary;
     public ResolveOutcome Outcome;
+    public ulong Hash;
     public byte Fallback;
     public short Max;
 }
@@ -286,6 +287,7 @@ internal static unsafe class FusedBox
         var scale = Vector256.Create(value);
         var ones = Vector256.Create((short)1);
         var seen = Vector256<short>.Zero;
+        var hash = (TileHash.Offset ^ (ulong)task->Tile) * TileHash.Prime;
         var summary = task->Summary;
         for (var y = 0; y < Size; y++)
         {
@@ -323,6 +325,11 @@ internal static unsafe class FusedBox
             low.Store(target);
             high.Store(target + 16);
             seen |= low | high;
+            var lowWords = low.AsUInt64();
+            for (var word = 0; word < 4; word++) hash = (hash ^ lowWords.GetElement(word)) * TileHash.Prime;
+            var highWords = high.AsUInt64();
+            for (var word = 0; word < 4; word++) hash = (hash ^ highWords.GetElement(word)) * TileHash.Prime;
+
             summary->RowSums[y] = Vector256.Sum(Avx2.MultiplyAddAdjacent(low, ones) + Avx2.MultiplyAddAdjacent(high, ones));
             var peak = Vector256.Max(low, high);
             var narrow = Vector128.Max(peak.GetLower(), peak.GetUpper());
@@ -332,7 +339,7 @@ internal static unsafe class FusedBox
             summary->RowMaxima[y] = narrow.ToScalar();
         }
 
-        FinishTile(page, summary, task, tick, seen != Vector256<short>.Zero, difference != Vector256<short>.Zero);
+        FinishTile(page, summary, task, tick, hash, seen != Vector256<short>.Zero, difference != Vector256<short>.Zero);
     }
 #endif
 
@@ -378,6 +385,7 @@ internal static unsafe class FusedBox
     {
         var start = Edge - offsetX - width + 1;
         var any = false;
+        var hash = (TileHash.Offset ^ (ulong)task->Tile) * TileHash.Prime;
         var summary = task->Summary;
         for (var y = 0; y < Size; y++)
         {
@@ -407,6 +415,7 @@ internal static unsafe class FusedBox
                 if (final != 0) any = true;
                 rowSum += final;
                 if (final > best) best = final;
+                if ((x & 3) == 3) hash = (hash ^ *(ulong*)(target + x - 3)) * TileHash.Prime;
                 if (++x == Size) break;
 
                 window += source[x + width - 1] - source[x - 1];
@@ -416,11 +425,12 @@ internal static unsafe class FusedBox
             summary->RowMaxima[y] = best;
         }
 
-        FinishTile(page, summary, task, tick, any, changed);
+        FinishTile(page, summary, task, tick, hash, any, changed);
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void FinishTile(short* page, TileSummary* summary, FusedTile* task, int tick, bool any, bool changed)
+    private static void FinishTile(short* page, TileSummary* summary, FusedTile* task, int tick, ulong hash,
+        bool any, bool changed)
     {
         long total = 0;
         var best = summary->RowMaxima[0];
@@ -442,6 +452,7 @@ internal static unsafe class FusedBox
         summary->ArgMaxX = (short)column;
         summary->ArgMaxY = (short)row;
         if (changed) summary->Epoch = tick;
+        task->Hash = any ? hash : 0;
         task->Max = best;
         task->Outcome = TileBake.Outcome(any, changed);
     }

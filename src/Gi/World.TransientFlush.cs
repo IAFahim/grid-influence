@@ -251,13 +251,13 @@ public static unsafe partial class World
             {
                 DropPage(ld, task->Tile);
                 ld->Max.Update(tps, task->Tile, 0);
-                RefreshTileHash(g, ld, task->Tile);
+                ApplyTileHash(g, ld, task->Tile, task->Hash);
             }
             else
             {
                 ld->Max.Update(tps, task->Tile, task->Max);
                 RetireTransientTile(ld, ld->SetOf(task->Tile), task->Tile);
-                if (changed) RefreshTileHash(g, ld, task->Tile);
+                ApplyTileHash(g, ld, task->Tile, task->Hash);
             }
 
             if (changed) AppendChanged(ld, task->Tile);
