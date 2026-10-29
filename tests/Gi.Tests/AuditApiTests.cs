@@ -182,19 +182,45 @@ public sealed unsafe class AuditApiTests
             var inside = new[] { 10f, 20f, 30f };
             var outside = new[] { 5000f, -5000f, 1e20f };
             var nan = new[] { float.NaN, 1f };
+            var neverAllocated = (byte)StampCatalog.Count;
             Assert.Equal(3, World.Splat(world, transient, inside, inside, box, 2));
             Assert.Equal(3, World.Splat(world, transient, outside, outside, box, 2));
             Assert.Equal(3, World.Splat(world, transient, inside, inside, box, 0));
             Assert.Equal(1, World.Splat(world, transient, nan, nan, box, 2));
             Assert.Equal(0, World.Splat(world, persistent, inside, inside, box, 2));
             Assert.Equal(0, World.Splat(world, 99, inside, inside, box, 2));
-            Assert.Equal(0, World.Splat(world, transient, inside, inside, 77, 2));
+            Assert.Equal(0, World.Splat(world, transient, inside, inside, neverAllocated, 2));
             _output.WriteLine("AUDIT-SPLAT in-grid, fully off-grid and gain-0 batches all return 3; invalid layer/stamp/persistent return 0");
         }
         finally
         {
             World.Free(world);
             Stamp.Free(box);
+        }
+    }
+
+    [Fact]
+    [Trait("Audit", "Hazard")]
+    public void LeakedStampsServeAFixedStampSentinelSoTheSplatRejectionDerivesItsHandle()
+    {
+        var world = World.New();
+        var held = new List<byte>();
+        try
+        {
+            while (!StampCatalog.Valid(77)) held.Add(Stamp.Box(2, 2, 3));
+            Grid.New(world, 7, 0f, 0f, 128f);
+            var transient = Layer.New(world, Layer.Residency.Transient, Layer.Precision.Cell);
+            var inside = new[] { 10f, 20f, 30f };
+            var neverAllocated = (byte)StampCatalog.Count;
+            Assert.Equal(3, World.Splat(world, transient, inside, inside, 77, 2));
+            Assert.Equal(0, World.Splat(world, transient, inside, inside, neverAllocated, 2));
+            _output.WriteLine(
+                $"AUDIT-PRESSURE {held.Count} live stamps made fixed id 77 servable (Splat returned 3); id {neverAllocated} at the catalog high-water mark stayed rejected");
+        }
+        finally
+        {
+            World.Free(world);
+            foreach (var stamp in held) Stamp.Free(stamp);
         }
     }
 
