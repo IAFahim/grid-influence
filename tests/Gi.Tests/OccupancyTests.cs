@@ -208,7 +208,7 @@ public sealed unsafe class OccupancyTests
         return w->Grids[0].Layers[layer].LivePages;
     }
 
-    private sealed unsafe class PlaneTile : IDisposable
+    private sealed class PlaneTile : IDisposable
     {
         public TilePlanes Plane;
         public PlaneStore Store;

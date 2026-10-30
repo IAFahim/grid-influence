@@ -1,5 +1,4 @@
 using System.Runtime.CompilerServices;
-using System.Threading;
 namespace Gi;
 
 internal enum KernelShape : byte

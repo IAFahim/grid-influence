@@ -2,7 +2,7 @@ using Xunit;
 
 namespace Gi.Tests;
 
-public sealed unsafe class AuditBatchScaleTests
+public sealed class AuditBatchScaleTests
 {
     [Fact]
     public void BatchPlaceMustHonourTheFootprintCapForItsScale()
