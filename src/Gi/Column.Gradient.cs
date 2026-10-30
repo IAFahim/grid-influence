@@ -27,6 +27,7 @@ public static unsafe partial class World
         b->Accepted = 0;
         b->Interior = 0;
         b->Moved = 0;
+        b->Changes = 0;
 #if NET
         if (Avx2.IsSupported) i = QuantizeLanes(f, xs, ys, b);
 #endif
@@ -56,7 +57,7 @@ public static unsafe partial class World
 
         b->Accepted = accepted;
         b->Interior = interior;
-        b->Changes = CountBits(moved);
+        b->Changes += CountBits(moved);
     }
 
     [MethodImpl(Jit.Hot)]
