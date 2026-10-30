@@ -1951,3 +1951,14 @@ The unsafe code added to the sweep is `TryEmitBoxMove` over `EmitNarrowBands`: w
 - **Concurrency.** The pair path runs inside `SweepChanged` on the single thread that owns `Process`; no other thread can observe the intermediate one-chain state, and `PublishDirty` still runs strictly after the sweep, so publish-side invariants are unchanged.
 
 `SweepTrackPairEmitTests` pins the path against a rebuilt-field oracle (queries, region, layer hash) for cell-crossing box runs, mixed gain/scale/removal churn, zero-gain movers, and cross-tile walkers; the stream differential suites cover the fold interaction.
+
+## Unsafe proof: fallback emission rects (SP-2)
+
+`EmitFallback` now records the tile-local intersection of the placement's clipped cell bounds instead of stamping the whole tile: the dirty rect per touched tile becomes `[max(cx0 - tileX0, 0), min(cx1 - tileX0, TileSize)) x [max(cy0 - tileY0, 0), min(cy1 - tileY0, TileSize))`, folded into the per-tile union with the same min/max the other emitters use. The placement bounds `X0..X1 / Y0..Y1` are computed by `TileBake.PlaceAnchored` as the write bounds of every plane kind — the axis support span for separable stamps, the turned support cells for rotated ones, and the footprint span otherwise — so the rect covers every cell the fallback's `Emit*` calls can write, and publish still scans a superset of each frame's changed cells. No new unsafe state is introduced; the change only narrows the values written into the existing `TileRect`.
+
+- **Lifetime.** The rect is written inside `EmitFallback` through the `DirtyIndex`-returned index, re-derived per touched tile exactly like the box and kernel emitters; no pointer to `Rects` outlives the call, and a `NativeBuffer` resize between tiles cannot dangle anything.
+- **Aliasing.** The rect write happens after the plane writes of the same emit and unions monotonically, so concurrent emitters into the same tile in the same sweep only ever widen the union; the published page, summaries, hashes and changed-tile epochs are functions of the page cells, not of the rect, and the rect is a covering of all written cells.
+- **Alignment.** Four ints in an existing struct; nothing new is allocated or cast.
+- **Concurrency.** Same single-thread `Process` discipline as SP-1.
+
+Because publish walks the rect, an emission-bounded rect shrinks publish work in proportion to how much of the tile the fallback actually touches: a sparse smooth-stamp churn measures 18% fewer instructions per frame (publish of tent/bell tiles no longer smooths untouched rows), while dense workloads whose per-tile union already covers the tile are unchanged up to the rect arithmetic. `SweepTrackFallbackRectTests` pins the path against a rebuilt-field oracle for dense raster movers with unique phases, turned-arc disk movers, and sparse churn with removals, and fails when the rect is deliberately narrowed below the footprint.
