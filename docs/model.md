@@ -1831,3 +1831,69 @@ The unsafe code in the runtime field draw is four pointer hand-offs from `Presen
 - **Concurrency.** The refresh job is a Gi reader and runs between `GiRuntime.BeginRead` and `EndRead`, after the main thread has completed the `GiFrame` writers through `EntityManager.GetComponentData` (the E-1 discipline); it writes no Gi state. The draw jobs only read ECS components and Quill's atomic-write-only stream, whose main-thread `AsReader` in `DrawSystem.OnUpdate` completes them before playback. `TryReadTile` is main-thread only and expects the caller to have completed the world's jobs.
 
 The mirror keys a tile as `gridId << 20 | tile`; the core's power bound of 14 keeps a grid at most 512 x 512 tiles, so the key cannot collide. `GiFieldDrawStats` on the frame entity carries the receipts: `UpdatedTiles` follows `ChangedTiles`, `MirrorTiles` is the live tile count, and `VisibleTiles`/`DrawnSources`/`DrawnBindings` are the post-cull counts the culling test pins.
+
+## Unsafe proof: deferred tile hashing (DV-1)
+
+`RefreshTileHash` no longer computes page hashes on the process path: it sets one bit in a
+per-layer `HashPending` bitset (`uint` per 32 tiles, allocated zeroed from `NativeHeap` the first
+time a layer marks a tile) and counts the set bits. `LayerHash` — the query that observes the
+hash — flushes the pending set once, memoized: each pending tile recomputes exactly the eager
+expression (`PageOf` + `PageAny` + `TileHash.Of`, or 0 for absent or all-zero pages) and folds it
+through `ApplyTileHash`, so hash values are bit-identical to eager hashing and only their timing
+moves to the first observation. `Clear` zeroes the bitset and count; the layer teardown frees it
+behind a null guard so a layer that never marked a tile never allocates.
+
+- **Lifetime.** The bitset is owned by `LayerData` for the layer's lifetime, allocated once and
+  never reallocated, so no pointer to it is retained anywhere (every access re-derives
+  `ld->HashPending`); the teardown free is the same discipline as `TileHashes` beside it.
+- **Aliasing.** The bitset aliases nothing: one bit per tile, written by the marker and
+  read-and-cleared by the flush, and the flush's page reads go through `PageOf` as before.
+- **Alignment.** `NativeHeap.AllocZeroed` returns allocation-aligned memory; the access
+  granularity is `uint` at `(tile >> 5)` words.
+- **Concurrency.** Marks happen inside the single-threaded `Process` discipline and the flush
+  runs on the `LayerHash` caller's thread against the same world; no other thread observes the
+  layer between them, matching the existing single-reader hash contract.
+
+`DeriveTrackOracleTests.LayerHashIsStableAcrossIdleFramesAndFlushesOnce` pins the memoization
+(idle frames keep the hash and flush once), and the replay oracles compare `LayerHash` against a
+full rebuild every frame.
+
+## Unsafe proof: rect-scoped derive combine (DV-2)
+
+`Derive` now scopes the combine to the tile rows the sources actually touched. `PrimeDerived`
+runs before `PublishDirty` and grows the derived layer's dirty tiles and rects from its sources:
+a derived source contributes its own rects, a transient source contributes whole tiles (its rect
+bookkeeping is consumed by the transient flush), and a base non-transient source contributes tile
+marks as before — the derived rect is therefore the union of every region its inputs changed this
+frame. Rows outside the union see inputs identical to the previous frame, so their combined cells
+are unchanged and skipping them is exact.
+
+`CombineRows` recombines only rows `[rect.Y0, rect.Y1)` and maintains the pre-existing
+`TileSummary` row stats incrementally: each processed row's sum replaces `RowSums[y]` and the
+page `Sum` moves by the row delta; `Max` is recomputed from `RowMaxima` across all rows; the
+any-cells outcome reads `Occupied(summary)` instead of a separate accumulator.
+
+- **Row invariant.** `RowSums[y]` equals the sum of the page's row `y` at all times. A page
+  derived layer is written only by this combine; `EnsureSet` yields a zeroed summary matching a
+  zeroed page, and the bootstrap gate (`ArgMaxX == 0`, the fresh-summary sentinel) forces one
+  full-tile pass that re-derives every row stat before rect scoping engages. A dropped page
+  (`DropPage`) resets both on its next `EnsureSet`, re-arming the bootstrap.
+- **ArgMaxX sentinel safety.** A legitimate max at column 0 only triggers the conservative
+  full-row pass and overwrites the coordinate with 1 — the value-safe direction: consumers of
+  `ArgMaxX` validate the stored cell against `Max` and rescan when it no longer holds the max,
+  so a stale coordinate can cost a rescan but never reports a stale `Max` value.
+- **Lifetime.** No new allocations; rect growth folds into the existing `TileRect` union with
+  the same monotonic min/max the sweep rect paths use (SP-1/SP-2).
+- **Aliasing.** Rect writes union monotonically after the plane writes of the same frame;
+  published page cells, hashes, and epochs remain functions of the page contents, which the
+  rect covers.
+- **Alignment.** Four `int` fields in an existing struct and the existing fixed row arrays in
+  `TileSummary`; nothing new is allocated or cast.
+- **Concurrency.** Same single-thread `Process` discipline as SP-1; `PrimeDerived`, publish,
+  and `Derive` run sequentially on the owning thread.
+
+`DeriveTrackOracleTests.IncrementalDeriveMatchesAFullRebuildEveryFrame` and
+`RestoredSnapshotDerivesIdenticallyToTheLiveWorld` pin the path: a replay driver compares query
+output and `LayerHash` against a world rebuilt from final sources every frame, across Sum/Min/Max
+recipes, chained derived layers, gain fades, removals, and snapshot round-trips; the frame
+checksums must stay identical.

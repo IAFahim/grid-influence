@@ -979,6 +979,7 @@ public static unsafe partial class World
         ProcessStages.Measure(ref w->Stages.Prepare, stamp);
 
         stamp = ProcessStages.Mark();
+        if (w->DerivedCount != 0) PrimeDerived(w);
         PublishDirty(w);
         ProcessStages.Measure(ref w->Stages.Apply, stamp);
 
