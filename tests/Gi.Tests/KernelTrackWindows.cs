@@ -18,6 +18,56 @@ public sealed unsafe class KernelTrackWindows
         return data;
     }
 
+    [Theory]
+    [MemberData(nameof(Stamps))]
+    public void TouchesAdmitsEveryTileThatReceivesEmission(string name)
+    {
+        var stamp = MakeStamp(name);
+        var variant = StampCatalog.Get(stamp);
+        var dense = stackalloc int[TileBake.TileSize * TileBake.TileSize];
+        var smooth = stackalloc long[TileBake.TileSize * TileBake.TileSize];
+        try
+        {
+            foreach (var scale in new[] { 128, 256, 947 })
+            foreach (var angleSeed in new[] { 0, 1, 5, 7919, 30011, 60013 })
+            {
+                var angle = (angleSeed * 7919) & 0xFFFF;
+                var x = (((35 << 8) + 77 - (((long)variant->OriginQ8X * scale) >> 8)) + 0.5f) / 256f;
+                var y = (((41 << 8) + 201 - (((long)variant->OriginQ8Y * scale) >> 8)) + 0.5f) / 256f;
+                Assert.True(TileBake.Place(x, y, 0f, 0f, 256, Size, variant, angle, scale, Layer.Precision.Exact,
+                    out var p));
+                var denseStamp = p.Plane == Plane.Dense;
+                for (var ty = (p.Y0 >> TileBake.TileBits) - 1; ty <= (p.Y1 - 1 >> TileBake.TileBits) + 1; ty++)
+                for (var tx = (p.X0 >> TileBake.TileBits) - 1; tx <= (p.X1 - 1 >> TileBake.TileBits) + 1; tx++)
+                {
+                    var tileX0 = tx << TileBake.TileBits;
+                    var tileY0 = ty << TileBake.TileBits;
+                    var touched = TileBake.Touches(&p, tileX0, tileY0);
+                    var any = false;
+                    if (denseStamp)
+                    {
+                        new Span<int>(dense, TileBake.TileSize * TileBake.TileSize).Clear();
+                        TileBake.EmitTurnedDense(dense, tileX0, tileY0, &p, 3);
+                        for (var i = 0; i < TileBake.TileSize * TileBake.TileSize && !any; i++) any = dense[i] != 0;
+                    }
+                    else
+                    {
+                        new Span<long>(smooth, TileBake.TileSize * TileBake.TileSize).Clear();
+                        TileBake.EmitTurnedSmooth(smooth, tileX0, tileY0, &p, 3);
+                        for (var i = 0; i < TileBake.TileSize * TileBake.TileSize && !any; i++) any = smooth[i] != 0;
+                    }
+
+                    if (any && !touched)
+                        Assert.Fail($"{name} scale {scale} angle {angle}: tile ({tx},{ty}) receives emission but Touches rejects it");
+                }
+            }
+        }
+        finally
+        {
+            Stamp.Free(stamp);
+        }
+    }
+
     private static byte MakeStamp(string name)
     {
         switch (name)

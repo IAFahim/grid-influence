@@ -333,6 +333,8 @@ internal static unsafe partial class TileBake
             return nx * nx + ny * ny <= reach * reach;
         }
 
+        if (p->Kind == StampKind.Raster) return TouchesTexel(p, lx, hx, ly, hy);
+
         var minU = long.MaxValue;
         var maxU = long.MinValue;
         var minV = long.MaxValue;
@@ -352,6 +354,31 @@ internal static unsafe partial class TileBake
         var mu = p->SupportU + CellHalf;
         var mv = p->SupportV + CellHalf;
         return maxU >= -mu && minU <= mu && maxV >= -mv && minV <= mv;
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static bool TouchesTexel(Placement* p, long lx, long hx, long ly, long hy)
+    {
+        var low = -(1L << (48 + p->Level));
+        var highU = Math.Min((long)p->Width << (48 + p->Level), 1L << 62);
+        var highV = Math.Min((long)p->Height << (48 + p->Level), 1L << 62);
+        var minU = long.MaxValue;
+        var maxU = long.MinValue;
+        var minV = long.MaxValue;
+        var maxV = long.MinValue;
+        for (var corner = 0; corner < 4; corner++)
+        {
+            var dx = ((corner & 1) == 0 ? lx : hx) - p->CentreX;
+            var dy = ((corner & 2) == 0 ? ly : hy) - p->CentreY;
+            var tu = dx * p->SampleUx + dy * p->SampleUy + p->SampleU0;
+            var tv = dx * p->SampleVx + dy * p->SampleVy + p->SampleV0;
+            minU = Math.Min(minU, tu);
+            maxU = Math.Max(maxU, tu);
+            minV = Math.Min(minV, tv);
+            maxV = Math.Max(maxV, tv);
+        }
+
+        return maxU >= low && minU < highU && maxV >= low && minV < highV;
     }
 
     [MethodImpl(Jit.Hot)]
