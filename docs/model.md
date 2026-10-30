@@ -1831,3 +1831,41 @@ The unsafe code in the runtime field draw is four pointer hand-offs from `Presen
 - **Concurrency.** The refresh job is a Gi reader and runs between `GiRuntime.BeginRead` and `EndRead`, after the main thread has completed the `GiFrame` writers through `EntityManager.GetComponentData` (the E-1 discipline); it writes no Gi state. The draw jobs only read ECS components and Quill's atomic-write-only stream, whose main-thread `AsReader` in `DrawSystem.OnUpdate` completes them before playback. `TryReadTile` is main-thread only and expects the caller to have completed the world's jobs.
 
 The mirror keys a tile as `gridId << 20 | tile`; the core's power bound of 14 keeps a grid at most 512 x 512 tiles, so the key cannot collide. `GiFieldDrawStats` on the frame entity carries the receipts: `UpdatedTiles` follows `ChangedTiles`, `MirrorTiles` is the live tile count, and `VisibleTiles`/`DrawnSources`/`DrawnBindings` are the post-cull counts the culling test pins.
+
+## Sense lane preparation and gradient prefetch
+
+The point-sense track changed two unsafe sites in the column read path, both inside `World`'s
+private column helpers; no public surface moved.
+
+The gradient column path no longer issues `Sse.Prefetch0` hints from `PrepareBlock`: the fused
+gradient read gathers every tap it needs (centre, both axis neighbours), so the per-lane
+three-line prefetch only added hint traffic on top of gathers that touch the same lines.
+The point path (`SenseSingle`) keeps its single-line prefetch behind the existing
+`Changes >= ScatterChanges` scattered-block gate; that gate is what keeps random-order point
+reads of a cold page set at speed, and removing it was measured as a 2x regression there.
+
+`QuantizeLanes` no longer derives the per-lane tile-run mask in the quantize loop through a
+carried `PermuteVar8x32`/`Blend` pair; after the loop the change bits are read back from the
+stored lane array with one permuted compare for the first eight lanes and one shifted-load
+compare per further eight, and the count lands in `ColumnBlock.Changes` exactly as the
+carried chain produced it (lane zero of a block never counts).
+
+- **Lifetime.** Both sites only touch storage that already exists for the call: `PrefetchBlock`
+  reads `ColumnField.Table`, `Pages`, and the block's lane arrays, all owned by the live layer
+  the read borrowed them from; the change-count pass reads the block's `Tiles` slice, which
+  points into the caller's `stackalloc` lane buffer for the duration of `PrepareBlock`. No
+  pointer survives either call.
+- **Aliasing.** The shifted load at `tiles + g - 1` for `g >= 8` reads lanes `[7, i - 2]` of the
+  same 64-lane slice the quantize loop just stored; the first-lane compare permutes a register
+  copy. Within one block the slice is written before it is read back, by the same thread, in the
+  same call; the second block's slice sits at a non-negative offset of the shared buffer, so no
+  read reaches below it. The lane buffer holds three disjoint slices per block (`Tiles`,
+  `Locals`, `Windows`), and the pass touches only `Tiles`.
+- **Alignment.** The lane buffer is an `int` stack array, so every load is element-aligned; the
+  32-bit vector loads of the change-count pass are unaligned-safe `Vector256.Load` on x86-64 and
+  sit behind the method's `Avx2.IsSupported` guard, like the rest of `QuantizeLanes`. The
+  remaining prefetch address is the page-base-plus-cell-offset expression the old code used.
+- **Concurrency.** One world, one thread, one call stack: `PrepareBlock` runs between the
+  read-side epoch checks the column entry already performs, the lane buffer is stack-local, and
+  no other writer can touch a live layer's pages during a read. `Prefetch0` hints carry no
+  concurrency obligation.
