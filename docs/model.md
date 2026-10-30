@@ -1878,3 +1878,29 @@ padded support is what the sweep, `Touches`, kernel capture and sense exclusion 
 halving it toward the true sample hull under-covers minified rasters (mip levels inflate the
 bilinear sample window), which the window oracle catches as dropped contributions. The skip
 therefore lives entirely inside the row walk.
+
+## RT-2: raster tile gating on the texel window
+
+`TileBake.Touches` answers the turned raster case from the tile box's four corners projected
+through the bilinear sample map (`dx * SampleUx + dy * SampleUy + SampleU0`, and the `V` twin)
+against the mip texel index window `[-(1 << (48 + Level)), Width << (48 + Level))` on each axis,
+clamped at `1 << 62` where the shifted width would not fit a signed 64-bit word; no reachable
+sample coordinate exceeds the clamp, so the clamped window admits every coordinate the exact
+window admits. The sample coordinates are affine over the tile box, so their extremes sit on the
+corners and the corner range contains every emitted cell's coordinate: a tile whose corner
+projection misses the window on either axis cannot receive emission, and rejecting it changes no
+byte. `KernelTrackWindows.TouchesAdmitsEveryTileThatReceivesEmission` pins that implication
+against the per-cell oracle across the stamp, scale and angle sweep, and the corpus, stream and
+crowd suites pin the field bytes.
+
+- **Lifetime.** `TouchesTexel` reads only the placement and the stamp variant behind the
+  placement pointer, both owned by the caller's world for the duration of the sweep; it returns
+  a bool and holds nothing.
+- **Aliasing.** Pure predicate over shared read-only placement state; no writes.
+- **Alignment.** No new memory access beyond the existing placement fields.
+- **Concurrency.** Called inside `Process`'s single-writer emission pass, unchanged.
+
+The round-kind branch (centre distance against `Bound + CellHalf`) and the rotated-rectangle
+branch (`SupportU/V + CellHalf` corner window) keep their previous predicates: the smooth
+support already matches the shifted weight window and the rectangle support its overlap window,
+so only the raster branch carried the full-width padding that admitted empty tiles.
