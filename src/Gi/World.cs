@@ -133,6 +133,8 @@ internal unsafe struct LayerData
     public int* InDirty;
     public int* Epochs;
     public ulong* TileHashes;
+    public uint* HashPending;
+    public int HashPendingCount;
     public ulong Hash;
     public NativeBuffer<int> Dirty;
     public NativeBuffer<int> Changed;
@@ -456,8 +458,19 @@ public static unsafe partial class World
         ld->LivePages = 0;
         NativeHeap.Free(ld->InDirty);
         NativeHeap.Free(ld->Epochs);
-        NativeHeap.Free(ld->TileHashes);
-        ld->TileHashes = null;
+        if (ld->TileHashes != null)
+        {
+            NativeHeap.Free(ld->TileHashes);
+            ld->TileHashes = null;
+        }
+
+        if (ld->HashPending != null)
+        {
+            NativeHeap.Free(ld->HashPending);
+            ld->HashPending = null;
+        }
+
+        ld->HashPendingCount = 0;
         ld->Hash = 0;
         if (ld->Hist != null)
         {
@@ -722,6 +735,11 @@ public static unsafe partial class World
                 ld->Max.Reset();
                 ld->Hash = 0;
                 if (ld->TileHashes != null) new Span<ulong>(ld->TileHashes, g->TileCount).Clear();
+                if (ld->HashPending != null)
+                {
+                    new Span<uint>(ld->HashPending, (g->TileCount + 31) >> 5).Clear();
+                    ld->HashPendingCount = 0;
+                }
             }
         }
     }
@@ -961,6 +979,7 @@ public static unsafe partial class World
         ProcessStages.Measure(ref w->Stages.Prepare, stamp);
 
         stamp = ProcessStages.Mark();
+        if (w->DerivedCount != 0) PrimeDerived(w);
         PublishDirty(w);
         ProcessStages.Measure(ref w->Stages.Apply, stamp);
 
