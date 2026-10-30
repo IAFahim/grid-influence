@@ -14,13 +14,17 @@ public static unsafe partial class World
     private const int WindowOrigin = WindowStride + 4;
     private const int WindowAlign = 32;
     private const int RunChanges = 3;
+#if NET
     private const int ScatterChanges = 16;
+#endif
 
     private struct ColumnField
     {
         public float OriginX;
         public float OriginY;
-        public float Scale;
+#if NET
+        public float ScaleExact;
+#endif
         public float Unit;
         public int ScaleQ8;
         public int Size;
@@ -28,7 +32,9 @@ public static unsafe partial class World
         public int TileShift;
         public int* Table;
         public byte* Pages;
+#if NET
         public byte Wide;
+#endif
 
         [MethodImpl(Jit.Inline)]
         public readonly short* PageAt(int tile)
@@ -73,7 +79,9 @@ public static unsafe partial class World
         {
             OriginX = g->OriginX,
             OriginY = g->OriginY,
-            Scale = g->ScaleQ8,
+#if NET
+            ScaleExact = g->ScaleQ8,
+#endif
             Unit = g->ScaleQ8 / 512f,
             ScaleQ8 = g->ScaleQ8,
             Size = g->Size,
@@ -81,7 +89,9 @@ public static unsafe partial class World
             TileShift = shift,
             Table = ld->PageIndex,
             Pages = ld->Store.Pages.Region,
+#if NET
             Wide = (byte)(ld->Store.Pages.ByteCapacity <= int.MaxValue ? 1 : 0)
+#endif
         };
     }
 

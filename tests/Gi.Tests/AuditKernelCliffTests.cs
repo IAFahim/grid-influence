@@ -37,7 +37,7 @@ public sealed unsafe class AuditKernelCliffTests
         var stamp = stampKind switch
         {
             "disk" => Stamp.Disk(6, 40),
-            "cone" => Stamp.Cone(6, 40, 360),
+            "cone" => Stamp.Cone(6, 40),
             "tent" => Stamp.Tent(12, 12, 40),
             "raster" => MakeRaster(),
             _ => Stamp.Box(12, 12, 40)

@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using Xunit;
 
 namespace Gi.Tests;
@@ -42,7 +40,7 @@ public sealed class ReproTests
     [Theory]
     [InlineData(60, 5)]
     [InlineData(10, 1)]
-    public unsafe void DenseBoxCrowdVanishesOnTheEmptyFrameAfterFusing(int value, int gain)
+    public void DenseBoxCrowdVanishesOnTheEmptyFrameAfterFusing(int value, int gain)
     {
         var world = World.New();
         Grid.New(world, 6, 0f, 0f, 64f);
@@ -52,8 +50,9 @@ public sealed class ReproTests
         var ys = new float[800];
         for (var i = 0; i < 800; i++)
         {
+            var row = i / 28;
             xs[i] = 1 + (i % 28);
-            ys[i] = 1 + (i / 28);
+            ys[i] = 1 + row;
         }
 
         Assert.Equal(800, World.Splat(world, transient, xs, ys, box, (sbyte)gain));

@@ -1,6 +1,5 @@
 using System.Runtime.CompilerServices;
 #if NET
-using System.Numerics;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 #endif
@@ -45,7 +44,6 @@ internal static unsafe class FusedBox
     internal const int StageStride = Edge + TileBake.TileSize + Edge;
 
     private const int Size = TileBake.TileSize;
-    private const int Cells = Size * Size;
     private const long Limit = short.MaxValue - 1;
 
     [MethodImpl(Jit.Inline)]

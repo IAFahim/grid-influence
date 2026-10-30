@@ -1,5 +1,4 @@
 #if NET
-using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
@@ -13,7 +12,7 @@ public static unsafe partial class World
     {
         var originX = Vector256.Create(f.OriginX);
         var originY = Vector256.Create(f.OriginY);
-        var scale = Vector256.Create(f.Scale);
+        var scale = Vector256.Create(f.ScaleExact);
         var outside = Vector256.Create(~(f.Size - 1));
         var last = Vector256.Create(f.Size - 1);
         var tileMask = Vector256.Create(TileBake.TileSize - 1);
@@ -125,9 +124,8 @@ public static unsafe partial class World
         var ty = Vector256.ShiftRightArithmetic(tiles, f.TileShift);
         var cx = Vector256.ShiftLeft(tx, TileBake.TileBits) + lx;
         var cy = Vector256.ShiftLeft(ty, TileBake.TileBits) + ly;
-        var inner = Vector256.Create(f.Size - 2);
         var last = Vector256.Create(f.Size - 1);
-        var present = zero;
+        Vector256<int> present;
         var baseBytes = PageTapBases(f, tiles, out present);
         var centre = PageTap(f, baseBytes, Vector256.ShiftLeft(local, 1), present);
 

@@ -51,8 +51,9 @@ public sealed unsafe class AuditSortCliffTests
             for (var i = 0; i < tiles; i++)
             {
                 var tile = order[i];
+                var row = tile / side;
                 xs[i] = tile % side * 32 + 16.5f;
-                ys[i] = tile / side * 32 + 16.5f;
+                ys[i] = row * 32 + 16.5f;
                 ids[i] = World.Place(world, layer, xs[i], ys[i], stamp, 3);
             }
 
@@ -115,7 +116,10 @@ public sealed unsafe class AuditSortCliffTests
             var layer = Layer.New(world, Layer.Precision.Cell);
             var ids = new World.SourceId[count];
             for (var i = 0; i < count; i++)
-                ids[i] = World.Place(world, layer, 8f + i % 1000, 8f + i / 1000 % 1000, stamp, 1);
+            {
+                var row = i / 1000 % 1000;
+                ids[i] = World.Place(world, layer, 8f + i % 1000, 8f + row, stamp, 1);
+            }
 
             World.Process(world);
             var order = new int[count];
@@ -171,7 +175,10 @@ public sealed unsafe class AuditSortCliffTests
             var side = size >> 5;
             var tiles = side * side;
             for (var t = 0; t < tiles; t++)
-                World.Place(world, layer, t % side * 32 + 16.5f, t / side * 32 + 16.5f, stamp, 3);
+            {
+                var row = t / side;
+                World.Place(world, layer, t % side * 32 + 16.5f, row * 32 + 16.5f, stamp, 3);
+            }
             World.Process(world);
             var destination = new int[tiles];
             double best = double.MaxValue;
