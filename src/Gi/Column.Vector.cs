@@ -17,7 +17,6 @@ public static unsafe partial class World
         var last = Vector256.Create(f.Size - 1);
         var tileMask = Vector256.Create(TileBake.TileSize - 1);
         var origin = Vector256.Create(WindowOrigin);
-        var rotate = Vector256.Create(7, 0, 1, 2, 3, 4, 5, 6);
         var shift = Vector128.CreateScalar(f.TileShift);
         var zero = Vector256<int>.Zero;
         var tiles = b->Tiles;
@@ -26,8 +25,6 @@ public static unsafe partial class World
         var count = b->Count;
         ulong accepted = 0;
         ulong interior = 0;
-        ulong moved = 0;
-        var previous = zero;
         var i = 0;
         for (; i + 8 <= count; i += 8)
         {
@@ -45,20 +42,29 @@ public static unsafe partial class World
             var local = Vector256.ShiftLeft(ly, TileBake.TileBits) + lx;
             var tile = Avx2.ShiftLeftLogical(Vector256.ShiftRightArithmetic(cy, TileBake.TileBits), shift) +
                        Vector256.ShiftRightArithmetic(cx, TileBake.TileBits);
-            var rotated = Avx2.PermuteVar8x32(tile, rotate);
-            var shifted = Avx2.Blend(rotated, i == 0 ? tile : previous, 1);
-            previous = rotated;
             accepted |= (ulong)inside.AsSingle().ExtractMostSignificantBits() << i;
             interior |= (ulong)Vector256.AndNot(inside, border).AsSingle().ExtractMostSignificantBits() << i;
-            moved |= (ulong)(~Vector256.Equals(tile, shifted).AsSingle().ExtractMostSignificantBits() & 0xFFu) << i;
             tile.Store(tiles + i);
             local.Store(locals + i);
             (local + Vector256.ShiftLeft(ly, 3) + origin).Store(windows + i);
         }
 
+        var changes = 0;
+        if (i >= 8)
+        {
+            var rotate = Vector256.Create(7, 0, 1, 2, 3, 4, 5, 6);
+            var first = Vector256.Load(tiles);
+            changes += CountBits((uint)(~Vector256.Equals(first, Avx2.PermuteVar8x32(first, rotate))
+                .AsSingle().ExtractMostSignificantBits() & 0xFEu));
+        }
+
+        for (var g = 8; g < i; g += 8)
+            changes += CountBits((uint)(~Vector256.Equals(Vector256.Load(tiles + g), Vector256.Load(tiles + g - 1))
+                .AsSingle().ExtractMostSignificantBits() & 0xFFu));
+
         b->Accepted = accepted;
         b->Interior = interior;
-        b->Moved = moved;
+        b->Changes = changes;
         return i;
     }
 
@@ -239,7 +245,7 @@ public static unsafe partial class World
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void PrefetchBlock(in ColumnField f, ColumnBlock* b, bool vertical)
+    private static void PrefetchBlock(in ColumnField f, ColumnBlock* b)
     {
         if (!Sse.IsSupported || b->Changes < ScatterChanges || f.Table == null) return;
 
@@ -254,12 +260,7 @@ public static unsafe partial class World
             var index = f.Table[tiles[l]];
             if (index < 0) continue;
 
-            var at = f.Pages + ((nuint)index << PageShift) + (nuint)locals[l] * sizeof(short);
-            Sse.Prefetch0(at);
-            if (!vertical) continue;
-
-            Sse.Prefetch0(at - TileBake.TileSize * sizeof(short));
-            Sse.Prefetch0(at + TileBake.TileSize * sizeof(short));
+            Sse.Prefetch0(f.Pages + ((nuint)index << PageShift) + (nuint)locals[l] * sizeof(short));
         }
     }
 }
