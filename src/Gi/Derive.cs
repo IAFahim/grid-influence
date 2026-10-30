@@ -109,14 +109,14 @@ public static unsafe partial class World
                 if (first->Dirty.Length == 0 && second->Dirty.Length == 0) continue;
 
                 var ld = EnsureDirty(g, (byte)d);
-                PrimeSource(g, ld, first, IsTransient(w, r->A));
-                if (r->B != r->A) PrimeSource(g, ld, second, IsTransient(w, r->B));
+                PrimeSource(ld, first, IsTransient(w, r->A));
+                if (r->B != r->A) PrimeSource(ld, second, IsTransient(w, r->B));
             }
         }
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void PrimeSource(GridCtx* g, LayerData* ld, LayerData* source, bool transient)
+    private static void PrimeSource(LayerData* ld, LayerData* source, bool transient)
     {
         if (source->Derived != 0) return;
 
@@ -124,11 +124,11 @@ public static unsafe partial class World
         var rects = source->Rects.Pointer;
         var count = source->Dirty.Length;
         for (var i = 0; i < count; i++)
-            GrowPrime(g, ld, tiles[i], transient ? WholeTile : rects[i]);
+            GrowPrime(ld, tiles[i], transient ? WholeTile : rects[i]);
     }
 
     [MethodImpl(Jit.Hot)]
-    private static int PrimeIndex(GridCtx* g, LayerData* ld, int tile)
+    private static int PrimeIndex(LayerData* ld, int tile)
     {
         var index = ld->InDirty[tile];
         if (index != 0) return index - 1;
@@ -149,9 +149,9 @@ public static unsafe partial class World
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void GrowPrime(GridCtx* g, LayerData* ld, int tile, TileRect add)
+    private static void GrowPrime(LayerData* ld, int tile, TileRect add)
     {
-        var index = PrimeIndex(g, ld, tile);
+        var index = PrimeIndex(ld, tile);
         var rect = ld->Rects.Pointer + index;
         if (add.X0 < rect->X0) rect->X0 = add.X0;
         if (add.Y0 < rect->Y0) rect->Y0 = add.Y0;
@@ -545,9 +545,9 @@ public static unsafe partial class World
     [MethodImpl(Jit.Inline)]
     private static short RowMax(Vector128<short> v)
     {
-        v = Vector128.Max(v, Vector128.Shuffle(v, Vector128.Create((short)4, 5, 6, 7, 0, 1, 2, 3)));
-        v = Vector128.Max(v, Vector128.Shuffle(v, Vector128.Create((short)2, 3, 0, 1, 6, 7, 4, 5)));
-        v = Vector128.Max(v, Vector128.Shuffle(v, Vector128.Create((short)1, 0, 3, 2, 5, 4, 7, 6)));
+        v = Vector128.Max(v, Vector128.Shuffle(v, Vector128.Create(4, 5, 6, 7, 0, 1, 2, 3)));
+        v = Vector128.Max(v, Vector128.Shuffle(v, Vector128.Create(2, 3, 0, 1, 6, 7, 4, 5)));
+        v = Vector128.Max(v, Vector128.Shuffle(v, Vector128.Create(1, 0, 3, 2, 5, 4, 7, 6)));
         return v.ToScalar();
     }
 #endif

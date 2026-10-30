@@ -8,7 +8,7 @@ public sealed unsafe class DeriveTrackOracleTests
     private const int Size = 128;
     private const int Cells = Size * Size;
 
-    private sealed unsafe class Driver
+    private sealed class Driver
     {
         private readonly float[] _xs = new float[16];
         private readonly float[] _ys = new float[16];
@@ -21,8 +21,8 @@ public sealed unsafe class DeriveTrackOracleTests
         public byte P0;
         public byte P1;
         public byte T2;
-        public byte SumPT;
-        public byte MaxPP;
+        public byte SumPt;
+        public byte MaxPp;
         public byte BoxStamp;
         public byte TentStamp;
         public byte ConeStamp;
@@ -43,8 +43,8 @@ public sealed unsafe class DeriveTrackOracleTests
             P0 = Layer.New(Id);
             P1 = Layer.New(Id);
             T2 = Layer.New(Id, Layer.Residency.Transient, Layer.Precision.Exact);
-            SumPT = Layer.Sum(Id, P1, 1, T2, 1);
-            MaxPP = Layer.Max(Id, P0, P1);
+            SumPt = Layer.Sum(Id, P1, 1, T2, 1);
+            MaxPp = Layer.Max(Id, P0, P1);
         }
 
         public void Place(int i, float x, float y, byte kind, sbyte gain)
@@ -173,7 +173,7 @@ public sealed unsafe class DeriveTrackOracleTests
             World.Splat(rebuilt.Id, rebuilt.T2, new[] { sx, sy + 5f }, new[] { sy, sx }, cone, 4);
             World.Process(rebuilt.Id);
 
-            foreach (var layer in new[] { live.P0, live.P1, live.T2, live.SumPT, live.MaxPP })
+            foreach (var layer in new[] { live.P0, live.P1, live.T2, live.SumPt, live.MaxPp })
             {
                 live.FillPage(0, layer);
                 var expected = (short[])live.Page.Clone();
@@ -183,8 +183,8 @@ public sealed unsafe class DeriveTrackOracleTests
                 Assert.Equal(World.LayerHash(live.Id, 0, layer), World.LayerHash(rebuilt.Id, 0, layer));
             }
 
-            World.QueryMax(live.Id, 0, live.SumPT, out var liveX, out var liveY);
-            World.QueryMax(rebuilt.Id, 0, rebuilt.SumPT, out var rebuildX, out var rebuildY);
+            World.QueryMax(live.Id, 0, live.SumPt, out var liveX, out var liveY);
+            World.QueryMax(rebuilt.Id, 0, rebuilt.SumPt, out var rebuildX, out var rebuildY);
             Assert.Equal((liveX, liveY), (rebuildX, rebuildY));
             Assert.True(World.Free(rebuilt.Id));
         }
@@ -224,15 +224,15 @@ public sealed unsafe class DeriveTrackOracleTests
             restored.P0 = 0;
             restored.P1 = 1;
             restored.T2 = 2;
-            restored.SumPT = 3;
-            restored.MaxPP = 4;
+            restored.SumPt = 3;
+            restored.MaxPp = 4;
             restored.CopyStateFrom(live);
 
             for (var tail = 41; tail < Frames; tail++)
             {
                 DriveFrame(live, new Random(tail * 31 + 7), tail);
                 DriveFrame(restored, new Random(tail * 31 + 7), tail);
-                foreach (var layer in new[] { live.P0, live.P1, live.T2, live.SumPT, live.MaxPP })
+                foreach (var layer in new[] { live.P0, live.P1, live.T2, live.SumPt, live.MaxPp })
                 {
                     live.FillPage(0, layer);
                     var expected = (short[])live.Page.Clone();

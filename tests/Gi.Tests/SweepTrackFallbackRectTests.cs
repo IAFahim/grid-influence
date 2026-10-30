@@ -67,7 +67,7 @@ public sealed class SweepTrackFallbackRectTests : IDisposable
     }
 
     [Fact]
-    public unsafe void DenseFallbackMoversWithUniquePhasesMatchAFieldRebuild()
+    public void DenseFallbackMoversWithUniquePhasesMatchAFieldRebuild()
     {
         const int count = 420;
         var ids = new World.SourceId[count];
@@ -75,8 +75,9 @@ public sealed class SweepTrackFallbackRectTests : IDisposable
         var ys = new float[count];
         for (var i = 0; i < count; i++)
         {
+            var row = i / 20;
             xs[i] = 12f + (i % 20) * 11 + Fraction(i);
-            ys[i] = 12f + (i / 20) * 11 + Fraction(i + 3);
+            ys[i] = 12f + row * 11 + Fraction(i + 3);
             ids[i] = World.Place(_world, _layer, xs[i], ys[i], _raster, 2);
         }
 
@@ -94,12 +95,12 @@ public sealed class SweepTrackFallbackRectTests : IDisposable
         }
 
         var live = new (float, float, sbyte)[count];
-        for (var i = 0; i < count; i++) live[i] = (xs[i], ys[i], (sbyte)2);
+        for (var i = 0; i < count; i++) live[i] = (xs[i], ys[i], 2);
         AssertFieldMatchesRebuild(_world, _grid, _layer, _raster, live, Side);
     }
 
     [Fact]
-    public unsafe void TurnedDiskFallbackMoversMatchAFieldRebuild()
+    public void TurnedDiskFallbackMoversMatchAFieldRebuild()
     {
         const int count = 420;
         var ids = new World.SourceId[count];
@@ -108,8 +109,9 @@ public sealed class SweepTrackFallbackRectTests : IDisposable
         var headings = new float[count];
         for (var i = 0; i < count; i++)
         {
+            var row = i / 18;
             xs[i] = 16f + (i % 18) * 12 + Fraction(i + 1);
-            ys[i] = 16f + (i / 18) * 12 + Fraction(i + 5);
+            ys[i] = 16f + row * 12 + Fraction(i + 5);
             ids[i] = World.Place(_world, _layer, xs[i], ys[i], _disk, 1);
             headings[i] = i * 0.013f;
             World.Turn(_world, ids[i], headings[i]);
@@ -131,12 +133,12 @@ public sealed class SweepTrackFallbackRectTests : IDisposable
         }
 
         var live = new (float, float, sbyte)[count];
-        for (var i = 0; i < count; i++) live[i] = (xs[i], ys[i], (sbyte)1);
+        for (var i = 0; i < count; i++) live[i] = (xs[i], ys[i], 1);
         AssertFieldMatchesRebuild(_world, _grid, _layer, _disk, live, Side, headings);
     }
 
     [Fact]
-    public unsafe void SparseFallbackChurnKeepsQueriesAndHashesExact()
+    public void SparseFallbackChurnKeepsQueriesAndHashesExact()
     {
         const int count = 512;
         var ids = new World.SourceId[count];
@@ -145,8 +147,9 @@ public sealed class SweepTrackFallbackRectTests : IDisposable
         var gains = new sbyte[count];
         for (var i = 0; i < count; i++)
         {
+            var row = i / 22;
             xs[i] = 20f + (i % 22) * 10 + Fraction(i);
-            ys[i] = 20f + (i / 22) * 10 + Fraction(i + 2);
+            ys[i] = 20f + row * 10 + Fraction(i + 2);
             gains[i] = (sbyte)(1 + i % 4);
             ids[i] = World.Place(_world, _layer, xs[i], ys[i], _raster, gains[i]);
         }
@@ -163,8 +166,9 @@ public sealed class SweepTrackFallbackRectTests : IDisposable
 
             var victim = frame % count;
             World.Remove(_world, ids[victim]);
+            var row = victim / 20;
             xs[victim] = 24f + (victim % 20) * 10 + Fraction(victim + frame);
-            ys[victim] = 24f + (victim / 20) * 10 + Fraction(victim);
+            ys[victim] = 24f + row * 10 + Fraction(victim);
             gains[victim] = 3;
             ids[victim] = World.Place(_world, _layer, xs[victim], ys[victim], _raster, gains[victim]);
             World.Process(_world);
