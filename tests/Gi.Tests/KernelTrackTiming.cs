@@ -223,4 +223,69 @@ public sealed unsafe class KernelTrackTiming(ITestOutputHelper output)
             Stamp.Free(stamp);
         }
     }
+
+    [Fact]
+    public void AreaQueryAttribution_ReadsDominateLargeRadius()
+    {
+        var world = World.New();
+        Grid.New(world, 10, 0f, 0f, 1024f);
+        var layer = Layer.New(world, Layer.Precision.Cell);
+        var box = Stamp.Box(4, 4, 7);
+        var rng = new Random(5);
+        for (var i = 0; i < 400_000; i++)
+            World.Place(world, layer, (float)(rng.NextDouble() * 1000.0 + 12.0),
+                (float)(rng.NextDouble() * 1000.0 + 12.0), box, 1);
+        World.Process(world);
+
+        var empty = World.New();
+        Grid.New(empty, 10, 0f, 0f, 1024f);
+        var emptyLayer = Layer.New(empty, Layer.Precision.Cell);
+        try
+        {
+            const int probes = 4096;
+            var xs = new float[probes];
+            var ys = new float[probes];
+            for (var i = 0; i < probes; i++)
+            {
+                xs[i] = (float)(rng.NextDouble() * 850.0 + 90.0);
+                ys[i] = (float)(rng.NextDouble() * 850.0 + 90.0);
+            }
+
+            foreach (var reach in new[] { 4f, 16f, 32f, 64f })
+            {
+                long guard = 0;
+                double populated = double.MaxValue, absent = double.MaxValue;
+                for (var pass = 0; pass < 8; pass++)
+                {
+                    var t0 = Stopwatch.GetTimestamp();
+                    for (var i = 0; i < probes; i++)
+                    {
+                        World.TrySenseArea(world, layer, xs[i], ys[i], reach, out var total);
+                        guard += total;
+                    }
+
+                    var t1 = Stopwatch.GetTimestamp();
+                    for (var i = 0; i < probes; i++)
+                    {
+                        World.TrySenseArea(empty, emptyLayer, xs[i], ys[i], reach, out var total);
+                        guard += total;
+                    }
+
+                    var t2 = Stopwatch.GetTimestamp();
+                    if (pass < 2) continue;
+                    populated = Math.Min(populated, Stopwatch.GetElapsedTime(t0, t1).TotalNanoseconds / probes);
+                    absent = Math.Min(absent, Stopwatch.GetElapsedTime(t1, t2).TotalNanoseconds / probes);
+                }
+
+                output.WriteLine($"area r={reach}: populated {populated:F1} ns, no-tile {absent:F1} ns ({guard & 1})");
+                Assert.True(populated > 0 && absent > 0);
+            }
+        }
+        finally
+        {
+            World.Free(world);
+            World.Free(empty);
+            Stamp.Free(box);
+        }
+    }
 }

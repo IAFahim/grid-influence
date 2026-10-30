@@ -1831,3 +1831,50 @@ The unsafe code in the runtime field draw is four pointer hand-offs from `Presen
 - **Concurrency.** The refresh job is a Gi reader and runs between `GiRuntime.BeginRead` and `EndRead`, after the main thread has completed the `GiFrame` writers through `EntityManager.GetComponentData` (the E-1 discipline); it writes no Gi state. The draw jobs only read ECS components and Quill's atomic-write-only stream, whose main-thread `AsReader` in `DrawSystem.OnUpdate` completes them before playback. `TryReadTile` is main-thread only and expects the caller to have completed the world's jobs.
 
 The mirror keys a tile as `gridId << 20 | tile`; the core's power bound of 14 keeps a grid at most 512 x 512 tiles, so the key cannot collide. `GiFieldDrawStats` on the frame entity carries the receipts: `UpdatedTiles` follows `ChangedTiles`, `MirrorTiles` is the live tile count, and `VisibleTiles`/`DrawnSources`/`DrawnBindings` are the post-cull counts the culling test pins.
+
+## RT-1: turned emission row windows
+
+`TileBake.EmitTurnedDense` and `TileBake.EmitTurnedSmooth` (the fallback direct emission for
+turned stamps, and the raster stage of every kernel bake through `KernelFactory.Capture`) walk
+each tile row only over the cells whose value can be nonzero. The per-cell evaluators
+(`DenseAt`, `SampleAt`/`TexelAt`, `SmoothAt`/`SmoothOf`, `RoundAt`) are unchanged, so every
+emitted cell is bit-identical to the previous full-range walk; only cells that evaluate to zero
+are skipped.
+
+- **Round kinds** (disk, cone, dome, arcs): a row at half-cell offset `dy` can hold a nonzero
+  cell only when `dy * dy < Bound * Bound`; the row's cell span solves
+  `|cx * 512 - (CentreX - 256)| <= isqrt(Bound^2 - dy^2)` in closed form with `FloorDiv`/`CeilDiv`
+  on `long`. All operands are bounded by the placement caps: `Bound <= 2^17 + 2^16` Q8 (a
+  512-cell footprint plus the disk half-cell), so `Bound^2` fits `long` with two bits to spare.
+- **Rasters**: the bilinear sample coordinates advance by exact integer steps
+  (`512 * SampleUx`, `512 * SampleVx`) per cell, so the row scan carries `tu`, `tv` by addition
+  instead of re-multiplying; a cell can contribute only while its mip texel indices lie in
+  `[-1, Width) x [-1, Height)`. Because each index is a monotone affine function of `cx` (or
+  constant), each axis's in-window set is an interval, the conjunction is one interval, and the
+  scan enters at its first cell and stops at its exit. The carried values equal the per-cell
+  products exactly (integer affine identity), which `KernelTrackWindows` checks cell-for-cell
+  against `TurnedDenseAt`/`TurnedSmoothAt` over an angle, scale, phase and mip sweep, including
+  a margin outside the placement footprint. Magnitudes stay within the product
+  `|dx| * |SampleUx| <= (Width + 2) * 2^47 + 2^55` — the same bound the unwindowed `SampleAt`
+  multiplication already produces — so no intermediate overflows a `long`.
+- **Turned rectangles and smooth kernels**: the same scan runs on the rotated rectangle
+  coordinates `Pu = dx * Cos + dy * Sin`, `Pv = dy * Cos - dx * Sin` with window bounds derived
+  from `Overlap`'s coverage condition (`|u| < Extent + 256`, exact) and the shifted smooth
+  weight condition (`|du| < HalfU`, conservatively `|Pu| <= HalfU << (15 + ShiftU)`), both far
+  inside `long` range at the stamp axis cap of 256.
+
+- **Lifetime.** The emits write only through the `dense`/`sums` plane pointers handed in by
+  `EmitFallback`, `Capture` (stack canvases or kernel-cache canvas) and the window carries no
+  pointers at all — only `long` coordinates. Nothing outlives the call.
+- **Aliasing.** One emit writes one tile plane region; the row window only narrows the `cx`
+  range, never reorders writes, so the accumulation order per cell is unchanged.
+- **Alignment.** No new loads or stores; the `int`/`long` plane accesses keep their natural
+  alignment.
+- **Concurrency.** Emission runs inside `Process` under the single-writer discipline unchanged;
+  the windows add no shared state.
+
+The placement footprint (`SupportU/V`, `TurnedFootprintCells`) is deliberately untouched: the
+padded support is what the sweep, `Touches`, kernel capture and sense exclusion all consume, and
+halving it toward the true sample hull under-covers minified rasters (mip levels inflate the
+bilinear sample window), which the window oracle catches as dropped contributions. The skip
+therefore lives entirely inside the row walk.
