@@ -1831,3 +1831,199 @@ The unsafe code in the runtime field draw is four pointer hand-offs from `Presen
 - **Concurrency.** The refresh job is a Gi reader and runs between `GiRuntime.BeginRead` and `EndRead`, after the main thread has completed the `GiFrame` writers through `EntityManager.GetComponentData` (the E-1 discipline); it writes no Gi state. The draw jobs only read ECS components and Quill's atomic-write-only stream, whose main-thread `AsReader` in `DrawSystem.OnUpdate` completes them before playback. `TryReadTile` is main-thread only and expects the caller to have completed the world's jobs.
 
 The mirror keys a tile as `gridId << 20 | tile`; the core's power bound of 14 keeps a grid at most 512 x 512 tiles, so the key cannot collide. `GiFieldDrawStats` on the frame entity carries the receipts: `UpdatedTiles` follows `ChangedTiles`, `MirrorTiles` is the live tile count, and `VisibleTiles`/`DrawnSources`/`DrawnBindings` are the post-cull counts the culling test pins.
+
+## Sense lane preparation and gradient prefetch
+
+The point-sense track changed two unsafe sites in the column read path, both inside `World`'s
+private column helpers; no public surface moved.
+
+The gradient column path no longer issues `Sse.Prefetch0` hints from `PrepareBlock`: the fused
+gradient read gathers every tap it needs (centre, both axis neighbours), so the per-lane
+three-line prefetch only added hint traffic on top of gathers that touch the same lines.
+The point path (`SenseSingle`) keeps its single-line prefetch behind the existing
+`Changes >= ScatterChanges` scattered-block gate; that gate is what keeps random-order point
+reads of a cold page set at speed, and removing it was measured as a 2x regression there.
+
+`QuantizeLanes` no longer derives the per-lane tile-run mask in the quantize loop through a
+carried `PermuteVar8x32`/`Blend` pair; after the loop the change bits are read back from the
+stored lane array with one permuted compare for the first eight lanes and one shifted-load
+compare per further eight, and the count lands in `ColumnBlock.Changes` exactly as the
+carried chain produced it (lane zero of a block never counts).
+
+- **Lifetime.** Both sites only touch storage that already exists for the call: `PrefetchBlock`
+  reads `ColumnField.Table`, `Pages`, and the block's lane arrays, all owned by the live layer
+  the read borrowed them from; the change-count pass reads the block's `Tiles` slice, which
+  points into the caller's `stackalloc` lane buffer for the duration of `PrepareBlock`. No
+  pointer survives either call.
+- **Aliasing.** The shifted load at `tiles + g - 1` for `g >= 8` reads lanes `[7, i - 2]` of the
+  same 64-lane slice the quantize loop just stored; the first-lane compare permutes a register
+  copy. Within one block the slice is written before it is read back, by the same thread, in the
+  same call; the second block's slice sits at a non-negative offset of the shared buffer, so no
+  read reaches below it. The lane buffer holds three disjoint slices per block (`Tiles`,
+  `Locals`, `Windows`), and the pass touches only `Tiles`.
+- **Alignment.** The lane buffer is an `int` stack array, so every load is element-aligned; the
+  32-bit vector loads of the change-count pass are unaligned-safe `Vector256.Load` on x86-64 and
+  sit behind the method's `Avx2.IsSupported` guard, like the rest of `QuantizeLanes`. The
+  remaining prefetch address is the page-base-plus-cell-offset expression the old code used.
+- **Concurrency.** One world, one thread, one call stack: `PrepareBlock` runs between the
+  read-side epoch checks the column entry already performs, the lane buffer is stack-local, and
+  no other writer can touch a live layer's pages during a read. `Prefetch0` hints carry no
+  concurrency obligation.
+## RT-1: turned emission row windows
+
+`TileBake.EmitTurnedDense` and `TileBake.EmitTurnedSmooth` (the fallback direct emission for
+turned stamps, and the raster stage of every kernel bake through `KernelFactory.Capture`) walk
+each tile row only over the cells whose value can be nonzero. The per-cell evaluators
+(`DenseAt`, `SampleAt`/`TexelAt`, `SmoothAt`/`SmoothOf`, `RoundAt`) are unchanged, so every
+emitted cell is bit-identical to the previous full-range walk; only cells that evaluate to zero
+are skipped.
+
+- **Round kinds** (disk, cone, dome, arcs): a row at half-cell offset `dy` can hold a nonzero
+  cell only when `dy * dy < Bound * Bound`; the row's cell span solves
+  `|cx * 512 - (CentreX - 256)| <= isqrt(Bound^2 - dy^2)` in closed form with `FloorDiv`/`CeilDiv`
+  on `long`. All operands are bounded by the placement caps: `Bound <= 2^17 + 2^16` Q8 (a
+  512-cell footprint plus the disk half-cell), so `Bound^2` fits `long` with two bits to spare.
+- **Rasters**: the bilinear sample coordinates advance by exact integer steps
+  (`512 * SampleUx`, `512 * SampleVx`) per cell, so the row scan carries `tu`, `tv` by addition
+  instead of re-multiplying; a cell can contribute only while its mip texel indices lie in
+  `[-1, Width) x [-1, Height)`. Because each index is a monotone affine function of `cx` (or
+  constant), each axis's in-window set is an interval, the conjunction is one interval, and the
+  scan enters at its first cell and stops at its exit. The carried values equal the per-cell
+  products exactly (integer affine identity), which `KernelTrackWindows` checks cell-for-cell
+  against `TurnedDenseAt`/`TurnedSmoothAt` over an angle, scale, phase and mip sweep, including
+  a margin outside the placement footprint. Magnitudes stay within the product
+  `|dx| * |SampleUx| <= (Width + 2) * 2^47 + 2^55` — the same bound the unwindowed `SampleAt`
+  multiplication already produces — so no intermediate overflows a `long`.
+- **Turned rectangles and smooth kernels**: the same scan runs on the rotated rectangle
+  coordinates `Pu = dx * Cos + dy * Sin`, `Pv = dy * Cos - dx * Sin` with window bounds derived
+  from `Overlap`'s coverage condition (`|u| < Extent + 256`, exact) and the shifted smooth
+  weight condition (`|du| < HalfU`, conservatively `|Pu| <= HalfU << (15 + ShiftU)`), both far
+  inside `long` range at the stamp axis cap of 256.
+
+- **Lifetime.** The emits write only through the `dense`/`sums` plane pointers handed in by
+  `EmitFallback`, `Capture` (stack canvases or kernel-cache canvas) and the window carries no
+  pointers at all — only `long` coordinates. Nothing outlives the call.
+- **Aliasing.** One emit writes one tile plane region; the row window only narrows the `cx`
+  range, never reorders writes, so the accumulation order per cell is unchanged.
+- **Alignment.** No new loads or stores; the `int`/`long` plane accesses keep their natural
+  alignment.
+- **Concurrency.** Emission runs inside `Process` under the single-writer discipline unchanged;
+  the windows add no shared state.
+
+The placement footprint (`SupportU/V`, `TurnedFootprintCells`) is deliberately untouched: the
+padded support is what the sweep, `Touches`, kernel capture and sense exclusion all consume, and
+halving it toward the true sample hull under-covers minified rasters (mip levels inflate the
+bilinear sample window), which the window oracle catches as dropped contributions. The skip
+therefore lives entirely inside the row walk.
+
+## RT-2: raster tile gating on the texel window
+
+`TileBake.Touches` answers the turned raster case from the tile box's four corners projected
+through the bilinear sample map (`dx * SampleUx + dy * SampleUy + SampleU0`, and the `V` twin)
+against the mip texel index window `[-(1 << (48 + Level)), Width << (48 + Level))` on each axis,
+clamped at `1 << 62` where the shifted width would not fit a signed 64-bit word; no reachable
+sample coordinate exceeds the clamp, so the clamped window admits every coordinate the exact
+window admits. The sample coordinates are affine over the tile box, so their extremes sit on the
+corners and the corner range contains every emitted cell's coordinate: a tile whose corner
+projection misses the window on either axis cannot receive emission, and rejecting it changes no
+byte. `KernelTrackWindows.TouchesAdmitsEveryTileThatReceivesEmission` pins that implication
+against the per-cell oracle across the stamp, scale and angle sweep, and the corpus, stream and
+crowd suites pin the field bytes.
+
+- **Lifetime.** `TouchesTexel` reads only the placement and the stamp variant behind the
+  placement pointer, both owned by the caller's world for the duration of the sweep; it returns
+  a bool and holds nothing.
+- **Aliasing.** Pure predicate over shared read-only placement state; no writes.
+- **Alignment.** No new memory access beyond the existing placement fields.
+- **Concurrency.** Called inside `Process`'s single-writer emission pass, unchanged.
+
+The round-kind branch (centre distance against `Bound + CellHalf`) and the rotated-rectangle
+branch (`SupportU/V + CellHalf` corner window) keep their previous predicates: the smooth
+support already matches the shifted weight window and the rectangle support its overlap window,
+so only the raster branch carried the full-width padding that admitted empty tiles.
+## Unsafe proof: sweep pair emission (SP-1)
+
+The unsafe code added to the sweep is `TryEmitBoxMove` over `EmitNarrowBands`: when a changed slot's old and new deposit records differ only in anchor, and both anchored boxes of one constant stamp fit the narrow single-tile path, one `LayerData`/plane/dirty-rect bookkeeping chain emits the −old and +new bands instead of two full `EmitDelta` passes. `PublishTiles` also stops calling `RefreshTileHash` per changed tile and instead applies the tile hash directly from the publish outcome: a dropped or empty-resolved tile contributes 0 without scanning the page, because the outcome's `Empty` bit is exactly `!Occupied(summary)` and `Occupied` holds iff any page cell is nonzero (a positive cell lifts `Max`, otherwise a negative cell sinks `Sum`). `IntPlane` returns `Int32Planes.Unit(set->I)` directly; `QPlane` keeps deriving its pointer through `Cells` after the charge.
+
+- **Lifetime.** The `plane` (`int*`, `Int32Planes` slab) and `set` (`TilePlanes*`, `Sets` slab) references live only inside one `TryEmitBoxMove` call, which runs to completion inside `SweepEntryAt` with no reentrancy and no other emit interleaved. `PlaneFold.ChargeI` between the two `EmitNarrowBands` calls can fold, and a fold can `TakeWide`, which takes from and can grow the `Int64Planes` slab — never `Int32Planes` and never `Sets` — so both held references stay valid across the second charge. This is also why `QPlane` must not cache the pointer `EnsureT`/`EnsureB` returns across `ChargeQ40`: that charge can grow `Int64Planes` and free the old region (the fold differential tests catch exactly this). The rect pointer is re-derived from the cached dirty index inside each `EmitNarrowBands` after all bands, because `DirtyIndex` can append to `Rects` and `NativeBuffer` resize may move it.
+- **Aliasing.** The pair path writes the same plane cells, in the same order (all old bands, then all new bands), with the same lane weights and the same two `ChargeI` calls (one per box at its first non-empty band) as the two sequential `EmitDelta` calls it replaces; only the repeated `EnsureSet`/`Cells`/`DirtyIndex` lookups are shared, and those are reads plus idempotent appends. The dirty rect ends as the union of the per-box extents gated on the same per-box "at least one non-empty band" condition, and min/max folding is order-independent, so rect values are bit-identical.
+- **Alignment.** No new storage is introduced; `NarrowPlace` is a plain stack struct of ints, and the `weights`/`lanes` stack buffers are the same `stackalloc int[TileBake.LaneCount]` arrays the narrow path already used.
+- **Concurrency.** The pair path runs inside `SweepChanged` on the single thread that owns `Process`; no other thread can observe the intermediate one-chain state, and `PublishDirty` still runs strictly after the sweep, so publish-side invariants are unchanged.
+
+`SweepTrackPairEmitTests` pins the path against a rebuilt-field oracle (queries, region, layer hash) for cell-crossing box runs, mixed gain/scale/removal churn, zero-gain movers, and cross-tile walkers; the stream differential suites cover the fold interaction.
+
+## Unsafe proof: fallback emission rects (SP-2)
+
+`EmitFallback` now records the tile-local intersection of the placement's clipped cell bounds instead of stamping the whole tile: the dirty rect per touched tile becomes `[max(cx0 - tileX0, 0), min(cx1 - tileX0, TileSize)) x [max(cy0 - tileY0, 0), min(cy1 - tileY0, TileSize))`, folded into the per-tile union with the same min/max the other emitters use. The placement bounds `X0..X1 / Y0..Y1` are computed by `TileBake.PlaceAnchored` as the write bounds of every plane kind — the axis support span for separable stamps, the turned support cells for rotated ones, and the footprint span otherwise — so the rect covers every cell the fallback's `Emit*` calls can write, and publish still scans a superset of each frame's changed cells. No new unsafe state is introduced; the change only narrows the values written into the existing `TileRect`.
+
+- **Lifetime.** The rect is written inside `EmitFallback` through the `DirtyIndex`-returned index, re-derived per touched tile exactly like the box and kernel emitters; no pointer to `Rects` outlives the call, and a `NativeBuffer` resize between tiles cannot dangle anything.
+- **Aliasing.** The rect write happens after the plane writes of the same emit and unions monotonically, so concurrent emitters into the same tile in the same sweep only ever widen the union; the published page, summaries, hashes and changed-tile epochs are functions of the page cells, not of the rect, and the rect is a covering of all written cells.
+- **Alignment.** Four ints in an existing struct; nothing new is allocated or cast.
+- **Concurrency.** Same single-thread `Process` discipline as SP-1.
+
+Because publish walks the rect, an emission-bounded rect shrinks publish work in proportion to how much of the tile the fallback actually touches: a sparse smooth-stamp churn measures 18% fewer instructions per frame (publish of tent/bell tiles no longer smooths untouched rows), while dense workloads whose per-tile union already covers the tile are unchanged up to the rect arithmetic. `SweepTrackFallbackRectTests` pins the path against a rebuilt-field oracle for dense raster movers with unique phases, turned-arc disk movers, and sparse churn with removals, and fails when the rect is deliberately narrowed below the footprint.
+## Unsafe proof: deferred tile hashing (DV-1)
+
+`RefreshTileHash` no longer computes page hashes on the process path: it sets one bit in a
+per-layer `HashPending` bitset (`uint` per 32 tiles, allocated zeroed from `NativeHeap` the first
+time a layer marks a tile) and counts the set bits. `LayerHash` — the query that observes the
+hash — flushes the pending set once, memoized: each pending tile recomputes exactly the eager
+expression (`PageOf` + `PageAny` + `TileHash.Of`, or 0 for absent or all-zero pages) and folds it
+through `ApplyTileHash`, so hash values are bit-identical to eager hashing and only their timing
+moves to the first observation. `Clear` zeroes the bitset and count; the layer teardown frees it
+behind a null guard so a layer that never marked a tile never allocates.
+
+- **Lifetime.** The bitset is owned by `LayerData` for the layer's lifetime, allocated once and
+  never reallocated, so no pointer to it is retained anywhere (every access re-derives
+  `ld->HashPending`); the teardown free is the same discipline as `TileHashes` beside it.
+- **Aliasing.** The bitset aliases nothing: one bit per tile, written by the marker and
+  read-and-cleared by the flush, and the flush's page reads go through `PageOf` as before.
+- **Alignment.** `NativeHeap.AllocZeroed` returns allocation-aligned memory; the access
+  granularity is `uint` at `(tile >> 5)` words.
+- **Concurrency.** Marks happen inside the single-threaded `Process` discipline and the flush
+  runs on the `LayerHash` caller's thread against the same world; no other thread observes the
+  layer between them, matching the existing single-reader hash contract.
+
+`DeriveTrackOracleTests.LayerHashIsStableAcrossIdleFramesAndFlushesOnce` pins the memoization
+(idle frames keep the hash and flush once), and the replay oracles compare `LayerHash` against a
+full rebuild every frame.
+
+## Unsafe proof: rect-scoped derive combine (DV-2)
+
+`Derive` now scopes the combine to the tile rows the sources actually touched. `PrimeDerived`
+runs before `PublishDirty` and grows the derived layer's dirty tiles and rects from its sources:
+a derived source contributes its own rects, a transient source contributes whole tiles (its rect
+bookkeeping is consumed by the transient flush), and a base non-transient source contributes tile
+marks as before — the derived rect is therefore the union of every region its inputs changed this
+frame. Rows outside the union see inputs identical to the previous frame, so their combined cells
+are unchanged and skipping them is exact.
+
+`CombineRows` recombines only rows `[rect.Y0, rect.Y1)` and maintains the pre-existing
+`TileSummary` row stats incrementally: each processed row's sum replaces `RowSums[y]` and the
+page `Sum` moves by the row delta; `Max` is recomputed from `RowMaxima` across all rows; the
+any-cells outcome reads `Occupied(summary)` instead of a separate accumulator.
+
+- **Row invariant.** `RowSums[y]` equals the sum of the page's row `y` at all times. A page
+  derived layer is written only by this combine; `EnsureSet` yields a zeroed summary matching a
+  zeroed page, and the bootstrap gate (`ArgMaxX == 0`, the fresh-summary sentinel) forces one
+  full-tile pass that re-derives every row stat before rect scoping engages. A dropped page
+  (`DropPage`) resets both on its next `EnsureSet`, re-arming the bootstrap.
+- **ArgMaxX sentinel safety.** A legitimate max at column 0 only triggers the conservative
+  full-row pass and overwrites the coordinate with 1 — the value-safe direction: consumers of
+  `ArgMaxX` validate the stored cell against `Max` and rescan when it no longer holds the max,
+  so a stale coordinate can cost a rescan but never reports a stale `Max` value.
+- **Lifetime.** No new allocations; rect growth folds into the existing `TileRect` union with
+  the same monotonic min/max the sweep rect paths use (SP-1/SP-2).
+- **Aliasing.** Rect writes union monotonically after the plane writes of the same frame;
+  published page cells, hashes, and epochs remain functions of the page contents, which the
+  rect covers.
+- **Alignment.** Four `int` fields in an existing struct and the existing fixed row arrays in
+  `TileSummary`; nothing new is allocated or cast.
+- **Concurrency.** Same single-thread `Process` discipline as SP-1; `PrimeDerived`, publish,
+  and `Derive` run sequentially on the owning thread.
+
+`DeriveTrackOracleTests.IncrementalDeriveMatchesAFullRebuildEveryFrame` and
+`RestoredSnapshotDerivesIdenticallyToTheLiveWorld` pin the path: a replay driver compares query
+output and `LayerHash` against a world rebuilt from final sources every frame, across Sum/Min/Max
+recipes, chained derived layers, gain fades, removals, and snapshot round-trips; the frame
+checksums must stay identical.

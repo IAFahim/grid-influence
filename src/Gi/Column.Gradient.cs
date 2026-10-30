@@ -27,6 +27,7 @@ public static unsafe partial class World
         b->Accepted = 0;
         b->Interior = 0;
         b->Moved = 0;
+        b->Changes = 0;
 #if NET
         if (Avx2.IsSupported) i = QuantizeLanes(f, xs, ys, b);
 #endif
@@ -56,16 +57,16 @@ public static unsafe partial class World
 
         b->Accepted = accepted;
         b->Interior = interior;
-        b->Changes = CountBits(moved);
+        b->Changes += CountBits(moved);
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void PrepareBlock(in ColumnField f, float* xs, float* ys, ColumnBlock* b, int count, bool vertical)
+    private static void PrepareBlock(in ColumnField f, float* xs, float* ys, ColumnBlock* b, int count, bool prefetch)
     {
         b->Count = count;
         QuantizeBlock(f, xs, ys, b);
 #if NET
-        PrefetchBlock(f, b, vertical);
+        if (prefetch) PrefetchBlock(f, b);
 #endif
     }
 
@@ -94,11 +95,11 @@ public static unsafe partial class World
         var complete = true;
         var windowTile = -1;
         var at = from;
-        PrepareBlock(f, xs + at, ys + at, current, Math.Min(BlockLanes, to - at), true);
+        PrepareBlock(f, xs + at, ys + at, current, Math.Min(BlockLanes, to - at), false);
         while (true)
         {
             var next = at + current->Count;
-            if (next < to) PrepareBlock(f, xs + next, ys + next, spare, Math.Min(BlockLanes, to - next), true);
+            if (next < to) PrepareBlock(f, xs + next, ys + next, spare, Math.Min(BlockLanes, to - next), false);
 
             if (current->Changes <= RunChanges)
                 GradientWindow(f, current, at, values, gradientXs, gradientYs, window, ref windowTile);
@@ -258,11 +259,11 @@ public static unsafe partial class World
         var spare = blocks + 1;
         var gaps = 0;
         var at = from;
-        PrepareBlock(f, xs + at, ys + at, current, Math.Min(BlockLanes, to - at), false);
+        PrepareBlock(f, xs + at, ys + at, current, Math.Min(BlockLanes, to - at), true);
         while (true)
         {
             var next = at + current->Count;
-            if (next < to) PrepareBlock(f, xs + next, ys + next, spare, Math.Min(BlockLanes, to - next), false);
+            if (next < to) PrepareBlock(f, xs + next, ys + next, spare, Math.Min(BlockLanes, to - next), true);
 
             SenseLanes(f, current, at, values);
             if (whole != null) OrBits(whole, at, current->Accepted);
