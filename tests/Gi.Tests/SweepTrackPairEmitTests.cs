@@ -51,7 +51,7 @@ public sealed class SweepTrackPairEmitTests : IDisposable
     }
 
     [Fact]
-    public unsafe void CellCrossingBoxMovesMatchAFieldRebuiltFromFinalSources()
+    public void CellCrossingBoxMovesMatchAFieldRebuiltFromFinalSources()
     {
         const int count = 96;
         var ids = new World.SourceId[count];
@@ -59,8 +59,10 @@ public sealed class SweepTrackPairEmitTests : IDisposable
         var ys = new float[count];
         for (var i = 0; i < count; i++)
         {
-            xs[i] = 6f + (i % 12) * 8 + (i / 12 % 2) * 0.5f;
-            ys[i] = 6f + (i / 12) * 8;
+            var col = i % 12;
+            var row = i / 12;
+            xs[i] = 6f + col * 8 + (row % 2) * 0.5f;
+            ys[i] = 6f + row * 8;
             ids[i] = World.Place(_world, _layer, xs[i], ys[i], _stamp, 1);
         }
 
@@ -79,12 +81,12 @@ public sealed class SweepTrackPairEmitTests : IDisposable
         }
 
         var live = new (float, float, sbyte)[count];
-        for (var i = 0; i < count; i++) live[i] = (xs[i], ys[i], (sbyte)1);
+        for (var i = 0; i < count; i++) live[i] = (xs[i], ys[i], 1);
         AssertFieldMatchesRebuild(_world, _grid, _layer, _stamp, live);
     }
 
     [Fact]
-    public unsafe void MixedMovesGainFadesScalesAndRemovalsMatchAFieldRebuild()
+    public void MixedMovesGainFadesScalesAndRemovalsMatchAFieldRebuild()
     {
         const int count = 120;
         var ids = new World.SourceId[count];
@@ -94,8 +96,9 @@ public sealed class SweepTrackPairEmitTests : IDisposable
         var removed = new bool[count];
         for (var i = 0; i < count; i++)
         {
+            var row = i / 15;
             xs[i] = 8f + (i % 15) * 7;
-            ys[i] = 8f + (i / 15) * 7;
+            ys[i] = 8f + row * 7;
             gains[i] = (sbyte)(1 + i % 5);
             ids[i] = World.Place(_world, _layer, xs[i], ys[i], _stamp, gains[i]);
         }
@@ -134,7 +137,7 @@ public sealed class SweepTrackPairEmitTests : IDisposable
     }
 
     [Fact]
-    public unsafe void ZeroGainMoversAndCrossTileMoversLeaveTheFieldUnchangedOrExact()
+    public void ZeroGainMoversAndCrossTileMoversLeaveTheFieldUnchangedOrExact()
     {
         var still = World.Place(_world, _layer, 32f, 32f, _stamp, 3);
         var walker = World.Place(_world, _layer, 60f, 60f, _stamp, 3);
@@ -154,9 +157,9 @@ public sealed class SweepTrackPairEmitTests : IDisposable
             World.Process(_world);
         }
 
-        var live = new (float, float, sbyte)[]
+        (float, float, sbyte)[] live =
         {
-            (32.5f, 32.25f, (sbyte)3), (60.5f + 7 * 0.5f, 60f, (sbyte)3), (97.5f, 97.75f, (sbyte)0)
+            (32.5f, 32.25f, 3), (60.5f + 7 * 0.5f, 60f, 3), (97.5f, 97.75f, 0)
         };
         AssertFieldMatchesRebuild(_world, _grid, _layer, _stamp, live);
         Assert.NotEqual(beforeHash, World.LayerHash(_world, _grid, _layer));

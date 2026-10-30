@@ -54,12 +54,12 @@ public static unsafe partial class World
         {
             var rotate = Vector256.Create(7, 0, 1, 2, 3, 4, 5, 6);
             var first = Vector256.Load(tiles);
-            changes += CountBits((uint)(~Vector256.Equals(first, Avx2.PermuteVar8x32(first, rotate))
+            changes += CountBits((~Vector256.Equals(first, Avx2.PermuteVar8x32(first, rotate))
                 .AsSingle().ExtractMostSignificantBits() & 0xFEu));
         }
 
         for (var g = 8; g < i; g += 8)
-            changes += CountBits((uint)(~Vector256.Equals(Vector256.Load(tiles + g), Vector256.Load(tiles + g - 1))
+            changes += CountBits((~Vector256.Equals(Vector256.Load(tiles + g), Vector256.Load(tiles + g - 1))
                 .AsSingle().ExtractMostSignificantBits() & 0xFFu));
 
         b->Accepted = accepted;

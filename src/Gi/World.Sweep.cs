@@ -158,15 +158,15 @@ public static unsafe partial class World
         if (sampling == 0) return true;
 
         TileBake.SpanAnchored(rec->Ax, v->OriginQ8X, v->Width, sampling, g->Size, true, TileBake.MaxExtent,
-            out var pox, out var fox, out var eox, out var x0o, out var x1o);
+            out var pox, out var fox, out var eox, out var ox0, out var ox1);
         TileBake.SpanAnchored(rec->Ay, v->OriginQ8Y, v->Height, sampling, g->Size, true, TileBake.MaxExtent,
-            out var poy, out var foy, out var eoy, out var y0o, out var y1o);
+            out var poy, out var foy, out var eoy, out var oy0, out var oy1);
         TileBake.SpanAnchored(key.Ax, v->OriginQ8X, v->Width, sampling, g->Size, true, TileBake.MaxExtent,
-            out var pnx, out var fnx, out var enx, out var x0n, out var x1n);
+            out var pnx, out var fnx, out var enx, out var nx0, out var nx1);
         TileBake.SpanAnchored(key.Ay, v->OriginQ8Y, v->Height, sampling, g->Size, true, TileBake.MaxExtent,
-            out var pny, out var fny, out var eny, out var y0n, out var y1n);
-        if (x0o < 0 || y0o < 0 || x1o > g->Size || y1o > g->Size) return false;
-        if (x0n < 0 || y0n < 0 || x1n > g->Size || y1n > g->Size) return false;
+            out var pny, out var fny, out var eny, out var ny0, out var ny1);
+        if (ox0 < 0 || oy0 < 0 || ox1 > g->Size || oy1 > g->Size) return false;
+        if (nx0 < 0 || ny0 < 0 || nx1 > g->Size || ny1 > g->Size) return false;
         if ((pox >> TileBake.TileBits) != (pnx >> TileBake.TileBits) ||
             (poy >> TileBake.TileBits) != (pny >> TileBake.TileBits)) return false;
         if (!NarrowPlaceOf(g, pox, poy, fox, foy, eox, eoy, out var oldPlace)) return false;
@@ -290,8 +290,6 @@ public static unsafe partial class World
 
     private struct NarrowPlace
     {
-        public int Px;
-        public int Py;
         public int Fx;
         public int Fy;
         public int LocalX;
@@ -327,8 +325,6 @@ public static unsafe partial class World
 
         place = new NarrowPlace
         {
-            Px = px,
-            Py = py,
             Fx = fx,
             Fy = fy,
             LocalX = localX,
@@ -346,7 +342,7 @@ public static unsafe partial class World
     }
 
     [MethodImpl(Jit.Hot)]
-    private static bool EmitNarrowBands(
+    private static void EmitNarrowBands(
         GridCtx* g, LayerData* ld, in NarrowPlace place, int constant, int gain, int* weights, int* lanes,
         ref int* plane, ref TilePlanes* set, ref int dirty)
     {
@@ -411,8 +407,6 @@ public static unsafe partial class World
             if (localX + place.CellsX > rect->X1) rect->X1 = localX + place.CellsX;
             if (place.LocalY + place.CellsY > rect->Y1) rect->Y1 = place.LocalY + place.CellsY;
         }
-
-        return wrote;
     }
 
     [MethodImpl(Jit.Hot)]

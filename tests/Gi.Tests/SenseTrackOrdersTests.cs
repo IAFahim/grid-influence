@@ -176,7 +176,7 @@ public unsafe class SenseTrackOrdersTests : IDisposable
 
     private static ulong Morton(uint x, uint y)
     {
-        return ((ulong)Spread(x) | ((ulong)Spread(y) << 1)) << 32;
+        return (Spread(x) | ((ulong)Spread(y) << 1)) << 32;
     }
 
     private static uint Spread(uint value)

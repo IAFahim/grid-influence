@@ -7,7 +7,6 @@ namespace Gi.Tests;
 public sealed unsafe class KernelTrackTiming(ITestOutputHelper output)
 {
     private const int Size = 1 << 10;
-    private const int Warmup = 200;
     private const int Passes = 5;
 
     private static byte RasterStamp()
@@ -39,7 +38,7 @@ public sealed unsafe class KernelTrackTiming(ITestOutputHelper output)
     {
         var world = World.New();
         Grid.New(world, 10, 0f, 0f, Size);
-        var layer = Layer.New(world, Layer.Precision.Exact);
+        Layer.New(world, Layer.Precision.Exact);
         var stamp = RasterStamp();
         var w = World.GetContext(world);
         var v = StampCatalog.Get(stamp);
@@ -67,9 +66,9 @@ public sealed unsafe class KernelTrackTiming(ITestOutputHelper output)
             output.WriteLine($"tryGetTaps bake+insert turned raster: {bakeCost:F1} ns ({bakeSum & 1})");
 
             long findSum = 0;
-            TileBake.PlaceAnchored(anchorX, anchorY, 256, Size, v, 1234, 256, Layer.Precision.Exact, out var fixed_);
-            KernelFactory.TryGetTaps(w, 0, stamp, 1234, Layer.Precision.Exact, &fixed_, out _);
-            var findCost = Best(i =>
+            TileBake.PlaceAnchored(anchorX, anchorY, 256, Size, v, 1234, 256, Layer.Precision.Exact, out var pinned);
+            KernelFactory.TryGetTaps(w, 0, stamp, 1234, Layer.Precision.Exact, &pinned, out _);
+            var findCost = Best(_ =>
             {
                 TileBake.PlaceAnchored(anchorX, anchorY, 256, Size, v, 1234, 256, Layer.Precision.Exact, out var p);
                 if (!KernelFactory.TryFindTaps(w, 0, stamp, 1234, Layer.Precision.Exact, &p, out var taps))

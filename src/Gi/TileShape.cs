@@ -468,8 +468,8 @@ internal static unsafe partial class TileBake
     private static void EmitTurnedRasterDense(
         int* dense, int tileX0, int tileY0, Placement* p, int gain, int x0, int x1, int y0, int y1)
     {
-        var stepU = (long)CellHalf * p->SampleUx;
-        var stepV = (long)CellHalf * p->SampleVx;
+        var stepU = CellHalf * p->SampleUx;
+        var stepV = CellHalf * p->SampleVx;
         var level = p->Level;
         var width = p->Width;
         var height = p->Height;
