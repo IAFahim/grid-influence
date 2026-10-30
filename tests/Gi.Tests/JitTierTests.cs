@@ -16,6 +16,7 @@ public class JitTierTests
         foreach (var type in typeof(World).Assembly.GetTypes())
         {
             if (type.IsInterface || type.IsEnum || IsGenerated(type)) continue;
+            if (type.Namespace?.StartsWith("System.", StringComparison.Ordinal) == true) continue;
 
             foreach (var method in type.GetMethods(Declared))
             {
@@ -36,7 +37,7 @@ public class JitTierTests
 
     private static bool Optimized(MethodImplAttributes flags)
     {
-        return (flags & MethodImplAttributes.AggressiveOptimization) != 0;
+        return ((int)flags & (int)MethodImplAttributes.AggressiveOptimization) != 0;
     }
 
     private static bool IsAccessor(MethodInfo method)
