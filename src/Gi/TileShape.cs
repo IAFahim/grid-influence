@@ -333,6 +333,8 @@ internal static unsafe partial class TileBake
             return nx * nx + ny * ny <= reach * reach;
         }
 
+        if (p->Kind == StampKind.Raster) return TouchesTexel(p, lx, hx, ly, hy);
+
         var minU = long.MaxValue;
         var maxU = long.MinValue;
         var minV = long.MaxValue;
@@ -355,22 +357,161 @@ internal static unsafe partial class TileBake
     }
 
     [MethodImpl(Jit.Hot)]
+    private static bool TouchesTexel(Placement* p, long lx, long hx, long ly, long hy)
+    {
+        var low = -(1L << (48 + p->Level));
+        var highU = Math.Min((long)p->Width << (48 + p->Level), 1L << 62);
+        var highV = Math.Min((long)p->Height << (48 + p->Level), 1L << 62);
+        var minU = long.MaxValue;
+        var maxU = long.MinValue;
+        var minV = long.MaxValue;
+        var maxV = long.MinValue;
+        for (var corner = 0; corner < 4; corner++)
+        {
+            var dx = ((corner & 1) == 0 ? lx : hx) - p->CentreX;
+            var dy = ((corner & 2) == 0 ? ly : hy) - p->CentreY;
+            var tu = dx * p->SampleUx + dy * p->SampleUy + p->SampleU0;
+            var tv = dx * p->SampleVx + dy * p->SampleVy + p->SampleV0;
+            minU = Math.Min(minU, tu);
+            maxU = Math.Max(maxU, tu);
+            minV = Math.Min(minV, tv);
+            maxV = Math.Max(maxV, tv);
+        }
+
+        return maxU >= low && minU < highU && maxV >= low && minV < highV;
+    }
+
+    [MethodImpl(Jit.Hot)]
     internal static void EmitTurnedDense(int* dense, int tileX0, int tileY0, Placement* p, int gain)
     {
         var x0 = Math.Max(p->X0, tileX0);
         var x1 = Math.Min(p->X1, tileX0 + TileSize);
         var y0 = Math.Max(p->Y0, tileY0);
         var y1 = Math.Min(p->Y1, tileY0 + TileSize);
+        if (p->Kind >= StampKind.Disk)
+        {
+            EmitTurnedRoundDense(dense, tileX0, tileY0, p, gain, x0, x1, y0, y1);
+            return;
+        }
+
+        if (p->Kind == StampKind.Raster)
+        {
+            EmitTurnedRasterDense(dense, tileX0, tileY0, p, gain, x0, x1, y0, y1);
+            return;
+        }
+
+        var stepU = (long)CellHalf * p->Cos;
+        var stepV = -(long)CellHalf * p->Sin;
+        var lowU = (-(long)p->ExtentX - 255) << 14;
+        var highU = ((long)p->ExtentX + 256) << 14;
+        var lowV = (-(long)p->ExtentY - 255) << 14;
+        var highV = ((long)p->ExtentY + 256) << 14;
         for (var cy = y0; cy < y1; cy++)
         {
             var dy = (long)cy * CellHalf + CellHalf / 2 - p->CentreY;
             var row = dense + (cy - tileY0) * TileSize - tileX0;
-            for (var cx = x0; cx < x1; cx++)
+            var dx = (long)x0 * CellHalf + CellHalf / 2 - p->CentreX;
+            var pu = dx * p->Cos + dy * p->Sin;
+            var pv = dy * p->Cos - dx * p->Sin;
+            var cx = x0;
+            while (cx < x1 && (pu < lowU || pu >= highU || pv < lowV || pv >= highV))
             {
-                var value = DenseAt(p, (long)cx * CellHalf + CellHalf / 2 - p->CentreX, dy);
+                pu += stepU;
+                pv += stepV;
+                cx++;
+            }
+
+            var start = cx;
+            var eu = pu;
+            var ev = pv;
+            while (cx < x1 && pu >= lowU && pu < highU && pv >= lowV && pv < highV)
+            {
+                pu += stepU;
+                pv += stepV;
+                cx++;
+            }
+
+            for (var emit = start; emit < cx; emit++, eu += stepU, ev += stepV)
+            {
+                var value = RoundQ16(p->V->Constant * Overlap(eu >> 14, p->ExtentX) * Overlap(ev >> 14, p->ExtentY));
+                if (value != 0) row[emit] += value * gain;
+            }
+        }
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static void EmitTurnedRoundDense(
+        int* dense, int tileX0, int tileY0, Placement* p, int gain, int x0, int x1, int y0, int y1)
+    {
+        var bound = p->Bound;
+        var room0 = bound * bound;
+        var baseX = p->CentreX - CellHalf / 2;
+        for (var cy = y0; cy < y1; cy++)
+        {
+            var dy = (long)cy * CellHalf + CellHalf / 2 - p->CentreY;
+            var room = room0 - dy * dy;
+            if (room <= 0) continue;
+
+            var half = Root(room);
+            var row = dense + (cy - tileY0) * TileSize - tileX0;
+            var lo = Math.Max(x0, (int)CeilDiv(baseX - half, CellHalf));
+            var hi = Math.Min(x1, (int)FloorDiv(baseX + half, CellHalf) + 1);
+            for (var cx = lo; cx < hi; cx++)
+            {
+                var value = RoundAt(p, (long)cx * CellHalf + CellHalf / 2 - p->CentreX, dy);
                 if (value != 0) row[cx] += value * gain;
             }
         }
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static void EmitTurnedRasterDense(
+        int* dense, int tileX0, int tileY0, Placement* p, int gain, int x0, int x1, int y0, int y1)
+    {
+        var stepU = (long)CellHalf * p->SampleUx;
+        var stepV = (long)CellHalf * p->SampleVx;
+        var level = p->Level;
+        var width = p->Width;
+        var height = p->Height;
+        for (var cy = y0; cy < y1; cy++)
+        {
+            var dy = (long)cy * CellHalf + CellHalf / 2 - p->CentreY;
+            var row = dense + (cy - tileY0) * TileSize - tileX0;
+            var dx = (long)x0 * CellHalf + CellHalf / 2 - p->CentreX;
+            var tu = dx * p->SampleUx + dy * p->SampleUy + p->SampleU0;
+            var tv = dx * p->SampleVx + dy * p->SampleVy + p->SampleV0;
+            var cx = x0;
+            while (cx < x1 &&
+                   !(InTexelSpan((tu >> 32 >> level) >> 16, width) && InTexelSpan((tv >> 32 >> level) >> 16, height)))
+            {
+                tu += stepU;
+                tv += stepV;
+                cx++;
+            }
+
+            var start = cx;
+            var eu = tu;
+            var ev = tv;
+            while (cx < x1 &&
+                   InTexelSpan((tu >> 32 >> level) >> 16, width) && InTexelSpan((tv >> 32 >> level) >> 16, height))
+            {
+                tu += stepU;
+                tv += stepV;
+                cx++;
+            }
+
+            for (var emit = start; emit < cx; emit++, eu += stepU, ev += stepV)
+            {
+                var value = TexelAt(p, eu >> 32 >> level, ev >> 32 >> level);
+                if (value != 0) row[emit] += value * gain;
+            }
+        }
+    }
+
+    [MethodImpl(Jit.Inline)]
+    private static bool InTexelSpan(long index, int limit)
+    {
+        return index >= -1 && index < limit;
     }
 
     [MethodImpl(Jit.Hot)]
@@ -380,14 +521,41 @@ internal static unsafe partial class TileBake
         var x1 = Math.Min(p->X1, tileX0 + TileSize);
         var y0 = Math.Max(p->Y0, tileY0);
         var y1 = Math.Min(p->Y1, tileY0 + TileSize);
+        var stepU = (long)CellHalf * p->Cos;
+        var stepV = -(long)CellHalf * p->Sin;
+        var lowU = -(p->HalfU << (15 + p->ShiftU));
+        var highU = p->HalfU << (15 + p->ShiftU);
+        var lowV = -(p->HalfV << (15 + p->ShiftV));
+        var highV = p->HalfV << (15 + p->ShiftV);
         for (var cy = y0; cy < y1; cy++)
         {
             var dy = (long)cy * CellHalf + CellHalf / 2 - p->CentreY;
             var row = sums + (cy - tileY0) * TileSize - tileX0;
-            for (var cx = x0; cx < x1; cx++)
+            var dx = (long)x0 * CellHalf + CellHalf / 2 - p->CentreX;
+            var pu = dx * p->Cos + dy * p->Sin;
+            var pv = dy * p->Cos - dx * p->Sin;
+            var cx = x0;
+            while (cx < x1 && (pu < lowU || pu > highU || pv < lowV || pv > highV))
             {
-                var value = SmoothAt(p, (long)cx * CellHalf + CellHalf / 2 - p->CentreX, dy);
-                if (value != 0) row[cx] += value * gain;
+                pu += stepU;
+                pv += stepV;
+                cx++;
+            }
+
+            var start = cx;
+            var eu = pu;
+            var ev = pv;
+            while (cx < x1 && pu >= lowU && pu <= highU && pv >= lowV && pv <= highV)
+            {
+                pu += stepU;
+                pv += stepV;
+                cx++;
+            }
+
+            for (var emit = start; emit < cx; emit++, eu += stepU, ev += stepV)
+            {
+                var value = SmoothOf(p, eu >> 14 >> (p->ShiftU + 1), ev >> 14 >> (p->ShiftV + 1));
+                if (value != 0) row[emit] += value * gain;
             }
         }
     }
@@ -429,6 +597,12 @@ internal static unsafe partial class TileBake
     {
         var tx = (dx * p->SampleUx + dy * p->SampleUy + p->SampleU0) >> 32 >> p->Level;
         var ty = (dx * p->SampleVx + dy * p->SampleVy + p->SampleV0) >> 32 >> p->Level;
+        return TexelAt(p, tx, ty);
+    }
+
+    [MethodImpl(Jit.Inline)]
+    private static int TexelAt(Placement* p, long tx, long ty)
+    {
         var ix = tx >> 16;
         var iy = ty >> 16;
         if (ix < -1 || iy < -1 || ix >= p->Width || iy >= p->Height) return 0;
@@ -486,6 +660,12 @@ internal static unsafe partial class TileBake
     {
         var du = (dx * p->Cos + dy * p->Sin) >> 14 >> (p->ShiftU + 1);
         var dv = (dy * p->Cos - dx * p->Sin) >> 14 >> (p->ShiftV + 1);
+        return SmoothOf(p, du, dv);
+    }
+
+    [MethodImpl(Jit.Inline)]
+    private static long SmoothOf(Placement* p, long du, long dv)
+    {
         long wu;
         long wv;
         if (p->Kind == StampKind.Bell)
@@ -514,6 +694,12 @@ internal static unsafe partial class TileBake
     {
         var q = value / divisor;
         return q * divisor > value ? q - 1 : q;
+    }
+
+    [MethodImpl(Jit.Inline)]
+    private static long CeilDiv(long value, long divisor)
+    {
+        return -FloorDiv(-value, divisor);
     }
 
     [MethodImpl(Jit.Inline)]
