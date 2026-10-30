@@ -130,10 +130,59 @@ public static unsafe partial class World
             var key = KeyOf(w, g, entry, in target);
             if (Same(rec, in key)) continue;
 
+            if (TryEmitBoxMove(g, rec, in key))
+            {
+                *rec = key;
+                continue;
+            }
+
             EmitDelta(w, gi, in *rec, -1);
             EmitDelta(w, gi, in key, 1);
             *rec = key;
         }
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static bool TryEmitBoxMove(GridCtx* g, DepositRecord* rec, in DepositRecord key)
+    {
+        if (rec->Alive == 0 || key.Alive == 0 ||
+            rec->Layer != key.Layer || rec->Stamp != key.Stamp || rec->Gain != key.Gain ||
+            rec->Angle != key.Angle || rec->Scale != key.Scale)
+            return false;
+        if (key.Angle != 0 || key.Gain == 0 || !TileBake.LanesSupported) return false;
+
+        var v = StampCatalog.Get(key.Stamp);
+        if (v->Kind != StampKind.ConstantRectangle) return false;
+
+        var sampling = (int)Math.Min(((long)g->ScaleQ8 * key.Scale) >> 8, int.MaxValue);
+        if (sampling == 0) return true;
+
+        TileBake.SpanAnchored(rec->Ax, v->OriginQ8X, v->Width, sampling, g->Size, true, TileBake.MaxExtent,
+            out var pox, out var fox, out var eox, out var x0o, out var x1o);
+        TileBake.SpanAnchored(rec->Ay, v->OriginQ8Y, v->Height, sampling, g->Size, true, TileBake.MaxExtent,
+            out var poy, out var foy, out var eoy, out var y0o, out var y1o);
+        TileBake.SpanAnchored(key.Ax, v->OriginQ8X, v->Width, sampling, g->Size, true, TileBake.MaxExtent,
+            out var pnx, out var fnx, out var enx, out var x0n, out var x1n);
+        TileBake.SpanAnchored(key.Ay, v->OriginQ8Y, v->Height, sampling, g->Size, true, TileBake.MaxExtent,
+            out var pny, out var fny, out var eny, out var y0n, out var y1n);
+        if (x0o < 0 || y0o < 0 || x1o > g->Size || y1o > g->Size) return false;
+        if (x0n < 0 || y0n < 0 || x1n > g->Size || y1n > g->Size) return false;
+        if ((pox >> TileBake.TileBits) != (pnx >> TileBake.TileBits) ||
+            (poy >> TileBake.TileBits) != (pny >> TileBake.TileBits)) return false;
+        if (!NarrowPlaceOf(g, pox, poy, fox, foy, eox, eoy, out var oldPlace)) return false;
+        if (!NarrowPlaceOf(g, pnx, pny, fnx, fny, enx, eny, out var newPlace)) return false;
+
+        var ld = EnsureDirty(g, key.Layer);
+        if (ld->Epochs == null) EnsureEpochs(g, ld);
+        var weights = stackalloc int[TileBake.LaneCount];
+        var lanes = stackalloc int[TileBake.LaneCount];
+        int* plane = null;
+        TilePlanes* set = null;
+        var dirty = 0;
+        var gain = key.Gain;
+        EmitNarrowBands(g, ld, in oldPlace, v->Constant, -gain, weights, lanes, ref plane, ref set, ref dirty);
+        EmitNarrowBands(g, ld, in newPlace, v->Constant, gain, weights, lanes, ref plane, ref set, ref dirty);
+        return true;
     }
 
     [MethodImpl(Jit.Hot)]
@@ -219,6 +268,15 @@ public static unsafe partial class World
         return ld->Store.Cells(*set).I;
     }
 
+    [MethodImpl(Jit.Inline)]
+    private static int* IntPlane(GridCtx* g, LayerData* ld, int tile, int amount, out TilePlanes* set)
+    {
+        set = EnsureSet(g, ld, tile);
+        PrepareTransientSet(ld, set);
+        PlaneFold.ChargeI(&ld->Store, set, amount);
+        return set->I < 0 ? null : (int*)ld->Store.Int32Planes.Unit(set->I);
+    }
+
     [MethodImpl(Jit.Hot)]
     private static long* QPlane(LayerData* ld, TilePlanes* set, bool tent, long amount)
     {
@@ -230,10 +288,29 @@ public static unsafe partial class World
         return tent ? cells.T : cells.B;
     }
 
-    [MethodImpl(Jit.Hot)]
-    private static bool EmitBoxNarrow(
-        GridCtx* g, LayerData* ld, int px, int py, int fx, int fy, int extentX, int extentY, int constant, int gain)
+    private struct NarrowPlace
     {
+        public int Px;
+        public int Py;
+        public int Fx;
+        public int Fy;
+        public int LocalX;
+        public int LocalY;
+        public int CellsX;
+        public int CellsY;
+        public int Column;
+        public int Tile;
+        public int FullX;
+        public int FullY;
+        public int TailX;
+        public int TailY;
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static bool NarrowPlaceOf(
+        GridCtx* g, int px, int py, int fx, int fy, int extentX, int extentY, out NarrowPlace place)
+    {
+        place = default;
         var endX = fx + extentX;
         var endY = fy + extentY;
         var fullX = endX >> 8;
@@ -248,20 +325,41 @@ public static unsafe partial class World
         var localY = py & (TileBake.TileSize - 1);
         if (localX + cellsX > TileBake.TileSize || localY + cellsY > TileBake.TileSize) return false;
 
-        var column = Math.Min(localX, TileBake.TileSize - TileBake.LaneCount);
-        var weights = stackalloc int[TileBake.LaneCount];
-        var lanes = stackalloc int[TileBake.LaneCount];
-        var leadX = fx != 0 ? 1 : 0;
-        var leadWeightX = 256 - fx;
+        place = new NarrowPlace
+        {
+            Px = px,
+            Py = py,
+            Fx = fx,
+            Fy = fy,
+            LocalX = localX,
+            LocalY = localY,
+            CellsX = cellsX,
+            CellsY = cellsY,
+            Column = Math.Min(localX, TileBake.TileSize - TileBake.LaneCount),
+            Tile = (py >> TileBake.TileBits) * g->TilesPerSide + (px >> TileBake.TileBits),
+            FullX = fullX,
+            FullY = fullY,
+            TailX = tailX,
+            TailY = tailY
+        };
+        return true;
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static bool EmitNarrowBands(
+        GridCtx* g, LayerData* ld, in NarrowPlace place, int constant, int gain, int* weights, int* lanes,
+        ref int* plane, ref TilePlanes* set, ref int dirty)
+    {
+        var localX = place.LocalX;
+        var leadX = place.Fx != 0 ? 1 : 0;
         TileBake.LaneWeights3(
-            column,
-            localX, localX + leadX, leadWeightX,
-            localX + leadX, localX + fullX, 256,
-            localX + fullX, localX + fullX + (tailX != 0 ? 1 : 0), tailX,
+            place.Column,
+            localX, localX + leadX, 256 - place.Fx,
+            localX + leadX, localX + place.FullX, 256,
+            localX + place.FullX, localX + place.FullX + (place.TailX != 0 ? 1 : 0), place.TailX,
             weights);
-        var tile = (py >> TileBake.TileBits) * g->TilesPerSide + (px >> TileBake.TileBits);
-        var leadY = fy != 0 ? 1 : 0;
-        int* plane = null;
+        var leadY = place.Fy != 0 ? 1 : 0;
+        var wrote = false;
         for (var band = 0; band < 3; band++)
         {
             int rowLo;
@@ -269,43 +367,66 @@ public static unsafe partial class World
             int weightY;
             if (band == 0)
             {
-                rowLo = localY;
-                rowHi = localY + leadY;
-                weightY = 256 - fy;
+                rowLo = place.LocalY;
+                rowHi = place.LocalY + leadY;
+                weightY = 256 - place.Fy;
             }
             else if (band == 1)
             {
-                rowLo = localY + leadY;
-                rowHi = localY + fullY;
+                rowLo = place.LocalY + leadY;
+                rowHi = place.LocalY + place.FullY;
                 weightY = 256;
             }
             else
             {
-                rowLo = localY + fullY;
-                rowHi = rowLo + (tailY != 0 ? 1 : 0);
-                weightY = tailY;
+                rowLo = place.LocalY + place.FullY;
+                rowHi = rowLo + (place.TailY != 0 ? 1 : 0);
+                weightY = place.TailY;
             }
 
             if (rowHi <= rowLo || !TileBake.BandLanes(weights, constant * weightY, gain, lanes)) continue;
 
-            if (plane == null)
+            if (!wrote)
             {
-                plane = IntPlane(g, ld, tile, Math.Abs(constant * gain));
-                DirtyIndex(g, ld, tile);
+                if (plane == null)
+                {
+                    plane = IntPlane(g, ld, place.Tile, Math.Abs(constant * gain), out set);
+                    dirty = DirtyIndex(g, ld, place.Tile);
+                }
+                else
+                {
+                    PlaneFold.ChargeI(&ld->Store, set, Math.Abs(constant * gain));
+                }
             }
 
-            TileBake.AddRows(plane, rowLo, rowHi, column, lanes);
+            TileBake.AddRows(plane, rowLo, rowHi, place.Column, lanes);
+            wrote = true;
         }
 
-        if (plane != null)
+        if (wrote)
         {
-            var rect = &ld->Rects.Pointer[ld->InDirty[tile] - 1];
+            var rect = &ld->Rects.Pointer[dirty];
             if (localX < rect->X0) rect->X0 = localX;
-            if (localY < rect->Y0) rect->Y0 = localY;
-            if (localX + cellsX > rect->X1) rect->X1 = localX + cellsX;
-            if (localY + cellsY > rect->Y1) rect->Y1 = localY + cellsY;
+            if (place.LocalY < rect->Y0) rect->Y0 = place.LocalY;
+            if (localX + place.CellsX > rect->X1) rect->X1 = localX + place.CellsX;
+            if (place.LocalY + place.CellsY > rect->Y1) rect->Y1 = place.LocalY + place.CellsY;
         }
 
+        return wrote;
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static bool EmitBoxNarrow(
+        GridCtx* g, LayerData* ld, int px, int py, int fx, int fy, int extentX, int extentY, int constant, int gain)
+    {
+        if (!NarrowPlaceOf(g, px, py, fx, fy, extentX, extentY, out var place)) return false;
+
+        var weights = stackalloc int[TileBake.LaneCount];
+        var lanes = stackalloc int[TileBake.LaneCount];
+        int* plane = null;
+        TilePlanes* set = null;
+        var dirty = 0;
+        EmitNarrowBands(g, ld, in place, constant, gain, weights, lanes, ref plane, ref set, ref dirty);
         return true;
     }
 
@@ -611,12 +732,15 @@ public static unsafe partial class World
             }
             else
             {
-                ld->Max.Update(tps, tile, ld->Store.Cells(*set).Summary->Max);
+                ld->Max.Update(tps, tile, ((TileSummary*)ld->Store.Summaries.Unit(set->Summary))->Max);
                 if (transient) RetireTransientTile(ld, set, tile);
                 dropped = false;
             }
 
-            if (dropped || (outcome & ResolveOutcome.Changed) != 0) RefreshTileHash(g, ld, tile);
+            if (dropped) ApplyTileHash(g, ld, tile, 0);
+            else if ((outcome & ResolveOutcome.Changed) != 0)
+                ApplyTileHash(g, ld, tile,
+                    (outcome & ResolveOutcome.Empty) != 0 ? 0 : TileHash.Of(tile, ld->PageOf(tile)));
             if ((outcome & ResolveOutcome.Changed) != 0) dirty[kept++] = tile;
         }
 
