@@ -4,6 +4,7 @@ namespace Gi;
 
 public static unsafe partial class World
 {
+    [MethodImpl(Jit.Hot)]
     private static ushort QuantizeAngle(float radians)
     {
         var turns = radians * (1.0 / (2 * Math.PI));
@@ -11,6 +12,7 @@ public static unsafe partial class World
         return (ushort)((int)(turns * 65536.0) & 0xFFFF);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static bool FootprintFits(WorldCtx* w, byte stamp, long scale)
     {
         var v = StampCatalog.Get(stamp);
@@ -28,19 +30,23 @@ public static unsafe partial class World
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static ushort QuantizeScale(float scale)
     {
         var quantized = Math.Floor(scale * 256.0);
         return (ushort)(quantized < 1 ? 1 : quantized > ushort.MaxValue ? ushort.MaxValue : quantized);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static SourceResultStatus PlaceSlot(
-        WorldCtx* w, byte layer, float x, float y, byte stamp, sbyte gain, out SourceId id)
+        WorldCtx* w, byte layer, float x, float y, byte stamp, sbyte gain, ushort scale, out SourceId id)
     {
         id = default;
         if (layer >= w->LayerCount || IsDerived(w, layer) || IsTransient(w, layer))
             return SourceResultStatus.InvalidLayer;
-        if (!StampCatalog.Valid(stamp) || !FootprintFits(w, stamp, UnitScale)) return SourceResultStatus.InvalidStamp;
+        if (!StampCatalog.Valid(stamp) || !FootprintFits(w, stamp, UnitScale) ||
+            (scale != UnitScale && !FootprintFits(w, stamp, scale)))
+            return SourceResultStatus.InvalidStamp;
         if (!float.IsFinite(x) || !float.IsFinite(y)) return SourceResultStatus.InvalidSource;
 
         var s = &w->Sources;
@@ -61,7 +67,7 @@ public static unsafe partial class World
         s->Layer[i] = layer;
         s->Gain[i] = g;
         s->Angle[i] = 0;
-        s->Scale[i] = UnitScale;
+        s->Scale[i] = scale;
         JournalSchedule(w, s, i);
         s->Timed.Pointer[i] = 0;
         s->Alive[i] = 1;
@@ -70,7 +76,34 @@ public static unsafe partial class World
         return SourceResultStatus.Applied;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Hot)]
+    private static void JournalColumns(WorldCtx* w, SourceColumns* s, int slot)
+    {
+        s->HotStamp.Pointer[slot] = w->RecordEpoch;
+        var n = w->Journal.Length;
+        w->Journal.Resize(n + 1);
+        w->Journal.Pointer[n] = new JournalEntry
+        {
+            Slot = slot,
+            X = s->X[slot],
+            Y = s->Y[slot],
+            Stamp = s->Stamp[slot],
+            Layer = s->Layer[slot],
+            Gain = s->Gain[slot],
+            Alive = s->Alive[slot],
+            Angle = s->Angle[slot],
+            Scale = s->Scale[slot],
+            Gen = s->Gen[slot]
+        };
+    }
+
+    [MethodImpl(Jit.Inline)]
+    private static void JournalUnsnapshotted(WorldCtx* w, SourceColumns* s, int slot)
+    {
+        if (w->Recording != 0 && s->HotStamp.Pointer[slot] != w->RecordEpoch) JournalColumns(w, s, slot);
+    }
+
+    [MethodImpl(Jit.Inline)]
     private static void WriteMove(WorldCtx* w, SourceColumns* s, int i, float x, float y)
     {
         var oldX = s->X[i];
@@ -79,12 +112,13 @@ public static unsafe partial class World
 
         var changed = PositionChanged(w, s->Layer[i], oldX, oldY, x, y);
         if (changed) BeforeWrite(w, s, i);
+        else JournalUnsnapshotted(w, s, i);
         s->X[i] = x;
         s->Y[i] = y;
         if (changed) MarkChanged(w, s, i);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static void WriteMoveExact(WorldCtx* w, SourceColumns* s, int i, float x, float y)
     {
         var oldX = s->X[i];
@@ -93,12 +127,13 @@ public static unsafe partial class World
 
         var changed = PositionChanged(w, s->Layer[i], oldX, oldY, x, y);
         if (changed) BeforeWrite(w, s, i);
+        else JournalUnsnapshotted(w, s, i);
         s->X[i] = x;
         s->Y[i] = y;
         if (changed) MarkChanged(w, s, i);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static void WriteTurn(WorldCtx* w, SourceColumns* s, int i, ushort next)
     {
         var old = s->Angle[i];
@@ -106,11 +141,12 @@ public static unsafe partial class World
 
         var changed = AngleChanged(w, s->Layer[i], old, next);
         if (changed) BeforeWrite(w, s, i);
+        else JournalUnsnapshotted(w, s, i);
         s->Angle[i] = next;
         if (changed) MarkChanged(w, s, i);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static void WriteScale(WorldCtx* w, SourceColumns* s, int i, ushort next)
     {
         if (next == s->Scale[i] || !FootprintFits(w, s->Stamp[i], next)) return;
@@ -120,6 +156,7 @@ public static unsafe partial class World
         MarkChanged(w, s, i);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void WriteGain(WorldCtx* w, SourceColumns* s, int i, sbyte gain)
     {
         var next = (byte)Math.Clamp((int)gain, -MaxGain, MaxGain);
@@ -136,6 +173,7 @@ public static unsafe partial class World
         MarkChanged(w, s, i);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void WriteRemove(WorldCtx* w, SourceColumns* s, int i)
     {
         BeforeWrite(w, s, i);

@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 namespace Gi;
 
 internal static unsafe class PlaneFold
@@ -7,11 +8,13 @@ internal static unsafe class PlaneFold
     private const long Mask40 = (1L << 40) - 1;
     private const int Cells = TileBake.TileSize * TileBake.TileSize;
 
+    [MethodImpl(Jit.Hot)]
     public static long LimitI(PlaneStore* store)
     {
         return store->LimitI == 0 ? DefaultLimitI : store->LimitI;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static void ChargeI(PlaneStore* store, TilePlanes* set, long amount)
     {
         var next = set->BoundI + amount;
@@ -24,6 +27,7 @@ internal static unsafe class PlaneFold
         set->BoundI = (int)next;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static void ChargeQ40(PlaneStore* store, TilePlanes* set, bool tent, long amount)
     {
         var next = (tent ? set->BoundT : set->BoundB) + amount;
@@ -37,12 +41,14 @@ internal static unsafe class PlaneFold
         else set->BoundB = next;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static void AddWideI(PlaneStore* store, TilePlanes* set, int* sums, int value)
     {
         var carry = EnsureCarry(store, set);
         for (var i = 0; i < Cells; i++) carry[i] += (long)sums[i] * value;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void FoldI(PlaneStore* store, TilePlanes* set)
     {
         var carry = EnsureCarry(store, set);
@@ -56,6 +62,7 @@ internal static unsafe class PlaneFold
         set->BoundI = 0;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void FoldQ40(PlaneStore* store, TilePlanes* set, bool tent)
     {
         EnsureHighLow(store, set, tent);
@@ -83,6 +90,7 @@ internal static unsafe class PlaneFold
         else set->BoundB = 0;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static long* EnsureCarry(PlaneStore* store, TilePlanes* set)
     {
         var summary = (TileSummary*)store->Summaries.Unit(set->Summary);
@@ -96,6 +104,7 @@ internal static unsafe class PlaneFold
         return store->Wide(summary->CarryI);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void EnsureHighLow(PlaneStore* store, TilePlanes* set, bool tent)
     {
         var summary = (TileSummary*)store->Summaries.Unit(set->Summary);

@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 namespace Gi;
 
 internal static unsafe class TileHash
@@ -5,6 +6,7 @@ internal static unsafe class TileHash
     internal const ulong Offset = 0xcbf29ce484222325ul;
     internal const ulong Prime = 0x100000001b3ul;
 
+    [MethodImpl(Jit.Hot)]
     internal static ulong Of(int tile, short* page)
     {
         var words = (ulong*)page;

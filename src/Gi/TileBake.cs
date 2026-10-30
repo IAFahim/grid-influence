@@ -34,7 +34,7 @@ internal static unsafe partial class TileBake
 
     internal static bool LanesSupported
     {
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        [MethodImpl(Jit.Inline)]
         get
         {
 #if NET
@@ -45,13 +45,13 @@ internal static unsafe partial class TileBake
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     internal static int RoundQ16(int value)
     {
         return (value + 32768 + (value >> 31)) >> 16;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     internal static void LaneWeights(int* lo, int* hi, int* weight, int live, int column, int* output)
     {
 #if NET
@@ -73,7 +73,7 @@ internal static unsafe partial class TileBake
 #endif
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     internal static void LaneWeights3(
         int column, int lo0, int hi0, int w0, int lo1, int hi1, int w1, int lo2, int hi2, int w2, int* output)
     {
@@ -101,7 +101,7 @@ internal static unsafe partial class TileBake
 #endif
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     internal static bool BandLanes(int* weights, int scaled, int gain, int* lanes)
     {
 #if NET
@@ -123,7 +123,7 @@ internal static unsafe partial class TileBake
 #endif
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     internal static void AddRows(int* plane, int rowFirst, int rowEnd, int column, int* lanes)
     {
 #if NET
@@ -140,6 +140,7 @@ internal static unsafe partial class TileBake
 #endif
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static bool AnyNonZero(int* values, int count)
     {
         for (var i = 0; i < count; i++)
@@ -149,6 +150,7 @@ internal static unsafe partial class TileBake
         return false;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static bool AnyNonZero(long* values, int count)
     {
         for (var i = 0; i < count; i++)
@@ -158,6 +160,7 @@ internal static unsafe partial class TileBake
         return false;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static void AddScaledRow(int* destination, int* source, int count, int gain)
     {
         var i = 0;
@@ -172,7 +175,7 @@ internal static unsafe partial class TileBake
         for (; i < count; i++) destination[i] += source[i] * gain;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     internal static void AddConstant(int* cells, int first, int end, int value)
     {
 #if NET
@@ -194,13 +197,13 @@ internal static unsafe partial class TileBake
         for (var i = first; i < end; i++) cells[i] += value;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     internal static int RoundQ40(long value)
     {
         return (int)((value + 549755813888L + (value >> 63)) >> 40);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     internal static int AnchorQ8(float value, float origin, int scaleQ8, int anchorMask)
     {
         var position = (value - origin) * scaleQ8;
@@ -212,7 +215,7 @@ internal static unsafe partial class TileBake
         return (int)MathF.Floor(bounded) & anchorMask;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static void FootprintAnchored(
         int anchorX, int anchorY, int sampling, int size, StampVariant* v, bool clip,
         out int px, out int py, out int fx, out int fy,
@@ -226,7 +229,7 @@ internal static unsafe partial class TileBake
             out y1);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     internal static void SpanAnchored(
         int anchor, int originQ8, int length, int sampling, int size, bool clip, long cap,
         out int cell, out int phase, out int extent, out int first, out int end)
@@ -247,7 +250,7 @@ internal static unsafe partial class TileBake
         end = (int)Math.Min(cell + ((phase + full + 255) >> 8), size + 1L);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     internal static bool Unclipped(StampVariant* v, Placement* p)
     {
         var cap = v->Kind == StampKind.Tent ? MaxTentExtent : MaxExtent;
@@ -255,9 +258,7 @@ internal static unsafe partial class TileBake
                && p->ExtentY == (int)Math.Min((long)v->Height * p->Sampling, cap);
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     internal static void EmitBox(
         int* difference, int tileX0, int tileY0,
         int px, int py, int fx, int fy, int extentX, int extentY, StampVariant* v, int gain)
@@ -298,7 +299,7 @@ internal static unsafe partial class TileBake
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     internal static int ClipBands(
         int origin, int phase, int extent, int tileLo, int tileHi,
         int* bandLo, int* bandHi, int* bandWeight)
@@ -322,7 +323,7 @@ internal static unsafe partial class TileBake
         return live;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static int Band(
         int origin, int start, int end, int weight, int tileLo, int tileHi,
         int* bandLo, int* bandHi, int* bandWeight, int live)
@@ -339,6 +340,7 @@ internal static unsafe partial class TileBake
         return live + 1;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static void EmitTent(
         long* tent, int tileX0, int tileY0,
         int px, int py, int fx, int fy, int extentX, int extentY, StampVariant* v, int gain)
@@ -346,6 +348,7 @@ internal static unsafe partial class TileBake
         EmitSmooth(tent, StampKind.Tent, tileX0, tileY0, px, py, fx, fy, extentX, extentY, v, gain);
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static void EmitBell(
         long* bell, int tileX0, int tileY0,
         int px, int py, int fx, int fy, int extentX, int extentY, StampVariant* v, int gain)
@@ -353,9 +356,7 @@ internal static unsafe partial class TileBake
         EmitSmooth(bell, StampKind.Bell, tileX0, tileY0, px, py, fx, fy, extentX, extentY, v, gain);
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     internal static void EmitRaster(
         int* dense, int tileX0, int tileY0,
         int px, int py, int fx, int fy, int x1, int y1, int scaleQ8,
@@ -420,6 +421,7 @@ internal static unsafe partial class TileBake
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void EmitRasterNative(
         int* dense, int tileX0, int tileY0,
         int px, int py, int fx, int fy, int gx0, int gy0, int gx1, int gy1,
@@ -481,20 +483,36 @@ internal static unsafe partial class TileBake
     }
 
 #if NET
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static Vector128<int> Tap4(sbyte* p)
     {
         return Vector128.Widen(Vector128.Widen(Vector128.CreateScalarUnsafe(*(int*)p).AsSByte()).Item1).Item1;
     }
 #endif
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static void SmoothRow(long* sums, int y, int* output)
     {
         var row = sums + y * TileSize;
+#if NET
+        if (Vector256.IsHardwareAccelerated)
+        {
+            var half = Vector256.Create(549755813888L);
+            for (var x = 0; x < TileSize; x += 4)
+            {
+                var value = Vector256.Load(row + x);
+                var rounded =
+                    Vector256.ShiftRightArithmetic(value + half + Vector256.ShiftRightArithmetic(value, 63), 40);
+                Vector128.Narrow(rounded.GetLower(), rounded.GetUpper()).Store(output + x);
+            }
+
+            return;
+        }
+#endif
         for (var x = 0; x < TileSize; x++) output[x] = RoundQ40(row[x]);
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static ResolveOutcome Outcome(bool any, bool changed)
     {
         return (any ? ResolveOutcome.None : ResolveOutcome.Empty) |
@@ -507,28 +525,28 @@ internal static unsafe partial class TileBake
 #endif
 
 #if NET
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static Vector128<int> Load128(int* p)
     {
         if (Sse2.IsSupported) return Sse2.LoadVector128(p);
         return AdvSimd.LoadVector128(p);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static void Store128(int* p, Vector128<int> v)
     {
         if (Sse2.IsSupported) Sse2.Store(p, v);
         else AdvSimd.Store(p, v);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static Vector128<short> LoadShorts(short* p)
     {
         if (Sse2.IsSupported) return Sse2.LoadVector128(p);
         return AdvSimd.LoadVector128(p);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static void StoreShorts(short* p, Vector128<short> v)
     {
         if (Sse2.IsSupported) Sse2.Store(p, v);

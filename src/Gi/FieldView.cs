@@ -4,6 +4,7 @@ namespace Gi;
 
 public static unsafe partial class World
 {
+    [MethodImpl(Jit.Hot)]
     public static FieldView View(byte world, byte grid, byte layer)
     {
         var w = GetContext(world);
@@ -23,6 +24,7 @@ public static unsafe partial class World
         private int _tile;
         private short* _page;
 
+        [MethodImpl(Jit.Hot)]
         internal FieldView(GridCtx* g, LayerData* layer)
         {
             _layer = layer;
@@ -39,7 +41,7 @@ public static unsafe partial class World
 
         public short this[int x, int y]
         {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            [MethodImpl(Jit.Inline)]
             get
             {
                 if ((uint)x >= (uint)Size || (uint)y >= (uint)Size) return 0;
@@ -57,6 +59,7 @@ public static unsafe partial class World
             }
         }
 
+        [MethodImpl(Jit.Hot)]
         public bool TryCell(float x, float y, out int cx, out int cy)
         {
             cx = 0;
@@ -72,6 +75,7 @@ public static unsafe partial class World
             return true;
         }
 
+        [MethodImpl(Jit.Hot)]
         public short At(float x, float y)
         {
             var qx = CellQ8(x, _originX, _scaleQ8);
@@ -79,7 +83,7 @@ public static unsafe partial class World
             return this[(int)(qx >> 8), (int)(qy >> 8)];
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        [MethodImpl(Jit.Inline)]
         public void Gradient(int x, int y, out int gx, out int gy)
         {
             var lx = x & (TileBake.TileSize - 1);

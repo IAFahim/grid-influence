@@ -7,7 +7,7 @@ internal static unsafe partial class TileBake
     private const long HalfQ40 = 1L << 39;
     private const long FractionMask = (1L << 40) - 1;
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     internal static long RoundWide(long high, long low)
     {
         var whole = high + (low >> 40);
@@ -15,6 +15,7 @@ internal static unsafe partial class TileBake
         return whole + (whole >= 0 ? fraction >= HalfQ40 ? 1 : 0 : fraction > HalfQ40 ? 1 : 0);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static ResolveOutcome PublishWide(PlaneStore* store, TilePlanes* tile, int x0, int y0, int x1, int y1,
         int tick)
     {
@@ -48,6 +49,6 @@ internal static unsafe partial class TileBake
 
         UpdateSummaries(t, x0, y0, x1, y1);
         if (changed) t.Summary->Epoch = tick;
-        return Outcome(PageAny(t.Page), changed);
+        return Outcome(Occupied(t.Summary), changed);
     }
 }

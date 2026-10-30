@@ -6,13 +6,13 @@ public static unsafe partial class World
 {
     private const int FallbackCharge = 128;
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static DepositRecord* RecordOf(GridCtx* g, int slot)
     {
         return g->Records.Pointer + slot;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static void SnapshotPending(WorldCtx* w, SourceColumns* s, int slot)
     {
         var n = w->Pending.Length;
@@ -40,13 +40,13 @@ public static unsafe partial class World
         w->Journal.Pointer[journaled] = w->Pending.Pointer[n];
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static void BeforeWrite(WorldCtx* w, SourceColumns* s, int slot)
     {
         if ((int)s->Mark[slot] != w->MarkEpoch) SnapshotPending(w, s, slot);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static void MarkChanged(WorldCtx* w, SourceColumns* s, int slot)
     {
         if ((int)s->Mark[slot] == w->MarkEpoch) return;
@@ -57,6 +57,7 @@ public static unsafe partial class World
         w->Changed.Pointer[n] = slot;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void SweepChanged(WorldCtx* w)
     {
         var s = &w->Sources;
@@ -74,7 +75,7 @@ public static unsafe partial class World
         w->Changed.Resize(0);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static DepositRecord TargetOf(WorldCtx* w, SweepEntry* entry)
     {
         var layer = (byte)entry->Meta;
@@ -93,7 +94,7 @@ public static unsafe partial class World
         return target;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static DepositRecord KeyOf(WorldCtx* w, GridCtx* g, SweepEntry* entry, in DepositRecord target)
     {
         var key = target;
@@ -107,7 +108,7 @@ public static unsafe partial class World
         return key;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static bool Same(DepositRecord* rec, in DepositRecord key)
     {
         fixed (DepositRecord* k = &key)
@@ -116,6 +117,7 @@ public static unsafe partial class World
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void SweepEntryAt(WorldCtx* w, SweepEntry* entry)
     {
         var target = TargetOf(w, entry);
@@ -134,6 +136,7 @@ public static unsafe partial class World
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void EmitDelta(WorldCtx* w, int gi, in DepositRecord record, int sign)
     {
         var gain = record.Gain * sign;
@@ -182,6 +185,7 @@ public static unsafe partial class World
         EmitFallback(g, ld, &p, gain);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void EmitBoxFast(GridCtx* g, in DepositRecord record, StampVariant* v, int gain)
     {
         var sampling = (int)Math.Min(((long)g->ScaleQ8 * record.Scale) >> 8, int.MaxValue);
@@ -206,7 +210,7 @@ public static unsafe partial class World
         EmitBoxDelta(g, ld, px, py, fx, fy, extentX, extentY, cx0, cy0, cx1, cy1, v->Constant, gain);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static int* IntPlane(GridCtx* g, LayerData* ld, int tile, int amount)
     {
         var set = EnsureSet(g, ld, tile);
@@ -215,6 +219,7 @@ public static unsafe partial class World
         return ld->Store.Cells(*set).I;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static long* QPlane(LayerData* ld, TilePlanes* set, bool tent, long amount)
     {
         PrepareTransientSet(ld, set);
@@ -225,6 +230,7 @@ public static unsafe partial class World
         return tent ? cells.T : cells.B;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static bool EmitBoxNarrow(
         GridCtx* g, LayerData* ld, int px, int py, int fx, int fy, int extentX, int extentY, int constant, int gain)
     {
@@ -303,9 +309,7 @@ public static unsafe partial class World
         return true;
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static void EmitBoxDelta(
         GridCtx* g, LayerData* ld, int px, int py, int fx, int fy, int extentX, int extentY,
         int cx0, int cy0, int cx1, int cy1, int constant, int gain)
@@ -414,6 +418,7 @@ public static unsafe partial class World
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void EmitKernelTaps(GridCtx* g, LayerData* ld, in KernelTaps taps, int px, int py, int gain)
     {
         var kx0 = px + taps.OriginX;
@@ -504,6 +509,7 @@ public static unsafe partial class World
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void EmitFallback(GridCtx* g, LayerData* ld, Placement* p, int gain)
     {
         var cx0 = Math.Max(p->X0, 0);
@@ -560,74 +566,65 @@ public static unsafe partial class World
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void PublishDirty(WorldCtx* w)
     {
         for (var gi = 0; gi < w->GridCount; gi++)
         {
             var g = w->Grids + gi;
-            var tps = g->TilesPerSide;
             for (var l = 0; l < w->LayerCount; l++)
             {
                 if (IsDerived(w, l)) continue;
 
                 var ld = g->Layers + l;
                 var transient = IsTransient(w, l);
-                if (transient)
-                {
-                    FlushHistogram(w, gi, g, ld, (byte)l);
-                    RestartStale(g, ld);
-                }
-
-                if (ld->InDirty == null) continue;
-
-                var dirty = ld->Dirty.Pointer;
-                var rects = ld->Rects.Pointer;
-                var kept = 0;
-                for (var i = 0; i < ld->Dirty.Length; i++)
-                {
-                    var tile = dirty[i];
-                    ld->InDirty[tile] = 0;
-                    var set = ld->SetOf(tile);
-                    if (set == null) continue;
-
-                    var rect = rects + i;
-                    if (transient) PrepareTransientSet(ld, set);
-                    var outcome = TileBake.Publish(&ld->Store, set, rect->X0, rect->Y0, rect->X1, rect->Y1, w->Tick);
-                    bool dropped;
-                    if ((outcome & ResolveOutcome.Empty) != 0 && (transient || ld->Store.PlanesZero(*set)))
-                    {
-                        DropPage(ld, tile);
-                        ld->Max.Update(tps, tile, 0);
-                        dropped = true;
-                    }
-                    else
-                    {
-                        ld->Max.Update(tps, tile, ld->Store.Cells(*set).Summary->Max);
-                        if (transient) RetireTransientTile(ld, set, tile);
-                        dropped = false;
-                    }
-
-                    if (dropped || (outcome & ResolveOutcome.Changed) != 0) RefreshTileHash(g, ld, tile);
-                    if ((outcome & ResolveOutcome.Changed) != 0) dirty[kept++] = tile;
-                }
-
-                ld->Dirty.Resize(kept);
-                ld->Rects.Resize(0);
+                if (transient) PlanTransient(w, gi, g, ld, (byte)l);
+                if (ld->InDirty != null) PublishTiles(w, g, ld, transient);
+                if (transient) CommitTransient(g, ld);
             }
         }
     }
 
-    private static void RestartStale(GridCtx* g, LayerData* ld)
+    [MethodImpl(Jit.Hot)]
+    private static void PublishTiles(WorldCtx* w, GridCtx* g, LayerData* ld, bool transient)
     {
-        for (var i = 0; i < ld->Stale.Length; i++)
+        var tps = g->TilesPerSide;
+        var dirty = ld->Dirty.Pointer;
+        var rects = ld->Rects.Pointer;
+        var kept = 0;
+        for (var i = 0; i < ld->Dirty.Length; i++)
         {
-            var dirty = DirtyIndex(g, ld, ld->Stale.Pointer[i]);
-            ld->Rects.Pointer[dirty] = new TileRect { X0 = 0, Y0 = 0, X1 = TileBake.TileSize, Y1 = TileBake.TileSize };
+            var tile = dirty[i];
+            ld->InDirty[tile] = 0;
+            var set = ld->SetOf(tile);
+            if (set == null) continue;
+
+            var rect = rects + i;
+            if (transient) PrepareTransientSet(ld, set);
+            var outcome = TileBake.Publish(&ld->Store, set, rect->X0, rect->Y0, rect->X1, rect->Y1, w->Tick);
+            bool dropped;
+            if ((outcome & ResolveOutcome.Empty) != 0 && (transient || ld->Store.PlanesZero(*set)))
+            {
+                DropPage(ld, tile);
+                ld->Max.Update(tps, tile, 0);
+                dropped = true;
+            }
+            else
+            {
+                ld->Max.Update(tps, tile, ld->Store.Cells(*set).Summary->Max);
+                if (transient) RetireTransientTile(ld, set, tile);
+                dropped = false;
+            }
+
+            if (dropped || (outcome & ResolveOutcome.Changed) != 0) RefreshTileHash(g, ld, tile);
+            if ((outcome & ResolveOutcome.Changed) != 0) dirty[kept++] = tile;
         }
 
-        ld->Stale.Resize(0);
+        ld->Dirty.Resize(kept);
+        ld->Rects.Resize(0);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void PrepareTransientSet(LayerData* ld, TilePlanes* set)
     {
         if (set->Stale == 0) return;
@@ -640,6 +637,7 @@ public static unsafe partial class World
         set->Stale = 0;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void RetireTransientTile(LayerData* ld, TilePlanes* set, int tile)
     {
         set->Stale = 1;

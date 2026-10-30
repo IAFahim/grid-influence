@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Buffers.Binary;
 
 namespace Gi;
@@ -6,6 +7,7 @@ internal unsafe ref struct SnapshotWriter
 {
     private readonly Span<byte> _buffer;
 
+    [MethodImpl(Jit.Hot)]
     public SnapshotWriter(Span<byte> buffer)
     {
         _buffer = buffer;
@@ -14,60 +16,70 @@ internal unsafe ref struct SnapshotWriter
 
     private int Written { get; set; }
 
+    [MethodImpl(Jit.Hot)]
     public void U32(uint value)
     {
         BinaryPrimitives.WriteUInt32LittleEndian(_buffer.Slice(Written, 4), value);
         Written += 4;
     }
 
+    [MethodImpl(Jit.Hot)]
     public void U64(ulong value)
     {
         BinaryPrimitives.WriteUInt64LittleEndian(_buffer.Slice(Written, 8), value);
         Written += 8;
     }
 
+    [MethodImpl(Jit.Hot)]
     public void U16(ushort value)
     {
         BinaryPrimitives.WriteUInt16LittleEndian(_buffer.Slice(Written, 2), value);
         Written += 2;
     }
 
+    [MethodImpl(Jit.Hot)]
     public void I16(short value)
     {
         BinaryPrimitives.WriteInt16LittleEndian(_buffer.Slice(Written, 2), value);
         Written += 2;
     }
 
+    [MethodImpl(Jit.Hot)]
     public void I32(int value)
     {
         BinaryPrimitives.WriteInt32LittleEndian(_buffer.Slice(Written, 4), value);
         Written += 4;
     }
 
+    [MethodImpl(Jit.Hot)]
     public void I64(long value)
     {
         BinaryPrimitives.WriteInt64LittleEndian(_buffer.Slice(Written, 8), value);
         Written += 8;
     }
 
+    [MethodImpl(Jit.Hot)]
     public void F32(float value)
     {
         var bits = *(int*)&value;
         I32(bits);
     }
 
+    [MethodImpl(Jit.Hot)]
     public void Byte(byte value)
     {
         _buffer[Written] = value;
         Written++;
     }
 
+    [MethodImpl(Jit.Hot)]
     public void I8(sbyte value)
     {
         _buffer[Written] = *(byte*)&value;
         Written++;
     }
 
+    [MethodImpl(Jit.Hot)]
     public void Copy(byte* source, int bytes)
     {
         new Span<byte>(source, bytes).CopyTo(_buffer.Slice(Written, bytes));
@@ -80,6 +92,7 @@ internal unsafe ref struct SnapshotReader
     private readonly ReadOnlySpan<byte> _buffer;
     private int _cursor;
 
+    [MethodImpl(Jit.Hot)]
     public SnapshotReader(ReadOnlySpan<byte> buffer)
     {
         _buffer = buffer;
@@ -90,6 +103,7 @@ internal unsafe ref struct SnapshotReader
 
     public readonly int Position => _cursor;
 
+    [MethodImpl(Jit.Hot)]
     public SnapshotReader From(int position)
     {
         var clone = this;
@@ -99,6 +113,7 @@ internal unsafe ref struct SnapshotReader
 
     private readonly int Remaining => _buffer.Length - _cursor;
 
+    [MethodImpl(Jit.Hot)]
     public bool U32(out uint value)
     {
         value = 0;
@@ -108,6 +123,7 @@ internal unsafe ref struct SnapshotReader
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     public bool U64(out ulong value)
     {
         value = 0;
@@ -117,6 +133,7 @@ internal unsafe ref struct SnapshotReader
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     public bool U16(out ushort value)
     {
         value = 0;
@@ -126,6 +143,7 @@ internal unsafe ref struct SnapshotReader
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     public bool I16(out short value)
     {
         value = 0;
@@ -135,6 +153,7 @@ internal unsafe ref struct SnapshotReader
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     public bool I32(out int value)
     {
         value = 0;
@@ -144,6 +163,7 @@ internal unsafe ref struct SnapshotReader
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     public bool I64(out long value)
     {
         value = 0;
@@ -153,6 +173,7 @@ internal unsafe ref struct SnapshotReader
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     public bool F32(out float value)
     {
         value = 0f;
@@ -161,6 +182,7 @@ internal unsafe ref struct SnapshotReader
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     public bool Byte(out byte value)
     {
         value = 0;
@@ -170,6 +192,7 @@ internal unsafe ref struct SnapshotReader
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     public bool I8(out sbyte value)
     {
         value = 0;
@@ -178,6 +201,7 @@ internal unsafe ref struct SnapshotReader
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     public bool Skip(int bytes)
     {
         if (Remaining < bytes) return false;
@@ -185,6 +209,7 @@ internal unsafe ref struct SnapshotReader
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     public bool Copy(byte* destination, int bytes)
     {
         if (Remaining < bytes) return false;
@@ -217,6 +242,7 @@ public static unsafe partial class World
 
     private const byte SnapshotEpochsAllocated = 1;
 
+    [MethodImpl(Jit.Hot)]
     public static int SnapshotSize(byte world)
     {
         var w = GetContext(world);
@@ -239,6 +265,7 @@ public static unsafe partial class World
         return size > int.MaxValue ? 0 : (int)size;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static bool TrySnapshot(byte world, Span<byte> destination, out int written)
     {
         written = 0;
@@ -250,6 +277,7 @@ public static unsafe partial class World
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static bool TryRestore(byte world, ReadOnlySpan<byte> data)
     {
         var w = GetContext(world);
@@ -262,6 +290,7 @@ public static unsafe partial class World
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static bool SnapshotQuiescent(WorldCtx* w)
     {
         if (w == null || w->Pending.Length != 0 || w->Changed.Length != 0 || w->Recording != 0) return false;
@@ -280,6 +309,7 @@ public static unsafe partial class World
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static int SnapshotStampMap(WorldCtx* w, byte* usage)
     {
         new Span<byte>(usage, StampCatalog.MaxStamps).Clear();
@@ -298,6 +328,7 @@ public static unsafe partial class World
         return count;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static long SnapshotLayerBytes(GridCtx* g, int layer)
     {
         var ld = g->Layers + layer;
@@ -329,6 +360,7 @@ public static unsafe partial class World
         return size;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static int SnapshotWideCount(TileSummary* summary)
     {
         var count = 0;
@@ -340,6 +372,7 @@ public static unsafe partial class World
         return count;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void WriteSnapshot(WorldCtx* w, Span<byte> destination)
     {
         var writer = new SnapshotWriter(destination);
@@ -447,6 +480,7 @@ public static unsafe partial class World
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void WriteLayerSnapshot(GridCtx* g, int layer, ref SnapshotWriter writer)
     {
         var ld = g->Layers + layer;
@@ -519,6 +553,7 @@ public static unsafe partial class World
             }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static bool SnapshotValidates(ReadOnlySpan<byte> data)
     {
         var reader = new SnapshotReader(data);
@@ -715,6 +750,7 @@ public static unsafe partial class World
         return reader.AtEnd;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static bool NextLiveTile(ref SnapshotReader reader, byte* summary, out int tile)
     {
         tile = -1;
@@ -732,6 +768,7 @@ public static unsafe partial class World
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static bool WideMismatch(byte flags, TileSummary* summary)
     {
         if ((flags & SnapshotHasCarryI) != 0 != (summary->CarryI != 0)) return true;
@@ -741,6 +778,7 @@ public static unsafe partial class World
         return (flags & SnapshotHasLowB) != 0 != (summary->LowB != 0);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void RestoreApply(byte world, WorldCtx* w, ReadOnlySpan<byte> data)
     {
         var reader = new SnapshotReader(data);
@@ -903,6 +941,7 @@ public static unsafe partial class World
         RebuildTimed(w);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void RestoreLayer(GridCtx* g, int layer, byte* summaryBytes, ref SnapshotReader reader)
     {
         var ld = g->Layers + layer;

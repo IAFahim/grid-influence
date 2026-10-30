@@ -11,7 +11,7 @@ internal unsafe struct FreeRing
 
     public readonly int Capacity => _slots.Capacity;
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     public bool TryPop(out int slot)
     {
         if (Count == 0)
@@ -27,7 +27,7 @@ internal unsafe struct FreeRing
         return true;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     public void Push(int slot)
     {
         var tail = _head + Count;
@@ -36,12 +36,14 @@ internal unsafe struct FreeRing
         Count++;
     }
 
+    [MethodImpl(Jit.Hot)]
     public void Clear()
     {
         _head = 0;
         Count = 0;
     }
 
+    [MethodImpl(Jit.Hot)]
     public void Reserve(int size)
     {
         var current = _slots.Length;
@@ -62,6 +64,7 @@ internal unsafe struct FreeRing
         _head = 0;
     }
 
+    [MethodImpl(Jit.Hot)]
     public void Release()
     {
         _slots.Free();

@@ -583,7 +583,7 @@ public sealed unsafe class KernelCacheTests
     }
 
     [Fact]
-    public void Cache_StoresHitsEvictsRoundRobinAndSkipsOversizedKernels()
+    public void Cache_StoresHitsKeepsAWorkingSetResidentEvictsOnOverflowAndSkipsOversizedKernels()
     {
         var world = NewWorld();
         try
@@ -612,17 +612,53 @@ public sealed unsafe class KernelCacheTests
             Assert.True(KernelFactory.TryGetTaps(w, 0, stamp, 0, Layer.Precision.Exact, &again, out var second));
             Assert.Equal(taps.Cells[0], second.Cells[0]);
 
-            for (var phase = 2; phase <= KernelCache.EntryCount + 1; phase++)
+            var resident = new List<KernelKey> { key };
+            var phase = 2;
+            for (; resident.Count < KernelCache.EntryCount; phase++)
             {
-                w->Kernels.BeginFrame();
                 var placement = PlaceAt(phase);
+                w->Kernels.BeginFrame();
                 Assert.True(KernelFactory.TryGetTaps(w, 0, stamp, 0, Layer.Precision.Exact, &placement, out _));
+                resident.Add(new KernelKey(stamp, placement.Sampling, 0, placement.Fx, placement.Fy, 0));
             }
 
-            Assert.True(w->Kernels.Find(key.Main, key.Turn) == null);
-            var last = PlaceAt(KernelCache.EntryCount + 1);
-            var lastKey = new KernelKey(stamp, last.Sampling, 0, last.Fx, last.Fy, 0);
-            Assert.True(w->Kernels.Find(lastKey.Main, lastKey.Turn) != null);
+            Assert.Equal(KernelCache.EntryCount, resident.Count);
+            foreach (var residentKey in resident)
+                Assert.True(w->Kernels.Find(residentKey.Main, residentKey.Turn) != null,
+                    "a working set within the entry count stays fully resident");
+            Assert.Equal(KernelCache.EntryCount, w->Kernels.LiveEntries);
+
+            w->Kernels.BeginFrame();
+            var overflow = PlaceAt(phase);
+            Assert.True(KernelFactory.TryGetTaps(w, 0, stamp, 0, Layer.Precision.Exact, &overflow, out _));
+            Assert.Equal(KernelCache.EntryCount, w->Kernels.LiveEntries);
+            var evicted = 0;
+            foreach (var residentKey in resident)
+                if (w->Kernels.Find(residentKey.Main, residentKey.Turn) == null)
+                    evicted++;
+            Assert.Equal(1, evicted);
+            var overflowKey = new KernelKey(stamp, overflow.Sampling, 0, overflow.Fx, overflow.Fy, 0);
+            Assert.True(w->Kernels.Find(overflowKey.Main, overflowKey.Turn) != null);
+
+            var churned = new List<KernelKey>();
+            for (; phase < 256; phase++)
+            {
+                var placement = PlaceAt(phase);
+                w->Kernels.BeginFrame();
+                Assert.True(KernelFactory.TryGetTaps(w, 0, stamp, 0, Layer.Precision.Exact, &placement, out _));
+                churned.Add(new KernelKey(stamp, placement.Sampling, 0, placement.Fx, placement.Fy, 0));
+            }
+
+            Assert.Equal(KernelCache.EntryCount, w->Kernels.LiveEntries);
+            var served = 0;
+            foreach (var churnedKey in churned)
+                if (w->Kernels.Find(churnedKey.Main, churnedKey.Turn) != null)
+                    served++;
+            Assert.Equal(churned.Count, served);
+            foreach (var retiredKey in resident.Take(resident.Count - 1))
+                Assert.True(w->Kernels.Find(retiredKey.Main, retiredKey.Turn) == null,
+                    "a full table evicts in insertion order");
+            Assert.True(w->Kernels.Find(resident[^1].Main, resident[^1].Turn) != null);
 
             var big = Stamp.Box(100, 100, 60);
             Assert.True(TileBake.Place(300.5f, 300.5f, 0f, 0f, 256, Size, StampCatalog.Get(big), 0, 256,
@@ -642,7 +678,7 @@ public sealed unsafe class KernelCacheTests
     }
 
     [Fact]
-    public void InsertCap_ClosesAfterEightInsertsAndReopensEachFrame()
+    public void InsertCap_ClosesAfterTheFrameBudgetAndReopensEachFrame()
     {
         var world = NewWorld();
         try

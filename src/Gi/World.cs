@@ -14,7 +14,7 @@ internal unsafe struct SourceColumn<T> where T : unmanaged
 
     public ref T this[int slot]
     {
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        [MethodImpl(Jit.Inline)]
         get => ref Chunks[slot >> SourceColumns.ChunkBits][slot & SourceColumns.ChunkMask];
     }
 }
@@ -51,6 +51,7 @@ internal unsafe struct SourceColumns
 
     public readonly int Slots => Chunks << ChunkBits;
 
+    [MethodImpl(Jit.Hot)]
     public void AddChunks(int chunks)
     {
         if (Chunks == 0)
@@ -85,6 +86,7 @@ internal unsafe struct SourceColumns
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     public void Release()
     {
         ReleaseColumn(ref X);
@@ -110,6 +112,7 @@ internal unsafe struct SourceColumns
         Free.Release();
     }
 
+    [MethodImpl(Jit.Hot)]
     private void ReleaseColumn<T>(ref SourceColumn<T> column) where T : unmanaged
     {
         if (column.Chunks == null) return;
@@ -138,8 +141,9 @@ internal unsafe struct LayerData
     public NativeBuffer<TileRect> Rects;
     public Pyramid<short, ShortMaxOp> Max;
     public Pyramid<int, EpochMaxOp> EpochTree;
+    public int* PageIndex;
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     public readonly TilePlanes* SetOf(int tile)
     {
         var directory = Directory;
@@ -149,20 +153,24 @@ internal unsafe struct LayerData
         return index < 0 ? null : (TilePlanes*)Sets.Unit(index);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     public readonly short* PageOf(int tile)
     {
-        var set = SetOf(tile);
-        return set == null ? null : (short*)Store.Pages.Unit(set->Page);
+        var table = PageIndex;
+        if (table == null) return null;
+
+        var index = table[tile];
+        return index < 0 ? null : (short*)(Store.Pages.Region + ((nuint)index << World.PageShift));
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     public readonly PlaneCells CellsOf(int tile)
     {
         var set = SetOf(tile);
         return set == null ? default : Store.Cells(*set);
     }
 
+    [MethodImpl(Jit.Hot)]
     public readonly TileSummary* SummaryOf(int tile)
     {
         var set = SetOf(tile);
@@ -254,10 +262,11 @@ public static unsafe partial class World
     internal const int MaxSourceSlots = 1 << 24;
     private const int Cells = TileBake.TileSize * TileBake.TileSize;
     internal const int PageBytes = Cells * sizeof(short);
+    internal const int PageShift = 11;
 
     private static int _worldCount;
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     internal static WorldCtx* GetContext(byte world)
     {
         if (world >= _worldCount) return null;
@@ -266,6 +275,7 @@ public static unsafe partial class World
         return w->Grids == null ? null : w;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static byte ReserveSlot()
     {
         for (var i = 0; i < _worldCount; i++)
@@ -277,6 +287,7 @@ public static unsafe partial class World
         return (byte)_worldCount++;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static byte New()
     {
         Runtime.Ensure();
@@ -290,6 +301,7 @@ public static unsafe partial class World
         return id;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static bool Free(byte world)
     {
         var w = GetContext(world);
@@ -311,11 +323,13 @@ public static unsafe partial class World
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static int Revision(byte world)
     {
         return world < _worldCount ? Runtime.WorldRevisions[world] : 0;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static bool Teardown()
     {
         if (Runtime.Worlds == null) return true;
@@ -330,6 +344,7 @@ public static unsafe partial class World
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static bool TryGetSourceSpec(byte world, SourceId source, out SourceSpec spec)
     {
         spec = default;
@@ -346,6 +361,7 @@ public static unsafe partial class World
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static int CopyWorldIds(Span<byte> destination)
     {
         var count = 0;
@@ -359,6 +375,7 @@ public static unsafe partial class World
         return count;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static void ProcessAll()
     {
         for (var i = 0; i < _worldCount; i++)
@@ -366,12 +383,14 @@ public static unsafe partial class World
                 Process((byte)i);
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static int GridCount(byte world)
     {
         var w = GetContext(world);
         return w == null ? 0 : w->GridCount;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static int CopyGridIds(byte world, Span<byte> destination)
     {
         var w = GetContext(world);
@@ -382,6 +401,7 @@ public static unsafe partial class World
         return count;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static bool TryGetGridSpec(byte world, byte grid, out int power, out float x, out float y, out float size)
     {
         power = 0;
@@ -399,12 +419,14 @@ public static unsafe partial class World
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static int LayerCount(byte world)
     {
         var w = GetContext(world);
         return w == null ? 0 : w->LayerCount;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static int CopyLayerIds(byte world, Span<byte> destination)
     {
         var w = GetContext(world);
@@ -415,6 +437,7 @@ public static unsafe partial class World
         return count;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void FreeGrid(GridCtx* g, int layerCount)
     {
         for (var l = 0; l < layerCount; l++) FreeLayer(g->Layers + l);
@@ -422,12 +445,14 @@ public static unsafe partial class World
         g->Records.Free();
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void FreeLayer(LayerData* ld)
     {
         ld->Sets.Reset();
         ld->Store.Reset();
         if (ld->Directory != null) NativeHeap.Free(ld->Directory);
         ld->Directory = null;
+        ld->PageIndex = null;
         ld->LivePages = 0;
         NativeHeap.Free(ld->InDirty);
         NativeHeap.Free(ld->Epochs);
@@ -449,6 +474,7 @@ public static unsafe partial class World
         ld->EpochTree.Reset();
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static byte AddGrid(byte world, int power, float x, float y, float size)
     {
         if (!ValidationRules.IsPower(power)) throw new ArgumentOutOfRangeException(nameof(power));
@@ -482,9 +508,18 @@ public static unsafe partial class World
             if (IsDerived(w, l))
                 g->Layers[l].Derived = 1;
         g->Records.Resize(w->Sources.Slots);
+        var s = &w->Sources;
+        for (var i = 0; i < s->Count; i++)
+        {
+            if (s->Alive[i] == 0) continue;
+            BeforeWrite(w, s, i);
+            MarkChanged(w, s, i);
+        }
+
         return id;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static void ConfigureConvolveCost(byte world, byte layer, long cost)
     {
         var w = GetContext(world);
@@ -493,12 +528,14 @@ public static unsafe partial class World
         for (var gi = 0; gi < w->GridCount; gi++) EnsureHist(w->Grids[gi].Layers + layer)->ConvolveCost = cost;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static void DisableKernelInserts(byte world)
     {
         var w = GetContext(world);
         if (w != null) w->Kernels.InsertsDisabled = true;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static void ConfigureFoldLimits(byte world, long limitI, long limitQ40)
     {
         var w = GetContext(world);
@@ -508,6 +545,7 @@ public static unsafe partial class World
         w->FoldLimitQ40 = limitQ40;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static byte AddLayer(byte world, Layer.Precision precision, bool transient = false)
     {
         if (!ValidationRules.IsPhaseBits(precision.PhaseBits) || !ValidationRules.IsTurnBits(precision.TurnBits))
@@ -528,14 +566,14 @@ public static unsafe partial class World
         return (byte)id;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static Layer.Precision LayerPrecision(WorldCtx* w, byte layer)
     {
         var r = w->Recipes + layer;
         return new Layer.Precision(r->PhaseBits, r->TurnBits);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     internal static bool PositionChanged(WorldCtx* w, byte layer, float oldX, float oldY, float newX, float newY)
     {
         var mask = w->Recipes[layer].AnchorMask;
@@ -553,17 +591,19 @@ public static unsafe partial class World
         return false;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static bool AngleChanged(WorldCtx* w, byte layer, ushort oldAngle, ushort newAngle)
     {
         return w->GridCount > 0 && ((oldAngle ^ newAngle) & w->Recipes[layer].TurnMask) != 0;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static SourceId Place(byte world, byte layer, float x, float y, byte stamp, sbyte gain)
     {
         return Place(world, layer, x, y, stamp, gain, out _);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static SourceId Place(byte world, byte layer, float x, float y, byte stamp, sbyte gain,
         out WriteStatus status)
     {
@@ -574,12 +614,13 @@ public static unsafe partial class World
         else if (!StampCatalog.Valid(stamp) || !FootprintFits(w, stamp, UnitScale)) status = WriteStatus.InvalidStamp;
         else if (!float.IsFinite(x) || !float.IsFinite(y)) status = WriteStatus.NonFinite;
         else
-            status = PlaceSlot(w, layer, x, y, stamp, gain, out id) == SourceResultStatus.Applied
+            status = PlaceSlot(w, layer, x, y, stamp, gain, UnitScale, out id) == SourceResultStatus.Applied
                 ? WriteStatus.Applied
                 : WriteStatus.CapacityReached;
         return id;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static WriteStatus Move(byte world, SourceId source, float x, float y)
     {
         if (!float.IsFinite(x) || !float.IsFinite(y)) return WriteStatus.NonFinite;
@@ -589,6 +630,7 @@ public static unsafe partial class World
         return WriteStatus.Applied;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static WriteStatus SetGain(byte world, SourceId source, sbyte gain)
     {
         if (!TrySource(world, source, out var w, out var s, out var i)) return WriteStatus.StaleSource;
@@ -597,6 +639,7 @@ public static unsafe partial class World
         return WriteStatus.Applied;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static WriteStatus Turn(byte world, SourceId source, float angle)
     {
         if (!float.IsFinite(angle)) return WriteStatus.NonFinite;
@@ -606,6 +649,7 @@ public static unsafe partial class World
         return WriteStatus.Applied;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static WriteStatus Scale(byte world, SourceId source, float scale)
     {
         if (!float.IsFinite(scale)) return WriteStatus.NonFinite;
@@ -618,6 +662,7 @@ public static unsafe partial class World
         return WriteStatus.Applied;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static WriteStatus Remove(byte world, SourceId source)
     {
         if (!TrySource(world, source, out var w, out var s, out var i)) return WriteStatus.StaleSource;
@@ -626,6 +671,7 @@ public static unsafe partial class World
         return WriteStatus.Applied;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static void Clear(byte world)
     {
         var w = GetContext(world);
@@ -680,6 +726,7 @@ public static unsafe partial class World
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     public static void Record(byte world)
     {
         var w = GetContext(world);
@@ -700,6 +747,7 @@ public static unsafe partial class World
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     public static void StopRecording(byte world)
     {
         var w = GetContext(world);
@@ -709,6 +757,7 @@ public static unsafe partial class World
         w->Recording = 0;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static void Rewind(byte world)
     {
         var w = GetContext(world);
@@ -750,6 +799,7 @@ public static unsafe partial class World
                 s->Free.Push(i);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void RestoreColumns(SourceColumns* s, JournalEntry* entry)
     {
         var slot = entry->Slot;
@@ -764,6 +814,7 @@ public static unsafe partial class World
         if (entry->Alive != 0) s->Gen[slot] = entry->Gen;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static bool UsesStamp(byte stamp)
     {
         for (var wi = 0; wi < _worldCount; wi++)
@@ -779,15 +830,17 @@ public static unsafe partial class World
         return false;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static void FlushKernels()
     {
         for (var wi = 0; wi < _worldCount; wi++)
         {
             var w = Runtime.Worlds + wi;
-            if (w->Grids != null) w->Kernels.Clear();
+            if (w->Grids != null) w->Kernels.RequestFlush();
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static bool References(NativeBuffer<JournalEntry> entries, byte stamp)
     {
         for (var i = 0; i < entries.Length; i++)
@@ -796,6 +849,7 @@ public static unsafe partial class World
         return false;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static bool TrySource(byte world, SourceId source, out WorldCtx* w, out SourceColumns* s, out int index)
     {
         w = GetContext(world);
@@ -804,6 +858,7 @@ public static unsafe partial class World
         return s != null && (uint)index < (uint)s->Count && s->Alive[index] != 0 && source.Generation == s->Gen[index];
     }
 
+    [MethodImpl(Jit.Hot)]
     private static LayerData* EnsureDirty(GridCtx* g, byte layer)
     {
         var ld = g->Layers + layer;
@@ -812,6 +867,7 @@ public static unsafe partial class World
         return ld;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void EnsureEpochs(GridCtx* g, LayerData* ld)
     {
         if (ld->Epochs != null) return;
@@ -820,14 +876,17 @@ public static unsafe partial class World
         ld->EpochTree.Ensure(g->TilesPerSide);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void EnsureDirectory(GridCtx* g, LayerData* ld)
     {
         if (ld->Directory != null) return;
 
-        ld->Directory = (int*)NativeHeap.AllocZeroed((nuint)g->TileCount * sizeof(int));
-        new Span<int>(ld->Directory, g->TileCount).Fill(-1);
+        ld->Directory = (int*)NativeHeap.AllocZeroed((nuint)g->TileCount * 2 * sizeof(int));
+        new Span<int>(ld->Directory, g->TileCount * 2).Fill(-1);
+        ld->PageIndex = ld->Directory + g->TileCount;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static TilePlanes* EnsureSet(GridCtx* g, LayerData* ld, int tile)
     {
         var set = ld->SetOf(tile);
@@ -838,10 +897,12 @@ public static unsafe partial class World
         set = (TilePlanes*)ld->Sets.Unit(index);
         *set = ld->Derived != 0 ? ld->Store.TakeDerived() : ld->Store.Take();
         ld->Directory[tile] = index;
+        ld->PageIndex[tile] = set->Page;
         ld->LivePages++;
         return set;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void DropPage(LayerData* ld, int tile)
     {
         var index = ld->Directory[tile];
@@ -851,9 +912,11 @@ public static unsafe partial class World
         ld->Store.Give(*set);
         ld->Sets.Give(index);
         ld->Directory[tile] = -1;
+        ld->PageIndex[tile] = -1;
         ld->LivePages--;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static int DirtyIndex(GridCtx* g, LayerData* ld, int tile)
     {
         EnsureEpochs(g, ld);
@@ -875,14 +938,13 @@ public static unsafe partial class World
         return n;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void MarkDirty(GridCtx* g, LayerData* ld, int tile)
     {
         DirtyIndex(g, ld, tile);
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     public static void Process(byte world)
     {
         var w = GetContext(world);
@@ -920,6 +982,7 @@ public static unsafe partial class World
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void EnsureSourceCapacity(SourceColumns* s, WorldCtx* w, int required)
     {
         var initialized = s->Slots;
@@ -941,7 +1004,7 @@ public static unsafe partial class World
                 w->Grids[gi].Records.Resize(capacity);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     public static short Query(byte world, byte grid, byte layer, int x, int y)
     {
         var w = GetContext(world);
@@ -956,9 +1019,7 @@ public static unsafe partial class World
         return page[(y & (TileBake.TileSize - 1)) * TileBake.TileSize + (x & (TileBake.TileSize - 1))];
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     public static long Query(byte world, byte grid, byte layer, int x, int y, int width, int height)
     {
         var w = GetContext(world);
@@ -1016,9 +1077,7 @@ public static unsafe partial class World
         return sum;
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static long PartialSum(short* page, int lx0, int ly0, int lx1, int ly1)
     {
 #if NET
@@ -1082,9 +1141,7 @@ public static unsafe partial class World
         return sum;
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     public static void QueryRegion(
         byte world, byte grid, byte layer, int x, int y, int width, int height, short* destination)
     {
@@ -1145,7 +1202,7 @@ public static unsafe partial class World
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static void CopyRun(short* destination, short* source, int count)
     {
 #if NET
@@ -1168,7 +1225,7 @@ public static unsafe partial class World
         for (var i = 0; i < count; i++) destination[i] = source[i];
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static void FillRun(short* destination, int count)
     {
 #if NET
@@ -1191,6 +1248,7 @@ public static unsafe partial class World
         for (var i = 0; i < count; i++) destination[i] = 0;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static short QueryAt(byte world, byte grid, byte layer, float x, float y)
     {
         var w = GetContext(world);
@@ -1202,6 +1260,7 @@ public static unsafe partial class World
         return Query(world, grid, layer, cx, cy);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static short QueryMax(byte world, byte grid, byte layer, out int x, out int y)
     {
         x = 0;
@@ -1214,6 +1273,7 @@ public static unsafe partial class World
         return MaxQueries.Best(ld->Max, g->TilesPerSide, ld, out x, out y);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static short QueryMax(byte world, byte grid, byte layer,
         int x, int y, int width, int height, out int bestX, out int bestY)
     {
@@ -1233,6 +1293,7 @@ public static unsafe partial class World
         return MaxQueries.Best(ld->Max, g->TilesPerSide, ld, x0, y0, (int)x1, (int)y1, out bestX, out bestY);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static void QueryGradient(byte world, byte grid, byte layer, float x, float y, out int gx, out int gy)
     {
         gx = 0;
@@ -1247,6 +1308,7 @@ public static unsafe partial class World
         gy = Query(world, grid, layer, cx, cy + 1) - Query(world, grid, layer, cx, cy - 1);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static int ChangedTiles(byte world, byte grid, byte layer, int since, int* destination)
     {
         var w = GetContext(world);
@@ -1259,6 +1321,7 @@ public static unsafe partial class World
         return CollectNewer(g, g->Layers + layer, since, destination);
     }
 
+    [MethodImpl(Jit.Hot)]
     public static int ChangedTiles(byte world, byte grid, byte layer, int* destination)
     {
         var w = GetContext(world);
@@ -1276,38 +1339,45 @@ public static unsafe partial class World
         public readonly uint Slot;
         public readonly uint Generation;
 
+        [MethodImpl(Jit.Hot)]
         public SourceId(uint slot, uint generation)
         {
             Slot = slot;
             Generation = generation;
         }
 
+        [MethodImpl(Jit.Hot)]
         public bool Equals(SourceId other)
         {
             return Slot == other.Slot && Generation == other.Generation;
         }
 
+        [MethodImpl(Jit.Hot)]
         public override bool Equals(object? obj)
         {
             return obj is SourceId other && Equals(other);
         }
 
+        [MethodImpl(Jit.Hot)]
         public override int GetHashCode()
         {
             return (int)((Slot * 31u) ^ Generation);
         }
 
+        [MethodImpl(Jit.Hot)]
         public override string ToString()
         {
             return "slot " + Slot.ToString(CultureInfo.InvariantCulture) +
                    " generation " + Generation.ToString(CultureInfo.InvariantCulture);
         }
 
+        [MethodImpl(Jit.Hot)]
         public static bool operator ==(SourceId left, SourceId right)
         {
             return left.Equals(right);
         }
 
+        [MethodImpl(Jit.Hot)]
         public static bool operator !=(SourceId left, SourceId right)
         {
             return !left.Equals(right);
@@ -1324,6 +1394,7 @@ public static unsafe partial class World
         public readonly byte Layer;
         public readonly byte Stamp;
 
+        [MethodImpl(Jit.Hot)]
         internal SourceSpec(float x, float y, float headingRadians, float scale, sbyte gain, byte layer, byte stamp)
         {
             X = x;
@@ -1337,14 +1408,14 @@ public static unsafe partial class World
     }
 
 #if NET
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static Vector128<short> LoadShorts(short* p)
     {
         if (Sse2.IsSupported) return Sse2.LoadVector128(p);
         return AdvSimd.LoadVector128(p);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static void StoreShorts(short* p, Vector128<short> v)
     {
         if (Sse2.IsSupported) Sse2.Store(p, v);

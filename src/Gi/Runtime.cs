@@ -12,7 +12,7 @@ internal static unsafe class Runtime
     internal static int* WorldRevisions;
     private static int _revisionFloor;
 
-    [MethodImpl(MethodImplOptions.NoInlining)]
+    [MethodImpl(MethodImplOptions.NoInlining | Jit.Hot)]
     internal static void Ensure()
     {
         if (Worlds != null) return;
@@ -25,7 +25,7 @@ internal static unsafe class Runtime
         new Span<int>(WorldRevisions, World.MaxWorlds).Fill(_revisionFloor);
     }
 
-    [MethodImpl(MethodImplOptions.NoInlining)]
+    [MethodImpl(MethodImplOptions.NoInlining | Jit.Hot)]
     internal static void Release()
     {
         for (var i = 0; i < World.MaxWorlds; i++)

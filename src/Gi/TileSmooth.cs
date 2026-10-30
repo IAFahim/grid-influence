@@ -13,7 +13,7 @@ internal struct SmoothAxis
 
     public readonly long Peak => Bell ? Half * Half : Half;
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     public readonly long Weight(int cell)
     {
         var d = cell * Step + Base;
@@ -33,13 +33,14 @@ internal static unsafe partial class TileBake
     private const long BellExactHalf = 1L << 15;
     private const long MinSmoothHalf = 256;
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     internal static StampKind Effective(StampVariant* v, int extentX, int extentY)
     {
         if (v->Kind != StampKind.Bell) return v->Kind;
         return extentX >> 1 >= BellExactHalf || extentY >> 1 >= BellExactHalf ? StampKind.Raster : StampKind.Bell;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static SmoothAxis Axis(StampKind kind, int origin, int phase, int extent)
     {
         var bell = kind == StampKind.Bell;
@@ -59,16 +60,14 @@ internal static unsafe partial class TileBake
         return axis;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     internal static long Normalizer(in SmoothAxis x, in SmoothAxis y)
     {
         var peak = x.Peak * y.Peak;
         return ((1L << 40) + peak / 2) / peak;
     }
 
-    #if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    #endif
+    [MethodImpl(Jit.Hot)]
     private static void EmitSmooth(
         long* sums, StampKind kind, int tileX0, int tileY0,
         int px, int py, int fx, int fy, int extentX, int extentY, StampVariant* v, int gain)
@@ -95,7 +94,7 @@ internal static unsafe partial class TileBake
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static int BitLength(long value)
     {
 #if NET
@@ -112,6 +111,7 @@ internal static unsafe partial class TileBake
 #endif
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static void BellSamples(sbyte* samples, int width, int height, sbyte value)
     {
         var w2 = (long)width * width;

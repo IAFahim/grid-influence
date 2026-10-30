@@ -1,7 +1,9 @@
+using System.Runtime.CompilerServices;
 namespace Gi;
 
 public static unsafe partial class World
 {
+    [MethodImpl(Jit.Hot)]
     public static bool SetAllocator(
         delegate* unmanaged[Cdecl]<nuint, nuint, void*> allocate,
         delegate* unmanaged[Cdecl]<void*, void> free)

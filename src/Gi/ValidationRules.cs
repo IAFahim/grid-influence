@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 namespace Gi;
 
 internal static class ValidationRules
@@ -24,86 +25,103 @@ internal static class ValidationRules
     internal const int MaxFootprint = 512;
     internal const int MaxReachCells = 4096;
 
+    [MethodImpl(Jit.Hot)]
     internal static bool IsAxis(int axis)
     {
         return axis >= 1 && axis <= MaxAxis;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static bool IsRadius(int radius)
     {
         return radius >= 1 && radius <= MaxRadius;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static bool IsArc(int arc)
     {
         return arc >= 1 && arc <= FullArc;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static bool IsValue(int value)
     {
         return value >= MinValue && value <= MaxValue;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static bool IsGain(int gain)
     {
         return gain >= -MaxGain && gain <= MaxGain;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static bool IsCount(int count, int maximum)
     {
         return count >= 0 && count <= maximum;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static bool IsIndex(int index, int maximum)
     {
         return index >= 0 && index < maximum;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static bool IsPower(int power)
     {
         return power >= MinPower && power <= MaxPower;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static bool IsWeight(int weight)
     {
         return weight >= -MaxWeight && weight <= MaxWeight;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static bool IsShift(int shift)
     {
         return shift >= 0 && shift <= MaxShift;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static bool IsPhaseBits(int phaseBits)
     {
         return phaseBits >= 0 && phaseBits <= MaxPhaseBits;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static bool IsTurnBits(int turnBits)
     {
         return turnBits >= 0 && turnBits <= MaxTurnBits;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static bool IsFootprint(long cells)
     {
         return cells >= 0 && cells <= MaxFootprint;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static bool IsReachCells(float cells)
     {
         return cells >= 0f && cells <= MaxReachCells;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static bool IsGridSize(float size)
     {
         return float.IsFinite(size) && size > 0f;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static bool IsGridOrigin(float origin)
     {
         return float.IsFinite(origin);
     }
 
+    [MethodImpl(Jit.Hot)]
     internal static bool TryGridScaleQ8(int power, float size, out int scaleQ8)
     {
         scaleQ8 = 0;

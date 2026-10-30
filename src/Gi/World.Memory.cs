@@ -1,7 +1,9 @@
+using System.Runtime.CompilerServices;
 namespace Gi;
 
 public static unsafe partial class World
 {
+    [MethodImpl(Jit.Hot)]
     public static void Memory(
         byte world, out long storeBytes, out int liveTiles, out int pages, out int kernelEntries, out int liveSources)
     {

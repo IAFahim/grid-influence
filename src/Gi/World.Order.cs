@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 #if NET
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
@@ -7,6 +8,7 @@ namespace Gi;
 
 public static unsafe partial class World
 {
+    [MethodImpl(Jit.Hot)]
     internal static int SpatialKeys(byte world, byte grid, ReadOnlySpan<float> xs, ReadOnlySpan<float> ys,
         Span<uint> keys)
     {
@@ -42,6 +44,7 @@ public static unsafe partial class World
     }
 
 #if NET
+    [MethodImpl(Jit.Hot)]
     private static int SpatialKeysBlocks(GridCtx* g, ReadOnlySpan<float> xs, ReadOnlySpan<float> ys, Span<uint> keys,
         int count)
     {
@@ -80,6 +83,7 @@ public static unsafe partial class World
         return i;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static Vector256<int> Spread(Vector256<int> value)
     {
         value &= Vector256.Create(0x0000FFFF);

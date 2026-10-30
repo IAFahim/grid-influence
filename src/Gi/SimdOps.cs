@@ -8,13 +8,13 @@ namespace Gi;
 
 internal static unsafe class SimdOps
 {
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     internal static short HorizontalMax(Vector256<short> vector)
     {
         return HorizontalMax(Vector128.Max(vector.GetLower(), vector.GetUpper()));
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     internal static short HorizontalMax(Vector128<short> vector)
     {
         var halves = Vector128.Max(vector, Vector128.Shuffle(vector, Vector128.Create((short)4, 5, 6, 7, 0, 1, 2, 3)));
@@ -24,7 +24,7 @@ internal static unsafe class SimdOps
             .ToScalar();
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    [MethodImpl(Jit.Hot)]
     internal static int FirstEqualFlat(short* values, short target, int count)
     {
         var index = 0;
@@ -54,7 +54,7 @@ internal static unsafe class SimdOps
         return count;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    [MethodImpl(Jit.Hot)]
     internal static int FirstEqualRows(short* rows, int stride, short target, int laneCount, int rowCount)
     {
         if (Vector128.IsHardwareAccelerated && laneCount <= 8)
@@ -81,7 +81,7 @@ internal static unsafe class SimdOps
         return rowCount * stride;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    [MethodImpl(Jit.Hot)]
     internal static int FirstEqualSpan(short* values, int first, int end, short target)
     {
         var count = end - first;
@@ -112,7 +112,7 @@ internal static unsafe class SimdOps
         return end;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    [MethodImpl(Jit.Hot)]
     internal static short SegmentMax(short* row, int first, int end)
     {
         if (Vector256.IsHardwareAccelerated)
@@ -154,7 +154,7 @@ internal static unsafe class SimdOps
         return maximum;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static Vector256<int> PairSums(Vector256<short> values, Vector256<short> ones)
     {
         if (Avx2.IsSupported) return Avx2.MultiplyAddAdjacent(values, ones);
@@ -163,7 +163,7 @@ internal static unsafe class SimdOps
         return low + high;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    [MethodImpl(Jit.Hot)]
     internal static long RaggedSum(short* rows, int* rowSums, int tileX, int rowCount, int* rowLow, int* rowHigh)
     {
         if (Vector256.IsHardwareAccelerated)
@@ -256,7 +256,7 @@ internal static unsafe class SimdOps
         return sum;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    [MethodImpl(Jit.Hot)]
     internal static long LinearDelta(short* page, int* core, int top, int rowCount, int* rowLow, int* rowHigh)
     {
         const int columns = TileBake.TileSize;
@@ -332,6 +332,7 @@ internal static unsafe class SimdOps
         return delta;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static long Saturate(long value)
     {
         return Math.Clamp(value, short.MinValue, short.MaxValue);

@@ -13,7 +13,7 @@ internal struct SweepEntry
 
 public static unsafe partial class World
 {
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static SweepEntry EntryOf(SourceColumns* s, int slot)
     {
         return new SweepEntry

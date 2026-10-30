@@ -1,14 +1,10 @@
-#if NET
 using System.Runtime.CompilerServices;
-#endif
 
 namespace Gi;
 
 internal static unsafe partial class TileBake
 {
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     internal static int BoxAt(int px, int py, int fx, int fy, int extentX, int extentY, StampVariant* v, int gain,
         int cx, int cy)
     {
@@ -27,9 +23,7 @@ internal static unsafe partial class TileBake
         return value;
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     internal static void BoxCells(
         int* cells, int tileX0, int tileY0, int px, int py, int fx, int fy, int extentX, int extentY, StampVariant* v,
         int gain)
@@ -38,9 +32,7 @@ internal static unsafe partial class TileBake
         AccumulateBoxCells(cells, tileX0, tileY0, px, py, fx, fy, extentX, extentY, v, gain);
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     private static void AccumulateBoxCells(
         int* cells, int tileX0, int tileY0, int px, int py, int fx, int fy, int extentX, int extentY, StampVariant* v,
         int gain)
@@ -65,9 +57,7 @@ internal static unsafe partial class TileBake
         }
     }
 
-#if NET
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-#endif
+    [MethodImpl(Jit.Hot)]
     internal static void SmoothWeights(StampKind kind, int origin, int phase, int extent, int lo, int count,
         long* weights)
     {

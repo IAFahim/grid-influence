@@ -56,7 +56,8 @@ The rest of this file derives from seven statements.
   (`PlaneStore.Bytes`, free lists included), the engine's live-tile counter (`LivePages`, one per
   directory entry), and the live plane units those slabs hold — every live tile's page, `I`,
   `T`/`B` and summary unit, folded tiles' wide temporaries included — then counts the kernel
-  cache's occupied entries out of 32 and the sources whose alive bit is set. It reads only
+  cache's servable entries out of 128 — zero once a `Stamp.Free` has queued a flush, until the
+  owning world repairs the table — and the sources whose alive bit is set. It reads only
   existing counters, allocates nothing, throws nothing, and returns all zeros for a dead or
   never-allocated handle; `Clear` empties the live counts while the slab bytes stay (regions are
   retained, free lists grow), and `Free` returns everything to zero. `World.LayerHash(world,
@@ -104,7 +105,9 @@ before reading command payloads, writing
   `Grid.CopyIds(world, ids)` copies them into a span and returns the count, and
   `Grid.TryGetSpec(world, grid, out power, out x, out y, out size)` returns the exact
   constructor arguments — the world extent is stored, not recovered from the truncated
-  scale, so the spec round-trips bit-exact. `Layer.Count(world)` and
+  scale, so the spec round-trips bit-exact. A grid added after sources exist still receives
+  them: `Grid.New` marks every live source changed, so the next `Process` deposits into the new
+  grid exactly as if the grid had existed before the sources. `Layer.Count(world)` and
   `Layer.CopyIds(world, ids)` enumerate layers the same way, deposited and derived sharing
   one dense id space, and `Layer.TryGetRecipe(world, layer, out recipe)` inspects any live
   layer's `Layer.Recipe` (`Layer.Derivation` operator plus input layers, weights, shift, and
@@ -357,7 +360,9 @@ before reading command payloads, writing
   the `whole` mask the conjunction of the two. Every column read overwrites its mask words, so
   bits never accumulate across calls. `World.ChangedMask(world, layer, xs, ys,
   reach, since, count, words)` writes one `ulong` per 64 agents — bit set when that agent's
-  disk changed since the tick — zeros for quiet words, and returns the changed count.
+  disk changed since the tick — zeros for quiet words, and returns the changed count; each row
+  answers through the same epoch-pyramid walk as `World.Changed`, so its cost is independent of
+  the disk's reach.
   `World.Sync(world, sources, xs, ys, count)` is the fused column form of `Move`: it
   validates generations, skips no-ops, ignores rows with a non-finite position, and marks
   the changed-list entries `Move` would, batch after batch, with zero managed allocation, in one serial loop.
@@ -559,8 +564,10 @@ its serialized page. Caches are
   `Query` central difference, read from the cached page when the cell is at least one cell from
   the page edge; `view.At(x, y)` and `view.TryCell(x, y, out cx, out cy)` map world floats the
   way `QueryAt` and the column reads do. An invalid handle yields a view of size 0 that reads 0.
-  A view is valid until the next `Process`, `Clear`, `Rewind` or `World.Free` — those can
-  allocate or free pages and directories — and is for the owning thread's read phase only;
+  A view is valid until the next `Process`, `Splat`, `Clear`, `Rewind`, `TryRestore` or
+  `World.Free` — those can allocate or free pages and directories, and a transient-layer
+  `Splat` emits directly into tile sets and can grow the page slab with no `Process` in between,
+  moving every published page — and is for the owning thread's read phase only;
   reads never write, so any number of views may read concurrently with each other and never with
   mutation or `Process`. It copies nothing and allocates nothing (a coherent read costs about
   0.8 ns; `benchmarks --view` pins it to `Query` on every cell).
@@ -1120,17 +1127,30 @@ digits. Concurrency: single thread.
   out again only whole. `World.Clear` returns every unit to its slab's free list and retains the
   regions, so repopulating after a clear makes no heap calls. The shared zero page (an absent
   derived input) is allocated once with the arenas and never written afterwards. The per-world kernel
-  cache is fixed-capacity native storage held by value in `WorldCtx`: 32 entries, each owning a
-  4,096-`long` tap slot and 128 row-extent `int`s, plus a miss canvas and a row-extent scratch;
-  all five buffers are allocated zeroed together by the first insert and released exactly once
+  cache is fixed-capacity native storage held by value in `WorldCtx`: 128 entries, each owning a
+  4,096-`long` tap slot and 128 row-extent `int`s, a 256-head bucket directory hashed on the
+  full kernel key, plus a miss canvas and a row-extent scratch; all six buffers are allocated
+  zeroed together by the first insert and released exactly once
   by `World.Free` before the context is zeroed (`World.Clear` keeps entries, because stamps are
-  immutable and only a stamp id leaving the catalog can invalidate them). Entry taps are values
+  immutable and only a stamp id leaving the catalog can invalidate them). The table is fully
+  associative — any working set of at most 128 distinct keys stays resident however the keys
+  hash — and runs one FIFO hand once it is full, so a key is evicted only when a newer key
+  arrives past capacity; at most 64 kernels are inserted per frame (`FrameInsertCap`), and a
+  workload that churns more keys than that in a frame pays the exact per-kind emitters for the
+  remainder of the frame instead of unbounded rebuilds, the budget reopening at the next
+  `Process`. Entry taps are values
   copied out of the canvas, never pointers into stamp storage, so a freed stamp leaves no
   dangling reference; because a freed id can be re-baked as a different stamp, a successful
-  `Stamp.Free` clears every live world's cache in the same process-wide scan that already
-  serializes catalog mutation. A `KernelTaps` handle points either into its owning entry —
-  valid until that slot is evicted by a later insert on the same cache, flushed by
-  `Stamp.Free`, or released by `World.Free` — or into the miss canvas, valid until the next
+  `Stamp.Free` queues a flush of every live world's cache in the same process-wide scan that
+  already serializes catalog mutation — one aligned flag store per world, never a write to
+  another world's entries. A flagged cache serves no entry (`Find` misses, `World.Memory`
+  counts zero live entries), and the owning thread wipes the table at its next `Process` or at
+  the first rebuild insert, so a kernel baked for the dead id can never be served for a
+  re-baked one. A `KernelTaps` handle points either into its owning entry —
+  valid until that slot is evicted by a later insert on the same cache, released by
+  `World.Free`, or wiped by the owning thread's post-free repair; a `Stamp.Free` leaves the
+  slot's bytes untouched, so a view held across a concurrent free stays whole —
+  or into the miss canvas, valid until the next
   build on the same cache; callers consume taps before the next build. A kernel whose capture
   rectangle exceeds 4,194,304 cells is refused and the caller emits through the placement
   itself, which is exact by construction. Grid-edge clipping is folded into box extents
@@ -1262,8 +1282,10 @@ digits. Concurrency: single thread.
   counters live in the tile set, are written only by the charge, and are zero in a fresh set.
   *Alignment*: units are 64-byte aligned. *Concurrency*: owning thread only.
 - **Field view**: *Lifetime*: a `FieldView` holds the layer and grid constants it was built from
-  and one cached page pointer; both name directory and slab storage that only `Process`, `Clear`,
-  `Rewind` and `World.Free` can grow, move or release, so a view must not be used across them (a
+  and one cached page pointer; both name directory and slab storage that only `Process`, `Splat`
+  (direct emission into transient tile sets, which grows the page slab with no `Process` in
+  between), `Clear`, `Rewind`, `TryRestore` and `World.Free` can grow, move or release, so a view
+  must not be used across them (a
   stale page pointer is the one hazard, and it is confined to the caller's read phase).
   *Aliasing*: the view only reads published `int16` pages. *Alignment*: page rows are 64 B
   aligned and every access is a naturally aligned `int16` load. *Bounds*: every cell read is
@@ -1417,11 +1439,30 @@ digits. Concurrency: single thread.
   before steady state, and the hook counter (`NativeHeap.Calls`) is asserted flat by a test
   across warm frames that move and read. Kernel-cache builds run on the owning world's thread
   inside `Process` — the sweep and publish write paths on a cache miss — reading the placement
-  and the stamp variant read-only and writing only cache-owned buffers and their own stack; the
-  `Stamp.Free` flush rides the process-wide catalog scan already serialized above. Entries and
-  canvas are allocated by the first insert, so warm frames after the first miss make no
-  cache-driven heap calls either. Sensing never builds: its cache use is a read-only
-  `TryFindTaps`, and a miss recomputes from the stamp into stack scratch, so reads add no
+  and the stamp variant read-only and writing only cache-owned buffers and their own stack.
+  `Stamp.Free` no longer clears a cache it does not own: its only cross-world write is one
+  aligned flag store in every live world's cache, and the owning thread does the clearing.
+  *Lifetime*: the flag is an `int` field of the per-world `KernelCache`, so it lives and dies
+  with the `WorldCtx`; it stores only the constant 1, and the writer holds the process-wide
+  catalog scan that also observed the world alive. *Aliasing*: the flag is a distinct field —
+  no other word of any world is written by another thread's `Stamp.Free`, and the freeing
+  thread reads no kernel entry, tap, bucket, or canvas. *Alignment*: a naturally aligned
+  4-byte `int`, so the cross-thread store and the polls are single-copy atomic and cannot
+  tear. *Concurrency*: the flag store is a release (`Volatile.Write`), every poll an acquire
+  (`Volatile.Read`) at the three points a cache consults or repairs its table — `Find`,
+  `BeginFrame`, and `Insert`. A reader that has not yet observed the flag still reads whole
+  entries, because the free wrote nothing else; a reader can only meet a source naming a
+  re-baked id after its own thread synchronized with the free (the catalog rule serializes
+  re-bake and placement with the scan), and the acquire poll keeps the flag read from being
+  served older than that synchronization; and once a poll does observe the flag the cache
+  serves nothing until the owner has wiped the table — at the next `Process`, or inside the
+  first rebuild insert, both before any new key is served. A free that races a world's
+  `Process` can at worst queue a flush the following frame repairs, which is benign, but its
+  `UsesStamp` pass still reads every world's source columns, so catalog mutation keeps its
+  process-wide serialization. Entries and canvas are allocated by the first insert, so warm
+  frames after the first miss make no cache-driven heap calls either. Sensing never builds: its cache use is a read-only
+  `TryFindTaps` (a flagged cache misses, exactly as an absent one), and a miss recomputes
+  from the stamp into stack scratch, so reads add no
   inserts and no canvas traffic.
   Determinism is unaffected: tiles are
   independent, arithmetic is integer-exact, the dead set is a pure function of page content, and
@@ -1429,7 +1470,9 @@ digits. Concurrency: single thread.
   allocates 0 B: every buffer it touches is sized by grow-to-max before steady state. `Process` on different worlds shares no mutable state: the kernel cache and canvas belong to the world, the stage timers (`ProcessStages`) accumulate in the `Stages` field of the `WorldCtx` that ran the stage and are summed only when a benchmark reads them, and `NativeHeap.Calls` is advanced with `Interlocked.Increment`, so first-growth allocations on two threads leave it exact. `ProcessStages.Measuring` is written only while no `Process` runs. `CrossWorldProcessTests` drives two worlds on two threads for 10,000 ticks of place, move, gain and remove traffic and requires the same layer hashes and the same heap-call count as the same two worlds run one after the other. World creation, `World.Free`, and stamp catalog mutation (creation and `Stamp.Free`, which
   scans every world's source columns, pending snapshots, and journal) are also serialized
   across worlds because their arenas and counts are process-wide, `Stamp.Free` must not
-  overlap any world's mutation or `Process`, and `World.Free` must not overlap any call that
+  overlap any world's mutation or `Process` — its `UsesStamp` scan still reads live columns,
+  though its only cross-world write, the kernel-cache flush flag, is tearing-free by
+  construction — and `World.Free` must not overlap any call that
   takes the freed handle. Arena initialization rides the
   same rule: the first creation call allocates both arenas before any handle exists, and handles
   only originate from creation calls, so no query can observe an uninitialized arena.

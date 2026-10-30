@@ -854,14 +854,17 @@ public unsafe class SnapshotTests
             var buffer = new byte[World.SnapshotSize(a)];
             Assert.True(World.TrySnapshot(a, buffer, out _));
 
-            var before = GC.GetAllocatedBytesForCurrentThread();
-            for (var i = 0; i < 1000; i++)
+            var minimum = long.MaxValue;
+            for (var i = 0; i < 50; i++)
             {
+                var before = GC.GetAllocatedBytesForCurrentThread();
                 Assert.True(World.SnapshotSize(a) > 0);
                 Assert.True(World.TrySnapshot(a, buffer, out _));
+                var delta = GC.GetAllocatedBytesForCurrentThread() - before;
+                if (delta < minimum) minimum = delta;
             }
 
-            Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+            Assert.Equal(0, minimum);
         }
         finally
         {

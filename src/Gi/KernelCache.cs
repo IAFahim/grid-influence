@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 namespace Gi;
 
 internal enum KernelShape : byte
@@ -22,6 +23,7 @@ internal readonly unsafe struct KernelTaps
     public readonly int* Cells;
     public readonly long* Q40;
 
+    [MethodImpl(Jit.Hot)]
     internal KernelTaps(
         Plane plane, KernelShape shape, int originX, int originY, int width, int height,
         int maxTap, long maxTapQ40, int* rowExtents, int* cells, long* q40)
@@ -45,6 +47,7 @@ internal readonly struct KernelKey
     public readonly ulong Main;
     public readonly ulong Turn;
 
+    [MethodImpl(Jit.Hot)]
     internal KernelKey(byte stamp, int sampling, int grid, int phaseX, int phaseY, int angle)
     {
         Main = stamp | ((ulong)sampling << 8) | ((ulong)grid << 36) | ((ulong)phaseX << 41) | ((ulong)phaseY << 49);
@@ -65,56 +68,73 @@ internal struct KernelEntry
     public int MaxTap;
     public long MaxTapQ40;
     public int Slot;
+    public int Next;
 }
 
 internal unsafe struct KernelCache
 {
-    internal const int EntryCount = 32;
+    internal const int EntryCount = 128;
+    internal const int BucketCount = 256;
     internal const int MaxSide = 64;
     internal const int MaxCells = MaxSide * MaxSide;
     internal const int CanvasCellLimit = 1 << 22;
-    internal const int FrameInsertCap = 8;
+    internal const int FrameInsertCap = 64;
 
     private NativeBuffer<KernelEntry> _entries;
     private NativeBuffer<long> _taps;
     private NativeBuffer<int> _rows;
     private NativeBuffer<long> _canvas;
     private NativeBuffer<int> _canvasRows;
-    private int _cursor;
+    private NativeBuffer<int> _buckets;
+    private int _live;
+    private int _hand;
     private int _inserts;
+    private int _flushPending;
 
     public readonly long Bytes =>
         (long)_entries.Capacity * sizeof(KernelEntry) + (long)_taps.Capacity * sizeof(long) +
-        ((long)_rows.Capacity + _canvasRows.Capacity) * sizeof(int) + (long)_canvas.Capacity * sizeof(long);
+        ((long)_rows.Capacity + _canvasRows.Capacity + _buckets.Capacity) * sizeof(int) +
+        (long)_canvas.Capacity * sizeof(long);
 
-    public readonly int LiveEntries
+    public readonly int LiveEntries => _entries.Pointer == null || _flushPending != 0 ? 0 : _live;
+
+    [MethodImpl(Jit.Hot)]
+    public void RequestFlush()
     {
-        get
-        {
-            var entries = _entries.Pointer;
-            if (entries == null) return 0;
-
-            var count = 0;
-            for (var i = 0; i < EntryCount; i++)
-                if (entries[i].Key != 0 || entries[i].Turn != 0)
-                    count++;
-
-            return count;
-        }
+        Volatile.Write(ref _flushPending, 1);
     }
 
-    public readonly KernelEntry* Find(ulong key, ulong turn)
+    [MethodImpl(Jit.Hot)]
+    private static int BucketOf(ulong key, ulong turn)
+    {
+        var hash = key ^ (turn * 0x9E3779B97F4A7C15ul);
+        hash ^= hash >> 33;
+        hash *= 0xFF51AFD7ED558CCDul;
+        hash ^= hash >> 33;
+        hash *= 0xC4CEB9FE1A85EC53ul;
+        hash ^= hash >> 33;
+        return (int)((hash >> 56) & (BucketCount - 1ul));
+    }
+
+    [MethodImpl(Jit.Hot)]
+    public KernelEntry* Find(ulong key, ulong turn)
     {
         var entries = _entries.Pointer;
         if (entries == null) return null;
+        if (Volatile.Read(ref _flushPending) != 0) return null;
 
-        for (var i = 0; i < EntryCount; i++)
-            if (entries[i].Key == key && entries[i].Turn == turn)
-                return entries + i;
+        var slot = _buckets.Pointer[BucketOf(key, turn)];
+        while (slot >= 0)
+        {
+            var entry = entries + slot;
+            if (entry->Key == key && entry->Turn == turn) return entry;
+            slot = entry->Next;
+        }
 
         return null;
     }
 
+    [MethodImpl(Jit.Hot)]
     public readonly KernelTaps View(KernelEntry* entry)
     {
         var taps = _taps.Pointer + (long)entry->Slot * MaxCells;
@@ -131,18 +151,29 @@ internal unsafe struct KernelCache
     public readonly bool CanInsert => !InsertsDisabled && _inserts < FrameInsertCap;
 
 
+    [MethodImpl(Jit.Hot)]
     public void BeginFrame()
     {
         _inserts = 0;
+        if (Volatile.Read(ref _flushPending) != 0) Clear();
     }
 
+    [MethodImpl(Jit.Hot)]
     public void Clear()
     {
-        if (_entries.Pointer != null) new Span<KernelEntry>(_entries.Pointer, EntryCount).Clear();
-        _cursor = 0;
+        if (_entries.Pointer != null)
+        {
+            new Span<KernelEntry>(_entries.Pointer, EntryCount).Clear();
+            new Span<int>(_buckets.Pointer, BucketCount).Fill(-1);
+        }
+
+        _live = 0;
+        _hand = 0;
         _inserts = 0;
+        _flushPending = 0;
     }
 
+    [MethodImpl(Jit.Hot)]
     public void Release()
     {
         _entries.Free();
@@ -150,20 +181,41 @@ internal unsafe struct KernelCache
         _rows.Free();
         _canvas.Free();
         _canvasRows.Free();
-        _cursor = 0;
+        _buckets.Free();
+        _live = 0;
+        _hand = 0;
+        _flushPending = 0;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal KernelEntry* Insert(
         ulong key, ulong turn, Plane plane, KernelShape shape,
         int originX, int originY, int width, int height, int maxTap, long maxTapQ40,
         int* rowExtents, int* cells, long* q40)
     {
+        if (Volatile.Read(ref _flushPending) != 0) Clear();
         EnsureStorage();
         _inserts++;
-        var slot = _cursor;
-        _cursor = slot + 1 == EntryCount ? 0 : slot + 1;
+        var entries = _entries.Pointer;
+        var buckets = _buckets.Pointer;
+        var slot = buckets[BucketOf(key, turn)];
+        while (slot >= 0 && !(entries[slot].Key == key && entries[slot].Turn == turn)) slot = entries[slot].Next;
 
-        var entry = _entries.Pointer + slot;
+        if (slot < 0)
+        {
+            if (_live < EntryCount) slot = _live++;
+            else
+            {
+                slot = _hand;
+                _hand = _hand + 1 == EntryCount ? 0 : _hand + 1;
+                Unlink(entries, buckets, slot);
+            }
+
+            entries[slot].Next = buckets[BucketOf(key, turn)];
+            buckets[BucketOf(key, turn)] = slot;
+        }
+
+        var entry = entries + slot;
         entry->Key = key;
         entry->Turn = turn;
         entry->Plane = plane;
@@ -185,24 +237,43 @@ internal unsafe struct KernelCache
         return entry;
     }
 
+    [MethodImpl(Jit.Hot)]
+    private static void Unlink(KernelEntry* entries, int* buckets, int slot)
+    {
+        var bucket = BucketOf(entries[slot].Key, entries[slot].Turn);
+        if (buckets[bucket] == slot)
+        {
+            buckets[bucket] = entries[slot].Next;
+            return;
+        }
+
+        var cursor = buckets[bucket];
+        while (entries[cursor].Next != slot) cursor = entries[cursor].Next;
+        entries[cursor].Next = entries[slot].Next;
+    }
+
+    [MethodImpl(Jit.Hot)]
     internal int* CanvasInt(int cells)
     {
         _canvas.Resize(cells);
         return (int*)_canvas.Pointer;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal long* CanvasLong(int cells)
     {
         _canvas.Resize(cells);
         return _canvas.Pointer;
     }
 
+    [MethodImpl(Jit.Hot)]
     internal int* CanvasRows(int rows)
     {
         _canvasRows.Resize(2 * rows);
         return _canvasRows.Pointer;
     }
 
+    [MethodImpl(Jit.Hot)]
     private void EnsureStorage()
     {
         if (_entries.Pointer != null) return;
@@ -210,11 +281,14 @@ internal unsafe struct KernelCache
         _entries.Resize(EntryCount);
         _taps.Resize(EntryCount * MaxCells);
         _rows.Resize(EntryCount * 2 * MaxSide);
+        _buckets.Resize(BucketCount);
+        new Span<int>(_buckets.Pointer, BucketCount).Fill(-1);
     }
 }
 
 internal static unsafe class KernelFactory
 {
+    [MethodImpl(Jit.Hot)]
     public static bool TryFindTaps(
         WorldCtx* w, int grid, byte stamp, int angle, Layer.Precision precision, Placement* p, out KernelTaps taps)
     {
@@ -230,6 +304,7 @@ internal static unsafe class KernelFactory
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static bool TryGetTaps(
         WorldCtx* w, int grid, byte stamp, int angle, Layer.Precision precision, Placement* p, out KernelTaps taps)
     {
@@ -307,6 +382,7 @@ internal static unsafe class KernelFactory
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void EmitTaps(
         Placement* p, int* difference, int* dense, long* smooth, int tileX0, int tileY0, int gain, int rasterX1,
         int rasterY1)
@@ -339,6 +415,7 @@ internal static unsafe class KernelFactory
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static KernelShape ShapeOf(Placement* p)
     {
         if (p->Turned) return p->Kind >= StampKind.Disk && p->V->Arc == 0 ? KernelShape.Spans : KernelShape.Dense;
@@ -350,6 +427,7 @@ internal static unsafe class KernelFactory
         };
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void RelativeRect(
         Placement* p, int maskedAngle, out int rx0, out int ry0, out int rx1, out int ry1, out int rasterX1,
         out int rasterY1)
@@ -395,6 +473,7 @@ internal static unsafe class KernelFactory
         rasterY1 = p->Py + ry1;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void Capture(
         Placement* q, Plane plane, int* ints, long* longs,
         int ax0, int ay0, int ax1, int ay1, int width, int rasterX1, int rasterY1)
@@ -460,6 +539,7 @@ internal static unsafe class KernelFactory
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void Measure(
         int* ints, long* longs, int width, int height, int* extents,
         out int minX, out int minY, out int maxX, out int maxY, out long maxTap)
@@ -523,6 +603,7 @@ internal static unsafe class KernelFactory
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void Compact(int* ints, long* longs, int width, int minX, int minY, int kernelWidth,
         int kernelHeight)
     {

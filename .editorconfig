@@ -37,6 +37,9 @@ indent_size = 4
 # - World.cs: SourceSpec.Scale is the public field name on the nested struct.
 # - SimdOps.cs: the explicit (short) cast on the first argument of
 #   Vector128.Create/Vector256.Create selects the short overload.
+# - Column.Gradient.cs: PrepareBlock's vertical flag is consumed only by
+#   the #if NET PrefetchBlock in Column.Vector.cs, so the netstandard2.1
+#   analysis reports it unused.
 [benchmarks/SenseVerification.cs]
 resharper_compare_of_floats_by_equality_operator_highlighting = none
 
@@ -77,6 +80,9 @@ resharper_unused_member_global_highlighting = none
 
 [src/Gi/ResolvePool.cs]
 resharper_function_never_returns_highlighting = none
+
+[src/Gi/Column.Gradient.cs]
+resharper_unused_parameter_local_highlighting = none
 
 [*.{csproj,props,targets,slnx}]
 indent_style = space

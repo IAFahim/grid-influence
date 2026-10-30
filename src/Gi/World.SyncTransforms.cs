@@ -1,13 +1,16 @@
+using System.Runtime.CompilerServices;
 namespace Gi;
 
 public static unsafe partial class World
 {
+    [MethodImpl(Jit.Hot)]
     public static BatchStatus SyncTransforms(Token token, ReadOnlySpan<TransformRange> ranges)
     {
         var status = ValidateToken(token, out var context);
         return status != BatchStatus.Applied ? status : SyncTransformRanges(context, ranges);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static BatchStatus SyncTransformRanges(WorldCtx* context, ReadOnlySpan<TransformRange> ranges)
     {
         long totalRows = 0;
@@ -33,7 +36,7 @@ public static unsafe partial class World
                 ref readonly var columns = ref ranges[reader];
                 if (columns.Count == 0) continue;
                 var rowBytes = (long)columns.Count;
-                if (BorrowOverlap(mask.Invalid, maskBytes, columns.Sources, rowBytes * sizeof(int)) ||
+                if (BorrowOverlap(mask.Invalid, maskBytes, columns.Sources, rowBytes * sizeof(SourceId)) ||
                     BorrowOverlap(mask.Invalid, maskBytes, columns.Xs, rowBytes * sizeof(float)) ||
                     BorrowOverlap(mask.Invalid, maskBytes, columns.Ys, rowBytes * sizeof(float)) ||
                     BorrowOverlap(mask.Invalid, maskBytes, columns.Headings, rowBytes * sizeof(float)) ||
@@ -57,6 +60,7 @@ public static unsafe partial class World
         return BatchStatus.Applied;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static bool BorrowOverlap(void* first, long firstBytes, void* second, long secondBytes)
     {
         if (firstBytes <= 0 || secondBytes <= 0 || first == null || second == null) return false;
@@ -65,6 +69,7 @@ public static unsafe partial class World
         return a < b + secondBytes && b < a + firstBytes;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void ApplyTransformRanges(WorldCtx* context, ReadOnlySpan<TransformRange> ranges)
     {
         var source = &context->Sources;

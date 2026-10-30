@@ -24,12 +24,14 @@ public static unsafe partial class World
     private const byte Fading = 1;
     private const byte Expiring = 2;
 
+    [MethodImpl(Jit.Hot)]
     public static int Tick(byte world)
     {
         var w = GetContext(world);
         return w == null ? 0 : w->Tick;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static WriteStatus Fade(byte world, SourceId source, sbyte gain, int ticks)
     {
         if (!TrySource(world, source, out var w, out var s, out var i)) return WriteStatus.StaleSource;
@@ -38,6 +40,7 @@ public static unsafe partial class World
         return WriteStatus.Applied;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static WriteStatus Expire(byte world, SourceId source, int ticks)
     {
         if (!TrySource(world, source, out var w, out var s, out var i)) return WriteStatus.StaleSource;
@@ -46,6 +49,7 @@ public static unsafe partial class World
         return WriteStatus.Applied;
     }
 
+    [MethodImpl(Jit.Hot)]
     public static bool TryGetSchedule(
         byte world,
         SourceId source,
@@ -83,6 +87,7 @@ public static unsafe partial class World
         return true;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void WriteFade(WorldCtx* w, SourceColumns* s, int i, sbyte gain, int ticks)
     {
         var target = (sbyte)Math.Clamp((int)gain, -MaxGain, MaxGain);
@@ -110,6 +115,7 @@ public static unsafe partial class World
         Schedule(w, s, i);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void WriteExpire(WorldCtx* w, SourceColumns* s, int i, int ticks)
     {
         JournalSchedule(w, s, i);
@@ -126,6 +132,7 @@ public static unsafe partial class World
         Schedule(w, s, i);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void JournalSchedule(WorldCtx* w, SourceColumns* s, int slot)
     {
         if (w->Recording == 0 || s->SchedStamp.Pointer[slot] == w->RecordEpoch) return;
@@ -145,6 +152,7 @@ public static unsafe partial class World
         };
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void RestoreSchedules(WorldCtx* w, SourceColumns* s)
     {
         var records = w->ScheduleJournal.Pointer;
@@ -162,6 +170,7 @@ public static unsafe partial class World
         w->ScheduleJournal.Resize(0);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void ShiftSchedules(SourceColumns* s, int delta)
     {
         for (var i = 0; i < s->Count; i++)
@@ -172,6 +181,7 @@ public static unsafe partial class World
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void Schedule(WorldCtx* w, SourceColumns* s, int slot)
     {
         if (!NextDue(s, slot, w->Tick, out var next)) return;
@@ -189,6 +199,7 @@ public static unsafe partial class World
         s->TimedAt.Pointer[slot] = n + 1;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void Unlist(WorldCtx* w, SourceColumns* s, int index)
     {
         var list = w->TimedList.Pointer;
@@ -203,6 +214,7 @@ public static unsafe partial class World
         w->TimedList.Resize(last);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void RebuildTimed(WorldCtx* w)
     {
         var s = &w->Sources;
@@ -219,6 +231,7 @@ public static unsafe partial class World
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static bool NextDue(SourceColumns* s, int slot, int now, out int due)
     {
         due = 0;
@@ -241,6 +254,7 @@ public static unsafe partial class World
         return found;
     }
 
+    [MethodImpl(Jit.Hot)]
     private static bool NextStep(SourceColumns* s, int slot, int now, out int due)
     {
         due = 0;
@@ -257,7 +271,7 @@ public static unsafe partial class World
         return true;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static sbyte FadeGain(SourceColumns* s, int slot, int now)
     {
         var from = s->FadeFrom.Pointer[slot];
@@ -269,6 +283,7 @@ public static unsafe partial class World
         return (sbyte)(from + (delta < 0 ? -step : step));
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void SweepTimed(WorldCtx* w)
     {
         var s = &w->Sources;
@@ -324,11 +339,33 @@ public static unsafe partial class World
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void SortSlots(int* slots, int count)
     {
 #if NET
         new Span<int>(slots, count).Sort();
 #else
+        if (count <= InsertionLimit)
+        {
+            InsertionSort(slots, count);
+            return;
+        }
+
+        for (var parent = (count >> 1) - 1; parent >= 0; parent--) SiftDown(slots, parent, count);
+        for (var end = count - 1; end > 0; end--)
+        {
+            (slots[0], slots[end]) = (slots[end], slots[0]);
+            SiftDown(slots, 0, end);
+        }
+#endif
+    }
+
+#if !NET
+    private const int InsertionLimit = 16;
+
+    [MethodImpl(Jit.Hot)]
+    private static void InsertionSort(int* slots, int count)
+    {
         for (var i = 1; i < count; i++)
         {
             var value = slots[i];
@@ -341,6 +378,25 @@ public static unsafe partial class World
 
             slots[j + 1] = value;
         }
-#endif
     }
+
+    [MethodImpl(Jit.Hot)]
+    private static void SiftDown(int* slots, int root, int count)
+    {
+        var value = slots[root];
+        while (true)
+        {
+            var child = (root << 1) + 1;
+            if (child >= count) break;
+
+            if (child + 1 < count && slots[child + 1] > slots[child]) child++;
+            if (slots[child] <= value) break;
+
+            slots[root] = slots[child];
+            root = child;
+        }
+
+        slots[root] = value;
+    }
+#endif
 }

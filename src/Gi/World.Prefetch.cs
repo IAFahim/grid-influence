@@ -9,7 +9,7 @@ public static unsafe partial class World
     private const int PrefetchAhead = 8;
     private const int PrefetchRows = 12;
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static void PrefetchRecordTarget(WorldCtx* w, int slot)
     {
         if (!Sse.IsSupported) return;

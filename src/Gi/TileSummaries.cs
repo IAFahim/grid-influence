@@ -8,6 +8,13 @@ namespace Gi;
 
 internal static unsafe partial class TileBake
 {
+    [MethodImpl(Jit.Inline)]
+    internal static bool Occupied(TileSummary* summary)
+    {
+        return summary->Max != 0 || summary->Sum != 0;
+    }
+
+    [MethodImpl(Jit.Hot)]
     internal static void UpdateSummaries(PlaneCells t, int x0, int y0, int x1, int y1)
     {
         if (y1 <= y0) return;
@@ -15,22 +22,49 @@ internal static unsafe partial class TileBake
         var summary = t.Summary;
         var page = t.Page;
         var sum = summary->Sum;
-        var candidate = short.MinValue;
-        var cy = y0;
         for (var y = y0; y < y1; y++)
         {
             RowStats(page + y * TileSize, out var rowSum, out var rowMax);
             sum += rowSum - summary->RowSums[y];
             summary->RowSums[y] = rowSum;
             summary->RowMaxima[y] = rowMax;
-            if (rowMax > candidate)
+        }
+
+        CommitSummaries(t, x0, y0, x1, y1, sum);
+    }
+
+    [MethodImpl(Jit.Hot)]
+    internal static void CommitSummaries(PlaneCells t, int x0, int y0, int x1, int y1, long sum)
+    {
+        var summary = t.Summary;
+        var page = t.Page;
+        summary->Sum = sum;
+        var candidate = summary->RowMaxima[y0];
+        var cy = y0;
+#if NET
+        if (Vector256.IsHardwareAccelerated && y0 == 0 && y1 == TileSize)
+        {
+            var low = Vector256.Load(summary->RowMaxima);
+            var high = Vector256.Load(summary->RowMaxima + 16);
+            candidate = MaxLane(Vector256.Max(low, high));
+            var target = Vector256.Create(candidate);
+            var bits = Vector256.Equals(low, target).ExtractMostSignificantBits() |
+                       (Vector256.Equals(high, target).ExtractMostSignificantBits() << 16);
+            cy = BitOperations.TrailingZeroCount(bits);
+        }
+        else
+#endif
+        {
+            for (var y = y0 + 1; y < y1; y++)
             {
+                var rowMax = summary->RowMaxima[y];
+                if (rowMax <= candidate) continue;
+
                 candidate = rowMax;
                 cy = y;
             }
         }
 
-        summary->Sum = sum;
         var max = summary->Max;
         var ax = (int)summary->ArgMaxX;
         var ay = (int)summary->ArgMaxY;
@@ -60,6 +94,7 @@ internal static unsafe partial class TileBake
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void RescanMax(PlaneCells t, out short max, out int ax, out int ay)
     {
         var maxima = t.Summary->RowMaxima;
@@ -75,7 +110,7 @@ internal static unsafe partial class TileBake
         ax = FirstEqual(t.Page + ay * TileSize, max);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static void RowStats(short* row, out int sum, out short max)
     {
 #if NET
@@ -117,7 +152,7 @@ internal static unsafe partial class TileBake
         max = best;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static int FirstEqual(short* row, short value)
     {
 #if NET
@@ -145,13 +180,13 @@ internal static unsafe partial class TileBake
     }
 
 #if NET
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static short MaxLane(Vector256<short> v)
     {
         return MaxLane(Vector128.Max(v.GetLower(), v.GetUpper()));
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(Jit.Inline)]
     private static short MaxLane(Vector128<short> v)
     {
         v = Vector128.Max(v, Vector128.Shuffle(v, Vector128.Create(4, 5, 6, 7, 0, 1, 2, 3)));
