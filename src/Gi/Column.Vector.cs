@@ -239,7 +239,7 @@ public static unsafe partial class World
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void PrefetchBlock(in ColumnField f, ColumnBlock* b, bool vertical)
+    private static void PrefetchBlock(in ColumnField f, ColumnBlock* b)
     {
         if (!Sse.IsSupported || b->Changes < ScatterChanges || f.Table == null) return;
 
@@ -254,12 +254,7 @@ public static unsafe partial class World
             var index = f.Table[tiles[l]];
             if (index < 0) continue;
 
-            var at = f.Pages + ((nuint)index << PageShift) + (nuint)locals[l] * sizeof(short);
-            Sse.Prefetch0(at);
-            if (!vertical) continue;
-
-            Sse.Prefetch0(at - TileBake.TileSize * sizeof(short));
-            Sse.Prefetch0(at + TileBake.TileSize * sizeof(short));
+            Sse.Prefetch0(f.Pages + ((nuint)index << PageShift) + (nuint)locals[l] * sizeof(short));
         }
     }
 }
