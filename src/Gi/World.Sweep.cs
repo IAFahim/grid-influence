@@ -680,10 +680,14 @@ public static unsafe partial class World
 
             var dirty = DirtyIndex(g, ld, tile);
             var rect = &ld->Rects.Pointer[dirty];
-            rect->X0 = 0;
-            rect->Y0 = 0;
-            rect->X1 = TileBake.TileSize;
-            rect->Y1 = TileBake.TileSize;
+            var rx0 = Math.Max(cx0 - tileX0, 0);
+            var ry0 = Math.Max(cy0 - tileY0, 0);
+            var rx1 = Math.Min(cx1 - tileX0, TileBake.TileSize);
+            var ry1 = Math.Min(cy1 - tileY0, TileBake.TileSize);
+            if (rx0 < rect->X0) rect->X0 = rx0;
+            if (ry0 < rect->Y0) rect->Y0 = ry0;
+            if (rx1 > rect->X1) rect->X1 = rx1;
+            if (ry1 > rect->Y1) rect->Y1 = ry1;
         }
     }
 
