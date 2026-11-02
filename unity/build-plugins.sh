@@ -8,10 +8,10 @@ export DOTNET_NOLOGO=1
 
 root=$(cd -- "$(dirname -- "$0")/.." && pwd)
 plugins=$root/unity/com.gi.entities/Plugins/Gi
-variants="netstandard2.1:netstandard2.1"
 projects="Gi Gi.Validation"
 corpus_project=$root/unity/tests/Gi.Corpus/Gi.Corpus.csproj
 corpus_stage=$root/unity/com.gi.entities/Tests/Corpus
+retarget_project=$root/unity/tests/Gi.Retarget/Gi.Retarget.csproj
 check=false
 
 for arg in "$@"; do
@@ -33,22 +33,68 @@ printf 'sdk %s\n' "$sdk" >"$manifest"
 
 status=0
 
-for entry in $variants; do
-    variant=${entry%%:*}
-    tfm=${entry#*:}
-    mkdir -p "$plugins/$variant"
-    for project in $projects; do
-        dotnet build "$root/src/$project/$project.csproj" -c Release -f "$tfm" -t:Rebuild -m:1 -nodeReuse:false -p:Deterministic=true -p:ContinuousIntegrationBuild=true -p:IncludeSourceRevisionInInformationalVersion=false -p:DebugType=none -p:EnableSourceLink=false -p:EmbedAllSources=false
-        dll=$root/src/$project/bin/Release/$tfm/$project.dll
-        [ -f "$dll" ] || { printf 'missing %s\n' "$dll" >&2; exit 2; }
-        sha=$(sha256sum "$dll" | cut -d' ' -f1)
-        printf '%s %s %s\n' "$variant" "$project.dll" "$sha" >>"$manifest"
-        if $check; then
-            cmp -s "$dll" "$plugins/$variant/$project.dll" || { printf 'changed %s/%s\n' "$variant" "$project.dll" >&2; status=1; }
-        else
-            cp -- "$dll" "$plugins/$variant/$project.dll"
-        fi
+dotnet build "$retarget_project" -c Release -m:1 -nodeReuse:false -p:Deterministic=true -p:ContinuousIntegrationBuild=true -p:IncludeSourceRevisionInInformationalVersion=false -p:DebugType=none -p:EnableSourceLink=false -p:EmbedAllSources=false
+retarget=$root/unity/tests/Gi.Retarget/bin/Release/net10.0/Gi.Retarget.dll
+
+netstandard_ref() {
+    if [ -n "${NETSTANDARD_REF:-}" ]; then
+        [ -f "$NETSTANDARD_REF/netstandard.dll" ] && { printf '%s/netstandard.dll' "$NETSTANDARD_REF"; return 0; }
+        [ -f "$NETSTANDARD_REF" ] && { printf '%s' "$NETSTANDARD_REF"; return 0; }
+    fi
+    for dir in "$HOME"/Unity/Hub/Editor/*/Editor/Data/NetStandard/ref/2.1.0; do
+        [ -f "$dir/netstandard.dll" ] && { printf '%s/netstandard.dll' "$dir"; return 0; }
     done
+    cache=$(dotnet nuget locals global-packages -l | sed 's/^global-packages: //')
+    dll=$cache/netstandard.library.ref/2.1.0/ref/netstandard2.1/netstandard.dll
+    [ -f "$dll" ] && { printf '%s' "$dll"; return 0; }
+    return 1
+}
+
+shims_dir() {
+    if [ -n "${NETSTANDARD_REF:-}" ]; then printf '%s' "${NETSTANDARD_REF%/ref/2.1.0}/compat/2.1.0/shims/netstandard"; return 0; fi
+    for dir in "$HOME"/Unity/Hub/Editor/*/Editor/Data/NetStandard/compat/2.1.0/shims/netstandard; do
+        [ -d "$dir" ] && { printf '%s' "$dir"; return 0; }
+    done
+    return 1
+}
+
+ref=$(netstandard_ref) || { printf 'netstandard.dll not found; set NETSTANDARD_REF\n' >&2; exit 2; }
+
+for project in $projects; do
+    dotnet build "$root/src/$project/$project.csproj" -c Release -f netstandard2.1 -t:Rebuild -m:1 -nodeReuse:false -p:Deterministic=true -p:ContinuousIntegrationBuild=true -p:IncludeSourceRevisionInInformationalVersion=false -p:DebugType=none -p:EnableSourceLink=false -p:EmbedAllSources=false
+done
+
+shims=$(shims_dir) || shims=""
+if [ -n "$shims" ]; then
+    dotnet "$retarget" --check-shims "$shims" || exit 1
+fi
+
+for project in $projects; do
+    dll=$root/src/$project/bin/Release/netstandard2.1/$project.dll
+    [ -f "$dll" ] || { printf 'missing %s\n' "$dll" >&2; exit 2; }
+    sha=$(sha256sum "$dll" | cut -d' ' -f1)
+    printf 'portable %s %s\n' "$project.dll" "$sha" >>"$manifest"
+    mkdir -p "$plugins/portable"
+    if $check; then
+        cmp -s "$dll" "$plugins/portable/$project.dll" || { printf 'changed portable/%s\n' "$project.dll" >&2; status=1; }
+    else
+        cp -- "$dll" "$plugins/portable/$project.dll"
+    fi
+done
+
+for project in $projects; do
+    dotnet build "$root/src/$project/$project.csproj" -c Release -f net10.0 -t:Rebuild -m:1 -nodeReuse:false -p:Deterministic=true -p:ContinuousIntegrationBuild=true -p:IncludeSourceRevisionInInformationalVersion=false -p:DebugType=none -p:EnableSourceLink=false -p:EmbedAllSources=false
+    input=$root/src/$project/bin/Release/net10.0/$project.dll
+    [ -f "$input" ] || { printf 'missing %s\n' "$input" >&2; exit 2; }
+    dotnet "$retarget" "$ref" "$input" "$staging/$project.dll" || exit 1
+    sha=$(sha256sum "$staging/$project.dll" | cut -d' ' -f1)
+    printf 'coreclr %s %s\n' "$project.dll" "$sha" >>"$manifest"
+    mkdir -p "$plugins/coreclr"
+    if $check; then
+        cmp -s "$staging/$project.dll" "$plugins/coreclr/$project.dll" || { printf 'changed coreclr/%s\n' "$project.dll" >&2; status=1; }
+    else
+        cp -- "$staging/$project.dll" "$plugins/coreclr/$project.dll"
+    fi
 done
 
 dotnet build "$corpus_project" -c Release -f netstandard2.1 -t:Rebuild -m:1 -nodeReuse:false -p:Deterministic=true -p:ContinuousIntegrationBuild=true -p:IncludeSourceRevisionInInformationalVersion=false -p:DebugType=none -p:EnableSourceLink=false -p:EmbedAllSources=false
@@ -71,6 +117,7 @@ printf 'frames GiBenchmarks.dll %s\n' "$(sha256sum "$frames_dll" | cut -d' ' -f1
 if $check; then
     cmp -s "$frames_dll" "$frames_stage/GiBenchmarks.dll" || { printf 'changed Tests/Performance/GiBenchmarks.dll\n' >&2; status=1; }
 else
+    mkdir -p "$frames_stage"
     cp -- "$frames_dll" "$frames_stage/GiBenchmarks.dll"
 fi
 

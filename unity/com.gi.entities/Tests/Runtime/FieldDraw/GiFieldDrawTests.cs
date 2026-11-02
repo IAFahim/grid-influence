@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using Gi.Entities.Presentation;
 using Gi.Entities.Tests.Support;
@@ -68,8 +69,7 @@ namespace Gi.Entities.Tests
 
             try
             {
-                Assume.That(GiAllocation.Available, Is.True);
-                Assert.That(GiAllocation.SteadyZero(Step, 16, 5), Is.True);
+                Assert.That(SteadyThreadZero(Step, 16, 5), Is.True);
             }
             finally
             {
@@ -81,6 +81,20 @@ namespace Gi.Entities.Tests
             Assert.That(stats.MirrorTiles, Is.GreaterThan(0));
             Assert.That(stats.Drawn, Is.EqualTo(1));
             Assert.That(fixture.Frame.Faults.Raised, Is.EqualTo(0));
+        }
+
+        private static bool SteadyThreadZero(Action window, int windows, int consecutive)
+        {
+            var run = 0;
+            for (var i = 0; i < windows; i++)
+            {
+                var before = GC.GetAllocatedBytesForCurrentThread();
+                window();
+                run = GC.GetAllocatedBytesForCurrentThread() - before == 0L ? run + 1 : 0;
+                if (run >= consecutive) return true;
+            }
+
+            return false;
         }
 
         [UnityTest]

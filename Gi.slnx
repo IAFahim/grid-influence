@@ -21,6 +21,7 @@
   <Folder Name="/unity/">
     <Project Path="unity/tests/Gi.Entities.Columns.Tests/Gi.Entities.Columns.Tests.csproj" />
     <Project Path="unity/tests/Gi.Entities.Columns.Compat/Gi.Entities.Columns.Compat.csproj" />
+    <Project Path="unity/tests/Gi.Retarget/Gi.Retarget.csproj" />
     <Project Path="unity/tests/Gi.Corpus/Gi.Corpus.csproj" />
   </Folder>
 </Solution>
