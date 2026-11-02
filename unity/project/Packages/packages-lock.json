@@ -12,14 +12,14 @@
       "hash": "eb83b43db8845cf28b14bec4d3170a4e5ace2a51"
     },
     "com.bovinelabs.core": {
-      "version": "https://gitlab.com/tertle/com.bovinelabs.core.git#82be2794cf7535f6fb598bb704527f41629a8f64",
+      "version": "https://gitlab.com/tertle/com.bovinelabs.core.git#dccb0b5396fb2f98daa28929299fa24465d9e47a",
       "depth": 0,
       "source": "git",
       "dependencies": {
         "com.unity.collections": "6.7.0",
         "com.unity.entities": "6.7.0"
       },
-      "hash": "82be2794cf7535f6fb598bb704527f41629a8f64"
+      "hash": "dccb0b5396fb2f98daa28929299fa24465d9e47a"
     },
     "com.bovinelabs.quill": {
       "version": "https://github.com/vex-studio/tertle-monorepo.git?path=/com.bovinelabs.quill#eb83b43db8845cf28b14bec4d3170a4e5ace2a51",
@@ -39,7 +39,7 @@
       "depth": 0,
       "source": "local",
       "dependencies": {
-        "com.bovinelabs.core": "2.0.0-pre.6",
+        "com.bovinelabs.core": "2.0.0-pre.7",
         "com.bovinelabs.quill": "2.0.0-pre.5",
         "com.unity.burst": "2.0.0",
         "com.unity.collections": "6.7.0",
@@ -81,7 +81,6 @@
         "com.unity.scriptablebuildpipeline": "1.23.1",
         "com.unity.test-framework.performance": "3.2.0",
         "com.unity.modules.assetbundle": "1.0.0",
-        "com.unity.modules.audio": "1.0.0",
         "com.unity.modules.physics": "1.0.0",
         "com.unity.modules.uielements": "1.0.0",
         "com.unity.modules.unityanalytics": "1.0.0",
@@ -213,7 +212,7 @@
       }
     },
     "com.unity.test-framework.performance": {
-      "version": "6.7.0",
+      "version": "7.0.0",
       "depth": 0,
       "source": "builtin",
       "dependencies": {
@@ -258,7 +257,7 @@
     },
     "com.unity.modules.audio": {
       "version": "1.0.0",
-      "depth": 2,
+      "depth": 0,
       "source": "builtin",
       "dependencies": {}
     },

@@ -31,7 +31,7 @@ import sys
 
 source, target, package = sys.argv[1:4]
 pins = json.load(open(source))["dependencies"]
-dependencies = {name: pins[name] for name in ("com.bovinelabs.anchor", "com.bovinelabs.core", "com.bovinelabs.quill")}
+dependencies = {name: pins[name] for name in ("com.bovinelabs.anchor", "com.bovinelabs.core", "com.bovinelabs.quill", "com.unity.modules.audio")}
 dependencies["com.gi.entities"] = "file:" + package
 json.dump({"dependencies": dependencies}, open(target, "w"), indent=2)
 PY

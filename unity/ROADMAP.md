@@ -1213,6 +1213,8 @@ Recorded 2026-10-18 so later sessions start from verified facts, not assumptions
 - Receipt exit contract for `unity test`: `0` pass, `8` tests ran and failed (terminal, never retry), anything else is infrastructure and safe to retry once. For the direct editor runs: `0` pass, `2` tests failed, `3` run error.
 - A running editor is controllable headlessly: `unity pipeline install` (com.unity.pipeline, Unity 6.0+), launch the editor with `-batchmode -nographics` and no `-quit`, then `unity command eval '<C#>'` (about 40 ms round trip) and `unity close`. The editor-tooling cards (E-*) should drive editors this way instead of hand-authored UI harnesses. Safe Mode caveat: a project that boots with compile errors never loads the pipeline — fix the code and restart; `unity pipeline list` confirms.
 - BovineLabs sources: the public upstream is `https://gitlab.com/tertle/com.bovinelabs.core.git` (the host project pins commit `82be2794`, 2026-10-15, version 2.0.0-pre.6). The registry `upm.bovinelabs.com` serves up to pre.5; OpenUPM serves only pre.1 (stale; do not use). A local mirror of the BovineLabs monorepo exists at `~/GitHub/tertle-monorepo` (private; paid-tier content, never copy from it into this repository).
+- 2026-11-03: the pinned editor is **7000.0.0a12** (`8751f7c83ed7`, J00). Only a12 is installed; the project no longer opens on a9.
+- 2026-11-03 working third-party triple (J00): BovineLabs Core `dccb0b5` (2.0.0-pre.7, `unityRelease 0a12`, "Support Unity 7 a11 Entities internals"), quill/anchor `eb83b43` through the vex-studio tertle-monorepo mirror, plus explicit builtin `com.unity.modules.audio` 1.0.0 (a12 Entities drops the audio dependency, and anchor fails without it).
 
 ### Lessons — mistakes not to repeat
 
