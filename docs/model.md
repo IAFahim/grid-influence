@@ -1066,6 +1066,118 @@ zeroed, so the 8-byte hash loop over `Padded(count) * sizeof(T)` bytes stays ins
 zero padding; mask arrays hold `(count + 63) >> 6` words; the radix histogram has 2,048 entries for 11-bit
 digits. Concurrency: single thread.
 
+### Portable vector audit (J11)
+
+For each of the 81 `#if NET` sites (Y14) the table records whether the site names an ISA class
+(`Avx2`, `Avx`, `Sse`, `Sse2`, `Sse41`, `AdvSimd`) or uses only the cross-platform
+`Vector128`/`Vector256` API (`BitOperations`, `Span.Sort` and `NativeMemory` count as portable;
+they name no ISA class).
+`dispatch` is a portable call site whose callee is ISA; `ISA-gated` is an ISA gate over a portable
+body. `J24` marks the sites the portable-vector rewrite would touch. Y14 is confirmed: 21 files,
+per-file counts TileBake 15, Histogram 7, Column.Gradient 7, TilePublish 6, Column.Field 6,
+World 5, TileSummaries 5, Sense 5, FusedBox 5, and 12 files with 1-3 each.
+
+Stage shares are frame `mean_share` at 20,000 entities on a pinned core (i9-14900K, .NET 10,
+warmup 5, measure 10, `allocated_bytes_total` 0, all reads complete), keyed
+`[B1-exact, C-exact, C-cell, W-exact, W-cell]`. Measured: B1-exact
+`sync 1.3, process 91.3, point 1.2, gradient 2.4, changed 3.8`; C-exact
+`sync 7.6, process 77.7, point 1.8, gradient 2.3, area 10.7`; C-cell
+`sync 13.4, process 52.4, point 3.8, gradient 5.2, area 25.3`; W-exact
+`sync 1.2, churn 0.1, process 96.4, point 0.6, gradient 1.3, area 0.4`; W-cell
+`sync 4.3, churn 0.1, process 88.0, point 1.9, gradient 4.3, area 1.3`.
+`Splat` rows run in the sync echelon of transient frames; `transient-only` sites read 0 in the
+default persistent frames. `QueryMax`, bulk `QueryRegion` and stamp bake name no frame stage.
+
+| # | Site | Class | API | Stage | Share `[B1e, Ce, Cc, We, Wc]` % | J24 |
+|---|---|---|---|---|---|---|
+| 1 | Column.Field.cs:2 | using | `System.Runtime.Intrinsics` | — | — | no |
+| 2 | Column.Field.cs:17 | const | `ScatterChanges` | — | — | no |
+| 3 | Column.Field.cs:25 | field | `ScaleF` | — | — | no |
+| 4 | Column.Field.cs:35 | field | `Wide` | — | — | no |
+| 5 | Column.Field.cs:89 | init | `ScaleF`/`Wide` | — | — | no |
+| 6 | Column.Field.cs:123 | portable | `Vector256` Load/Store | point+gradient | Pt [1.2, 1.8, 3.8, 0.6, 1.9], G [2.4, 2.3, 5.2, 1.3, 4.3] | no |
+| 7 | Column.Gradient.cs:2 | using | `System.Numerics`, `X86` | — | — | no |
+| 8 | Column.Gradient.cs:14 | portable | `BitOperations.PopCount` | point+gradient | Pt+G as row 6 | no |
+| 9 | Column.Gradient.cs:30 | ISA | `Avx2.IsSupported` gate to `QuantizeLanes` | sync | S [1.3, 7.6, 13.4, 1.2, 4.3] | yes |
+| 10 | Column.Gradient.cs:67 | dispatch | calls Sse-gated `PrefetchBlock` | point+gradient | Pt+G as row 6 | via callee |
+| 11 | Column.Gradient.cs:131 | dispatch | `GradientWindowGroup`/`GradientGatherLanes` | gradient | G [2.4, 2.3, 5.2, 1.3, 4.3] | no |
+| 12 | Column.Gradient.cs:186 | dispatch | `GradientGatherLanes` | gradient | G as row 11 | no |
+| 13 | Column.Gradient.cs:290 | dispatch | `SenseGatherLanes` | point | Pt [1.2, 1.8, 3.8, 0.6, 1.9] | no |
+| 14 | Column.Vector.cs:1 | ISA | `Avx.ConvertToVector256Int32`, `Avx2` gather/permute/blend/shift, `Sse.Prefetch0` | sync+point+gradient | S+Pt+G as rows 9, 6, 11 | yes |
+| 15 | Derive.cs:2 | using | `System.Runtime.Intrinsics` | — | — | no |
+| 16 | Derive.cs:203 | portable | `Vector256/128.IsHardwareAccelerated` dispatch | process | P [91.3, 77.7, 52.4, 96.4, 88.0] | no |
+| 17 | Derive.cs:226 | portable | `Vector256/128` combine | process | P as row 16 | no |
+| 18 | FusedBox.cs:2 | using | `Intrinsics`, `X86` | — | — | no |
+| 19 | FusedBox.cs:66 | ISA | `Avx2.IsSupported` wide loop | process, transient-only | P as row 16, 0 in persistent frames | yes |
+| 20 | FusedBox.cs:141 | ISA-gated | `Avx2.IsSupported` to `VerticalWide` | process, transient-only | P as row 19 | gate only |
+| 21 | FusedBox.cs:147 | ISA-gated | `Vector256` body under Avx2 gate | process, transient-only | P as row 19 | gate only |
+| 22 | FusedBox.cs:232 | ISA | `Avx2.PackSignedSaturate`/`Permute4x64` (`ApplyWide`; `ApplyLastWide` is `Vector256`) | process, transient-only | P as row 19 | yes (`ApplyWide`) |
+| 23 | Histogram.cs:2 | using | `Numerics`, `Intrinsics`, `X86` | — | — | no |
+| 24 | Histogram.cs:143 | ISA | `Avx.Convert`, `Avx2.GatherVector256`/`ShiftLeftLogicalVariable` | Splat, transient-only | sync echelon, 0 in persistent frames | yes |
+| 25 | Histogram.cs:379 | portable | `Vector256` + `BitOperations` | process, transient-only | P as row 19 | no |
+| 26 | Histogram.cs:400 | portable | `Vector256` box filter | process, transient-only | P as row 19 | no |
+| 27 | Histogram.cs:461 | portable | `Vector256` scale-add | process, transient-only | P as row 19 | no |
+| 28 | Histogram.cs:528 | portable | `Vector256` copy | process, transient-only | P as row 19 | no |
+| 29 | Histogram.cs:545 | portable | `Vector256` zero | process, transient-only | P as row 19 | no |
+| 30 | MaxQueries.cs:152 | portable | `Vector128` dispatch to `SimdOps` | — (`QueryMax` API) | — | no |
+| 31 | MaxQueries.cs:169 | portable | `Vector128/256` dispatch to `SimdOps` | — (`QueryMax` API) | — | no |
+| 32 | NativeHeap.cs:15 | portable BCL | `NativeMemory` alloc/free/aligned | — (setup; not Burst-reachable) | — | no |
+| 33 | Pyramid.cs:2 | using | `System.Runtime.Intrinsics` | — | — | no |
+| 34 | Pyramid.cs:167 | portable | `Vector256/128` + `HorizontalMax` | — (`QueryMax` API) | — | no |
+| 35 | Schedule.cs:345 | portable BCL | `Span<int>.Sort` | process + changed (timed sweep, dirty and epoch drains) | P as row 16, Ch [3.8, —, —, —, —] | no |
+| 36 | Sense.cs:2 | using | `System.Runtime.Intrinsics` | — | — | no |
+| 37 | Sense.cs:415 | portable | dispatch to `SimdOps.SegmentMax` | area | A [—, 10.7, 25.3, 0.4, 1.3] | no |
+| 38 | Sense.cs:428 | portable | dispatch to `SimdOps.FirstEqualSpan` | area | A as row 37 | no |
+| 39 | Sense.cs:624 | portable | dispatch to `SimdOps.RaggedSum` | area | A as row 37 | no |
+| 40 | Sense.cs:767 | portable | dispatch to `SimdOps.LinearDelta` | point+gradient+area (excluded reads) | Pt+G+A as rows 13, 11, 37 | no |
+| 41 | SimdOps.cs:1 | mixed | `Vector128/256` + `BitOperations`; one `Avx2.MultiplyAddAdjacent` (`PairSums`) | point+gradient+area+process (derive/summary via `HorizontalMax`) | Pt+G+A+P as rows 13, 11, 37, 16 | yes (`PairSums` only) |
+| 42 | TileBake.cs:2 | using | `Intrinsics`, `Arm`, `X86` | — | — | no |
+| 43 | TileBake.cs:31 | ISA | `Sse2`/`AdvSimd` `Vector` property | process | P as row 16 | yes |
+| 44 | TileBake.cs:40 | portable | `Vector256.IsHardwareAccelerated` gate | process | P as row 16 | no |
+| 45 | TileBake.cs:57 | portable | `Vector256` deposit bands | process | P as row 16 | no |
+| 46 | TileBake.cs:80 | portable | `Vector256` two-band emit | process | P as row 16 | no |
+| 47 | TileBake.cs:107 | portable | `Vector256` scaled round | process | P as row 16 | no |
+| 48 | TileBake.cs:129 | portable | `Vector256` plane add | process | P as row 16 | no |
+| 49 | TileBake.cs:167 | portable | `Vector256` gain scale | process | P as row 16 | no |
+| 50 | TileBake.cs:181 | ISA-gated | `Avx2` gate, `Vector256` body | process | P as row 16 | gate only |
+| 51 | TileBake.cs:443 | ISA | `Vector` property + `Vector128.Create` | process (raster upscale) | P as row 16 | yes |
+| 52 | TileBake.cs:458 | ISA | `Vector128` + `Load128`/`Store128` | process (raster upscale) | P as row 16 | yes |
+| 53 | TileBake.cs:485 | portable | `Vector128.Widen` (`Tap4`) | process | P as row 16 | no |
+| 54 | TileBake.cs:497 | portable | `Vector256` + `Vector128.Narrow` smooth | process (publish) | P as row 16 | no |
+| 55 | TileBake.cs:522 | const | `ExactBound`/`ExactMask` | — | — | no |
+| 56 | TileBake.cs:527 | ISA | `Sse2`/`AdvSimd` `Load128`/`Store128`/`LoadShorts`/`StoreShorts` | process (deposit, raster, publish) | P as row 16 | yes |
+| 57 | TilePublish.cs:2 | using | `Intrinsics`, `Arm`, `X86` | — | — | no |
+| 58 | TilePublish.cs:21 | ISA | `Avx2`/`Vector` dispatch | process | P as row 16 | yes |
+| 59 | TilePublish.cs:77 | portable | `Vector256` zero-check | process | P as row 16 | no |
+| 60 | TilePublish.cs:96 | portable | `Vector256` zero-check | process | P as row 16 | no |
+| 61 | TilePublish.cs:114 | ISA | `Avx2` gate + `Avx.LoadVector256` | process | P as row 16 | yes |
+| 62 | TilePublish.cs:154 | ISA | `Publish128/256/Rows/Planes`: `Vector128/256` + `Avx`/`Avx2`/`Sse2`/`Sse41` + row-56 helpers | process | P as row 16 | yes |
+| 63 | TileSmooth.cs:100 | portable | `BitOperations.LeadingZeroCount` | — (stamp bake) | — | no |
+| 64 | TileSummaries.cs:2 | using | `Numerics`, `Intrinsics` | — | — | no |
+| 65 | TileSummaries.cs:44 | portable | `Vector256` + `BitOperations` max-locate | process (publish summaries) | P as row 16 | no |
+| 66 | TileSummaries.cs:116 | portable | `Vector256/128` row sum+max | process (publish summaries) | P as row 16 | no |
+| 67 | TileSummaries.cs:158 | portable | `Vector256/128` + `BitOperations` first-equal | process (publish argmax) | P as row 16 | no |
+| 68 | TileSummaries.cs:182 | portable | `Vector128` shuffle `MaxLane` | process + `QueryMax` API | P as row 16 | no |
+| 69 | World.Order.cs:2 | using | `Intrinsics`, `X86` | — | — | no |
+| 70 | World.Order.cs:25 | ISA | `Avx2.IsSupported` gate | sync | S as row 9 | yes |
+| 71 | World.Order.cs:46 | ISA | `Avx.ConvertToVector256Int32` + `Vector256` | sync | S as row 9 | yes |
+| 72 | World.Prefetch.cs:1 | ISA | `Sse.IsSupported` + `Sse.Prefetch0` | process (sweep prefetch) | P as row 16 | yes |
+| 73 | World.Splat.cs:2 | using | `Numerics`, `Intrinsics` | — | — | no |
+| 74 | World.Splat.cs:66 | dispatch | `Vector256` gate to `SplatBlocks` | Splat, transient-only | sync echelon, 0 in persistent frames | no |
+| 75 | World.Splat.cs:118 | portable | `Vector256` + `BitOperations` finite-count | Splat, transient-only | sync echelon, 0 in persistent frames | no |
+| 76 | World.Sweep.cs:68 | dispatch | scalar prefetch call (Sse inside callee) | process (sweep) | P as row 16 | no |
+| 77 | World.cs:3 | using | `Intrinsics`, `Arm`, `X86` | — | — | no |
+| 78 | World.cs:1083 | ISA | `Avx2` + `Avx.LoadVector256` + `Sse2`/helpers widen | — (bulk `QueryRegion` sum) | — | yes |
+| 79 | World.cs:1208 | ISA | `Avx2` + `Avx` + row-81 helpers | — (bulk `QueryRegion` copy) | — | yes |
+| 80 | World.cs:1231 | ISA | `Avx2` + row-81 helpers | — (bulk `QueryRegion` fill) | — | yes |
+| 81 | World.cs:1410 | ISA | `Sse2`/`AdvSimd` `LoadShorts`/`StoreShorts` | — (bulk copy/fill helpers for rows 79-80) | — | yes |
+
+J24 rewrite set (ISA namers): rows 9, 14, 19-22, 24, 41 (`PairSums` only), 43, 50-52 (gates/helpers),
+56, 58, 61, 62, 70-72, 78-81, plus row 10 via its callee. Rows 20, 21 and 50 keep their
+`Vector256` bodies and only need the `Avx2` gate replaced. `NativeMemory` (row 32) and
+`Sse.Prefetch0` (row 72) are portable-.NET but not Burst-reachable, so they need a Burst entry
+alongside the vector rewrite, not just a class swap.
+
 ## Unsafe proof
 
 - **Lifetime**: the world arena (255 `WorldCtx`) and stamp catalog (256 `StampVariant`) are
