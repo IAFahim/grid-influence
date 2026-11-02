@@ -98,7 +98,9 @@ namespace Gi.Entities
                 }
 
                 var binding = Resolve(ref state, i, specs[i]);
-                if (binding != null) list.Add(binding);
+                if (binding == null) continue;
+                SetupGate(binding, blob.Grids);
+                list.Add(binding);
             }
 
             if (list.Count > 0) _bindings = GCHandle.Alloc(list.ToArray());
@@ -117,7 +119,11 @@ namespace Gi.Entities
         {
             var table = Table;
             if (table != null)
-                foreach (var binding in table) binding.Query.Dispose();
+                foreach (var binding in table)
+                {
+                    binding.Query.Dispose();
+                    binding.DisposeGate();
+                }
             if (_bindings.IsAllocated) _bindings.Free();
             _bindings = default;
             _builtHash = 0ul;
