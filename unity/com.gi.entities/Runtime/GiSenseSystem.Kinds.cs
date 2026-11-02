@@ -28,6 +28,23 @@ namespace Gi.Entities
             var totals = new NativeList<long>(allocator);
             var whole = new NativeList<ulong>(allocator);
             var inputs = GateInputs(binding, allocator);
+            var fused = new NativeArray<GiSenseFusedType>(binding.Types.Length, allocator, NativeArrayOptions.UninitializedMemory);
+            for (var t = 0; t < binding.Types.Length; t++)
+            {
+                var type = binding.Types[t];
+                fused[t] = new GiSenseFusedType
+                {
+                    Handle = type.Handle,
+                    Size = type.Size,
+                    Value = type.Value,
+                    Gradient = type.Gradient,
+                    Total = type.Total,
+                    Position = type.Position,
+                    Coverage = type.Coverage,
+                    Reach = type.Reach,
+                    Threshold = type.Threshold,
+                };
+            }
 
             handle = new GiSenseCountJob
             {
@@ -83,7 +100,7 @@ namespace Gi.Entities
                 PrevYs = binding.PrevYs,
                 PrevReach = binding.PrevReach,
             }.Schedule(handle);
-            handle = new GiSenseWriteJob
+            handle = new GiSenseGatherJob
             {
                 View = _view,
                 Context = context,
@@ -92,6 +109,7 @@ namespace Gi.Entities
                 Reach = spec.Reach,
                 Threshold = spec.Threshold,
                 Offsets = offsets,
+                Types = fused,
                 Xs = xs.AsDeferredJobArray(),
                 Ys = ys.AsDeferredJobArray(),
                 Reaches = reaches.AsDeferredJobArray(),
@@ -101,18 +119,6 @@ namespace Gi.Entities
                 PrevYs = binding.PrevYs.AsDeferredJobArray(),
                 PrevReach = binding.PrevReach.AsDeferredJobArray(),
             }.ScheduleParallel(binding.Query, handle);
-
-            for (var t = 0; t < binding.Types.Length; t++)
-            {
-                var type = binding.Types[t];
-                if (!type.HasInput) continue;
-
-                type.Handle.Update(ref state);
-                if (type.Reach.Active)
-                    handle = Gather(binding, type, type.Reach, false, context, offsets, reaches, thresholds, handle);
-                if (type.Threshold.Active)
-                    handle = Gather(binding, type, type.Threshold, true, context, offsets, reaches, thresholds, handle);
-            }
 
             handle = new GiSenseReadJob
             {
@@ -136,57 +142,23 @@ namespace Gi.Entities
             }.Schedule(GiRuntime.BeginRead(handle));
             GiRuntime.EndRead(handle);
 
-            for (var t = 0; t < binding.Types.Length; t++)
-            {
-                var type = binding.Types[t];
-                if (!type.HasOutput && !type.Coverage.Active) continue;
-
-                type.Handle.Update(ref state);
-                handle = new GiSenseScatterJob
-                {
-                    View = _view,
-                    Handle = type.Handle,
-                    TypeSize = type.Size,
-                    Period = binding.Period,
-                    Value = type.Value,
-                    Gradient = type.Gradient,
-                    Total = type.Total,
-                    Position = type.Position,
-                    Coverage = type.Coverage,
-                    Context = context,
-                    Gate = binding.GateState,
-                    Rows = rows,
-                    Offsets = offsets,
-                    Values = values,
-                    GradientXs = gradientXs,
-                    GradientYs = gradientYs,
-                    Totals = totals,
-                    Whole = whole,
-                }.ScheduleParallel(binding.Query, handle);
-            }
-
-            return handle;
-        }
-
-        private JobHandle Gather(GiSenseBinding binding, GiSenseType type, GiSenseField field, bool threshold,
-            NativeReference<GiReconcileContext> context, NativeArray<int> offsets, NativeList<float> reaches,
-            NativeList<short> thresholds, JobHandle handle)
-        {
-            return new GiSenseGatherJob
+            handle = new GiSenseScatterJob
             {
                 View = _view,
-                Handle = type.Handle,
-                TypeSize = type.Size,
-                Offset = field.Offset,
-                Threshold = (byte)(threshold ? 1 : 0),
                 Period = binding.Period,
                 Context = context,
                 Gate = binding.GateState,
+                Rows = rows,
                 Offsets = offsets,
-                Reaches = reaches.AsDeferredJobArray(),
-                Thresholds = thresholds.AsDeferredJobArray(),
-                PrevReach = binding.PrevReach.AsDeferredJobArray(),
+                Types = fused,
+                Values = values,
+                GradientXs = gradientXs,
+                GradientYs = gradientYs,
+                Totals = totals,
+                Whole = whole,
             }.ScheduleParallel(binding.Query, handle);
+
+            return handle;
         }
 
         private NativeArray<DynamicComponentTypeHandle> GateInputs(GiSenseBinding binding, Allocator allocator)

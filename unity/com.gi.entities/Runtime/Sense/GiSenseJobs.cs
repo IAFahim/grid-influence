@@ -142,8 +142,21 @@ namespace Gi.Entities
         }
     }
 
+    internal struct GiSenseFusedType
+    {
+        public DynamicComponentTypeHandle Handle;
+        public int Size;
+        public GiSenseField Value;
+        public GiSenseField Gradient;
+        public GiSenseField Total;
+        public GiSenseField Position;
+        public GiSenseField Coverage;
+        public GiSenseField Reach;
+        public GiSenseField Threshold;
+    }
+
     [BurstCompile]
-    internal unsafe struct GiSenseWriteJob : IJobChunk
+    internal unsafe struct GiSenseGatherJob : IJobChunk
     {
         public GiSenseView View;
         public int Period;
@@ -152,6 +165,7 @@ namespace Gi.Entities
         [ReadOnly] public NativeReference<GiReconcileContext> Context;
         [ReadOnly] public NativeReference<GiSenseGateState> Gate;
         [ReadOnly] public NativeArray<int> Offsets;
+        [ReadOnly] public NativeArray<GiSenseFusedType> Types;
         [NativeDisableParallelForRestriction] public NativeArray<float> Xs;
         [NativeDisableParallelForRestriction] public NativeArray<float> Ys;
         [NativeDisableParallelForRestriction] public NativeArray<float> Reaches;
@@ -166,6 +180,22 @@ namespace Gi.Entities
             if (Gate.Value.Skip != 0) return;
             var context = Context.Value;
             if (!context.Alive || !View.Eligible(chunk)) return;
+
+            var count = Types.Length;
+            var present = stackalloc byte[count];
+            var inputs = stackalloc byte*[count];
+            for (var t = 0; t < count; t++)
+            {
+                present[t] = 0;
+                inputs[t] = null;
+                var type = Types[t];
+                var handle = type.Handle;
+                if ((type.Reach.Active || type.Threshold.Active) && type.Size != 0 && chunk.Has(ref handle))
+                {
+                    present[t] = 1;
+                    inputs[t] = (byte*)chunk.GetDynamicComponentDataArrayReinterpret<byte>(ref handle, type.Size).GetUnsafeReadOnlyPtr();
+                }
+            }
 
             var useMatrix = View.UsesMatrix(chunk);
             var transforms = !useMatrix ? chunk.GetNativeArray(ref View.Transforms) : default;
@@ -190,46 +220,16 @@ namespace Gi.Entities
                 }
                 if (Thresholds.Length != 0) Thresholds[row] = Threshold;
                 if (Excludes.Length != 0) Excludes[row] = sources.IsCreated ? sources[i].Id : default;
-                row++;
-            }
-        }
-    }
-
-    [BurstCompile]
-    internal unsafe struct GiSenseGatherJob : IJobChunk
-    {
-        public GiSenseView View;
-        public DynamicComponentTypeHandle Handle;
-        public int TypeSize;
-        public ushort Offset;
-        public byte Threshold;
-        public int Period;
-        [ReadOnly] public NativeReference<GiReconcileContext> Context;
-        [ReadOnly] public NativeReference<GiSenseGateState> Gate;
-        [ReadOnly] public NativeArray<int> Offsets;
-        [NativeDisableParallelForRestriction] public NativeArray<float> Reaches;
-        [NativeDisableParallelForRestriction] public NativeArray<short> Thresholds;
-        [NativeDisableParallelForRestriction] public NativeArray<float> PrevReach;
-
-        public void Execute(in ArchetypeChunk chunk, int unfilteredChunkIndex, bool useEnabledMask, in v128 chunkEnabledMask)
-        {
-            if (Gate.Value.Skip != 0) return;
-            var context = Context.Value;
-            if (!context.Alive || !View.Eligible(chunk) || !chunk.Has(ref Handle) || TypeSize == 0) return;
-
-            var data = (byte*)chunk.GetDynamicComponentDataArrayReinterpret<byte>(ref Handle, TypeSize).GetUnsafeReadOnlyPtr();
-            var entities = View.EntitiesOf(chunk);
-            var rows = View.Rows(chunk, useEnabledMask, chunkEnabledMask);
-            var row = Offsets[unfilteredChunkIndex];
-            while (rows.NextEntityIndex(out var i))
-            {
-                if (!GiSensePass.Due(entities[i].Index, Period, context.Tick)) continue;
-
-                if (Threshold != 0) Thresholds[row] = *(short*)(data + i * TypeSize + Offset);
-                else
+                for (var t = 0; t < count; t++)
                 {
-                    Reaches[row] = *(float*)(data + i * TypeSize + Offset);
-                    PrevReach[row] = Reaches[row];
+                    if (present[t] == 0) continue;
+                    var type = Types[t];
+                    if (type.Reach.Active)
+                    {
+                        Reaches[row] = *(float*)(inputs[t] + i * type.Size + type.Reach.Offset);
+                        PrevReach[row] = Reaches[row];
+                    }
+                    if (type.Threshold.Active) Thresholds[row] = *(short*)(inputs[t] + i * type.Size + type.Threshold.Offset);
                 }
                 row++;
             }
@@ -374,18 +374,12 @@ namespace Gi.Entities
     internal unsafe struct GiSenseScatterJob : IJobChunk
     {
         public GiSenseView View;
-        public DynamicComponentTypeHandle Handle;
-        public int TypeSize;
         public int Period;
-        public GiSenseField Value;
-        public GiSenseField Gradient;
-        public GiSenseField Total;
-        public GiSenseField Position;
-        public GiSenseField Coverage;
         [ReadOnly] public NativeReference<GiReconcileContext> Context;
         [ReadOnly] public NativeReference<GiSenseGateState> Gate;
         [ReadOnly] public NativeArray<int> Rows;
         [ReadOnly] public NativeArray<int> Offsets;
+        [ReadOnly] public NativeArray<GiSenseFusedType> Types;
         [ReadOnly] public NativeList<short> Values;
         [ReadOnly] public NativeList<float> GradientXs;
         [ReadOnly] public NativeList<float> GradientYs;
@@ -395,10 +389,24 @@ namespace Gi.Entities
         public void Execute(in ArchetypeChunk chunk, int unfilteredChunkIndex, bool useEnabledMask, in v128 chunkEnabledMask)
         {
             if (Gate.Value.Skip != 0) return;
-            if (Rows[1] == 0 || !View.Eligible(chunk) || !chunk.Has(ref Handle)) return;
+            if (Rows[1] == 0 || !View.Eligible(chunk)) return;
 
-            byte* data = null;
-            if (TypeSize > 0) data = (byte*)chunk.GetDynamicComponentDataArrayReinterpret<byte>(ref Handle, TypeSize).GetUnsafePtr();
+            var count = Types.Length;
+            var present = stackalloc byte[count];
+            var outputs = stackalloc byte*[count];
+            for (var t = 0; t < count; t++)
+            {
+                present[t] = 0;
+                outputs[t] = null;
+                var type = Types[t];
+                if (!type.Value.Active && !type.Gradient.Active && !type.Total.Active && !type.Position.Active && !type.Coverage.Active)
+                    continue;
+                var handle = type.Handle;
+                if (!chunk.Has(ref handle)) continue;
+                present[t] = 1;
+                if (type.Size != 0)
+                    outputs[t] = (byte*)chunk.GetDynamicComponentDataArrayReinterpret<byte>(ref handle, type.Size).GetUnsafePtr();
+            }
 
             var tick = Context.Value.Tick;
             var entities = View.EntitiesOf(chunk);
@@ -410,23 +418,33 @@ namespace Gi.Entities
                 if (!GiSensePass.Due(entities[i].Index, Period, tick)) continue;
 
                 var covered = (whole[row >> 6] >> (row & 63) & 1ul) != 0ul;
-                if (Value.Active) *(short*)(data + i * TypeSize + Value.Offset) = Values[row];
-                if (Total.Active) *(long*)(data + i * TypeSize + Total.Offset) = Totals[row];
-                if (Gradient.Active)
+                for (var t = 0; t < count; t++)
                 {
-                    var target = (float*)(data + i * TypeSize + Gradient.Offset);
-                    target[0] = GradientXs[row];
-                    target[1] = GradientYs[row];
-                }
+                    if (present[t] == 0) continue;
+                    var type = Types[t];
+                    var data = outputs[t];
+                    if (type.Value.Active) *(short*)(data + i * type.Size + type.Value.Offset) = Values[row];
+                    if (type.Total.Active) *(long*)(data + i * type.Size + type.Total.Offset) = Totals[row];
+                    if (type.Gradient.Active)
+                    {
+                        var gradient = (float*)(data + i * type.Size + type.Gradient.Offset);
+                        gradient[0] = GradientXs[row];
+                        gradient[1] = GradientYs[row];
+                    }
 
-                if (Position.Active)
-                {
-                    var target = (float*)(data + i * TypeSize + Position.Offset);
-                    target[0] = GradientXs[row];
-                    target[1] = GradientYs[row];
-                }
+                    if (type.Position.Active)
+                    {
+                        var position = (float*)(data + i * type.Size + type.Position.Offset);
+                        position[0] = GradientXs[row];
+                        position[1] = GradientYs[row];
+                    }
 
-                if (Coverage.Active) chunk.SetComponentEnabled(ref Handle, i, covered);
+                    if (type.Coverage.Active)
+                    {
+                        var handle = type.Handle;
+                        chunk.SetComponentEnabled(ref handle, i, covered);
+                    }
+                }
                 row++;
             }
         }
