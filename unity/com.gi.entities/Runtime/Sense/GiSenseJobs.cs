@@ -134,7 +134,7 @@ namespace Gi.Entities
             GradientYs.ResizeUninitialized(skip || (needs & GiSenseNeeds.Vector) == 0 ? 0 : total);
             Totals.ResizeUninitialized(skip || (needs & GiSenseNeeds.Total) == 0 ? 0 : total);
             Whole.ResizeUninitialized(skip ? 0 : GiSensePass.Words(total));
-            Batches.ResizeUninitialized(skip ? 0 : GiSensePass.Batches(total, Batch));
+            Batches.ResizeUninitialized(skip || total == 0 ? 0 : 1);
             PrevXs.ResizeUninitialized(total);
             PrevYs.ResizeUninitialized(total);
             PrevReach.ResizeUninitialized((needs & GiSenseNeeds.Reach) != 0 ? total : 0);
@@ -368,7 +368,7 @@ namespace Gi.Entities
             };
             GiGuard.Begin(context.World, GiGuard.Sense, false);
             var scope = GiMarkers.Sense.Auto();
-            GiSensePass.ReadColumns(Kind, context.World, layer, columns, Reach, GiSensePass.SinceTick(context.Tick, Since), Batch, batchIndex);
+            GiSensePass.ReadColumns(Kind, context.World, layer, columns, Reach, GiSensePass.SinceTick(context.Tick, Since), columns.Rows, 0);
             scope.Dispose();
             GiGuard.End(context.World, false);
         }
