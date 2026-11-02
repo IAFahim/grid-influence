@@ -153,6 +153,51 @@ namespace Gi.Entities
             return hash.Finish();
         }
 
+        public static ulong StateHash(GiPlaneSpec plane, ReadOnlySpan<GiGridSpec> grids, ReadOnlySpan<GiLayerSpec> layers,
+            ReadOnlySpan<GiStampSpec> stamps, ReadOnlySpan<sbyte> cells)
+        {
+            var hash = GiContentHash.Start();
+            hash.Add((byte)plane.Axes);
+            hash.Add(plane.OriginX);
+            hash.Add(plane.OriginY);
+
+            hash.Add(grids.Length);
+            foreach (var grid in grids)
+            {
+                hash.Add(grid.Power);
+                hash.Add(grid.X);
+                hash.Add(grid.Y);
+                hash.Add(grid.Size);
+            }
+
+            hash.Add(layers.Length);
+            foreach (var layer in layers)
+            {
+                hash.Add((byte)layer.Kind);
+                hash.Add(layer.PhaseBits);
+                hash.Add(layer.TurnBits);
+                hash.Add(layer.First);
+                hash.Add(layer.Second);
+                hash.Add(layer.FirstWeight);
+                hash.Add(layer.SecondWeight);
+                hash.Add(layer.Shift);
+                hash.Add(layer.MaskLow);
+                hash.Add(layer.MaskHigh);
+            }
+
+            hash.Add(stamps.Length);
+            foreach (var stamp in stamps) hash.Add(StampHash(stamp, cells));
+            return hash.Finish();
+        }
+
+        public static ulong BindingsHash(ReadOnlySpan<GiBindingSpec> bindings)
+        {
+            var hash = GiContentHash.Start();
+            hash.Add(bindings.Length);
+            foreach (var binding in bindings) AddBinding(ref hash, binding);
+            return hash.Finish();
+        }
+
         public static ulong StampHash(GiStampSpec stamp, ReadOnlySpan<sbyte> cells)
         {
             var hash = GiContentHash.Start();

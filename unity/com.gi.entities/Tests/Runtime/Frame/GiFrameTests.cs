@@ -82,6 +82,54 @@ namespace Gi.Entities.Tests
             Assert.That(DefinedStamps(), Is.EqualTo(GiScenarioProfile.Standard().Stamps.Length));
         }
 
+        public struct GiProbeValue : IComponentData
+        {
+            public short Value;
+        }
+
+        [Test]
+        public void ABindingsOnlyEditKeepsTheWorldAndEverySourceId()
+        {
+            using var fixture = new GiEcsFixture();
+            fixture.SetStandardProfile();
+            var emitter = fixture.CreateEmitter(0, 0, 10, 4f, 8f);
+            fixture.Tick();
+            fixture.Complete();
+            var first = fixture.Frame;
+            var placed = fixture.Manager.GetComponentData<GiSource>(emitter);
+            Assert.That(placed.Placed, Is.True);
+
+            var changed = GiScenarioProfile.Standard().ToSpec();
+            changed.Bindings = new[]
+            {
+                new GiBindingSpec
+                {
+                    Kind = GiBindingKind.Value,
+                    Layer = 0,
+                    Value = new GiBindingField
+                    {
+                        TypeHash = TypeManager.GetTypeInfo(TypeManager.GetTypeIndex<GiProbeValue>()).StableTypeHash,
+                        Offset = 0,
+                        Size = 2,
+                    },
+                },
+            };
+            fixture.SetProfile(changed);
+            fixture.Tick();
+            fixture.Complete();
+
+            var second = fixture.Frame;
+            Assert.That(second.World, Is.EqualTo(first.World));
+            Assert.That(GiWorld.Revision(second.World), Is.EqualTo(GiWorld.Revision(first.World)));
+            Assert.That(second.Generation, Is.EqualTo(first.Generation + 1u));
+            Assert.That(second.ProfileHash, Is.EqualTo(changed.Hash));
+            Assert.That(second.Faults.Has(GiFaultKind.Profile), Is.False);
+            Assert.That(GiOrphans.LiveWorlds(), Is.EqualTo(1));
+            var kept = fixture.Manager.GetComponentData<GiSource>(emitter);
+            Assert.That(kept.Id, Is.EqualTo(placed.Id));
+            Assert.That(kept.Placed, Is.True);
+        }
+
         [Test]
         public void RemovingTheProfileFreesTheWorldAndItsStamps()
         {

@@ -20,6 +20,8 @@ namespace Gi.Entities
         private ulong _builtHash;
         private ulong _failedHash;
         private uint _generation;
+        private ulong _builtStates;
+        private ulong _builtBindings;
 
         public void OnCreate(ref SystemState state)
         {
@@ -61,7 +63,20 @@ namespace Gi.Entities
             ref var blob = ref reference.Value.Value;
             if (blob.Hash == _builtHash || blob.Hash == _failedHash) return;
 
-            Rebuild(ref state, ref blob);
+            var grids = new ReadOnlySpan<GiGridSpec>(blob.Grids.GetUnsafePtr(), blob.Grids.Length);
+            var layers = new ReadOnlySpan<GiLayerSpec>(blob.Layers.GetUnsafePtr(), blob.Layers.Length);
+            var stamps = new ReadOnlySpan<GiStampSpec>(blob.Stamps.GetUnsafePtr(), blob.Stamps.Length);
+            var cells = new ReadOnlySpan<sbyte>(blob.Cells.GetUnsafePtr(), blob.Cells.Length);
+            var bindings = new ReadOnlySpan<GiBindingSpec>(blob.Bindings.GetUnsafePtr(), blob.Bindings.Length);
+            var statesHash = GiProfileHash.StateHash(blob.Plane, grids, layers, stamps, cells);
+            var bindingsHash = GiProfileHash.BindingsHash(bindings);
+            var intact = GiProfileHash.Compute(blob.Plane, grids, layers, stamps, cells, bindings) == blob.Hash;
+            var bindingsOnly = intact && _builtHash != 0ul &&
+                GiProfileEdit.Classify(_builtStates, _builtBindings, statesHash, bindingsHash) == GiProfileEditKind.BindingsOnly;
+            if (bindingsOnly)
+                Adopt(ref state, ref blob, statesHash, bindingsHash);
+            else
+                Rebuild(ref state, ref blob);
         }
 
         private void Suppress(ref SystemState state)
@@ -119,6 +134,8 @@ namespace Gi.Entities
 
             _failedHash = 0ul;
             _builtHash = blob.Hash;
+            _builtStates = GiProfileHash.StateHash(blob.Plane, grids, layers, stamps, cells);
+            _builtBindings = GiProfileHash.BindingsHash(bindings);
             _generation++;
             frame.World = world;
             frame.Token = GiWorld.Capture(world);
@@ -132,6 +149,24 @@ namespace Gi.Entities
             ResetSources(ref state);
         }
 
+        private void Adopt(ref SystemState state, ref GiProfileBlob blob, ulong states, ulong bindings)
+        {
+            GiRuntime.CompleteAll();
+            state.EntityManager.CompleteAllTrackedJobs();
+            var frame = state.EntityManager.GetComponentData<GiFrame>(_frame);
+            _failedHash = 0ul;
+            _builtHash = blob.Hash;
+            _builtStates = states;
+            _builtBindings = bindings;
+            _generation++;
+            frame.Token = GiWorld.Capture(frame.World);
+            frame.Tick = GiWorld.Tick(frame.World);
+            frame.Generation = _generation;
+            frame.ProfileHash = blob.Hash;
+            frame.Faults.Clear(GiFaultKind.Profile);
+            state.EntityManager.SetComponentData(_frame, frame);
+        }
+
         private void Release(ref SystemState state)
         {
             var frame = state.EntityManager.GetComponentData<GiFrame>(_frame);
@@ -142,6 +177,8 @@ namespace Gi.Entities
             state.EntityManager.GetComponentData<GiPulseMirror>(_frame).Entries->Clear();
             _builtHash = 0ul;
             _failedHash = 0ul;
+            _builtStates = 0ul;
+            _builtBindings = 0ul;
             ResetSources(ref state);
         }
 
