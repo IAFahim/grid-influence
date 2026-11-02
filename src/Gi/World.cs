@@ -947,6 +947,11 @@ public static unsafe partial class World
     [MethodImpl(Jit.Hot)]
     public static void Process(byte world)
     {
+        if (ForcedWorkers > 0)
+        {
+            ProcessParallel(world, ForcedWorkers);
+            return;
+        }
         var w = GetContext(world);
         if (w == null) return;
 

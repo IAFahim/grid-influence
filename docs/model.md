@@ -1614,6 +1614,7 @@ digits. Concurrency: single thread.
   cells take the scalar tail, so no access passes the 32-cell row end; the row-summary
   recomputation reads exactly the 32 published cells of each touched row, and the rescan reads
   exactly the 1,024 published cells.
+- **J50 parallel publish spike (not merged)**: `PublishTilesParallel` splits the serial publish into a parallel bake and a serial commit. Lifetime: the outcome scratch is one process-lifetime `NativeHeap` block grown only on the owning thread before the fork and never freed mid-frame, so no bake worker observes a move. Aliasing: each bake worker owns disjoint dirty-list indices and writes only its tile's planes, page, and summary plus its own outcome byte; the commit replays the serial mutation order (drop or max update, retire, hash, compaction) on the owning thread. Alignment: outcomes are bytes. Concurrency: deposit, transient planning, commit, derive, and epoch stamping stay serial; the fork joins before the commit, so shared trees see one thread.
 
 ### Floor probes
 

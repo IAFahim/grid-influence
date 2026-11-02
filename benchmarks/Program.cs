@@ -4,6 +4,7 @@ CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
 CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
 if (args.Length > 0 && args[0] == "--gate") return GateRunner.Run(args);
 if (args.Length > 0 && args[0] == "--frames") return FrameHarness.Run(args);
+if (args.Length > 0 && args[0] == "--j50") return J50Spike.Run(args);
 var mode = args.Length > 0 ? args[0] : "";
 if (mode == "--floor") return FloorProbes.Run(args);
 if (mode == "--place")
