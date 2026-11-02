@@ -10,6 +10,7 @@ public static unsafe partial class World
     private static byte* ParallelOutcomes;
     private static int ParallelOutcomeCapacity;
 
+    [MethodImpl(Jit.Hot)]
     internal static void ProcessParallel(byte world, int workers)
     {
         var w = GetContext(world);
@@ -134,6 +135,7 @@ public static unsafe partial class World
         ld->Rects.Resize(0);
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void BakeRange(
         nint ldAddr, nint dirtyAddr, nint rectsAddr, nint outcomesAddr,
         int lo, int hi, bool transient, int tick)
@@ -159,6 +161,7 @@ public static unsafe partial class World
         }
     }
 
+    [MethodImpl(Jit.Hot)]
     private static void EnsureParallelOutcomes(int count)
     {
         if (count <= ParallelOutcomeCapacity) return;
