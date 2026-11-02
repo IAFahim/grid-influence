@@ -335,6 +335,7 @@ namespace Gi.Entities
         [ReadOnly] public NativeList<int> Batches;
         [ReadOnly] public NativeReference<GiReconcileContext> Context;
         [ReadOnly] public NativeReference<GiSenseGateState> Gate;
+        [ReadOnly] public NativeArray<int> Rows;
         [ReadOnly] public NativeArray<float> Xs;
         [ReadOnly] public NativeArray<float> Ys;
         [ReadOnly] public NativeArray<float> Reaches;
