@@ -3,11 +3,11 @@
     "displayName": "Gi Entities",
     "version": "0.1.1",
     "unity": "7000.0",
-    "unityRelease": "0a9",
+    "unityRelease": "0a12",
     "description": "Sparse tiled integer influence fields for Unity Entities.",
     "license": "MIT",
     "dependencies": {
-        "com.bovinelabs.core": "2.0.0-pre.6",
+        "com.bovinelabs.core": "2.0.0-pre.7",
         "com.bovinelabs.quill": "2.0.0-pre.5",
         "com.unity.burst": "2.0.0",
         "com.unity.collections": "6.7.0",
