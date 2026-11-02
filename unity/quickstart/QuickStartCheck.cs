@@ -96,6 +96,7 @@ public static class QuickStartCheck
         }
         finally
         {
+            EcsWorld.PopWorldStack(world);
             world.Dispose();
         }
     }
