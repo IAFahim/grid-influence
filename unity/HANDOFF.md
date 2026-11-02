@@ -14,6 +14,7 @@ Rules that never change (`AGENTS.md`): Gi stays standalone and gains no Unity de
 - **`unity test` runs are allowed** (the owner said so): `unity/validate.sh editmode`, `playmode` and `perf` use it. Run them freely.
 - **Player builds are dropped.** The owner said "we don't care of build" (2026-10-18): do not run `unity/validate.sh coreclr` or `il2cpp`. The rows that need a player (L5, the player perf columns, "samples on IL2CPP") are closed as dropped.
 - The `unity` CLI has no connected editor (the host project has no Pipeline package), so `unity recompile` and `unity status` do not work; `compile.sh` launches the editor itself.
+- Pinned editor: **7000.0.0a12** (`8751f7c83ed7`). Working third-party triple: BovineLabs Core `dccb0b5` (2.0.0-pre.7, `unityRelease 0a12`), quill/anchor `eb83b43` through the vex-studio tertle-monorepo mirror, plus builtin `com.unity.modules.audio` 1.0.0 (a12 Entities no longer pulls it in).
 
 ## 3. State of the repository
 
