@@ -203,7 +203,7 @@ namespace Gi.Entities
                 if (type.HasInput && !type.HasOutput && !type.Coverage.Active) count++;
             }
 
-            var inputs = new NativeArray<DynamicComponentTypeHandle>(count, allocator);
+            var inputs = CollectionHelper.CreateNativeArray<DynamicComponentTypeHandle>(count, allocator);
             var cursor = 0;
             for (var t = 0; t < binding.Types.Length; t++)
             {
