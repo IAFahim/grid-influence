@@ -295,7 +295,7 @@ namespace Gi.Entities
         {
             var grids = Grids;
             var gridCount = context.Tables.GridCount;
-            if (grids.Length < gridCount) gridCount = grids.Length;
+            if (grids.Length < gridCount) gridCount = (byte)grids.Length;
             if (gridCount <= 0 || Scratch.Length == 0) return false;
 
             var needsReach = ((GiSenseNeeds)Needs & GiSenseNeeds.Reach) != 0;
