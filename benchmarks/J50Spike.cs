@@ -65,11 +65,13 @@ internal static unsafe class J50Spike
         var failures = 0;
         string reference = "";
         var medians = new List<string>();
+        var marks = stackalloc long[16];
         foreach (var w in cfg.Workers)
         {
             var passMedians = new List<double>();
             var passTotals = new List<double>();
             string hash = "";
+            string sig = "";
             var ok = true;
             for (var p = 0; p < cfg.Passes; p++)
             {
@@ -77,7 +79,6 @@ internal static unsafe class J50Spike
                 scenario.Setup();
                 var width = scenario.Stages.Length + 1;
                 var process = Array.IndexOf(scenario.Stages, "process");
-                var marks = stackalloc long[width];
                 World.ForcedWorkers = w;
                 for (var f = 0; f < cfg.Warmup; f++) FrameDriver.Execute(scenario, f, marks, out _);
                 GC.Collect();
@@ -98,21 +99,22 @@ internal static unsafe class J50Spike
 
                 var allocated = GC.GetTotalAllocatedBytes(false) - allocatedBefore;
                 var tiles = World.ParallelBakedTiles / Math.Max(cfg.Measure, 1);
-                ok &= scenario.VerifyState();
+                var verified = scenario.VerifyState();
                 var state = scenario.FinalState();
                 var layers = string.Join("+", scenario.LayerIds.Select(l => World.LayerHash(scenario.World, scenario.Grid, l).ToString("x16", CultureInfo.InvariantCulture)));
                 hash = checksum.ToString("x16", CultureInfo.InvariantCulture)
                     + "/final" + state.ToString("x16", CultureInfo.InvariantCulture)
                     + "/layers" + layers;
+                sig = FormattableString.Invariant($"complete={ok} verified={verified} {hash}");
                 Array.Sort(proc);
                 Array.Sort(total);
                 var toMs = 1e3 / Stopwatch.Frequency;
                 passMedians.Add(FrameStats.Rank(proc, 50) * toMs);
                 passTotals.Add(FrameStats.Rank(total, 50) * toMs);
                 Console.Out.WriteLine(FormattableString.Invariant(
-                    $"J50 frame={cfg.Frame} workers={w} pass={p} process_ms={FrameStats.Rank(proc, 50) * toMs:F3} total_ms={FrameStats.Rank(total, 50) * toMs:F3} tiles_per_frame={tiles} alloc_bytes={allocated} complete={ok} hash={hash}"));
-                if (w == 0 && p == 0) reference = hash;
-                else if (hash != reference) ok = false;
+                    $"J50 frame={cfg.Frame} workers={w} pass={p} process_ms={FrameStats.Rank(proc, 50) * toMs:F3} total_ms={FrameStats.Rank(total, 50) * toMs:F3} tiles_per_frame={tiles} alloc_bytes={allocated} sig={sig}"));
+                if (w == 0 && p == 0) reference = sig;
+                else if (sig != reference) ok = false;
             }
 
             passMedians.Sort();
@@ -120,9 +122,9 @@ internal static unsafe class J50Spike
             var mid = passMedians[passMedians.Count / 2];
             var midTotal = passTotals[passTotals.Count / 2];
             medians.Add(FormattableString.Invariant($"J50 median frame={cfg.Frame} workers={w} process_ms={mid:F3} total_ms={midTotal:F3}"));
-            if (w != 0 && hash != reference)
+            if (w != 0 && sig != reference)
             {
-                Console.Out.WriteLine(FormattableString.Invariant($"J50 MISMATCH frame={cfg.Frame} workers={w} hash={hash} reference={reference}"));
+                Console.Out.WriteLine(FormattableString.Invariant($"J50 MISMATCH frame={cfg.Frame} workers={w} sig={sig} reference={reference}"));
                 failures++;
             }
 

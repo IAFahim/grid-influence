@@ -7,6 +7,8 @@ public static unsafe partial class World
 {
     internal static int ForcedWorkers;
     internal static long ParallelBakedTiles;
+    private static byte* ParallelOutcomes;
+    private static int ParallelOutcomeCapacity;
 
     internal static void ProcessParallel(byte world, int workers)
     {
