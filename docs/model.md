@@ -1189,9 +1189,11 @@ digits. Concurrency: single thread.
   allocation, never a block interior — `SourceColumns` chunks, slab regions, and buffers are freed
   at their base and exactly once by the same owner that grew them. *Alignment*: `allocate` is
   called with alignment 0 or 64; a hook may return over-aligned memory for the 0 case freely
-  (every Gi access is at most naturally aligned), and the default path is byte-identical to the
-  unhooked build — `NativeMemory.AllocZeroed`/`Free` and `AlignedAlloc(64)`/`AlignedFree` on .NET,
-  `Marshal.AllocHGlobal` with platform-natural alignment on netstandard2.1. *Concurrency*: the
+  (every Gi access is at most naturally aligned). The default aligned path returns 64-byte
+  aligned memory on both builds — `NativeMemory.AlignedAlloc(64)`/`AlignedFree` on .NET, and on
+  netstandard2.1 an over-allocated `AllocHGlobal` block rounded up to a 64 B boundary with the
+  true base stored in the header word below the returned pointer, which `AlignedFree` reads back
+  and frees. *Concurrency*: the
   hook is installed or restored before the first allocation or after a full teardown, both
   process-wide serialized points (below), so the pointer fields are never written while any Gi
   call runs; afterwards the fields are read-only. The hook itself runs on the calling thread of
@@ -1379,18 +1381,16 @@ digits. Concurrency: single thread.
   pyramid nodes are 64 `int16` values at 128 B offsets inside a 64 B aligned buffer, so the
   full-node AVX2 max loads stay inside the allocation; partial nodes scan scalar. The `T` and `B` units are 8,192 B slab units of `int64` cells at a
   32-cell pitch, so every element is naturally aligned; they are only ever read and written by scalar
-  8-byte accesses. On
-  netstandard2.1 (Unity) `NativeHeap` backs onto `Marshal.AllocHGlobal`
-  with platform-natural alignment instead of 64-byte `AlignedAlloc`, and no SIMD paths compile:
-  every access in that build is a naturally aligned scalar load or store, so the weaker
-  alignment guarantee cannot be observed.
+  8-byte accesses. On netstandard2.1 (Unity) no SIMD paths compile; every access in that build
+  is a naturally aligned scalar load or store, and `AlignedAlloc` still returns 64-byte aligned
+  memory by rounding up inside an over-allocated `AllocHGlobal` block.
   Managed command/result arrays have their normal CLR alignment. Native spans must point to
   naturally aligned `SourceCommand`/`SourceResult` storage; no SIMD loads depend on their address.
   Borrowed `TransformRange` columns follow the same rule at their real widths — `int` ids,
   `float` positions/headings/scales, `ulong` mask words — with no per-row packing or decoding.
   The free ring is an
-  `int` buffer from the same aligned allocator (natural alignment on netstandard2.1), read and
-  written only through scalar naturally aligned `int` accesses. The kernel cache's entry, tap,
+  `int` buffer from the same aligned allocator, read and written only through scalar naturally
+  aligned `int` accesses. The kernel cache's entry, tap,
   row-extent, and canvas buffers are `NativeBuffer`s from the same 64-byte aligned allocator;
   tap rows are read and written as naturally aligned `int` (an integer kernel's cells share its
   long slot's alignment) or `long` scalars, and row extents are whole `int` pairs. The

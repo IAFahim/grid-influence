@@ -81,8 +81,12 @@ internal static unsafe class NativeHeap
     {
         Interlocked.Increment(ref Calls);
         var hook = HookAllocate;
-        if (hook == null) return (void*)Marshal.AllocHGlobal((nint)bytes);
-        return hook(bytes, VectorAlignment);
+        if (hook != null) return hook(bytes, VectorAlignment);
+        nuint slack = VectorAlignment - 1 + (nuint)sizeof(void*);
+        var raw = (byte*)Marshal.AllocHGlobal((nint)(bytes + slack));
+        var aligned = (byte*)(((nuint)raw + (nuint)sizeof(void*) + VectorAlignment - 1) & ~(VectorAlignment - 1));
+        ((void**)aligned)[-1] = raw;
+        return aligned;
     }
 
     [MethodImpl(Jit.Hot)]
@@ -90,7 +94,7 @@ internal static unsafe class NativeHeap
     {
         Interlocked.Increment(ref Calls);
         var hook = HookFree;
-        if (hook == null) Marshal.FreeHGlobal((nint)pointer);
+        if (hook == null) Marshal.FreeHGlobal((nint)((void**)pointer)[-1]);
         else hook(pointer);
     }
 #endif
