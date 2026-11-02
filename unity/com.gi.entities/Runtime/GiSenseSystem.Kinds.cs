@@ -8,7 +8,7 @@ namespace Gi.Entities
     public unsafe partial struct GiSenseSystem
     {
         private JobHandle Schedule(ref SystemState state, GiSenseBinding binding, Entity frame, NativeReference<GiReconcileContext> context,
-            int batch, Allocator allocator, JobHandle handle)
+            Allocator allocator, JobHandle handle)
         {
             var spec = binding.Spec;
             for (var t = 0; t < binding.Types.Length; t++) binding.Types[t].Handle.Update(ref state);
@@ -27,7 +27,6 @@ namespace Gi.Entities
             var gradientYs = new NativeList<float>(allocator);
             var totals = new NativeList<long>(allocator);
             var whole = new NativeList<ulong>(allocator);
-            var batches = new NativeList<int>(allocator);
             var inputs = GateInputs(binding, allocator);
 
             handle = new GiSenseCountJob
@@ -80,11 +79,9 @@ namespace Gi.Entities
                 GradientYs = gradientYs,
                 Totals = totals,
                 Whole = whole,
-                Batches = batches,
                 PrevXs = binding.PrevXs,
                 PrevYs = binding.PrevYs,
                 PrevReach = binding.PrevReach,
-                Batch = batch,
             }.Schedule(handle);
             handle = new GiSenseWriteJob
             {
@@ -121,10 +118,8 @@ namespace Gi.Entities
             {
                 Kind = spec.Kind,
                 Layer = new GiLayerKey(spec.Layer),
-                Batch = batch,
                 Reach = spec.Reach,
                 Since = spec.Since,
-                Batches = batches,
                 Context = context,
                 Gate = binding.GateState,
                 Rows = rows,
@@ -138,7 +133,7 @@ namespace Gi.Entities
                 GradientYs = gradientYs.AsDeferredJobArray(),
                 Totals = totals.AsDeferredJobArray(),
                 Whole = whole.AsDeferredJobArray(),
-            }.Schedule(batches, 1, GiRuntime.BeginRead(handle));
+            }.Schedule(GiRuntime.BeginRead(handle));
             GiRuntime.EndRead(handle);
 
             for (var t = 0; t < binding.Types.Length; t++)

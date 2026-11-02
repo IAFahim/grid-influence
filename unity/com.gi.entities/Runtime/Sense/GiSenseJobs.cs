@@ -103,11 +103,9 @@ namespace Gi.Entities
         public NativeList<float> GradientYs;
         public NativeList<long> Totals;
         public NativeList<ulong> Whole;
-        public NativeList<int> Batches;
         public NativeList<float> PrevXs;
         public NativeList<float> PrevYs;
         public NativeList<float> PrevReach;
-        public int Batch;
 
         public void Execute()
         {
@@ -134,7 +132,6 @@ namespace Gi.Entities
             GradientYs.ResizeUninitialized(skip || (needs & GiSenseNeeds.Vector) == 0 ? 0 : total);
             Totals.ResizeUninitialized(skip || (needs & GiSenseNeeds.Total) == 0 ? 0 : total);
             Whole.ResizeUninitialized(skip ? 0 : GiSensePass.Words(total));
-            Batches.ResizeUninitialized(skip || total == 0 ? 0 : 1);
             PrevXs.ResizeUninitialized(total);
             PrevYs.ResizeUninitialized(total);
             PrevReach.ResizeUninitialized((needs & GiSenseNeeds.Reach) != 0 ? total : 0);
@@ -325,16 +322,15 @@ namespace Gi.Entities
         }
     }
 
-    internal unsafe struct GiSenseReadJob : IJobParallelForDefer
+    internal unsafe struct GiSenseReadJob : IJob
     {
         public GiBindingKind Kind;
         public GiLayerKey Layer;
-        public int Batch;
         public float Reach;
         public int Since;
-        [ReadOnly] public NativeList<int> Batches;
         [ReadOnly] public NativeReference<GiReconcileContext> Context;
         [ReadOnly] public NativeReference<GiSenseGateState> Gate;
+        [ReadOnly] public NativeArray<int> Rows;
         [ReadOnly] public NativeArray<float> Xs;
         [ReadOnly] public NativeArray<float> Ys;
         [ReadOnly] public NativeArray<float> Reaches;
@@ -346,7 +342,7 @@ namespace Gi.Entities
         [NativeDisableParallelForRestriction] public NativeArray<long> Totals;
         [NativeDisableParallelForRestriction] public NativeArray<ulong> Whole;
 
-        public void Execute(int batchIndex)
+        public void Execute()
         {
             if (Gate.Value.Skip != 0) return;
             var context = Context.Value;
