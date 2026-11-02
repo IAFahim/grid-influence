@@ -18,6 +18,7 @@ namespace Gi.Entities
         [ReadOnly] public ComponentTypeHandle<LocalTransform> Transforms;
         [ReadOnly] public ComponentTypeHandle<LocalToWorld> Matrices;
         [ReadOnly] public ComponentTypeHandle<Parent> Parents;
+        public ComponentTypeHandle<GiDirty> Dirty;
         public ComponentTypeHandle<GiFault> Faults;
 
         public int Visit(in ArchetypeChunk chunk, in GiReconcileContext context, uint lastVersion, int baseIndex,
@@ -26,13 +27,22 @@ namespace Gi.Entities
             if (!context.Alive) return 0;
 
             var hasEmitter = chunk.Has(ref Emitters);
-            if (hasEmitter && !chunk.DidChange(ref Emitters, lastVersion) && !chunk.DidChange(ref Sources, lastVersion) &&
-                !chunk.DidOrderChange(lastVersion))
-                return 0;
+            if (!hasEmitter) return 0;
+
+            var full = context.Force || chunk.DidChange(ref Emitters, lastVersion);
+            var hasDirty = chunk.Has(ref Dirty);
+            var mask = hasDirty ? chunk.GetEnabledMask(ref Dirty) : default;
+            if (!full)
+            {
+                var any = false;
+                for (var d = 0; d < chunk.Count; d++)
+                    if (mask[d]) { any = true; break; }
+                if (!GiReconcileFilter.ShouldVisitChunk(false, false, any)) return 0;
+            }
 
             var sources = chunk.GetNativeArray(ref Sources);
-            var emitters = hasEmitter ? chunk.GetNativeArray(ref Emitters) : default;
-            var enabled = hasEmitter ? chunk.GetEnabledMask(ref Emitters) : default;
+            var emitters = chunk.GetNativeArray(ref Emitters);
+            var enabled = chunk.GetEnabledMask(ref Emitters);
             var disabled = chunk.Has(ref Disabled);
             var ramps = chunk.Has(ref Ramps) ? chunk.GetNativeArray(ref Ramps) : default;
             var oriented = chunk.Has(ref Oriented);
@@ -47,8 +57,10 @@ namespace Gi.Entities
             var count = 0;
             for (var i = 0; i < chunk.Count; i++)
             {
+                if (!full && !GiReconcileFilter.ShouldProcessEntity(mask[i])) continue;
+
                 var desired = default(GiDesired);
-                desired.Want = hasEmitter && !disabled && enabled[i];
+                desired.Want = !disabled && enabled[i];
                 if (desired.Want)
                 {
                     desired.Layer = emitters[i].Layer;
@@ -84,6 +96,9 @@ namespace Gi.Entities
                         faults[i] = new GiFault { Code = plan.Fault };
                         chunk.SetComponentEnabled(ref Faults, i, true);
                     }
+
+                    var keep = GiReconcileFilter.KeepDirty(plan.Count);
+                    if (hasDirty && mask[i] != keep) chunk.SetComponentEnabled(ref Dirty, i, keep);
                 }
 
                 count += plan.Count;

@@ -25,6 +25,8 @@ namespace Gi.Entities
         private ComponentLookup<GiFrame> _frames;
         private ComponentLookup<GiSource> _sourceLookup;
         private ComponentLookup<GiFault> _faultLookup;
+        private uint _generation;
+        private uint _disabledOrder;
         private EntityTypeHandle _entities;
         private ComponentTypeHandle<GiSource> _sourceHandle;
 
@@ -50,6 +52,7 @@ namespace Gi.Entities
                 Transforms = state.GetComponentTypeHandle<LocalTransform>(true),
                 Matrices = state.GetComponentTypeHandle<LocalToWorld>(true),
                 Parents = state.GetComponentTypeHandle<Parent>(true),
+                Dirty = state.GetComponentTypeHandle<GiDirty>(),
                 Faults = state.GetComponentTypeHandle<GiFault>(),
             };
             _frames = state.GetComponentLookup<GiFrame>();
@@ -83,7 +86,12 @@ namespace Gi.Entities
                 return;
             }
 
-            if (added) state.EntityManager.AddComponent<GiSource>(_added);
+            if (added)
+            {
+                state.EntityManager.AddComponent<GiSource>(_added);
+                state.EntityManager.AddComponent<GiDirty>(_added);
+                state.EntityManager.SetComponentEnabled<GiDirty>(_added, true);
+            }
 
             _view.Entities.Update(ref state);
             _view.Sources.Update(ref state);
@@ -95,6 +103,7 @@ namespace Gi.Entities
             _view.Transforms.Update(ref state);
             _view.Matrices.Update(ref state);
             _view.Parents.Update(ref state);
+            _view.Dirty.Update(ref state);
             _view.Faults.Update(ref state);
             _frames.Update(ref state);
             _sourceLookup.Update(ref state);
@@ -114,9 +123,44 @@ namespace Gi.Entities
             var scratch = new NativeList<GiWorld.SourceCommand>(allocator);
             var batchResults = new NativeList<GiWorld.SourceResult>(allocator);
 
+            var frameEntity = SystemAPI.GetSingletonEntity<GiFrame>();
+            var generation = state.EntityManager.GetComponentData<GiFrame>(frameEntity).Generation;
+            var disabledOrder = state.EntityManager.GetComponentOrderVersion<Disabled>();
+            var forceAll = generation != _generation || disabledOrder != _disabledOrder;
+            _generation = generation;
+            _disabledOrder = disabledOrder;
+
+            var retirees = 0;
+            if (!_retire.IsEmptyIgnoreFilter)
+            {
+                state.Dependency.Complete();
+                using var retired = _retire.ToArchetypeChunkArray(Allocator.Temp);
+                foreach (var chunk in retired)
+                {
+                    var retireSources = chunk.GetNativeArray(_sourceHandle);
+                    var retireEntities = chunk.GetNativeArray(_entities);
+                    for (var i = 0; i < chunk.Count; i++)
+                    {
+                        if (!retireSources[i].Placed) continue;
+                        var applied = new GiApplied
+                        {
+                            Placed = true,
+                            Layer = retireSources[i].Layer,
+                            Stamp = retireSources[i].Stamp,
+                            Gain = retireSources[i].Gain,
+                            Source = retireSources[i].Id,
+                        };
+                        commands.Add(GiDiff.RemoveFor(applied, retirees));
+                        owners.Add(retireEntities[i]);
+                        retirees++;
+                    }
+                }
+            }
+
             var handle = new GiDrainPulsesJob
             {
-                Frame = SystemAPI.GetSingletonEntity<GiFrame>(),
+                Frame = frameEntity,
+                ForceAll = forceAll,
                 Frames = _frames,
                 Context = context,
                 Streams = _pulses.Containers,
@@ -129,6 +173,7 @@ namespace Gi.Entities
                 Counts = counts,
                 Pulses = pulses,
                 Context = context,
+                Base = retirees,
                 Offsets = offsets,
                 Commands = commands,
                 Owners = owners,
