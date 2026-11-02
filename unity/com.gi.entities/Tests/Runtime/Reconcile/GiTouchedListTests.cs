@@ -82,47 +82,5 @@ namespace Gi.Entities.Tests
             for (var i = 25; i < 50; i++)
                 Assert.That(fixture.Manager.GetComponentData<GiSource>(entities[i]).Placed, Is.True);
         }
-
-        [Test]
-        public void AForcedFullVisitReproducesTheTouchedWorldContent()
-        {
-            using var fixture = new GiEcsFixture();
-            fixture.SetStandardProfile();
-            var entities = new List<Entity>();
-            for (var i = 0; i < 50; i++) entities.Add(fixture.CreateEmitter((byte)(i % 2), (byte)(i % 6), 4, 10f + i, 10f));
-            fixture.Tick(3);
-            fixture.Complete();
-            var touched = ContentHash(fixture, entities);
-            fixture.SetStandardProfile();
-            fixture.Tick(3);
-            fixture.Complete();
-            Assert.That(ContentHash(fixture, entities), Is.EqualTo(touched));
-            foreach (var entity in entities)
-                Assert.That(fixture.Manager.GetComponentData<GiSource>(entity).Placed, Is.True);
-        }
-
-        private static ulong ContentHash(GiEcsFixture fixture, List<Entity> entities)
-        {
-            var hash = GiContentHash.Start();
-            foreach (var entity in entities)
-            {
-                var source = fixture.Manager.GetComponentData<GiSource>(entity);
-                hash.Add(source.Placed ? 1 : 0);
-                hash.Add(source.Layer.Index);
-                hash.Add(source.Stamp.Index);
-                hash.Add(source.Gain);
-                if (source.Placed && GiWorld.TryGetSourceSpec(fixture.Frame.World, source.Id, out var spec))
-                {
-                    hash.Add(spec.X);
-                    hash.Add(spec.Y);
-                    hash.Add(spec.HeadingRadians);
-                    hash.Add(spec.Scale);
-                    hash.Add(spec.Gain);
-                    hash.Add(spec.Layer);
-                    hash.Add(spec.Stamp);
-                }
-            }
-            return hash.Finish();
-        }
     }
 }

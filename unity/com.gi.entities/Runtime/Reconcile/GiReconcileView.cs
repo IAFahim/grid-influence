@@ -29,23 +29,15 @@ namespace Gi.Entities
             var hasEmitter = chunk.Has(ref Emitters);
             if (!hasEmitter) return 0;
 
-            var inputsChanged =
-                chunk.DidChange(ref Emitters, lastVersion) ||
-                chunk.DidChange(ref Sources, lastVersion) ||
-                chunk.DidOrderChange(lastVersion) ||
-                chunk.DidChange(ref Ramps, lastVersion) ||
-                chunk.DidChange(ref Transforms, lastVersion) ||
-                chunk.DidChange(ref Matrices, lastVersion) ||
-                chunk.DidChange(ref Parents, lastVersion);
+            var full = context.Force || chunk.DidChange(ref Emitters, lastVersion);
             var hasDirty = chunk.Has(ref Dirty);
-            var full = context.Force || inputsChanged || !hasDirty;
             var mask = hasDirty ? chunk.GetEnabledMask(ref Dirty) : default;
-            var any = !hasDirty;
             if (!full)
             {
+                var any = false;
                 for (var d = 0; d < chunk.Count; d++)
                     if (mask[d]) { any = true; break; }
-                if (!GiReconcileFilter.ShouldVisitChunk(context.Force, inputsChanged, any)) return 0;
+                if (!GiReconcileFilter.ShouldVisitChunk(false, false, any)) return 0;
             }
 
             var sources = chunk.GetNativeArray(ref Sources);
@@ -65,7 +57,7 @@ namespace Gi.Entities
             var count = 0;
             for (var i = 0; i < chunk.Count; i++)
             {
-                if (!full && hasDirty && !GiReconcileFilter.ShouldProcessEntity(mask[i])) continue;
+                if (!full && !GiReconcileFilter.ShouldProcessEntity(mask[i])) continue;
 
                 var desired = default(GiDesired);
                 desired.Want = !disabled && enabled[i];

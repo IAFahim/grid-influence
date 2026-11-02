@@ -18,7 +18,6 @@ namespace Gi.Entities
         private SingletonCollectionUtil<GiPulseSingleton, NativeThreadStream> _pulses;
         private EntityQuery _all;
         private EntityQuery _added;
-        private EntityQuery _undirtied;
         private EntityQuery _retire;
         private EntityCommandBuffer _buffer;
         private bool _playback;
@@ -37,9 +36,8 @@ namespace Gi.Entities
             _pulses = new SingletonCollectionUtil<GiPulseSingleton, NativeThreadStream>(ref state);
 
             const EntityQueryOptions every = EntityQueryOptions.IncludeDisabledEntities | EntityQueryOptions.IncludePrefab;
-            _all = new EntityQueryBuilder(Allocator.Temp).WithAll<GiSource>().WithOptions(every).Build(ref state);
+            _all = new EntityQueryBuilder(Allocator.Temp).WithAll<GiSource>().WithPresent<GiDirty>().WithOptions(every).Build(ref state);
             _added = new EntityQueryBuilder(Allocator.Temp).WithAll<GiEmitter>().WithNone<GiSource>().Build(ref state);
-            _undirtied = new EntityQueryBuilder(Allocator.Temp).WithAll<GiEmitter, GiSource>().WithNone<GiDirty>().Build(ref state);
             _retire = new EntityQueryBuilder(Allocator.Temp).WithAll<GiSource>().WithNone<GiEmitter>().WithOptions(every).Build(ref state);
 
             _view = new GiReconcileView
@@ -82,7 +80,7 @@ namespace Gi.Entities
             }
 
             var added = !_added.IsEmptyIgnoreFilter;
-            if (!added && _all.IsEmptyIgnoreFilter && _pulses.Containers.Length == 0)
+            if (!added && _all.IsEmptyIgnoreFilter && _retire.IsEmptyIgnoreFilter && _pulses.Containers.Length == 0)
             {
                 _pulses.ClearRewind(state.Dependency);
                 return;
@@ -90,14 +88,11 @@ namespace Gi.Entities
 
             if (added)
             {
+                using var fresh = _added.ToEntityArray(Allocator.Temp);
                 state.EntityManager.AddComponent<GiSource>(_added);
                 state.EntityManager.AddComponent<GiDirty>(_added);
-                state.EntityManager.SetComponentEnabled<GiDirty>(_added, true);
-            }
-            if (!_undirtied.IsEmptyIgnoreFilter)
-            {
-                state.EntityManager.AddComponent<GiDirty>(_undirtied);
-                state.EntityManager.SetComponentEnabled<GiDirty>(_undirtied, true);
+                foreach (var entity in fresh)
+                    state.EntityManager.SetComponentEnabled<GiDirty>(entity, true);
             }
 
             _view.Entities.Update(ref state);
