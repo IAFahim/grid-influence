@@ -87,7 +87,8 @@ for (label, key), frames_ in runs.items():
     values[key + ".runs"] = float(len(ordered))
     values[key + ".p50_spread_ms"] = float(ordered[-1]["p50_ms"]) - float(ordered[0]["p50_ms"])
 
-table[unity["backend"]] = {key: float(value) for key, value in unity["values"].items()}
+unity_key = "editor-coreclr-vector" if unity["backend"] == "editor-coreclr" else unity["backend"]
+table[unity_key] = {key: float(value) for key, value in unity["values"].items()}
 
 
 def number(value):
@@ -129,7 +130,8 @@ labels = [
     ("dotnet-net10", "dotnet, net10 build (vector), default tiering"),
     ("dotnet-scalar", "dotnet, netstandard2.1 build (scalar), default tiering"),
     ("dotnet-scalar-pgo-off", "dotnet, netstandard2.1 build (scalar), TieredPGO off"),
-    ("editor-coreclr", "Unity editor, CoreCLR, netstandard2.1 build (scalar)"),
+    ("editor-coreclr", "Unity editor, CoreCLR, portable variant (scalar)"),
+    ("editor-coreclr-vector", "Unity editor, CoreCLR, coreclr variant (vector)"),
     ("coreclr-player", "Unity Linux player, CoreCLR, netstandard2.1 build (scalar)"),
     ("il2cpp-player", "Unity Linux player, IL2CPP, netstandard2.1 build (scalar)"),
 ]
@@ -142,7 +144,7 @@ out.append("")
 out.append("## Method")
 out.append("")
 out.append("- **Frames.** The `benchmarks/` frame harness (B1, C, W; the same scenarios, parameters, receipts and checksums) is compiled unchanged as `GiBenchmarks.dll` for netstandard2.1 (`unity/tests/Gi.Frames`; only `AggressiveOptimization`, two intrinsics probes and `Stopwatch.GetElapsedTime` are rewritten at build time). It runs inside the Unity test and on `dotnet`, on one core, one thread, %s entities, 10 warm-up and 60 measured frames, p50 of the frame time; each dotnet row is the median of three process runs because the tiered JIT is bimodal on some frames (frame C ran at 22 ms in one process and 9 ms in the next). A run fails if the harness's receipts fail or the frame allocates." % format(int(float(entities)), ","))
-out.append("- **dotnet rows** run the same harness pinned to one core. The net10 build is the vector build `src/Gi` ships for `net10.0`; Unity cannot reference it yet (`unity/ROADMAP.md`, Appendix B). The netstandard2.1 build is the scalar one Unity loads today.")
+out.append("- **dotnet rows** run the same harness pinned to one core. The net10 build is the vector build `src/Gi` ships for `net10.0`; Unity loads those bytes as the coreclr variant (retargeted to netstandard 2.1 references by `build-plugins.sh`, J01). The netstandard2.1 build is the scalar portable variant Unity loads where `ENABLE_CORECLR` is absent.")
 out.append("- **ECS rows** use `GiEcsFixture`: emitters (static) plus probes with a value and gradient binding on the derived layer; wall time is `Tick` plus completing every job; Gi time is the sum of the five `Gi.*` profiler markers, summed across threads. They are not frame C.")
 out.append("- Backends: the editor runs CoreCLR (there is no Mono in Unity 7). Player columns are filled by the final verification pass (`unity/validate.sh`; the suite writes `GI_PERF_OUT`).")
 out.append("")
@@ -159,11 +161,11 @@ for host_name in sorted(baseline["hosts"]):
             continue
         out.append("| %s | %s | %s | %s |" % (title, *(("%.2f" % t[label]["frame.%s.%s.p50_ms" % f]) if "frame.%s.%s.p50_ms" % f in t[label] else "n/a" for f in frames)))
     out.append("")
-    ed = t.get("editor-coreclr", {})
+    ed = t.get("editor-coreclr-vector", t.get("editor-coreclr", {}))
     net = t.get("dotnet-net10", {})
     sc = t.get("dotnet-scalar", {})
     pg = t.get("dotnet-scalar-pgo-off", {})
-    out.append("### Ratios for the editor (CoreCLR)")
+    out.append("### Ratios for the editor (CoreCLR, coreclr variant)")
     out.append("")
     out.append("| Frame | against dotnet net10 | against dotnet scalar, default tiering | against dotnet scalar, PGO off |")
     out.append("|---|---|---|---|")
@@ -205,14 +207,22 @@ out.append("Rows L1 to L11 of `unity/ROADMAP.md`, filled from this host only. A 
 out.append("")
 host_name = sorted(baseline["hosts"])[0]
 t = baseline["hosts"][host_name]
-ed = t.get("editor-coreclr", {})
+ed = t.get("editor-coreclr-vector", t.get("editor-coreclr", {}))
 net = t.get("dotnet-net10", {})
 sc = t.get("dotnet-scalar", {})
 pg = t.get("dotnet-scalar-pgo-off", {})
 c = "frame.C.cell.p50_ms"
-out.append("| # | Prediction | Measured |")
-out.append("|---|---|---|")
-out.append("| L1 | CoreCLR, frame C Gi time against dotnet on the same host: at most 1.15x | the editor against the same scalar build on dotnet: %s with default tiering, %s with PGO off; against the vector net10 build: %s (the vector build cannot be loaded yet) |" % (ratio(ed.get(c), sc.get(c)), ratio(ed.get(c), pg.get(c)), ratio(ed.get(c), net.get(c))))
+def fratio(frame):
+    k = "frame.%s.%s.p50_ms" % frame
+    a, b = ed.get(k), net.get(k)
+    return (a / b) if (a is not None and b not in (None, 0)) else None
+rb = fratio(frames[0]); rc = fratio(frames[1]); rw = fratio(frames[2])
+def fstr(v):
+    return "n/a" if v is None else "%.2fx" % v
+target = 1.10
+ok = rb is not None and rc is not None and rw is not None and rb <= target and rc <= target and rw <= target
+verdict = "within the plan-speed §3 target (<= 1.10x the dotnet net10 row on the same host and run)" if ok else "MISSED the plan-speed §3 target (> 1.10x the dotnet net10 row on the same host and run)"
+out.append("| L1 | CoreCLR, frame C Gi time against dotnet on the same host: at most 1.15x | the editor coreclr variant (vector) against the dotnet net10 build on the same host and run: B1 %s, C %s, W %s; %s. Against the same scalar build on dotnet, frame C: %s with default tiering, %s with PGO off |" % (fstr(rb), fstr(rc), fstr(rw), verdict, ratio(ed.get(c), sc.get(c)), ratio(ed.get(c), pg.get(c))))
 out.append("| L2 | CoreCLR, frame C wall time with sense on 8 workers: 3.6 to 4.6 ms | not measured on frame C; the ECS probe scene is in the table above (wall %s ms with workers, %s ms serial) |" % (("%.2f" % ed["ecs.workers.wall_ms"]) if "ecs.workers.wall_ms" in ed else "n/a", ("%.2f" % ed["ecs.serial.wall_ms"]) if "ecs.serial.wall_ms" in ed else "n/a"))
 share = ed.get("ecs.serial.ecs_share_of_gi")
 out.append("| L3 | ECS share of frame C at most 12%% of Gi time | MISSED on the probe scene: ECS time is %s of Gi time with job workers off (200,000 emitters, 200,000 probes with value and gradient). Not frame C. |" % ("%.0f%%" % (share * 100) if share is not None else "n/a"))
