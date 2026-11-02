@@ -118,7 +118,8 @@ namespace Gi.Entities.Tests
                 var frame = fixture.Frame;
                 frame.Tables.TryLayer(new GiLayerKey(3), out var derived);
                 frame.Tables.TryLayer(new GiLayerKey(1), out var cell);
-                CheckAll(fixture, entities, derived, cell, derived, frame.Tables.TryLayer(new GiLayerKey(4), out var maxLayer) ? maxLayer : derived);
+                frame.Tables.TryLayer(new GiLayerKey(4), out var maxLayer);
+                CheckAll(fixture, entities, derived, cell, derived, maxLayer);
                 Assert.That(fixture.Manager.GetComponentData<GiStats>(fixture.FrameEntity).Sensed, Is.EqualTo(6 * entities.Length));
 
                 fixture.Tick(2);
@@ -131,12 +132,12 @@ namespace Gi.Entities.Tests
 
                 fixture.Manager.SetComponentData(entities[5], LocalTransform.FromPosition(50f, 0f, 50f));
                 fixture.Manager.SetComponentData(entities[9], LocalTransform.FromPosition(8f, 0f, 55f));
-                fixture.Manager.SetComponentData(entities[9], new KindReach { Reach = 20f, Threshold = 5 });
+                fixture.Manager.SetComponentData(entities[9], new KindReach { Reach = 20f, Threshold = (short)5 });
                 fixture.Manager.SetComponentData(emitters[3], new GiEmitter
                 {
                     Layer = new GiLayerKey(0),
                     Stamp = new GiStampKey(0),
-                    Gain = 12,
+                    Gain = (sbyte)12,
                 });
                 fixture.Manager.DestroyEntity(emitters[7]);
                 fixture.Tick(1);
@@ -188,7 +189,7 @@ namespace Gi.Entities.Tests
                 Assert.That(fixture.Manager.GetComponentData<KindNearest>(entities[i]).Value, Is.EqualTo(near), $"nearest {i}");
             }
 
-            fixture.Manager.SetComponentData(entities[40], new KindReach { Reach = 24f, Threshold = 1 });
+            fixture.Manager.SetComponentData(entities[40], new KindReach { Reach = 24f, Threshold = (short)1 });
             fixture.Tick(1);
             fixture.Complete();
 
