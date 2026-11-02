@@ -258,7 +258,7 @@ namespace Gi.Entities
             };
         }
 
-        private void SetupGate(GiSenseBinding binding, BlobArray<GiGridSpec> grids)
+        private void SetupGate(GiSenseBinding binding, ref BlobArray<GiGridSpec> grids)
         {
             binding.GateEligible = binding.Period == 1;
             foreach (var type in binding.Types)
