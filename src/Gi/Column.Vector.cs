@@ -32,10 +32,10 @@ public static unsafe partial class World
         for (; i + 8 <= count; i += 8)
         {
             var cx = Vector256.ShiftRightArithmetic(
-                Vector256.ConvertToInt32(Vector256.Floor((Vector256.Load(xs + i) - originX) * scale)),
+                SimdOps.TruncateToInt32(Vector256.Floor((Vector256.Load(xs + i) - originX) * scale)),
                 8);
             var cy = Vector256.ShiftRightArithmetic(
-                Vector256.ConvertToInt32(Vector256.Floor((Vector256.Load(ys + i) - originY) * scale)),
+                SimdOps.TruncateToInt32(Vector256.Floor((Vector256.Load(ys + i) - originY) * scale)),
                 8);
             var inside = Vector256.Equals((cx | cy) & outside, zero);
             var border = Vector256.Equals(cx, zero) | Vector256.Equals(cx, last) | Vector256.Equals(cy, zero) |

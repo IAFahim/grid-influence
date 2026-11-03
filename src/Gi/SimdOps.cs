@@ -7,6 +7,17 @@ namespace Gi;
 
 internal static unsafe class SimdOps
 {
+    // Portable VCVTTPS2DQ: truncate toward zero; out-of-range or NaN yields int.MinValue.
+    // Vector256.ConvertToInt32 saturates (+overflow to Max, NaN to 0), which diverges.
+    [MethodImpl(Jit.Inline)]
+    internal static Vector256<int> TruncateToInt32(Vector256<float> value)
+    {
+        var truncated = Vector256.ConvertToInt32(value);
+        var invalid = ~Vector256.GreaterThanOrEqual(value, Vector256.Create(-2147483648f)) |
+                      ~Vector256.LessThan(value, Vector256.Create(2147483648f));
+        return Vector256.ConditionalSelect(invalid.AsInt32(), Vector256.Create(int.MinValue), truncated);
+    }
+
     [MethodImpl(Jit.Inline)]
     internal static Vector256<short> PackSaturate(Vector256<int> first, Vector256<int> second)
     {

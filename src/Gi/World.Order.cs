@@ -63,9 +63,9 @@ public static unsafe partial class World
                 var x = Vector256.Load(px + i);
                 var y = Vector256.Load(py + i);
                 var cx = Vector256.ShiftRightArithmetic(
-                    Vector256.ConvertToInt32(Vector256.Floor((x - originX) * scale)), 8);
+                    SimdOps.TruncateToInt32(Vector256.Floor((x - originX) * scale)), 8);
                 var cy = Vector256.ShiftRightArithmetic(
-                    Vector256.ConvertToInt32(Vector256.Floor((y - originY) * scale)), 8);
+                    SimdOps.TruncateToInt32(Vector256.Floor((y - originY) * scale)), 8);
                 var inside = Vector256.Equals(Vector256.Min(Vector256.Max(cx, Vector256<int>.Zero), limit), cx)
                              & Vector256.Equals(Vector256.Min(Vector256.Max(cy, Vector256<int>.Zero), limit), cy)
                              & (Vector256.LessThan(Vector256.Abs(x), infinity) &
