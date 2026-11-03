@@ -227,6 +227,57 @@ public sealed class ReconcileTests
         Assert.Equal(GiWorld.Revision(setup.World), token.RevisionAtCapture);
     }
 
+    [Fact]
+    public void TheTouchedFilterVisitsExactlyTheDirtyOrChangedChunks()
+    {
+        Assert.True(GiReconcileFilter.ShouldVisitChunk(true, false, false));
+        Assert.True(GiReconcileFilter.ShouldVisitChunk(false, true, false));
+        Assert.True(GiReconcileFilter.ShouldVisitChunk(false, false, true));
+        Assert.True(GiReconcileFilter.ShouldVisitChunk(true, true, true));
+        Assert.False(GiReconcileFilter.ShouldVisitChunk(false, false, false));
+    }
+
+    [Fact]
+    public void TheTouchedFilterProcessesOnlyDirtyEntitiesOutsideAFullVisit()
+    {
+        Assert.True(GiReconcileFilter.ShouldProcessEntity(true));
+        Assert.False(GiReconcileFilter.ShouldProcessEntity(false));
+    }
+
+    [Fact]
+    public void TheTouchedFilterKeepsDirtyOnlyWhileCommandsRemain()
+    {
+        Assert.False(GiReconcileFilter.KeepDirty(0));
+        Assert.True(GiReconcileFilter.KeepDirty(1));
+        Assert.True(GiReconcileFilter.KeepDirty(3));
+    }
+
+    [Fact]
+    public void RemoveForRetireesMatchesThePlannedRemove()
+    {
+        var tables = TablesOf(GiScenarioProfile.Standard());
+        var applied = new GiApplied
+        {
+            Placed = true,
+            Layer = new GiLayerKey(2),
+            Stamp = new GiStampKey(4),
+            Gain = 7,
+            Source = new GiWorld.SourceId(3, 11),
+        };
+        var planned = GiDiff.Plan(new GiDesired(), applied, tables, 9, 40);
+        Assert.Equal(1, planned.Count);
+        var direct = GiDiff.RemoveFor(applied, 9);
+        Assert.Equal(planned[0].Kind, direct.Kind);
+        Assert.Equal(planned[0].LayerKey, direct.LayerKey);
+        Assert.Equal(planned[0].StampKey, direct.StampKey);
+        Assert.Equal(planned[0].Target, direct.Target);
+        Assert.Equal(planned[0].Owner, direct.Owner);
+        Assert.Equal(planned[0].Source, direct.Source);
+
+        var idle = default(GiApplied);
+        Assert.Equal(0, GiDiff.Plan(new GiDesired(), idle, tables, 0, 0).Count);
+    }
+
     private static GiTables TablesOf(GiScenarioProfile profile)
     {
         var tables = default(GiTables);
