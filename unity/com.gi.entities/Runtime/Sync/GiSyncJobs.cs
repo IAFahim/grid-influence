@@ -1,3 +1,4 @@
+#define GI_BURST_SYNC
 using Unity.Burst;
 using Unity.Burst.Intrinsics;
 using Unity.Collections;
