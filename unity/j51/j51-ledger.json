@@ -1,0 +1,29 @@
+{
+  "render_pipeline": "Built-in",
+  "unity": "7000.0.0a12",
+  "backend": "editor-coreclr",
+  "host": "Intel(R) Core(TM) i9-14900K",
+  "l8_mirror_upload_512_tiles_ms": {
+    "scalar": 0.0085,
+    "vector": 0.0066
+  },
+  "png_sha256": {
+    "j51-builtin-grid1-layer0.png": "b75b4050d3ac558a0714f4103688a9e5ad0468f61ffcbb59152ffdff9dc0bae5",
+    "j51-builtin-grid1-layer3.png": "0d4839f1eb60560ed2f681fd32b52951ad3a92d2f77a17644ebcf89589232bd5"
+  },
+  "scalar_png_match_vector": true,
+  "plugin_sha256": {
+    "scalar_netstandard2.1_Gi.dll": "e6b145d9549e7dd76b8fb0b1d17d7e2f053fb0520ae0de3419a3ea27205187be",
+    "vector_coreclr_Gi.dll_J01_49b9992": "632fdafcce7512748ffbf5032fd1a28318bc2294977a9f9a3eec26a3654ea14e"
+  },
+  "tests": {
+    "scalar": {
+      "editmode_J51Shots": "1/0/0/0",
+      "playmode_MirrorUpload": "1/1 pass"
+    },
+    "vector_ephemeral_Y18": {
+      "editmode_J51Shots": "1/1 pass",
+      "playmode_MirrorUpload": "1/1 pass"
+    }
+  }
+}
