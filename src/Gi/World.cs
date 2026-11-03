@@ -264,27 +264,29 @@ public static unsafe partial class World
     internal const int PageBytes = Cells * sizeof(short);
     internal const int PageShift = 11;
 
-    private static int _worldCount;
-
     [MethodImpl(Jit.Inline)]
     internal static WorldCtx* GetContext(byte world)
     {
-        if (world >= _worldCount) return null;
-
-        var w = Runtime.Worlds + world;
+        fixed (GiRoot* root = &Runtime.Root) return GetContext(root, world);
+    }
+    [MethodImpl(Jit.Inline)]
+    internal static WorldCtx* GetContext(GiRoot* root, byte world)
+    {
+        if (world >= root->WorldCount) return null;
+        var w = root->Worlds + world;
         return w->Grids == null ? null : w;
     }
 
     [MethodImpl(Jit.Hot)]
     private static byte ReserveSlot()
     {
-        for (var i = 0; i < _worldCount; i++)
+        for (var i = 0; i < Runtime.Root.WorldCount; i++)
             if (Runtime.Worlds[i].Grids == null)
                 return (byte)i;
 
-        if (_worldCount >= MaxWorlds) throw new InvalidOperationException("World limit reached.");
+        if (Runtime.Root.WorldCount >= MaxWorlds) throw new InvalidOperationException("World limit reached.");
 
-        return (byte)_worldCount++;
+        return (byte)Runtime.Root.WorldCount++;
     }
 
     [MethodImpl(Jit.Hot)]
@@ -326,7 +328,7 @@ public static unsafe partial class World
     [MethodImpl(Jit.Hot)]
     public static int Revision(byte world)
     {
-        return world < _worldCount ? Runtime.WorldRevisions[world] : 0;
+        return world < Runtime.Root.WorldCount ? Runtime.WorldRevisions[world] : 0;
     }
 
     [MethodImpl(Jit.Hot)]
@@ -334,13 +336,13 @@ public static unsafe partial class World
     {
         if (Runtime.Worlds == null) return true;
 
-        for (var i = 0; i < _worldCount; i++)
+        for (var i = 0; i < Runtime.Root.WorldCount; i++)
             if (Runtime.Worlds[i].Grids != null)
                 return false;
 
         StampCatalog.Release();
         Runtime.Release();
-        _worldCount = 0;
+        Runtime.Root.WorldCount = 0;
         return true;
     }
 
@@ -365,7 +367,7 @@ public static unsafe partial class World
     public static int CopyWorldIds(Span<byte> destination)
     {
         var count = 0;
-        for (var i = 0; i < _worldCount; i++)
+        for (var i = 0; i < Runtime.Root.WorldCount; i++)
         {
             if ((Runtime.Worlds + i)->Grids == null) continue;
             if (count < destination.Length) destination[count] = (byte)i;
@@ -378,7 +380,7 @@ public static unsafe partial class World
     [MethodImpl(Jit.Hot)]
     public static void ProcessAll()
     {
-        for (var i = 0; i < _worldCount; i++)
+        for (var i = 0; i < Runtime.Root.WorldCount; i++)
             if ((Runtime.Worlds + i)->Grids != null)
                 Process((byte)i);
     }
@@ -817,7 +819,7 @@ public static unsafe partial class World
     [MethodImpl(Jit.Hot)]
     internal static bool UsesStamp(byte stamp)
     {
-        for (var wi = 0; wi < _worldCount; wi++)
+        for (var wi = 0; wi < Runtime.Root.WorldCount; wi++)
         {
             var w = Runtime.Worlds + wi;
             var s = &w->Sources;
@@ -833,7 +835,7 @@ public static unsafe partial class World
     [MethodImpl(Jit.Hot)]
     internal static void FlushKernels()
     {
-        for (var wi = 0; wi < _worldCount; wi++)
+        for (var wi = 0; wi < Runtime.Root.WorldCount; wi++)
         {
             var w = Runtime.Worlds + wi;
             if (w->Grids != null) w->Kernels.RequestFlush();
@@ -947,24 +949,25 @@ public static unsafe partial class World
     [MethodImpl(Jit.Hot)]
     public static void Process(byte world)
     {
-        var w = GetContext(world);
+        fixed (GiRoot* root = &Runtime.Root) Process(root, world);
+    }
+    [MethodImpl(Jit.Hot)]
+    internal static void Process(GiRoot* root, byte world)
+    {
+        var w = GetContext(root, world);
         if (w == null) return;
-
         w->Tick++;
         w->Kernels.BeginFrame();
         if (w->TimedList.Length != 0) SweepTimed(w);
-
-        var stamp = ProcessStages.Mark();
-        SweepChanged(w);
+        var stamp = ProcessStages.Mark(root);
+        SweepChanged(root, w);
         w->MarkEpoch++;
         w->Pending.Resize(0);
-        ProcessStages.Measure(ref w->Stages.Prepare, stamp);
-
-        stamp = ProcessStages.Mark();
+        ProcessStages.Measure(root, ref w->Stages.Prepare, stamp);
+        stamp = ProcessStages.Mark(root);
         PublishDirty(w);
-        ProcessStages.Measure(ref w->Stages.Apply, stamp);
-
-        if (w->DerivedCount != 0) Derive(w);
+        ProcessStages.Measure(root, ref w->Stages.Apply, stamp);
+        if (w->DerivedCount != 0) Derive(root, w);
         for (var gi = 0; gi < w->GridCount; gi++)
         {
             var g = w->Grids + gi;
@@ -1007,15 +1010,17 @@ public static unsafe partial class World
     [MethodImpl(Jit.Inline)]
     public static short Query(byte world, byte grid, byte layer, int x, int y)
     {
-        var w = GetContext(world);
+        fixed (GiRoot* root = &Runtime.Root) return Query(root, world, grid, layer, x, y);
+    }
+    [MethodImpl(Jit.Inline)]
+    internal static short Query(GiRoot* root, byte world, byte grid, byte layer, int x, int y)
+    {
+        var w = GetContext(root, world);
         if (w == null || grid >= w->GridCount || layer >= w->LayerCount) return 0;
-
         var g = w->Grids + grid;
         if ((uint)x >= (uint)g->Size || (uint)y >= (uint)g->Size) return 0;
-
         var page = g->Layers[layer].PageOf((y >> TileBake.TileBits) * g->TilesPerSide + (x >> TileBake.TileBits));
         if (page == null) return 0;
-
         return page[(y & (TileBake.TileSize - 1)) * TileBake.TileSize + (x & (TileBake.TileSize - 1))];
     }
 
