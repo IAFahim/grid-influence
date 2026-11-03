@@ -31,13 +31,45 @@ namespace Gi.Entities
     {
         public GiSenseView View;
         public int Period;
+        public uint LastVersion;
+        public byte WatchSources;
         [ReadOnly] public NativeReference<GiReconcileContext> Context;
+        [ReadOnly] public NativeArray<DynamicComponentTypeHandle> Inputs;
         [NativeDisableParallelForRestriction] public NativeArray<int> Counts;
+        [NativeDisableParallelForRestriction] public NativeArray<int> Moved;
 
         public void Execute(in ArchetypeChunk chunk, int unfilteredChunkIndex, bool useEnabledMask, in v128 chunkEnabledMask)
         {
+            Moved[unfilteredChunkIndex] = 0;
             var context = Context.Value;
             if (!context.Alive || !View.Eligible(chunk)) return;
+
+            var useMatrix = View.UsesMatrix(chunk);
+            if (useMatrix ? !chunk.Has(ref View.Matrices) || chunk.DidChange(ref View.Matrices, LastVersion) :
+                chunk.DidChange(ref View.Transforms, LastVersion))
+            {
+                Moved[unfilteredChunkIndex] = 1;
+            }
+            else if (WatchSources != 0 && (!chunk.Has(ref View.Sources) || chunk.DidChange(ref View.Sources, LastVersion)))
+            {
+                Moved[unfilteredChunkIndex] = 1;
+            }
+            else if (chunk.DidOrderChange(LastVersion))
+            {
+                Moved[unfilteredChunkIndex] = 1;
+            }
+            else
+            {
+                for (var i = 0; i < Inputs.Length; i++)
+                {
+                    var handle = Inputs[i];
+                    if (chunk.DidChange(ref handle, LastVersion))
+                    {
+                        Moved[unfilteredChunkIndex] = 1;
+                        break;
+                    }
+                }
+            }
 
             var entities = View.EntitiesOf(chunk);
             var rows = View.Rows(chunk, useEnabledMask, chunkEnabledMask);
@@ -56,6 +88,7 @@ namespace Gi.Entities
         public ComponentLookup<GiStats> Lookup;
         public byte Needs;
         public GiLayerKey Layer;
+        public NativeReference<GiSenseGateState> Gate;
         [ReadOnly] public NativeReference<GiReconcileContext> Context;
         [ReadOnly] public NativeArray<int> Counts;
         public NativeArray<int> Offsets;
@@ -71,6 +104,9 @@ namespace Gi.Entities
         public NativeList<long> Totals;
         public NativeList<ulong> Whole;
         public NativeList<int> Batches;
+        public NativeList<float> PrevXs;
+        public NativeList<float> PrevYs;
+        public NativeList<float> PrevReach;
         public int Batch;
 
         public void Execute()
@@ -85,22 +121,26 @@ namespace Gi.Entities
             var needs = (GiSenseNeeds)Needs;
             var context = Context.Value;
             var valid = context.Alive && context.Tables.TryLayer(Layer, out _);
-            Rows[0] = valid ? total : 0;
+            var skip = Gate.Value.Skip != 0;
+            Rows[0] = valid && !skip ? total : 0;
             Rows[1] = valid ? 1 : 0;
-            Xs.ResizeUninitialized(total);
-            Ys.ResizeUninitialized(total);
-            Reaches.ResizeUninitialized((needs & GiSenseNeeds.Reach) != 0 ? total : 0);
-            Thresholds.ResizeUninitialized((needs & GiSenseNeeds.Threshold) != 0 ? total : 0);
-            Excludes.ResizeUninitialized((needs & GiSenseNeeds.Exclude) != 0 ? total : 0);
-            Values.ResizeUninitialized((needs & GiSenseNeeds.Value) != 0 ? total : 0);
-            GradientXs.ResizeUninitialized((needs & GiSenseNeeds.Vector) != 0 ? total : 0);
-            GradientYs.ResizeUninitialized((needs & GiSenseNeeds.Vector) != 0 ? total : 0);
-            Totals.ResizeUninitialized((needs & GiSenseNeeds.Total) != 0 ? total : 0);
-            Whole.ResizeUninitialized(GiSensePass.Words(total));
-            Batches.ResizeUninitialized(GiSensePass.Batches(total, Batch));
+            Xs.ResizeUninitialized(skip ? 0 : total);
+            Ys.ResizeUninitialized(skip ? 0 : total);
+            Reaches.ResizeUninitialized(skip || (needs & GiSenseNeeds.Reach) == 0 ? 0 : total);
+            Thresholds.ResizeUninitialized(skip || (needs & GiSenseNeeds.Threshold) == 0 ? 0 : total);
+            Excludes.ResizeUninitialized(skip || (needs & GiSenseNeeds.Exclude) == 0 ? 0 : total);
+            Values.ResizeUninitialized(skip || (needs & GiSenseNeeds.Value) == 0 ? 0 : total);
+            GradientXs.ResizeUninitialized(skip || (needs & GiSenseNeeds.Vector) == 0 ? 0 : total);
+            GradientYs.ResizeUninitialized(skip || (needs & GiSenseNeeds.Vector) == 0 ? 0 : total);
+            Totals.ResizeUninitialized(skip || (needs & GiSenseNeeds.Total) == 0 ? 0 : total);
+            Whole.ResizeUninitialized(skip ? 0 : GiSensePass.Words(total));
+            Batches.ResizeUninitialized(skip ? 0 : GiSensePass.Batches(total, Batch));
+            PrevXs.ResizeUninitialized(total);
+            PrevYs.ResizeUninitialized(total);
+            PrevReach.ResizeUninitialized((needs & GiSenseNeeds.Reach) != 0 ? total : 0);
 
             var stats = Lookup[Stats];
-            stats.Sensed += Rows[0];
+            stats.Sensed += valid ? total : 0;
             Lookup[Stats] = stats;
         }
     }
@@ -113,15 +153,20 @@ namespace Gi.Entities
         public float Reach;
         public short Threshold;
         [ReadOnly] public NativeReference<GiReconcileContext> Context;
+        [ReadOnly] public NativeReference<GiSenseGateState> Gate;
         [ReadOnly] public NativeArray<int> Offsets;
         [NativeDisableParallelForRestriction] public NativeArray<float> Xs;
         [NativeDisableParallelForRestriction] public NativeArray<float> Ys;
         [NativeDisableParallelForRestriction] public NativeArray<float> Reaches;
         [NativeDisableParallelForRestriction] public NativeArray<short> Thresholds;
         [NativeDisableParallelForRestriction] public NativeArray<GiWorld.SourceId> Excludes;
+        [NativeDisableParallelForRestriction] public NativeArray<float> PrevXs;
+        [NativeDisableParallelForRestriction] public NativeArray<float> PrevYs;
+        [NativeDisableParallelForRestriction] public NativeArray<float> PrevReach;
 
         public void Execute(in ArchetypeChunk chunk, int unfilteredChunkIndex, bool useEnabledMask, in v128 chunkEnabledMask)
         {
+            if (Gate.Value.Skip != 0) return;
             var context = Context.Value;
             if (!context.Alive || !View.Eligible(chunk)) return;
 
@@ -139,7 +184,13 @@ namespace Gi.Entities
                 GiPose.Read(context.Plane, useMatrix, transforms, matrices, i, out var x, out var y, out _, out _);
                 Xs[row] = x;
                 Ys[row] = y;
-                if (Reaches.Length != 0) Reaches[row] = Reach;
+                PrevXs[row] = x;
+                PrevYs[row] = y;
+                if (Reaches.Length != 0)
+                {
+                    Reaches[row] = Reach;
+                    PrevReach[row] = Reach;
+                }
                 if (Thresholds.Length != 0) Thresholds[row] = Threshold;
                 if (Excludes.Length != 0) Excludes[row] = sources.IsCreated ? sources[i].Id : default;
                 row++;
@@ -157,12 +208,15 @@ namespace Gi.Entities
         public byte Threshold;
         public int Period;
         [ReadOnly] public NativeReference<GiReconcileContext> Context;
+        [ReadOnly] public NativeReference<GiSenseGateState> Gate;
         [ReadOnly] public NativeArray<int> Offsets;
         [NativeDisableParallelForRestriction] public NativeArray<float> Reaches;
         [NativeDisableParallelForRestriction] public NativeArray<short> Thresholds;
+        [NativeDisableParallelForRestriction] public NativeArray<float> PrevReach;
 
         public void Execute(in ArchetypeChunk chunk, int unfilteredChunkIndex, bool useEnabledMask, in v128 chunkEnabledMask)
         {
+            if (Gate.Value.Skip != 0) return;
             var context = Context.Value;
             if (!context.Alive || !View.Eligible(chunk) || !chunk.Has(ref Handle) || TypeSize == 0) return;
 
@@ -175,9 +229,99 @@ namespace Gi.Entities
                 if (!GiSensePass.Due(entities[i].Index, Period, context.Tick)) continue;
 
                 if (Threshold != 0) Thresholds[row] = *(short*)(data + i * TypeSize + Offset);
-                else Reaches[row] = *(float*)(data + i * TypeSize + Offset);
+                else
+                {
+                    Reaches[row] = *(float*)(data + i * TypeSize + Offset);
+                    PrevReach[row] = Reaches[row];
+                }
                 row++;
             }
+        }
+    }
+
+    internal struct GiSenseGateState
+    {
+        public int PrevRows;
+        public int PrevTick;
+        public int Skip;
+    }
+
+    internal unsafe struct GiSenseGateJob : IJob
+    {
+        public GiBindingKind Kind;
+        public GiLayerKey Layer;
+        public float Reach;
+        public ushort Since;
+        public byte Needs;
+        public byte Eligible;
+        [ReadOnly] public NativeReference<GiReconcileContext> Context;
+        [ReadOnly] public NativeArray<int> Counts;
+        [ReadOnly] public NativeArray<int> Moved;
+        [ReadOnly] public NativeArray<GiGridSpec> Grids;
+        [ReadOnly] public NativeList<float> PrevXs;
+        [ReadOnly] public NativeList<float> PrevYs;
+        [ReadOnly] public NativeList<float> PrevReach;
+        [NativeDisableParallelForRestriction] public NativeArray<int> Scratch;
+        public NativeReference<GiSenseGateState> Gate;
+
+        public void Execute()
+        {
+            var context = Context.Value;
+            var prior = Gate.Value;
+            var total = 0;
+            var moved = 0;
+            for (var c = 0; c < Counts.Length; c++)
+            {
+                total += Counts[c];
+                moved |= Moved[c];
+            }
+
+            var state = new GiSenseGateState { PrevRows = total, PrevTick = context.Tick, Skip = 0 };
+            if (Eligible != 0 && context.Alive && prior.PrevTick >= 0 && total == prior.PrevRows && moved == 0 &&
+                PrevXs.Length >= total && PrevYs.Length >= total &&
+                context.Tables.TryLayer(Layer, out var layer))
+            {
+                GiGuard.Begin(context.World, GiGuard.Sense, false);
+                var scope = GiMarkers.Sense.Auto();
+                state.Skip = Decide(context, layer, prior, total) ? 1 : 0;
+                scope.Dispose();
+                GiGuard.End(context.World, false);
+            }
+
+            Gate.Value = state;
+        }
+
+        private readonly bool Decide(in GiReconcileContext context, byte layer, in GiSenseGateState prior, int total)
+        {
+            var grids = Grids;
+            var gridCount = context.Tables.GridCount;
+            if (grids.Length < gridCount) gridCount = (byte)grids.Length;
+            if (gridCount <= 0 || Scratch.Length == 0) return false;
+
+            var needsReach = ((GiSenseNeeds)Needs & GiSenseNeeds.Reach) != 0;
+            if (needsReach && PrevReach.Length < total) return false;
+
+            var since = Kind == GiBindingKind.Changed ? prior.PrevTick - (Since < 1 ? 1 : Since) : prior.PrevTick;
+            float minX;
+            float minY;
+            float maxX;
+            float maxY;
+            GiSensePass.GateBounds(
+                total == 0 ? null : (float*)PrevXs.GetUnsafeReadOnlyPtr(),
+                total == 0 ? null : (float*)PrevYs.GetUnsafeReadOnlyPtr(),
+                !needsReach || total == 0 ? null : (float*)PrevReach.GetUnsafeReadOnlyPtr(),
+                needsReach ? 0f : Reach, total, out minX, out minY, out maxX, out maxY);
+
+            var ids = stackalloc byte[GiTables.MaxGrids];
+            var count = 0;
+            for (var gi = 0; gi < gridCount; gi++)
+            {
+                if (!context.Tables.TryGrid(gi, out ids[count])) return false;
+                count++;
+            }
+
+            return GiSensePass.GateClosed(context.World, layer, (GiGridSpec*)grids.GetUnsafeReadOnlyPtr(), ids,
+                count, since, minX, minY, maxX, maxY, (int*)Scratch.GetUnsafePtr(), Scratch.Length);
         }
     }
 
@@ -190,6 +334,7 @@ namespace Gi.Entities
         public int Since;
         [ReadOnly] public NativeList<int> Batches;
         [ReadOnly] public NativeReference<GiReconcileContext> Context;
+        [ReadOnly] public NativeReference<GiSenseGateState> Gate;
         [ReadOnly] public NativeArray<int> Rows;
         [ReadOnly] public NativeArray<float> Xs;
         [ReadOnly] public NativeArray<float> Ys;
@@ -204,6 +349,7 @@ namespace Gi.Entities
 
         public void Execute(int batchIndex)
         {
+            if (Gate.Value.Skip != 0) return;
             var context = Context.Value;
             if (Rows[1] == 0 || Rows[0] == 0 || !context.Tables.TryLayer(Layer, out var layer)) return;
 
@@ -242,6 +388,7 @@ namespace Gi.Entities
         public GiSenseField Position;
         public GiSenseField Coverage;
         [ReadOnly] public NativeReference<GiReconcileContext> Context;
+        [ReadOnly] public NativeReference<GiSenseGateState> Gate;
         [ReadOnly] public NativeArray<int> Rows;
         [ReadOnly] public NativeArray<int> Offsets;
         [ReadOnly] public NativeList<short> Values;
@@ -252,6 +399,7 @@ namespace Gi.Entities
 
         public void Execute(in ArchetypeChunk chunk, int unfilteredChunkIndex, bool useEnabledMask, in v128 chunkEnabledMask)
         {
+            if (Gate.Value.Skip != 0) return;
             if (Rows[1] == 0 || !View.Eligible(chunk) || !chunk.Has(ref Handle)) return;
 
             byte* data = null;

@@ -11,8 +11,10 @@ namespace Gi.Entities
             int batch, Allocator allocator, JobHandle handle)
         {
             var spec = binding.Spec;
+            for (var t = 0; t < binding.Types.Length; t++) binding.Types[t].Handle.Update(ref state);
             var chunkCount = binding.Query.CalculateChunkCountWithoutFiltering();
             var counts = CollectionHelper.CreateNativeArray<int>(chunkCount, allocator);
+            var moved = CollectionHelper.CreateNativeArray<int>(chunkCount, allocator);
             var offsets = CollectionHelper.CreateNativeArray<int>(chunkCount, allocator);
             var rows = CollectionHelper.CreateNativeArray<int>(2, allocator);
             var xs = new NativeList<float>(allocator);
@@ -26,9 +28,37 @@ namespace Gi.Entities
             var totals = new NativeList<long>(allocator);
             var whole = new NativeList<ulong>(allocator);
             var batches = new NativeList<int>(allocator);
+            var inputs = GateInputs(binding, allocator);
 
-            handle = new GiSenseCountJob { View = _view, Context = context, Period = binding.Period, Counts = counts }
-                .ScheduleParallel(binding.Query, handle);
+            handle = new GiSenseCountJob
+            {
+                View = _view,
+                Context = context,
+                Period = binding.Period,
+                LastVersion = state.LastSystemVersion,
+                WatchSources = (byte)((spec.Flags & GiBindingSpec.ExcludeSelf) != 0 ? 1 : 0),
+                Inputs = inputs,
+                Counts = counts,
+                Moved = moved,
+            }.ScheduleParallel(binding.Query, handle);
+            handle = new GiSenseGateJob
+            {
+                Kind = spec.Kind,
+                Layer = new GiLayerKey(spec.Layer),
+                Reach = spec.Reach,
+                Since = spec.Since,
+                Needs = (byte)binding.Needs,
+                Eligible = (byte)(binding.GateEligible ? 1 : 0),
+                Context = context,
+                Counts = counts,
+                Moved = moved,
+                Grids = binding.GateGrids,
+                PrevXs = binding.PrevXs,
+                PrevYs = binding.PrevYs,
+                PrevReach = binding.PrevReach,
+                Scratch = binding.GateScratch,
+                Gate = binding.GateState,
+            }.Schedule(GiRuntime.BeginRead(handle));
             handle = new GiSensePrefixJob
             {
                 Layer = new GiLayerKey(spec.Layer),
@@ -36,6 +66,7 @@ namespace Gi.Entities
                 Stats = frame,
                 Lookup = _stats,
                 Needs = (byte)binding.Needs,
+                Gate = binding.GateState,
                 Counts = counts,
                 Offsets = offsets,
                 Rows = rows,
@@ -50,12 +81,16 @@ namespace Gi.Entities
                 Totals = totals,
                 Whole = whole,
                 Batches = batches,
+                PrevXs = binding.PrevXs,
+                PrevYs = binding.PrevYs,
+                PrevReach = binding.PrevReach,
                 Batch = batch,
             }.Schedule(handle);
             handle = new GiSenseWriteJob
             {
                 View = _view,
                 Context = context,
+                Gate = binding.GateState,
                 Period = binding.Period,
                 Reach = spec.Reach,
                 Threshold = spec.Threshold,
@@ -65,6 +100,9 @@ namespace Gi.Entities
                 Reaches = reaches.AsDeferredJobArray(),
                 Thresholds = thresholds.AsDeferredJobArray(),
                 Excludes = excludes.AsDeferredJobArray(),
+                PrevXs = binding.PrevXs.AsDeferredJobArray(),
+                PrevYs = binding.PrevYs.AsDeferredJobArray(),
+                PrevReach = binding.PrevReach.AsDeferredJobArray(),
             }.ScheduleParallel(binding.Query, handle);
 
             for (var t = 0; t < binding.Types.Length; t++)
@@ -88,6 +126,7 @@ namespace Gi.Entities
                 Since = spec.Since,
                 Batches = batches,
                 Context = context,
+                Gate = binding.GateState,
                 Rows = rows,
                 Xs = xs.AsDeferredJobArray(),
                 Ys = ys.AsDeferredJobArray(),
@@ -120,6 +159,7 @@ namespace Gi.Entities
                     Position = type.Position,
                     Coverage = type.Coverage,
                     Context = context,
+                    Gate = binding.GateState,
                     Rows = rows,
                     Offsets = offsets,
                     Values = values,
@@ -146,10 +186,32 @@ namespace Gi.Entities
                 Threshold = (byte)(threshold ? 1 : 0),
                 Period = binding.Period,
                 Context = context,
+                Gate = binding.GateState,
                 Offsets = offsets,
                 Reaches = reaches.AsDeferredJobArray(),
                 Thresholds = thresholds.AsDeferredJobArray(),
+                PrevReach = binding.PrevReach.AsDeferredJobArray(),
             }.ScheduleParallel(binding.Query, handle);
+        }
+
+        private NativeArray<DynamicComponentTypeHandle> GateInputs(GiSenseBinding binding, Allocator allocator)
+        {
+            var count = 0;
+            for (var t = 0; t < binding.Types.Length; t++)
+            {
+                var type = binding.Types[t];
+                if (type.HasInput && !type.HasOutput && !type.Coverage.Active) count++;
+            }
+
+            var inputs = CollectionHelper.CreateNativeArray<DynamicComponentTypeHandle>(count, allocator);
+            var cursor = 0;
+            for (var t = 0; t < binding.Types.Length; t++)
+            {
+                var type = binding.Types[t];
+                if (type.HasInput && !type.HasOutput && !type.Coverage.Active) inputs[cursor++] = type.Handle;
+            }
+
+            return inputs;
         }
 
         private GiSenseBinding Resolve(ref SystemState state, int index, in GiBindingSpec spec)
@@ -194,6 +256,34 @@ namespace Gi.Entities
                 Query = query,
                 Types = types.ToArray(),
             };
+        }
+
+        private void SetupGate(GiSenseBinding binding, ref BlobArray<GiGridSpec> grids)
+        {
+            binding.GateEligible = binding.Period == 1;
+            foreach (var type in binding.Types)
+                if (type.HasInput && (type.HasOutput || type.Coverage.Active))
+                    binding.GateEligible = false;
+            binding.GateGrids = new NativeArray<GiGridSpec>(grids.Length, Allocator.Persistent);
+            var maxTiles = 0;
+            for (var i = 0; i < grids.Length; i++)
+            {
+                var grid = grids[i];
+                binding.GateGrids[i] = grid;
+                if (grid.Power >= 5 && grid.Power <= 14)
+                {
+                    var tiles = 1 << ((grid.Power - 5) * 2);
+                    if (tiles > maxTiles) maxTiles = tiles;
+                }
+            }
+
+            if (maxTiles > GiSensePass.GateScratchLimit) maxTiles = GiSensePass.GateScratchLimit;
+            binding.GateScratch = new NativeArray<int>(maxTiles, Allocator.Persistent);
+            binding.PrevXs = new NativeList<float>(Allocator.Persistent);
+            binding.PrevYs = new NativeList<float>(Allocator.Persistent);
+            binding.PrevReach = new NativeList<float>(Allocator.Persistent);
+            binding.GateState = new NativeReference<GiSenseGateState>(
+                new GiSenseGateState { PrevRows = -1, PrevTick = -1, Skip = 0 }, Allocator.Persistent);
         }
 
         private bool Bind(ref SystemState state, int index, System.Collections.Generic.List<GiSenseType> types, in GiBindingField field, GiSenseSlot slot)
