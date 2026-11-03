@@ -5,6 +5,24 @@ namespace Gi.Tests;
 public unsafe class NativeHeapTests
 {
     [Fact]
+    public void AlignedAllocIsVectorAligned()
+    {
+        for (var i = 0; i < 32; i++)
+        {
+            var bytes = (nuint)(i * 131 + 1);
+            var pointer = (byte*)NativeHeap.AlignedAlloc(bytes);
+            Assert.True((((nuint)pointer & 63) == 0));
+            new Span<byte>(pointer, (int)bytes).Fill(0xA5);
+            foreach (var b in new ReadOnlySpan<byte>(pointer, (int)bytes)) Assert.Equal(0xA5, b);
+            NativeHeap.AlignedFree(pointer);
+        }
+
+        var zero = NativeHeap.AlignedAlloc(0);
+        Assert.True((((nuint)zero & 63) == 0));
+        NativeHeap.AlignedFree(zero);
+    }
+
+    [Fact]
     public void WarmFramesMakeNoNativeHeapCalls()
     {
         var w = World.New();
