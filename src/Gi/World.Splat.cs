@@ -12,9 +12,14 @@ public static unsafe partial class World
     public static int Splat(byte world, byte layer, ReadOnlySpan<float> xs, ReadOnlySpan<float> ys, byte stamp,
         sbyte gain)
     {
-        var w = GetContext(world);
-        if (w == null || !CanSplat(w, layer, stamp)) return 0;
-
+        fixed (GiRoot* root = &Runtime.Root) return Splat(root, world, layer, xs, ys, stamp, gain);
+    }
+    [MethodImpl(Jit.Hot)]
+    internal static int Splat(GiRoot* root, byte world, byte layer, ReadOnlySpan<float> xs, ReadOnlySpan<float> ys, byte stamp,
+        sbyte gain)
+    {
+        var w = GetContext(root, world);
+        if (w == null || !CanSplat(root, w, layer, stamp)) return 0;
         var count = Math.Min(xs.Length, ys.Length);
         if (w->Recipes[layer].PhaseBits == 0)
             fixed (float* px = xs)
@@ -22,10 +27,9 @@ public static unsafe partial class World
             {
                 return SplatCells(w, layer, px, py, count, stamp, gain);
             }
-
         var applied = 0;
         for (var i = 0; i < count; i++)
-            if (EmitSplat(w, layer, xs[i], ys[i], stamp, gain))
+            if (EmitSplat(root, w, layer, xs[i], ys[i], stamp, gain))
                 applied++;
         return applied;
     }
@@ -138,13 +142,19 @@ public static unsafe partial class World
         byte world, byte layer, ReadOnlySpan<float> xs, ReadOnlySpan<float> ys,
         ReadOnlySpan<byte> stamps, ReadOnlySpan<sbyte> gains)
     {
-        var w = GetContext(world);
+        fixed (GiRoot* root = &Runtime.Root) return Splat(root, world, layer, xs, ys, stamps, gains);
+    }
+    [MethodImpl(Jit.Hot)]
+    internal static int Splat(GiRoot* root,
+        byte world, byte layer, ReadOnlySpan<float> xs, ReadOnlySpan<float> ys,
+        ReadOnlySpan<byte> stamps, ReadOnlySpan<sbyte> gains)
+    {
+        var w = GetContext(root, world);
         if (w == null || layer >= w->LayerCount || !IsTransient(w, layer)) return 0;
-
         var count = Math.Min(Math.Min(xs.Length, ys.Length), Math.Min(stamps.Length, gains.Length));
         var applied = 0;
         for (var i = 0; i < count; i++)
-            if (StampCatalog.Valid(stamps[i]) && EmitSplat(w, layer, xs[i], ys[i], stamps[i], gains[i]))
+            if (StampCatalog.Valid(root, stamps[i]) && EmitSplat(root, w, layer, xs[i], ys[i], stamps[i], gains[i]))
                 applied++;
         return applied;
     }
@@ -159,7 +169,12 @@ public static unsafe partial class World
     [MethodImpl(Jit.Hot)]
     private static bool CanSplat(WorldCtx* w, byte layer, byte stamp)
     {
-        return layer < w->LayerCount && IsTransient(w, layer) && StampCatalog.Valid(stamp);
+        fixed (GiRoot* root = &Runtime.Root) return CanSplat(root, w, layer, stamp);
+    }
+    [MethodImpl(Jit.Hot)]
+    private static bool CanSplat(GiRoot* root, WorldCtx* w, byte layer, byte stamp)
+    {
+        return layer < w->LayerCount && IsTransient(w, layer) && StampCatalog.Valid(root, stamp);
     }
 
     [MethodImpl(Jit.Hot)]
@@ -196,6 +211,38 @@ public static unsafe partial class World
             EmitDelta(w, gi, in key, 1);
         }
 
+        return true;
+    }
+    [MethodImpl(Jit.Hot)]
+    private static bool EmitSplat(GiRoot* root, WorldCtx* w, byte layer, float x, float y, byte stamp, sbyte gain)
+    {
+        if (!float.IsFinite(x) || !float.IsFinite(y)) return false;
+        var mask = w->Recipes[layer].AnchorMask;
+        var cellPrecision = w->Recipes[layer].PhaseBits == 0;
+        var key = new DepositRecord
+        {
+            Layer = layer,
+            Stamp = stamp,
+            Gain = (sbyte)Math.Clamp((int)gain, -MaxGain, MaxGain),
+            Alive = 1,
+            Scale = UnitScale
+        };
+        for (var gi = 0; gi < w->GridCount; gi++)
+        {
+            var g = w->Grids + gi;
+            if (g->ScaleQ8 == 0) continue;
+            key.Ax = TileBake.AnchorQ8(x, g->OriginX, g->ScaleQ8, mask);
+            key.Ay = TileBake.AnchorQ8(y, g->OriginY, g->ScaleQ8, mask);
+            if (cellPrecision)
+            {
+                var cx = key.Ax >> 8;
+                var cy = key.Ay >> 8;
+                if ((uint)cx < (uint)g->Size && (uint)cy < (uint)g->Size)
+                    if (key.Gain == 0 || HistAdd(g, g->Layers + layer, stamp, cx, cy, key.Gain))
+                        continue;
+            }
+            EmitDelta(root, w, gi, in key, 1);
+        }
         return true;
     }
 

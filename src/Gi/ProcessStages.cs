@@ -32,11 +32,20 @@ internal static unsafe class ProcessStages
     {
         return Measuring ? Stopwatch.GetTimestamp() : 0L;
     }
-
     [MethodImpl(Jit.Hot)]
     internal static void Measure(ref long stage, long stamp)
     {
         if (Measuring) stage += Stopwatch.GetTimestamp() - stamp;
+    }
+    [MethodImpl(Jit.Hot)]
+    internal static long Mark(GiRoot* root)
+    {
+        return root->Measuring ? Stopwatch.GetTimestamp() : 0L;
+    }
+    [MethodImpl(Jit.Hot)]
+    internal static void Measure(GiRoot* root, ref long stage, long stamp)
+    {
+        if (root->Measuring) stage += Stopwatch.GetTimestamp() - stamp;
     }
 
     [MethodImpl(Jit.Hot)]
