@@ -70,12 +70,11 @@ namespace Gi.Entities
 
             var frame = SystemAPI.GetSingletonEntity<GiFrame>();
             var allocator = state.WorldUpdateAllocator;
-            var batch = GiSensePass.Batch(GiSenseConfig.Batch.Data);
             var context = new NativeReference<GiReconcileContext>(allocator);
             var handle = new GiSenseBeginJob { Stats = frame, Lookup = _stats, Frame = frame, Frames = _frameData, Context = context }.Schedule(state.Dependency);
 
             for (var b = 0; b < table.Length; b++)
-                handle = Schedule(ref state, table[b], frame, context, batch, allocator, handle);
+                handle = Schedule(ref state, table[b], frame, context, allocator, handle);
 
             state.Dependency = handle;
         }
