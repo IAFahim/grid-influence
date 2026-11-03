@@ -110,7 +110,14 @@ public static unsafe partial class World
         var oldY = s->Y[i];
         if (oldX.Equals(x) && oldY.Equals(y)) return;
 
-        var changed = PositionChanged(w, s->Layer[i], oldX, oldY, x, y);
+        bool changed;
+        if (w->GridCount == 1 && w->Grids->ScaleQ8 != 0)
+        {
+            var only = w->Grids;
+            changed = TileBake.AnchorsChanged(oldX, oldY, x, y,
+                only->OriginX, only->OriginY, only->ScaleQ8, w->Recipes[s->Layer[i]].AnchorMask);
+        }
+        else changed = PositionChanged(w, s->Layer[i], oldX, oldY, x, y);
         if (changed) BeforeWrite(w, s, i);
         else JournalUnsnapshotted(w, s, i);
         s->X[i] = x;
@@ -125,7 +132,14 @@ public static unsafe partial class World
         var oldY = s->Y[i];
         if (*(int*)&x == *(int*)&oldX && *(int*)&y == *(int*)&oldY) return;
 
-        var changed = PositionChanged(w, s->Layer[i], oldX, oldY, x, y);
+        bool changed;
+        if (w->GridCount == 1 && w->Grids->ScaleQ8 != 0)
+        {
+            var only = w->Grids;
+            changed = TileBake.AnchorsChanged(oldX, oldY, x, y,
+                only->OriginX, only->OriginY, only->ScaleQ8, w->Recipes[s->Layer[i]].AnchorMask);
+        }
+        else changed = PositionChanged(w, s->Layer[i], oldX, oldY, x, y);
         if (changed) BeforeWrite(w, s, i);
         else JournalUnsnapshotted(w, s, i);
         s->X[i] = x;

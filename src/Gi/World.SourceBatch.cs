@@ -21,11 +21,13 @@ public static unsafe partial class World
         if (MemoryMarshal.AsBytes(commands).Overlaps(MemoryMarshal.AsBytes(results[..commands.Length])))
             return BatchStatus.OverlappingBuffers;
 
+        var directMoves = true;
         for (var index = 0; index < commands.Length; index++)
         {
             ref readonly var command = ref commands[index];
             if (command.Kind < SourceCommandKind.Place || command.Kind > SourceCommandKind.Expire)
                 return BatchStatus.InvalidCommand;
+            if (command.Kind != SourceCommandKind.Move || command.Target.Pending) directMoves = false;
             if (command.Kind == SourceCommandKind.Place || !command.Target.Pending) continue;
 
             var creationIndex = command.Target.Command;
@@ -33,8 +35,36 @@ public static unsafe partial class World
                 return BatchStatus.InvalidReference;
         }
 
+        if (directMoves)
+        {
+            ApplyMovesDirect(context, commands, results);
+            return BatchStatus.Applied;
+        }
+
         for (var index = 0; index < commands.Length; index++) ApplyCommand(context, in commands[index], results, index);
         return BatchStatus.Applied;
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static void ApplyMovesDirect(WorldCtx* w, ReadOnlySpan<SourceCommand> commands, Span<SourceResult> results)
+    {
+        var s = &w->Sources;
+        for (var index = 0; index < commands.Length; index++)
+        {
+            ref readonly var command = ref commands[index];
+            var identifier = command.Target.Source;
+            var slot = (int)identifier.Slot;
+            if (identifier.Generation == 0 || (uint)slot >= (uint)s->Count || s->Alive[slot] == 0 ||
+                identifier.Generation != s->Gen[slot])
+            {
+                results[index] = new SourceResult(default, SourceResultStatus.InvalidSource);
+                continue;
+            }
+
+            if (float.IsFinite(command.PositionX) && float.IsFinite(command.PositionY))
+                WriteMove(w, s, slot, command.PositionX, command.PositionY);
+            results[index] = new SourceResult(identifier, SourceResultStatus.Applied);
+        }
     }
 
     [MethodImpl(Jit.Hot)]

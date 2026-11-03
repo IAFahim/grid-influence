@@ -216,6 +216,14 @@ internal static unsafe partial class TileBake
     }
 
     [MethodImpl(Jit.Inline)]
+    internal static bool AnchorsChanged(
+        float oldX, float oldY, float newX, float newY, float originX, float originY, int scaleQ8, int anchorMask)
+    {
+        return ((AnchorQ8(oldX, originX, scaleQ8, anchorMask) ^ AnchorQ8(newX, originX, scaleQ8, anchorMask)) |
+            (AnchorQ8(oldY, originY, scaleQ8, anchorMask) ^ AnchorQ8(newY, originY, scaleQ8, anchorMask))) != 0;
+    }
+
+    [MethodImpl(Jit.Inline)]
     private static void FootprintAnchored(
         int anchorX, int anchorY, int sampling, int size, StampVariant* v, bool clip,
         out int px, out int py, out int fx, out int fy,
