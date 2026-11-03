@@ -1,7 +1,6 @@
 using System.Runtime.CompilerServices;
 #if NET
 using System.Runtime.Intrinsics;
-using System.Runtime.Intrinsics.X86;
 #endif
 
 namespace Gi;
@@ -64,7 +63,7 @@ internal static unsafe class FusedBox
         var count = plan->ClassCount;
         long bound = 0;
 #if NET
-        if (Avx2.IsSupported)
+        if (Vector256.IsHardwareAccelerated)
         {
             var difference = Vector256<short>.Zero;
             for (var c = 0; c < count; c++)
@@ -139,7 +138,7 @@ internal static unsafe class FusedBox
     {
         var first = -offsetY - height + 1;
 #if NET
-        if (Avx2.IsSupported) return VerticalWide(pages, stage, first, height);
+        if (Vector256.IsHardwareAccelerated) return VerticalWide(pages, stage, first, height);
 #endif
         return VerticalScalar(pages, stage, first, height);
     }
@@ -252,10 +251,8 @@ internal static unsafe class FusedBox
                 d += Vector256.Load(source + 24 + k);
             }
 
-            var low = Avx2.Permute4x64(
-                Avx2.PackSignedSaturate(a * scale, b * scale).AsInt64(), 0xd8).AsInt16();
-            var high = Avx2.Permute4x64(
-                Avx2.PackSignedSaturate(c * scale, d * scale).AsInt64(), 0xd8).AsInt16();
+            var low = SimdOps.PackSaturate(a * scale, b * scale);
+            var high = SimdOps.PackSaturate(c * scale, d * scale);
             if (initial)
             {
                 difference |= (low ^ Vector256.Load(target)) | (high ^ Vector256.Load(target + 16));
@@ -283,7 +280,6 @@ internal static unsafe class FusedBox
     {
         var start = Edge - offsetX - width + 1;
         var scale = Vector256.Create(value);
-        var ones = Vector256.Create((short)1);
         var seen = Vector256<short>.Zero;
         var hash = (TileHash.Offset ^ (ulong)task->Tile) * TileHash.Prime;
         var summary = task->Summary;
@@ -303,10 +299,8 @@ internal static unsafe class FusedBox
                 d += Vector256.Load(source + 24 + k);
             }
 
-            var low = Avx2.Permute4x64(
-                Avx2.PackSignedSaturate(a * scale, b * scale).AsInt64(), 0xd8).AsInt16();
-            var high = Avx2.Permute4x64(
-                Avx2.PackSignedSaturate(c * scale, d * scale).AsInt64(), 0xd8).AsInt16();
+            var low = SimdOps.PackSaturate(a * scale, b * scale);
+            var high = SimdOps.PackSaturate(c * scale, d * scale);
             if (initial)
             {
                 difference |= (low ^ Vector256.Load(target)) | (high ^ Vector256.Load(target + 16));
@@ -326,7 +320,9 @@ internal static unsafe class FusedBox
             var words = (ulong*)target;
             for (var word = 0; word < 8; word++) hash = (hash ^ words[word]) * TileHash.Prime;
 
-            summary->RowSums[y] = Vector256.Sum(Avx2.MultiplyAddAdjacent(low, ones) + Avx2.MultiplyAddAdjacent(high, ones));
+            var (low0, low1) = Vector256.Widen(low);
+            var (high0, high1) = Vector256.Widen(high);
+            summary->RowSums[y] = Vector256.Sum(low0 + low1 + high0 + high1);
             var peak = Vector256.Max(low, high);
             var narrow = Vector128.Max(peak.GetLower(), peak.GetUpper());
             narrow = Vector128.Max(narrow, Vector128.Shuffle(narrow, Vector128.Create(4, 5, 6, 7, 0, 1, 2, 3)));
