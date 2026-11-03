@@ -1,8 +1,6 @@
 using System.Runtime.CompilerServices;
 #if NET
 using System.Runtime.Intrinsics;
-using System.Runtime.Intrinsics.Arm;
-using System.Runtime.Intrinsics.X86;
 #endif
 
 namespace Gi;
@@ -19,7 +17,7 @@ internal static unsafe partial class TileBake
         if ((cells.Summary->CarryI | cells.Summary->HighT | cells.Summary->HighB) != 0)
             return PublishWide(store, tile, x0, y0, x1, y1, tick);
 #if NET
-        if (Avx2.IsSupported) return Publish256(cells, x0, y0, x1, y1, tick);
+        if (Vector256.IsHardwareAccelerated) return Publish256(cells, x0, y0, x1, y1, tick);
         if (Vector) return Publish128(cells, x0, y0, x1, y1, tick);
 #endif
         return PublishScalar(cells, x0, y0, x1, y1, tick);
@@ -112,7 +110,7 @@ internal static unsafe partial class TileBake
     internal static bool PageAny(short* page)
     {
 #if NET
-        if (Avx2.IsSupported)
+        if (Vector256.IsHardwareAccelerated)
         {
             var a = Vector256<short>.Zero;
             var b = Vector256<short>.Zero;
@@ -120,10 +118,10 @@ internal static unsafe partial class TileBake
             var d = Vector256<short>.Zero;
             for (var i = 0; i < TileSize * TileSize; i += 64)
             {
-                a |= Avx.LoadVector256(page + i);
-                b |= Avx.LoadVector256(page + i + 16);
-                c |= Avx.LoadVector256(page + i + 32);
-                d |= Avx.LoadVector256(page + i + 48);
+                a |= Vector256.Load(page + i);
+                b |= Vector256.Load(page + i + 16);
+                c |= Vector256.Load(page + i + 32);
+                d |= Vector256.Load(page + i + 48);
             }
 
             return !Vector256.EqualsAll((a | b) | (c | d), Vector256<short>.Zero);
@@ -244,7 +242,7 @@ internal static unsafe partial class TileBake
             if (planes)
             {
                 var wide = Vector256<int>.Zero;
-                for (var x = x0; x < vectorEnd; x += 8) wide |= Avx.LoadVector256(iRow + x) + bound;
+                for (var x = x0; x < vectorEnd; x += 8) wide |= Vector256.Load(iRow + x) + bound;
                 if (!Vector256.EqualsAll(wide & guard, Vector256<int>.Zero))
                 {
                     changed |= RowScalar(iRow, tentOut, bellOut, pageRow, x0, x1);
@@ -255,12 +253,11 @@ internal static unsafe partial class TileBake
             for (var x = x0; x < vectorEnd; x += 8)
             {
                 var total =
-                    Avx.LoadVector256(iRow + x) + Avx.LoadVector256(tentOut + x) + Avx.LoadVector256(bellOut + x);
-                var packed = Avx2.PackSignedSaturate(total, total);
-                var cells = Avx2.Permute4x64(packed.AsInt64(), 0xd8).GetLower().AsInt16();
-                var published = Sse2.LoadVector128(pageRow + x);
+                    Vector256.Load(iRow + x) + Vector256.Load(tentOut + x) + Vector256.Load(bellOut + x);
+                var cells = SimdOps.PackSaturate(total, total).GetLower();
+                var published = Vector128.Load(pageRow + x);
                 differs |= ~Vector128.Equals(published, cells);
-                Sse2.Store(pageRow + x, cells);
+                cells.Store(pageRow + x);
             }
 
             if (vectorEnd < x1) changed |= RowScalar(iRow, tentOut, bellOut, pageRow, vectorEnd, x1);
@@ -294,7 +291,7 @@ internal static unsafe partial class TileBake
             var pageRow = t.Page + y * TileSize;
 
             var wide = Vector256<int>.Zero;
-            for (var x = 0; x < TileSize; x += 8) wide |= Avx.LoadVector256(iRow + x) + bound;
+            for (var x = 0; x < TileSize; x += 8) wide |= Vector256.Load(iRow + x) + bound;
             if (!Vector256.EqualsAll(wide & guard, Vector256<int>.Zero))
             {
                 changed |= RowScalar(iRow, tentOut, bellOut, pageRow, 0, TileSize);
@@ -322,16 +319,17 @@ internal static unsafe partial class TileBake
         ref Vector256<short> differs, out int rowSum, out short rowMax)
     {
         var low = PackSixteen(
-            Avx.LoadVector256(iRow) + Avx.LoadVector256(tentOut) + Avx.LoadVector256(bellOut),
-            Avx.LoadVector256(iRow + 8) + Avx.LoadVector256(tentOut + 8) + Avx.LoadVector256(bellOut + 8));
+            Vector256.Load(iRow) + Vector256.Load(tentOut) + Vector256.Load(bellOut),
+            Vector256.Load(iRow + 8) + Vector256.Load(tentOut + 8) + Vector256.Load(bellOut + 8));
         var high = PackSixteen(
-            Avx.LoadVector256(iRow + 16) + Avx.LoadVector256(tentOut + 16) + Avx.LoadVector256(bellOut + 16),
-            Avx.LoadVector256(iRow + 24) + Avx.LoadVector256(tentOut + 24) + Avx.LoadVector256(bellOut + 24));
-        differs |= (low ^ Avx.LoadVector256(pageRow)) | (high ^ Avx.LoadVector256(pageRow + 16));
-        Avx.Store(pageRow, low);
-        Avx.Store(pageRow + 16, high);
-        var ones = Vector256.Create((short)1);
-        rowSum = Vector256.Sum(Avx2.MultiplyAddAdjacent(low, ones) + Avx2.MultiplyAddAdjacent(high, ones));
+            Vector256.Load(iRow + 16) + Vector256.Load(tentOut + 16) + Vector256.Load(bellOut + 16),
+            Vector256.Load(iRow + 24) + Vector256.Load(tentOut + 24) + Vector256.Load(bellOut + 24));
+        differs |= (low ^ Vector256.Load(pageRow)) | (high ^ Vector256.Load(pageRow + 16));
+        low.Store(pageRow);
+        high.Store(pageRow + 16);
+        var (low0, low1) = Vector256.Widen(low);
+        var (high0, high1) = Vector256.Widen(high);
+        rowSum = Vector256.Sum(low0 + low1 + high0 + high1);
         var widest = Vector256.Max(low, high);
         rowMax = RowMaximum(Vector128.Max(widest.GetLower(), widest.GetUpper()));
     }
@@ -353,10 +351,9 @@ internal static unsafe partial class TileBake
                 out var maxima2);
             PackRow(t.I + (y + 3) * TileSize, t.Page + (y + 3) * TileSize, ref differs, out var sums3,
                 out var maxima3);
-            var folded = Avx2.HorizontalAdd(Avx2.HorizontalAdd(sums0, sums1), Avx2.HorizontalAdd(sums2, sums3));
-            var rowSums = folded.GetLower() + folded.GetUpper();
-            var previous = Sse2.LoadVector128(summary->RowSums + y);
-            Sse2.Store(summary->RowSums + y, rowSums);
+            var rowSums = Vector128.Create(Vector256.Sum(sums0), Vector256.Sum(sums1), Vector256.Sum(sums2), Vector256.Sum(sums3));
+            var previous = Vector128.Load(summary->RowSums + y);
+            rowSums.Store(summary->RowSums + y);
             delta += rowSums - previous;
             summary->RowMaxima[y] = RowMaximum(maxima0);
             summary->RowMaxima[y + 1] = RowMaximum(maxima1);
@@ -383,13 +380,14 @@ internal static unsafe partial class TileBake
     private static void PackRow(int* iRow, short* pageRow, ref Vector256<short> differs, out Vector256<int> sums,
         out Vector128<short> maxima)
     {
-        var low = PackSixteen(Avx.LoadVector256(iRow), Avx.LoadVector256(iRow + 8));
-        var high = PackSixteen(Avx.LoadVector256(iRow + 16), Avx.LoadVector256(iRow + 24));
-        differs |= (low ^ Avx.LoadVector256(pageRow)) | (high ^ Avx.LoadVector256(pageRow + 16));
-        Avx.Store(pageRow, low);
-        Avx.Store(pageRow + 16, high);
-        var ones = Vector256.Create((short)1);
-        sums = Avx2.MultiplyAddAdjacent(low, ones) + Avx2.MultiplyAddAdjacent(high, ones);
+        var low = PackSixteen(Vector256.Load(iRow), Vector256.Load(iRow + 8));
+        var high = PackSixteen(Vector256.Load(iRow + 16), Vector256.Load(iRow + 24));
+        differs |= (low ^ Vector256.Load(pageRow)) | (high ^ Vector256.Load(pageRow + 16));
+        low.Store(pageRow);
+        high.Store(pageRow + 16);
+        var (low0, low1) = Vector256.Widen(low);
+        var (high0, high1) = Vector256.Widen(high);
+        sums = low0 + low1 + high0 + high1;
         var widest = Vector256.Max(low, high);
         maxima = Vector128.Max(widest.GetLower(), widest.GetUpper());
     }
@@ -397,22 +395,22 @@ internal static unsafe partial class TileBake
     [MethodImpl(Jit.Inline)]
     private static Vector256<short> PackSixteen(Vector256<int> first, Vector256<int> second)
     {
-        return Avx2.Permute4x64(Avx2.PackSignedSaturate(first, second).AsInt64(), 0xd8).AsInt16();
+        return SimdOps.PackSaturate(first, second);
     }
 
     [MethodImpl(Jit.Inline)]
     private static short RowMaximum(Vector128<short> maxima)
     {
-        var flip = Vector128.Create((short)0x7FFF);
-        return (short)(Sse41.MinHorizontal((maxima ^ flip).AsUInt16()).ToScalar() ^ 0x7FFF);
+        var narrow = Vector128.Max(maxima, Vector128.Shuffle(maxima, Vector128.Create(4, 5, 6, 7, 0, 1, 2, 3)));
+        narrow = Vector128.Max(narrow, Vector128.Shuffle(narrow, Vector128.Create(2, 3, 0, 1, 6, 7, 4, 5)));
+        narrow = Vector128.Max(narrow, Vector128.Shuffle(narrow, Vector128.Create(1, 0, 3, 2, 5, 4, 7, 6)));
+        return narrow.ToScalar();
     }
 
     [MethodImpl(Jit.Inline)]
     private static Vector128<short> PackCells(Vector128<int> lower, Vector128<int> upper)
     {
-        if (Sse2.IsSupported) return Sse2.PackSignedSaturate(lower, upper).AsInt16();
-        var narrowed = AdvSimd.ExtractNarrowingSaturateLower(lower);
-        return AdvSimd.ExtractNarrowingSaturateUpper(narrowed, upper);
+        return SimdOps.PackSaturate(lower, upper);
     }
 #endif
 }

@@ -2,8 +2,6 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 #if NET
 using System.Runtime.Intrinsics;
-using System.Runtime.Intrinsics.Arm;
-using System.Runtime.Intrinsics.X86;
 #endif
 
 namespace Gi;
@@ -1081,7 +1079,7 @@ public static unsafe partial class World
     private static long PartialSum(short* page, int lx0, int ly0, int lx1, int ly1)
     {
 #if NET
-        if (Avx2.IsSupported)
+        if (Vector256.IsHardwareAccelerated)
         {
             var acc = Vector256<int>.Zero;
             var acc128 = Vector128<int>.Zero;
@@ -1093,13 +1091,13 @@ public static unsafe partial class World
                 var i = 0;
                 for (; i + 16 <= count; i += 16)
                 {
-                    var widened = Vector256.Widen(Avx.LoadVector256(row + i));
+                    var widened = Vector256.Widen(Vector256.Load(row + i));
                     acc += widened.Item1 + widened.Item2;
                 }
 
                 for (; i + 8 <= count; i += 8)
                 {
-                    var widened = Vector128.Widen(Sse2.LoadVector128(row + i));
+                    var widened = Vector128.Widen(Vector128.Load(row + i));
                     acc128 += widened.Item1 + widened.Item2;
                 }
 
@@ -1110,7 +1108,7 @@ public static unsafe partial class World
             return (long)lanes[0] + lanes[1] + lanes[2] + lanes[3] + tail;
         }
 
-        if (Sse2.IsSupported || AdvSimd.IsSupported)
+        if (Vector128.IsHardwareAccelerated)
         {
             var acc = Vector128<int>.Zero;
             var tail = 0;
@@ -1206,15 +1204,15 @@ public static unsafe partial class World
     private static void CopyRun(short* destination, short* source, int count)
     {
 #if NET
-        if (Avx2.IsSupported)
+        if (Vector256.IsHardwareAccelerated)
         {
             var i = 0;
-            for (; i + 16 <= count; i += 16) Avx.Store(destination + i, Avx.LoadVector256(source + i));
+            for (; i + 16 <= count; i += 16) Vector256.Load(source + i).Store(destination + i);
             for (; i < count; i++) destination[i] = source[i];
             return;
         }
 
-        if (Sse2.IsSupported || AdvSimd.IsSupported)
+        if (Vector128.IsHardwareAccelerated)
         {
             var i = 0;
             for (; i + 8 <= count; i += 8) StoreShorts(destination + i, LoadShorts(source + i));
@@ -1229,15 +1227,15 @@ public static unsafe partial class World
     private static void FillRun(short* destination, int count)
     {
 #if NET
-        if (Avx2.IsSupported)
+        if (Vector256.IsHardwareAccelerated)
         {
             var i = 0;
-            for (; i + 16 <= count; i += 16) Avx.Store(destination + i, Vector256<short>.Zero);
+            for (; i + 16 <= count; i += 16) Vector256<short>.Zero.Store(destination + i);
             for (; i < count; i++) destination[i] = 0;
             return;
         }
 
-        if (Sse2.IsSupported || AdvSimd.IsSupported)
+        if (Vector128.IsHardwareAccelerated)
         {
             var i = 0;
             for (; i + 8 <= count; i += 8) StoreShorts(destination + i, Vector128<short>.Zero);
@@ -1411,15 +1409,13 @@ public static unsafe partial class World
     [MethodImpl(Jit.Inline)]
     private static Vector128<short> LoadShorts(short* p)
     {
-        if (Sse2.IsSupported) return Sse2.LoadVector128(p);
-        return AdvSimd.LoadVector128(p);
+        return Vector128.Load(p);
     }
 
     [MethodImpl(Jit.Inline)]
     private static void StoreShorts(short* p, Vector128<short> v)
     {
-        if (Sse2.IsSupported) Sse2.Store(p, v);
-        else AdvSimd.Store(p, v);
+        v.Store(p);
     }
 #endif
 }

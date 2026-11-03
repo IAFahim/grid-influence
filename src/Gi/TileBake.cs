@@ -1,8 +1,6 @@
 using System.Runtime.CompilerServices;
 #if NET
 using System.Runtime.Intrinsics;
-using System.Runtime.Intrinsics.Arm;
-using System.Runtime.Intrinsics.X86;
 #endif
 
 namespace Gi;
@@ -29,7 +27,7 @@ internal static unsafe partial class TileBake
     private const long MaxTentExtent = (1L << 23) - 2;
 
 #if NET
-    private static bool Vector => Sse2.IsSupported || AdvSimd.IsSupported;
+    private static bool Vector => Vector128.IsHardwareAccelerated;
 #endif
 
     internal static bool LanesSupported
@@ -179,7 +177,7 @@ internal static unsafe partial class TileBake
     internal static void AddConstant(int* cells, int first, int end, int value)
     {
 #if NET
-        if (Avx2.IsSupported)
+        if (Vector256.IsHardwareAccelerated)
         {
             var add = Vector256.Create(value);
             var i = first;
@@ -536,29 +534,25 @@ internal static unsafe partial class TileBake
     [MethodImpl(Jit.Inline)]
     private static Vector128<int> Load128(int* p)
     {
-        if (Sse2.IsSupported) return Sse2.LoadVector128(p);
-        return AdvSimd.LoadVector128(p);
+        return Vector128.Load(p);
     }
 
     [MethodImpl(Jit.Inline)]
     private static void Store128(int* p, Vector128<int> v)
     {
-        if (Sse2.IsSupported) Sse2.Store(p, v);
-        else AdvSimd.Store(p, v);
+        v.Store(p);
     }
 
     [MethodImpl(Jit.Inline)]
     private static Vector128<short> LoadShorts(short* p)
     {
-        if (Sse2.IsSupported) return Sse2.LoadVector128(p);
-        return AdvSimd.LoadVector128(p);
+        return Vector128.Load(p);
     }
 
     [MethodImpl(Jit.Inline)]
     private static void StoreShorts(short* p, Vector128<short> v)
     {
-        if (Sse2.IsSupported) Sse2.Store(p, v);
-        else AdvSimd.Store(p, v);
+        v.Store(p);
     }
 
 #endif
