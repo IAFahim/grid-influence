@@ -97,6 +97,110 @@ internal unsafe struct Pyramid<T, TOp> where T : unmanaged where TOp : struct, I
         new Span<T>(_slots.Pointer, total).Clear();
         Levels = level;
     }
+    [MethodImpl(Jit.Hot)]
+    public void Ensure(GiRoot* root, int tilesPerSide)
+    {
+        if (Levels > 0) return;
+
+        var side = (tilesPerSide + FanOut - 1) >> 3;
+        var total = 0;
+        var level = 0;
+        while (true)
+        {
+            _sides.Resize(root, level + 1);
+            _offsets.Resize(root, level + 1);
+            _sides.Pointer[level] = side;
+            _offsets.Pointer[level] = total;
+            total += side * side * NodeSlots;
+            level++;
+            if (side == 1) break;
+            side = (side + FanOut - 1) >> 3;
+        }
+
+        _slots.Resize(root, total);
+        new Span<T>(_slots.Pointer, total).Clear();
+        Levels = level;
+    }
+
+    [MethodImpl(Jit.Hot)]
+    public void Update(GiRoot* root, int tilesPerSide, int tile, T leaf)
+    {
+        if (Levels == 0) Ensure(root, tilesPerSide);
+
+        var tx = tile % tilesPerSide;
+        var ty = tile / tilesPerSide;
+        var nodeX = tx >> 3;
+        var nodeY = ty >> 3;
+        var slot = (ty & 7) * FanOut + (tx & 7);
+        var childSide = tilesPerSide;
+        var value = leaf;
+        var old = Node(0, nodeX, nodeY)[slot];
+        for (var level = 0;; level++)
+        {
+            var target = Node(level, nodeX, nodeY);
+            if (!GreaterThan(old, value) && !GreaterThan(value, old)) return;
+
+            target[slot] = value;
+            if (level == Levels - 1) return;
+
+            var parentSlot = (nodeY & 7) * FanOut + (nodeX & 7);
+            var parent = Node(level + 1, nodeX >> 3, nodeY >> 3) + parentSlot;
+            var cache = *parent;
+            T nodeMax;
+            if (GreaterThan(value, cache))
+            {
+                nodeMax = value;
+            }
+            else if (!GreaterThan(old, cache) && !GreaterThan(cache, old))
+            {
+                nodeMax = ReduceNode(target,
+                    Math.Min(FanOut, childSide - (nodeX << 3)),
+                    Math.Min(FanOut, childSide - (nodeY << 3)));
+                if (!GreaterThan(nodeMax, cache) && !GreaterThan(cache, nodeMax)) return;
+            }
+            else
+            {
+                return;
+            }
+
+            *parent = nodeMax;
+            old = cache;
+            value = nodeMax;
+            slot = parentSlot;
+            childSide = _sides.Pointer[level];
+            nodeX >>= 3;
+            nodeY >>= 3;
+        }
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static bool GreaterThan(T a, T b)
+    {
+        if (sizeof(T) == sizeof(short)) return *(short*)&a > *(short*)&b;
+        return *(int*)&a - *(int*)&b > 0;
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static T ReduceNode(T* target, int vx, int vy)
+    {
+        if (sizeof(T) == sizeof(short))
+        {
+            var reduced = ReduceMax((short*)target, vx, vy);
+            return *(T*)&reduced;
+        }
+
+        var slots = (int*)target;
+        var best = slots[0];
+        for (var y = 0; y < vy; y++)
+        {
+            var row = slots + y * FanOut;
+            for (var x = 0; x < vx; x++)
+                if (row[x] - best > 0)
+                    best = row[x];
+        }
+
+        return *(T*)&best;
+    }
 
     [MethodImpl(Jit.Hot)]
     public void Reset()

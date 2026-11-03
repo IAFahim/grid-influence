@@ -11,6 +11,12 @@ public static unsafe partial class World
         ld->Epochs[tile] = epoch;
         ld->EpochTree.Update(g->TilesPerSide, tile, epoch);
     }
+    [MethodImpl(Jit.Hot)]
+    private static void StampEpoch(GiRoot* root, GridCtx* g, LayerData* ld, int tile, int epoch)
+    {
+        ld->Epochs[tile] = epoch;
+        ld->EpochTree.Update(root, g->TilesPerSide, tile, epoch);
+    }
 
     [MethodImpl(Jit.Hot)]
     private static int CollectNewer(GridCtx* g, LayerData* ld, int since, int* destination)

@@ -89,19 +89,9 @@ public static unsafe partial class World
         return complete;
     }
     [MethodImpl(Jit.Hot)]
-    private static bool GradientRange(WorldCtx* w, byte layer, float* xs, float* ys, float* gradientXs, float* gradientYs, ulong* whole, int from, int to)
-    {
-        return GradientRange(w, layer, xs, ys, null, gradientXs, gradientYs, whole, from, to);
-    }
-    [MethodImpl(Jit.Hot)]
     internal static bool GradientRange(GiRoot* root, WorldCtx* w, byte layer, float* xs, float* ys, float* gradientXs, float* gradientYs, ulong* whole, int from, int to)
     {
         return GradientRange(root, w, layer, xs, ys, null, gradientXs, gradientYs, whole, from, to);
-    }
-    [MethodImpl(Jit.Hot)]
-    private static bool GradientRange(WorldCtx* w, byte layer, float* xs, float* ys, short* values, float* gradientXs, float* gradientYs, ulong* whole, int from, int to)
-    {
-        fixed (GiRoot* root = &Runtime.Root) return GradientRange(root, w, layer, xs, ys, values, gradientXs, gradientYs, whole, from, to);
     }
     [MethodImpl(Jit.Hot)]
     internal static bool GradientRange(GiRoot* root, WorldCtx* w, byte layer, float* xs, float* ys, short* values, float* gradientXs, float* gradientYs, ulong* whole, int from, int to)

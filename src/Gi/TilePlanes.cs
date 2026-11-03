@@ -80,6 +80,131 @@ internal unsafe struct PlaneStore
             Summary = summaryIndex
         };
     }
+    [MethodImpl(Jit.Hot)]
+    public TilePlanes Take(GiRoot* root)
+    {
+        var pageIndex = Pages.Take(root, PageUnit);
+        var page = (short*)Pages.Unit(pageIndex);
+        new Span<short>(page, TileBake.TileSize * TileBake.TileSize).Clear();
+
+        var int32Index = Int32Planes.Take(root, Int32Unit);
+        var i = (int*)Int32Planes.Unit(int32Index);
+        new Span<int>(i, TileBake.TileSize * TileBake.TileSize).Clear();
+
+        var summaryIndex = Summaries.Take(root, TileSummary.Bytes);
+        var summary = (TileSummary*)Summaries.Unit(summaryIndex);
+        new Span<byte>(summary, TileSummary.Bytes).Clear();
+
+        return new TilePlanes
+        {
+            Page = pageIndex,
+            I = int32Index,
+            T = -1,
+            B = -1,
+            Summary = summaryIndex
+        };
+    }
+
+    [MethodImpl(Jit.Hot)]
+    public TilePlanes TakeDerived(GiRoot* root)
+    {
+        var pageIndex = Pages.Take(root, PageUnit);
+        var page = (short*)Pages.Unit(pageIndex);
+        new Span<short>(page, TileBake.TileSize * TileBake.TileSize).Clear();
+
+        var summaryIndex = Summaries.Take(root, TileSummary.Bytes);
+        var summary = (TileSummary*)Summaries.Unit(summaryIndex);
+        new Span<byte>(summary, TileSummary.Bytes).Clear();
+
+        return new TilePlanes
+        {
+            Page = pageIndex,
+            I = -1,
+            T = -1,
+            B = -1,
+            Summary = summaryIndex
+        };
+    }
+
+    [MethodImpl(Jit.Hot)]
+    public long* EnsureT(GiRoot* root, ref TilePlanes tile)
+    {
+        if (tile.T >= 0) return (long*)Int64Planes.Unit(tile.T);
+        tile.T = TakeInt64(root);
+        return (long*)Int64Planes.Unit(tile.T);
+    }
+
+    [MethodImpl(Jit.Hot)]
+    public long* EnsureB(GiRoot* root, ref TilePlanes tile)
+    {
+        if (tile.B >= 0) return (long*)Int64Planes.Unit(tile.B);
+        tile.B = TakeInt64(root);
+        return (long*)Int64Planes.Unit(tile.B);
+    }
+
+    [MethodImpl(Jit.Hot)]
+    public void Give(GiRoot* root, in TilePlanes tile)
+    {
+        var summary = (TileSummary*)Summaries.Unit(tile.Summary);
+        GiveWide(root, summary->CarryI);
+        GiveWide(root, summary->HighT);
+        GiveWide(root, summary->LowT);
+        GiveWide(root, summary->HighB);
+        GiveWide(root, summary->LowB);
+        if (tile.T >= 0) Int64Planes.Give(root, tile.T);
+        if (tile.B >= 0) Int64Planes.Give(root, tile.B);
+        if (tile.I >= 0) Int32Planes.Give(root, tile.I);
+        Summaries.Give(root, tile.Summary);
+        Pages.Give(root, tile.Page);
+    }
+
+    [MethodImpl(Jit.Hot)]
+    public void Reset(GiRoot* root)
+    {
+        Pages.Reset(root);
+        Int32Planes.Reset(root);
+        Int64Planes.Reset(root);
+        Summaries.Reset(root);
+    }
+
+    [MethodImpl(Jit.Hot)]
+    public int TakeWide(GiRoot* root)
+    {
+        return TakeInt64(root) + 1;
+    }
+
+    [MethodImpl(Jit.Hot)]
+    public void ClearWide(GiRoot* root, TilePlanes* tile)
+    {
+        var summary = (TileSummary*)Summaries.Unit(tile->Summary);
+        GiveWide(root, summary->CarryI);
+        GiveWide(root, summary->HighT);
+        GiveWide(root, summary->LowT);
+        GiveWide(root, summary->HighB);
+        GiveWide(root, summary->LowB);
+        summary->CarryI = 0;
+        summary->HighT = 0;
+        summary->LowT = 0;
+        summary->HighB = 0;
+        summary->LowB = 0;
+        tile->BoundI = 0;
+        tile->BoundT = 0;
+        tile->BoundB = 0;
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private void GiveWide(GiRoot* root, int index)
+    {
+        if (index != 0) Int64Planes.Give(root, index - 1);
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private int TakeInt64(GiRoot* root)
+    {
+        var index = Int64Planes.Take(root, Int64Unit);
+        new Span<long>(Int64Planes.Unit(index), TileBake.TileSize * TileBake.TileSize).Clear();
+        return index;
+    }
 
     [MethodImpl(Jit.Hot)]
     public TilePlanes TakeDerived()

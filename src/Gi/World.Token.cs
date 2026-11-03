@@ -19,7 +19,7 @@ public static unsafe partial class World
     internal static BatchStatus ApplyBatch(GiRoot* root, Token token, ReadOnlySpan<SourceCommand> commands, Span<SourceResult> results)
     {
         var status = ValidateToken(root, token, out var context);
-        return status != BatchStatus.Applied ? status : ApplyBatchCommands(context, commands, results);
+        return status != BatchStatus.Applied ? status : ApplyBatchCommands(root, context, commands, results);
     }
 
     [MethodImpl(Jit.Hot)]
@@ -46,7 +46,7 @@ public static unsafe partial class World
     {
         var status = ValidateToken(root, token, out var context);
         if (status != BatchStatus.Applied) return status;
-        SyncColumns(context, sources, xs, ys, count);
+        SyncColumns(root, context, sources, xs, ys, count);
         return BatchStatus.Applied;
     }
 

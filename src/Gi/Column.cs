@@ -53,11 +53,11 @@ public static unsafe partial class World
     {
         var w = GetContext(root, world);
         if (w == null) return;
-        SyncColumns(w, sources, xs, ys, count);
+        SyncColumns(root, w, sources, xs, ys, count);
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void SyncColumns(WorldCtx* w, SourceId* sources, float* xs, float* ys, int count)
+    private static void SyncColumns(GiRoot* root, WorldCtx* w, SourceId* sources, float* xs, float* ys, int count)
     {
         if (count <= 0 || sources == null || xs == null || ys == null) return;
 
@@ -88,11 +88,11 @@ public static unsafe partial class World
                     var dx = TileBake.AnchorQ8(oldX, ox, scaleQ8, mask) ^ TileBake.AnchorQ8(x, ox, scaleQ8, mask);
                     var dy = TileBake.AnchorQ8(oldY, oy, scaleQ8, mask) ^ TileBake.AnchorQ8(y, oy, scaleQ8, mask);
                     var changed = (dx | dy) != 0;
-                    if (changed) BeforeWrite(w, s, slot);
-                    else JournalUnsnapshotted(w, s, slot);
+                    if (changed) BeforeWrite(root, w, s, slot);
+                    else JournalUnsnapshotted(root, w, s, slot);
                     s->X[slot] = x;
                     s->Y[slot] = y;
-                    if (changed) MarkChanged(w, s, slot);
+                    if (changed) MarkChanged(root, w, s, slot);
                 }
 
                 return;
@@ -113,11 +113,11 @@ public static unsafe partial class World
             if (*(int*)&x == *(int*)&oldX && *(int*)&y == *(int*)&oldY) continue;
             if (!float.IsFinite(x) || !float.IsFinite(y)) continue;
             var changed = PositionChanged(w, s->Layer[slot], oldX, oldY, x, y);
-            if (changed) BeforeWrite(w, s, slot);
-            else JournalUnsnapshotted(w, s, slot);
+            if (changed) BeforeWrite(root, w, s, slot);
+            else JournalUnsnapshotted(root, w, s, slot);
             s->X[slot] = x;
             s->Y[slot] = y;
-            if (changed) MarkChanged(w, s, slot);
+            if (changed) MarkChanged(root, w, s, slot);
         }
     }
 

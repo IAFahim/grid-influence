@@ -42,6 +42,58 @@ internal unsafe struct FixedSlab
         if (_taken == _capacity) Grow();
         return _taken++;
     }
+    [MethodImpl(Jit.Hot)]
+    public int Take(GiRoot* root, int stride)
+    {
+        if (Region == null)
+        {
+            _stride = stride;
+            _capacity = 16;
+            Region = (byte*)NativeHeap.AlignedAlloc(root, (nuint)_capacity * (nuint)stride + GatherSlack);
+        }
+
+        var freeCount = _free.Length;
+        if (freeCount != 0)
+        {
+            var recycled = _free.Pointer[freeCount - 1];
+            _free.ResizeUninitialized(root, freeCount - 1);
+            return recycled;
+        }
+
+        if (_taken == _capacity) Grow(root);
+        return _taken++;
+    }
+
+    [MethodImpl(Jit.Hot)]
+    public void Give(GiRoot* root, int index)
+    {
+        var freeCount = _free.Length;
+        _free.ResizeUninitialized(root, freeCount + 1);
+        _free.Pointer[freeCount] = index;
+    }
+
+    [MethodImpl(Jit.Hot)]
+    public void Reset(GiRoot* root)
+    {
+        if (Region != null) NativeHeap.AlignedFree(root, Region);
+
+        Region = null;
+        _stride = 0;
+        _capacity = 0;
+        _taken = 0;
+        _free.Free(root);
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private void Grow(GiRoot* root)
+    {
+        var capacity = _capacity * 2;
+        var region = (byte*)NativeHeap.AlignedAlloc(root, (nuint)capacity * (nuint)_stride + GatherSlack);
+        Buffer.MemoryCopy(Region, region, (long)capacity * _stride, (long)_capacity * _stride);
+        NativeHeap.AlignedFree(root, Region);
+        Region = region;
+        _capacity = capacity;
+    }
 
     [MethodImpl(Jit.Inline)]
     public readonly byte* Unit(int index)

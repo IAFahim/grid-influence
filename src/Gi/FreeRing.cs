@@ -63,6 +63,34 @@ internal unsafe struct FreeRing
         _slots = grown;
         _head = 0;
     }
+    [MethodImpl(Jit.Hot)]
+    public void Reserve(GiRoot* root, int size)
+    {
+        var current = _slots.Length;
+        if (size <= current) return;
+
+        var grown = default(NativeBuffer<int>);
+        grown.Resize(root, size);
+        if (Count > 0)
+        {
+            var leading = Math.Min(Count, current - _head);
+            new Span<int>(_slots.Pointer + _head, leading).CopyTo(new Span<int>(grown.Pointer, leading));
+            new Span<int>(_slots.Pointer, Count - leading).CopyTo(new Span<int>(grown.Pointer + leading,
+                Count - leading));
+        }
+
+        _slots.Free(root);
+        _slots = grown;
+        _head = 0;
+    }
+
+    [MethodImpl(Jit.Hot)]
+    public void Release(GiRoot* root)
+    {
+        _slots.Free(root);
+        _head = 0;
+        Count = 0;
+    }
 
     [MethodImpl(Jit.Hot)]
     public void Release()

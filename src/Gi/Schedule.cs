@@ -136,6 +136,68 @@ public static unsafe partial class World
 
         Schedule(w, s, i);
     }
+    [MethodImpl(Jit.Hot)]
+    private static void WriteFade(GiRoot* root, WorldCtx* w, SourceColumns* s, int i, sbyte gain, int ticks)
+    {
+        var target = (sbyte)Math.Clamp((int)gain, -MaxGain, MaxGain);
+        var current = (sbyte)s->Gain[i];
+        JournalSchedule(root, w, s, i);
+        if (ticks <= 0 || target == current)
+        {
+            s->Timed.Pointer[i] &= unchecked((byte)~Fading);
+            if (target != current)
+            {
+                BeforeWrite(root, w, s, i);
+                s->Gain[i] = (byte)target;
+                MarkChanged(root, w, s, i);
+            }
+        }
+        else
+        {
+            s->FadeFrom.Pointer[i] = current;
+            s->FadeTo.Pointer[i] = target;
+            s->FadeStart.Pointer[i] = w->Tick;
+            s->FadeTicks.Pointer[i] = ticks;
+            s->Timed.Pointer[i] |= Fading;
+        }
+
+        Schedule(root, w, s, i);
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static void WriteExpire(GiRoot* root, WorldCtx* w, SourceColumns* s, int i, int ticks)
+    {
+        JournalSchedule(root, w, s, i);
+        if (ticks <= 0)
+        {
+            s->Timed.Pointer[i] &= unchecked((byte)~Expiring);
+        }
+        else
+        {
+            s->ExpireAt.Pointer[i] = w->Tick + ticks;
+            s->Timed.Pointer[i] |= Expiring;
+        }
+
+        Schedule(root, w, s, i);
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static void Schedule(GiRoot* root, WorldCtx* w, SourceColumns* s, int slot)
+    {
+        if (!NextDue(s, slot, w->Tick, out var next)) return;
+
+        var at = s->TimedAt.Pointer[slot];
+        if (at != 0)
+        {
+            w->TimedList.Pointer[at - 1].Next = next;
+            return;
+        }
+
+        var n = w->TimedList.Length;
+        w->TimedList.Resize(root, n + 1);
+        w->TimedList.Pointer[n] = new TimedEntry { Slot = slot, Next = next };
+        s->TimedAt.Pointer[slot] = n + 1;
+    }
 
     [MethodImpl(Jit.Hot)]
     private static void JournalSchedule(WorldCtx* w, SourceColumns* s, int slot)
@@ -343,13 +405,100 @@ public static unsafe partial class World
             else Unlist(w, s, index);
         }
     }
+    [MethodImpl(Jit.Hot)]
+    private static void SweepTimed(GiRoot* root, WorldCtx* w)
+    {
+        var s = &w->Sources;
+        var now = w->Tick;
+        w->TimedDue.Resize(root, 0);
+        var list = w->TimedList.Pointer;
+        for (var i = 0; i < w->TimedList.Length; i++)
+        {
+            if (list[i].Next - now > 0) continue;
+
+            var n = w->TimedDue.Length;
+            w->TimedDue.Resize(root, n + 1);
+            w->TimedDue.Pointer[n] = list[i].Slot;
+        }
+
+        var due = w->TimedDue.Pointer;
+        var count = w->TimedDue.Length;
+        SortSlots(due, count);
+        for (var k = 0; k < count; k++)
+        {
+            var slot = due[k];
+            var index = s->TimedAt.Pointer[slot] - 1;
+            var timed = s->Timed.Pointer[slot];
+            if (s->Alive[slot] == 0 || timed == 0)
+            {
+                Unlist(root, w, s, index);
+                continue;
+            }
+
+            if ((timed & Expiring) != 0 && s->ExpireAt.Pointer[slot] - now <= 0)
+            {
+                BeforeWrite(root, w, s, slot);
+                s->Alive[slot] = 0;
+                if (s->Gen[slot] != uint.MaxValue) s->Free.Push(slot);
+                MarkChanged(root, w, s, slot);
+                Unlist(root, w, s, index);
+                continue;
+            }
+
+            if ((timed & Fading) != 0)
+            {
+                var gain = FadeGain(s, slot, now);
+                if (gain != (sbyte)s->Gain[slot])
+                {
+                    BeforeWrite(root, w, s, slot);
+                    s->Gain[slot] = (byte)gain;
+                    MarkChanged(root, w, s, slot);
+                }
+            }
+
+            if (NextDue(s, slot, now, out var next)) w->TimedList.Pointer[index].Next = next;
+            else Unlist(root, w, s, index);
+        }
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static void Unlist(GiRoot* root, WorldCtx* w, SourceColumns* s, int index)
+    {
+        var list = w->TimedList.Pointer;
+        var last = w->TimedList.Length - 1;
+        s->TimedAt.Pointer[list[index].Slot] = 0;
+        if (index != last)
+        {
+            list[index] = list[last];
+            s->TimedAt.Pointer[list[index].Slot] = index + 1;
+        }
+
+        w->TimedList.Resize(root, last);
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static void JournalSchedule(GiRoot* root, WorldCtx* w, SourceColumns* s, int slot)
+    {
+        if (w->Recording == 0 || s->SchedStamp.Pointer[slot] == w->RecordEpoch) return;
+
+        s->SchedStamp.Pointer[slot] = w->RecordEpoch;
+        var n = w->ScheduleJournal.Length;
+        w->ScheduleJournal.Resize(root, n + 1);
+        w->ScheduleJournal.Pointer[n] = new ScheduleRecord
+        {
+            Slot = slot,
+            FadeStart = s->FadeStart.Pointer[slot],
+            FadeTicks = s->FadeTicks.Pointer[slot],
+            ExpireAt = s->ExpireAt.Pointer[slot],
+            Timed = s->Timed.Pointer[slot],
+            FadeFrom = s->FadeFrom.Pointer[slot],
+            FadeTo = s->FadeTo.Pointer[slot]
+        };
+    }
 
     [MethodImpl(Jit.Hot)]
     private static void SortSlots(int* slots, int count)
     {
-#if NET
-        new Span<int>(slots, count).Sort();
-#else
         if (count <= InsertionLimit)
         {
             InsertionSort(slots, count);
@@ -362,10 +511,8 @@ public static unsafe partial class World
             (slots[0], slots[end]) = (slots[end], slots[0]);
             SiftDown(slots, 0, end);
         }
-#endif
     }
 
-#if !NET
     private const int InsertionLimit = 16;
 
     [MethodImpl(Jit.Hot)]
@@ -385,6 +532,7 @@ public static unsafe partial class World
         }
     }
 
+
     [MethodImpl(Jit.Hot)]
     private static void SiftDown(int* slots, int root, int count)
     {
@@ -403,5 +551,4 @@ public static unsafe partial class World
 
         slots[root] = value;
     }
-#endif
 }

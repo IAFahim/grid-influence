@@ -12,11 +12,11 @@ public static unsafe partial class World
     internal static BatchStatus SyncTransforms(GiRoot* root, Token token, ReadOnlySpan<TransformRange> ranges)
     {
         var status = ValidateToken(root, token, out var context);
-        return status != BatchStatus.Applied ? status : SyncTransformRanges(context, ranges);
+        return status != BatchStatus.Applied ? status : SyncTransformRanges(root, context, ranges);
     }
 
     [MethodImpl(Jit.Hot)]
-    private static BatchStatus SyncTransformRanges(WorldCtx* context, ReadOnlySpan<TransformRange> ranges)
+    private static BatchStatus SyncTransformRanges(GiRoot* root, WorldCtx* context, ReadOnlySpan<TransformRange> ranges)
     {
         long totalRows = 0;
         for (var index = 0; index < ranges.Length; index++)
@@ -61,7 +61,7 @@ public static unsafe partial class World
 
         if (totalRows == 0) return BatchStatus.Applied;
 
-        ApplyTransformRanges(context, ranges);
+        ApplyTransformRanges(root, context, ranges);
         return BatchStatus.Applied;
     }
 
@@ -75,7 +75,7 @@ public static unsafe partial class World
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void ApplyTransformRanges(WorldCtx* context, ReadOnlySpan<TransformRange> ranges)
+    private static void ApplyTransformRanges(GiRoot* root, WorldCtx* context, ReadOnlySpan<TransformRange> ranges)
     {
         var source = &context->Sources;
         for (var r = 0; r < ranges.Length; r++)
@@ -100,11 +100,10 @@ public static unsafe partial class World
                     continue;
                 }
 
-                WriteMoveExact(context, source, slot, x, y);
+                WriteMoveExact(root, context, source, slot, x, y);
                 if (headings != null && float.IsFinite(headings[i]))
-                    WriteTurn(context, source, slot, QuantizeAngle(headings[i]));
-                if (scales != null && float.IsFinite(scales[i]))
-                    WriteScale(context, source, slot, QuantizeScale(scales[i]));
+                    WriteTurn(root, context, source, slot, QuantizeAngle(headings[i]));
+                if (scales != null && float.IsFinite(scales[i])) WriteScale(root, context, source, slot, QuantizeScale(scales[i]));
             }
         }
     }

@@ -10,7 +10,7 @@ public static unsafe partial class World
     private const int PrefetchRows = 12;
 
     [MethodImpl(Jit.Inline)]
-    private static void PrefetchRecordTarget(WorldCtx* w, int slot)
+    private static void PrefetchRecordTarget(GiRoot* root, WorldCtx* w, int slot)
     {
         if (!Sse.IsSupported) return;
 
@@ -20,7 +20,7 @@ public static unsafe partial class World
             var rec = RecordOf(g, slot);
             if (rec->Alive == 0 || g->ScaleQ8 == 0) continue;
 
-            var v = StampCatalog.Get(rec->Stamp);
+            var v = StampCatalog.Get(root, rec->Stamp);
             if (v->Kind != StampKind.ConstantRectangle) continue;
 
             var ld = g->Layers + rec->Layer;
