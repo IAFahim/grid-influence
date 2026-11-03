@@ -89,8 +89,8 @@ namespace Gi.Entities
             if (added)
             {
                 using var fresh = _added.ToEntityArray(Allocator.Temp);
-                state.EntityManager.AddComponent<GiSource>(_added);
-                state.EntityManager.AddComponent<GiDirty>(_added);
+                state.EntityManager.AddComponent<GiSource>(fresh);
+                state.EntityManager.AddComponent<GiDirty>(fresh);
                 foreach (var entity in fresh)
                     state.EntityManager.SetComponentEnabled<GiDirty>(entity, true);
             }

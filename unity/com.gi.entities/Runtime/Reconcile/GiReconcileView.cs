@@ -29,7 +29,15 @@ namespace Gi.Entities
             var hasEmitter = chunk.Has(ref Emitters);
             if (!hasEmitter) return 0;
 
-            var full = context.Force || chunk.DidChange(ref Emitters, lastVersion);
+            var useMatrix = chunk.Has(ref Parents) || !chunk.Has(ref Transforms);
+            var full = context.Force
+                || chunk.DidChange(ref Emitters, lastVersion)
+                || chunk.DidChange(ref Sources, lastVersion)
+                || chunk.DidOrderChange(lastVersion);
+            if (!full && chunk.Has(ref Ramps)) full = chunk.DidChange(ref Ramps, lastVersion);
+            if (!full) full = useMatrix
+                ? chunk.Has(ref Matrices) && chunk.DidChange(ref Matrices, lastVersion)
+                : chunk.DidChange(ref Transforms, lastVersion);
             var hasDirty = chunk.Has(ref Dirty);
             var mask = hasDirty ? chunk.GetEnabledMask(ref Dirty) : default;
             if (!full)
@@ -47,7 +55,6 @@ namespace Gi.Entities
             var ramps = chunk.Has(ref Ramps) ? chunk.GetNativeArray(ref Ramps) : default;
             var oriented = chunk.Has(ref Oriented);
             var scaled = chunk.Has(ref Scaled);
-            var useMatrix = chunk.Has(ref Parents) || !chunk.Has(ref Transforms);
             var transforms = !useMatrix ? chunk.GetNativeArray(ref Transforms) : default;
             var matrices = useMatrix && chunk.Has(ref Matrices) ? chunk.GetNativeArray(ref Matrices) : default;
             var entities = chunk.GetNativeArray(Entities);
