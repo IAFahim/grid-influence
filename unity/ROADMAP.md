@@ -260,8 +260,8 @@ Plan §12's S1–S5 apply, plus:
 | N-2 | Lockstep checks | netcode | P2 | N-1 | U | 7 | review | Same PR. `GiLockstep` (a 256-tick ring of per-layer hashes, Unity-free, dotnet-tested), `GiLockstepSystem` (main package; with `gi.net.check` above 0 it keeps `GiTileHashes` current and records one hash per layer per tick), and `GiLockstepServerSystem` / `GiLockstepClientSystem` (an RPC of tick, layer and hash every k ticks; a client holding a different hash for that tick raises the new `Desync` fault). The Field window's runtime panel shows the faults and the first desync tick. A divergence injected into the client's Gi world on purpose is reported against a tick in (injection, injection + k], a multiple of k, and the server stays clean; 90 matching ticks raise nothing. Hashes come from the adapter's incremental tile hash (E-7), not from G-7 |
 | G-8 | Parallel splat | core | P3 | V-3 | G | 7 | cut | Not started, and it should not be: the card starts only if V-3 shows splat dominating the frame, and it does not. 1M Morton splats cost 1.33 ms against 6.95 ms for `Process` on one core (`benchmarks --splat`), about 16% of the pair; no V-3 frame has a splat stage above that, and the ECS crowd frame spends its Gi time in sense and process. Splat stays on one core (fallback S2) |
 | G-9 | Column batch entry points | core | P2 | G-1 | G | 8 | todo | |
-| V-0 | CoreCLR day 0 | verification | P0 | V-1, V-2, a CoreCLR build | U | day 0 | active | Preview answers in Appendix B (items 1-5, 7); the flip (item 11) waits for Unity's net10 API level |
-| G-0 | Build for Unity's CoreCLR TFM | core | P0 | G-0a, V-0 step 1 | G | day 0 | blocked | The TFM is net10.0 (already built); it cannot be referenced until Unity enables the net10 API level (Appendix B item 3) |
+| V-0 | CoreCLR day 0 | verification | P0 | V-1, V-2, a CoreCLR build | U | day 0 | active | Preview answers in Appendix B (items 1-5, 7); the flip (item 11) is recovered by the J01 retarget, measured in J03 (`unity/perf.md` coreclr variant row) |
+| G-0 | Build for Unity's CoreCLR TFM | core | P0 | G-0a, V-0 step 1 | G | day 0 | review | The TFM stays net10.0; `build-plugins.sh` (J01) retargets those bytes to netstandard 2.1 references and ships them as the `coreclr` variant. No longer blocked on Appendix B item 3; the plain net10 reference waits for Unity to enable the net10 API level |
 
 ### Waves
 
@@ -1131,7 +1131,7 @@ The questions are plan Appendix A. V-0 runs them and records the answers here. R
 | 8 | Burst | Burst 2.0.0 is a builtin module and the package compiles with it. `BurstTrampoline`: not yet exercised. |
 | 9 | Parity | V-1. |
 | 10 | Numbers | V-3. |
-| 11 | Flip | **Blocked by item 3**, not by the plugin machinery. When Unity enables the net10 API level: build the `coreclr:net10.0` variant (the variant→TFM mapping already exists in `build-plugins.sh`; add it to `variants`), write both importers' define constraints with `GiPluginSetup` (`GI_PLUGIN_VARIANT`, `GI_PLUGIN_CONSTRAINT`), and rerun V-1, V-2, V-3. |
+| 11 | Flip | **Recovered by retarget (J01), no net10 API level needed.** `build-plugins.sh` builds `net10.0`, retargets it to netstandard 2.1 references (fixed version table, deterministic MVID) and ships it as the `coreclr` variant (`ENABLE_CORECLR`; `portable` keeps the scalar build for `!ENABLE_CORECLR`). The a12 editor (7000.0.0a12) loads it with `errors: 0`, `burst: 0`; EditMode 84/0, PlayMode 91/0, perf 6/0; faster frame medians are in `unity/perf.md` (J03). The net10 API level stays disabled (item 3, rechecked on a12) and no longer gates the vector build. If a later alpha enables it, delete the retarget and reference the plain net10 build. |
 
 Importer metas: Unity 7 writes `platformData` as a mapping (`Any:`, `Editor:`). A hand-written meta using the older list form (`- first:` / `second:`) is silently ignored, which is what lesson 8 saw. Always let `GiPluginSetup` (the `PluginImporter` API) write the meta.
 
