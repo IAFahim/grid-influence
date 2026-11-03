@@ -74,6 +74,22 @@ public static unsafe partial class World
 
         w->Changed.Resize(0);
     }
+    [MethodImpl(Jit.Hot)]
+    private static void SweepChanged(GiRoot* root, WorldCtx* w)
+    {
+        var s = &w->Sources;
+        var slots = w->Changed.Pointer;
+        var count = w->Changed.Length;
+        for (var i = 0; i < count; i++)
+        {
+#if NET
+            if (i + PrefetchAhead < count) PrefetchRecordTarget(w, slots[i + PrefetchAhead]);
+#endif
+            var entry = EntryOf(s, slots[i]);
+            SweepEntryAt(root, w, &entry);
+        }
+        w->Changed.Resize(0);
+    }
 
     [MethodImpl(Jit.Inline)]
     private static DepositRecord TargetOf(WorldCtx* w, SweepEntry* entry)
@@ -135,6 +151,22 @@ public static unsafe partial class World
             *rec = key;
         }
     }
+    [MethodImpl(Jit.Hot)]
+    private static void SweepEntryAt(GiRoot* root, WorldCtx* w, SweepEntry* entry)
+    {
+        var target = TargetOf(w, entry);
+        for (var gi = 0; gi < w->GridCount; gi++)
+        {
+            var g = w->Grids + gi;
+            if (g->ScaleQ8 == 0) continue;
+            var rec = RecordOf(g, entry->Slot);
+            var key = KeyOf(w, g, entry, in target);
+            if (Same(rec, in key)) continue;
+            EmitDelta(root, w, gi, in *rec, -1);
+            EmitDelta(root, w, gi, in key, 1);
+            *rec = key;
+        }
+    }
 
     [MethodImpl(Jit.Hot)]
     private static void EmitDelta(WorldCtx* w, int gi, in DepositRecord record, int sign)
@@ -182,6 +214,47 @@ public static unsafe partial class World
             return;
         }
 
+        EmitFallback(g, ld, &p, gain);
+    }
+    [MethodImpl(Jit.Hot)]
+    private static void EmitDelta(GiRoot* root, WorldCtx* w, int gi, in DepositRecord record, int sign)
+    {
+        var gain = record.Gain * sign;
+        if (gain == 0) return;
+        var g = w->Grids + gi;
+        var v = StampCatalog.Get(root, record.Stamp);
+        if (v->Kind == StampKind.ConstantRectangle && record.Angle == 0)
+        {
+            EmitBoxFast(g, in record, v, gain);
+            return;
+        }
+        var precision = LayerPrecision(w, record.Layer);
+        if (!TileBake.PlaceAnchored(record.Ax, record.Ay, g->ScaleQ8, g->Size, v, record.Angle, record.Scale, precision, out var p))
+            return;
+        var cx0 = Math.Max(p.X0, 0);
+        var cy0 = Math.Max(p.Y0, 0);
+        var cx1 = Math.Min(p.X1, g->Size);
+        var cy1 = Math.Min(p.Y1, g->Size);
+        if (cx1 <= cx0 || cy1 <= cy0) return;
+        var ld = EnsureDirty(g, record.Layer);
+        if (ld->Epochs == null)
+        {
+            var placed = p;
+            for (var ty = cy0 >> TileBake.TileBits; ty <= (cy1 - 1) >> TileBake.TileBits && ld->Epochs == null; ty++)
+            for (var tx = cx0 >> TileBake.TileBits; tx <= (cx1 - 1) >> TileBake.TileBits; tx++)
+                if (TileBake.Touches(&placed, tx << TileBake.TileBits, ty << TileBake.TileBits))
+                {
+                    EnsureEpochs(g, ld);
+                    break;
+                }
+        }
+        if (KernelFactory.TryFindTaps(w, gi, record.Stamp, record.Angle, precision, &p, out var taps) ||
+            (w->Kernels.CanInsert &&
+             KernelFactory.TryGetTaps(w, gi, record.Stamp, record.Angle, precision, &p, out taps)))
+        {
+            EmitKernelTaps(g, ld, in taps, p.Px, p.Py, gain);
+            return;
+        }
         EmitFallback(g, ld, &p, gain);
     }
 

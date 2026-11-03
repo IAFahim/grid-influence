@@ -29,13 +29,17 @@ public static unsafe partial class World
     [MethodImpl(Jit.Hot)]
     public static bool TrySense(byte world, byte layer, float x, float y, out short value)
     {
+        fixed (GiRoot* root = &Runtime.Root) return TrySense(root, world, layer, x, y, out value);
+    }
+    [MethodImpl(Jit.Hot)]
+    internal static bool TrySense(GiRoot* root, byte world, byte layer, float x, float y, out short value)
+    {
         value = 0;
-        var w = GetContext(world);
+        var w = GetContext(root, world);
         if (w == null || layer >= w->LayerCount) return false;
         if (!Pick(w, x, y, 0f, 0, false, out var gi, out var complete)) return false;
-
         var g = w->Grids + gi;
-        value = Query(world, (byte)gi, layer,
+        value = Query(root, world, (byte)gi, layer,
             (int)(CellQ8(x, g->OriginX, g->ScaleQ8) >> 8), (int)(CellQ8(y, g->OriginY, g->ScaleQ8) >> 8));
         return complete;
     }
@@ -43,13 +47,16 @@ public static unsafe partial class World
     [MethodImpl(Jit.Hot)]
     private static bool Own(WorldCtx* w, GridCtx* g, SourceId id, in SplatOwn own, byte layer, out Placed source)
     {
+        fixed (GiRoot* root = &Runtime.Root) return Own(root, w, g, id, in own, layer, out source);
+    }
+    [MethodImpl(Jit.Hot)]
+    private static bool Own(GiRoot* root, WorldCtx* w, GridCtx* g, SourceId id, in SplatOwn own, byte layer, out Placed source)
+    {
         if (!own.Active) return Applied(w, g, id, layer, out source);
-
         source = default;
         var gain = Math.Clamp((int)own.Gain, -MaxGain, MaxGain);
-        if (gain == 0 || !IsTransient(w, layer) || !StampCatalog.Valid(own.Stamp)) return false;
+        if (gain == 0 || !IsTransient(w, layer) || !StampCatalog.Valid(root, own.Stamp)) return false;
         if (!float.IsFinite(own.X) || !float.IsFinite(own.Y) || g->ScaleQ8 == 0) return false;
-
         var mask = w->Recipes[layer].AnchorMask;
         source.Ax = TileBake.AnchorQ8(own.X, g->OriginX, g->ScaleQ8, mask);
         source.Ay = TileBake.AnchorQ8(own.Y, g->OriginY, g->ScaleQ8, mask);
@@ -84,24 +91,33 @@ public static unsafe partial class World
     [MethodImpl(Jit.Hot)]
     public static bool TrySense(byte world, byte layer, float x, float y, SourceId exclude, out short value)
     {
-        return SenseOwn(world, layer, x, y, exclude, default, out value);
+        fixed (GiRoot* root = &Runtime.Root) return TrySense(root, world, layer, x, y, exclude, out value);
+    }
+    [MethodImpl(Jit.Hot)]
+    internal static bool TrySense(GiRoot* root, byte world, byte layer, float x, float y, SourceId exclude, out short value)
+    {
+        return SenseOwn(root, world, layer, x, y, exclude, default, out value);
     }
 
     [MethodImpl(Jit.Hot)]
     private static bool SenseOwn(byte world, byte layer, float x, float y, SourceId exclude, in SplatOwn own,
         out short value)
     {
+        fixed (GiRoot* root = &Runtime.Root) return SenseOwn(root, world, layer, x, y, exclude, in own, out value);
+    }
+    [MethodImpl(Jit.Hot)]
+    private static bool SenseOwn(GiRoot* root, byte world, byte layer, float x, float y, SourceId exclude, in SplatOwn own,
+        out short value)
+    {
         value = 0;
-        var w = GetContext(world);
+        var w = GetContext(root, world);
         if (w == null || layer >= w->LayerCount) return false;
         if (!Pick(w, x, y, 0f, 0, false, out var gi, out var complete)) return false;
-
         var g = w->Grids + gi;
         var cx = (int)(CellQ8(x, g->OriginX, g->ScaleQ8) >> 8);
         var cy = (int)(CellQ8(y, g->OriginY, g->ScaleQ8) >> 8);
-        value = Query(world, (byte)gi, layer, cx, cy);
-        if (!Own(w, g, exclude, own, layer, out var source)) return complete;
-
+        value = Query(root, world, (byte)gi, layer, cx, cy);
+        if (!Own(root, w, g, exclude, own, layer, out var source)) return complete;
         var shape = ShapeOf(w, g, source);
         if (shape.P.Reaches(cx, cy)) value = ExcludedValue(w, g, layer, source.Layer, &shape, cx, cy, value);
         return complete;
@@ -110,27 +126,51 @@ public static unsafe partial class World
     [MethodImpl(Jit.Hot)]
     public static bool TrySenseArea(byte world, byte layer, float x, float y, float reach, out long total)
     {
-        return SenseArea(world, layer, x, y, reach, default, default, out total);
+        fixed (GiRoot* root = &Runtime.Root) return TrySenseArea(root, world, layer, x, y, reach, out total);
     }
-
+    [MethodImpl(Jit.Hot)]
+    internal static bool TrySenseArea(GiRoot* root, byte world, byte layer, float x, float y, float reach, out long total)
+    {
+        return SenseArea(root, world, layer, x, y, reach, default, default, out total);
+    }
     [MethodImpl(Jit.Hot)]
     public static bool TrySenseArea(byte world, byte layer, float x, float y, float reach, SourceId exclude,
         out long total)
     {
-        return SenseArea(world, layer, x, y, reach, exclude, default, out total);
+        fixed (GiRoot* root = &Runtime.Root) return TrySenseArea(root, world, layer, x, y, reach, exclude, out total);
+    }
+    [MethodImpl(Jit.Hot)]
+    internal static bool TrySenseArea(GiRoot* root, byte world, byte layer, float x, float y, float reach, SourceId exclude,
+        out long total)
+    {
+        return SenseArea(root, world, layer, x, y, reach, exclude, default, out total);
     }
 
     [MethodImpl(Jit.Hot)]
     public static bool TrySenseMax(byte world, byte layer, float x, float y, float reach,
         out short value, out float bestX, out float bestY)
     {
+        fixed (GiRoot* root = &Runtime.Root) return TrySenseMax(root, world, layer, x, y, reach, out value, out bestX, out bestY);
+    }
+    [MethodImpl(Jit.Hot)]
+    internal static bool TrySenseMax(GiRoot* root, byte world, byte layer, float x, float y, float reach,
+        out short value, out float bestX, out float bestY)
+    {
         value = 0;
         bestX = 0;
         bestY = 0;
-        var w = GetContext(world);
+        var w = GetContext(root, world);
         if (w == null || layer >= w->LayerCount) return false;
+        return TrySenseMax(w, layer, x, y, reach, out value, out bestX, out bestY);
+    }
+    [MethodImpl(Jit.Hot)]
+    private static bool TrySenseMax(WorldCtx* w, byte layer, float x, float y, float reach,
+        out short value, out float bestX, out float bestY)
+    {
+        value = 0;
+        bestX = 0;
+        bestY = 0;
         if (!Pick(w, x, y, reach, 0, true, out var gi, out var complete)) return false;
-
         var g = w->Grids + gi;
         var disk = Disk(g, x, y, reach);
         var ld = g->Layers + layer;
@@ -149,13 +189,11 @@ public static unsafe partial class World
         for (var tx = disk.X0 >> TileBake.TileBits; tx <= disk.X1 >> TileBake.TileBits; tx++)
         {
             if (Outside(disk, tx, ty)) continue;
-
             if (rowMaxima && Inside(disk, tx, ty))
             {
                 ConsiderTile(g, ld, disk, tx, ty, true, ref found, ref best, ref bx, ref by);
                 continue;
             }
-
             var summary = ld->SummaryOf(ty * tps + tx);
             var m = summary != null ? summary->Max : (short)0;
             if (pending == maxPending)
@@ -163,31 +201,26 @@ public static unsafe partial class World
                 ScanDiskTile(g, ld, disk, tx, ty, rowMaxima, ref found, ref best, ref bx, ref by);
                 continue;
             }
-
             pendingTiles[pending] = ty * tps + tx;
             pendingMaxima[pending] = m;
             if (top < 0 || m > pendingMaxima[top]) top = pending;
             pending++;
         }
-
         if (top >= 0 && (!found || pendingMaxima[top] >= best))
         {
             ScanDiskTile(g, ld, disk, pendingTiles[top] % tps, pendingTiles[top] / tps, rowMaxima, ref found, ref best,
                 ref bx, ref by);
             pendingMaxima[top] = short.MinValue;
         }
-
         for (var i = 0; i < pending; i++)
         {
             if (i == top) continue;
-
             var m = pendingMaxima[i];
             var ty = pendingTiles[i] / tps;
             if (found && m < best) continue;
             if (found && m == best && ty << TileBake.TileBits > by) continue;
             ScanDiskTile(g, ld, disk, pendingTiles[i] % tps, ty, rowMaxima, ref found, ref best, ref bx, ref by);
         }
-
         value = best;
         bestX = g->OriginX + ((bx << 8) + 128) / (float)g->ScaleQ8;
         bestY = g->OriginY + ((by << 8) + 128) / (float)g->ScaleQ8;
@@ -225,13 +258,27 @@ public static unsafe partial class World
     public static bool TrySenseNearest(byte world, byte layer, float x, float y, float reach, short threshold,
         out short value, out float nearestX, out float nearestY)
     {
+        fixed (GiRoot* root = &Runtime.Root) return TrySenseNearest(root, world, layer, x, y, reach, threshold, out value, out nearestX, out nearestY);
+    }
+    [MethodImpl(Jit.Hot)]
+    internal static bool TrySenseNearest(GiRoot* root, byte world, byte layer, float x, float y, float reach, short threshold,
+        out short value, out float nearestX, out float nearestY)
+    {
         value = short.MinValue;
         nearestX = 0;
         nearestY = 0;
-        var w = GetContext(world);
+        var w = GetContext(root, world);
         if (w == null || layer >= w->LayerCount) return false;
+        return TrySenseNearest(w, layer, x, y, reach, threshold, out value, out nearestX, out nearestY);
+    }
+    [MethodImpl(Jit.Hot)]
+    private static bool TrySenseNearest(WorldCtx* w, byte layer, float x, float y, float reach, short threshold,
+        out short value, out float nearestX, out float nearestY)
+    {
+        value = short.MinValue;
+        nearestX = 0;
+        nearestY = 0;
         if (!Pick(w, x, y, reach, 0, true, out var gi, out var complete)) return false;
-
         var g = w->Grids + gi;
         var disk = Disk(g, x, y, reach);
         var ld = g->Layers + layer;
@@ -248,17 +295,14 @@ public static unsafe partial class World
         {
             var gap = (long)Math.Max(ring - 1, 0) << (TileBake.TileBits + 8);
             if (gap * gap > best) break;
-
             for (var ty = originY - ring; ty <= originY + ring; ty++)
             {
                 if (ty < disk.Y0 >> TileBake.TileBits || ty > disk.Y1 >> TileBake.TileBits) continue;
-
                 var edge = ty == originY - ring || ty == originY + ring;
                 for (var tx = originX - ring; tx <= originX + ring; tx += edge ? 1 : 2 * Math.Max(ring, 1))
                 {
                     if (tx < disk.X0 >> TileBake.TileBits || tx > disk.X1 >> TileBake.TileBits ||
                         Outside(disk, tx, ty)) continue;
-
                     var cells = ld->CellsOf(ty * tps + tx);
                     var live = cells.Page != null;
                     if ((live ? cells.Summary->Max : 0) < threshold) continue;
@@ -266,14 +310,12 @@ public static unsafe partial class World
                 }
             }
         }
-
         if (best == long.MaxValue)
         {
             nearestX = x;
             nearestY = y;
             return complete;
         }
-
         value = Cell(g, layer, bx, by);
         nearestX = g->OriginX + ((bx << 8) + 128) / (float)g->ScaleQ8;
         nearestY = g->OriginY + ((by << 8) + 128) / (float)g->ScaleQ8;
@@ -446,12 +488,16 @@ public static unsafe partial class World
     [MethodImpl(Jit.Hot)]
     public static bool TrySenseGradient(byte world, byte layer, float x, float y, out float gx, out float gy)
     {
+        fixed (GiRoot* root = &Runtime.Root) return TrySenseGradient(root, world, layer, x, y, out gx, out gy);
+    }
+    [MethodImpl(Jit.Hot)]
+    internal static bool TrySenseGradient(GiRoot* root, byte world, byte layer, float x, float y, out float gx, out float gy)
+    {
         gx = 0f;
         gy = 0f;
-        var w = GetContext(world);
+        var w = GetContext(root, world);
         if (w == null || layer >= w->LayerCount) return false;
         if (!Pick(w, x, y, 0f, 1, false, out var gi, out var complete)) return false;
-
         var g = w->Grids + gi;
         var ld = g->Layers + layer;
         var cx = (int)(CellQ8(x, g->OriginX, g->ScaleQ8) >> 8);
@@ -468,23 +514,34 @@ public static unsafe partial class World
     public static bool TrySenseGradient(byte world, byte layer, float x, float y, SourceId exclude, out float gx,
         out float gy)
     {
-        return SenseGradientOwn(world, layer, x, y, exclude, default, out gx, out gy);
+        fixed (GiRoot* root = &Runtime.Root) return TrySenseGradient(root, world, layer, x, y, exclude, out gx, out gy);
+    }
+    [MethodImpl(Jit.Hot)]
+    internal static bool TrySenseGradient(GiRoot* root, byte world, byte layer, float x, float y, SourceId exclude, out float gx,
+        out float gy)
+    {
+        return SenseGradientOwn(root, world, layer, x, y, exclude, default, out gx, out gy);
     }
 
     [MethodImpl(Jit.Hot)]
     private static bool SenseGradientOwn(byte world, byte layer, float x, float y, SourceId exclude, in SplatOwn own,
         out float gx, out float gy)
     {
+        fixed (GiRoot* root = &Runtime.Root) return SenseGradientOwn(root, world, layer, x, y, exclude, in own, out gx, out gy);
+    }
+    [MethodImpl(Jit.Hot)]
+    private static bool SenseGradientOwn(GiRoot* root, byte world, byte layer, float x, float y, SourceId exclude, in SplatOwn own,
+        out float gx, out float gy)
+    {
         gx = 0f;
         gy = 0f;
-        var w = GetContext(world);
+        var w = GetContext(root, world);
         if (w == null || layer >= w->LayerCount) return false;
         if (!Pick(w, x, y, 0f, 1, false, out var gi, out var complete)) return false;
-
         var g = w->Grids + gi;
         var cx = (int)(CellQ8(x, g->OriginX, g->ScaleQ8) >> 8);
         var cy = (int)(CellQ8(y, g->OriginY, g->ScaleQ8) >> 8);
-        var excluding = Own(w, g, exclude, own, layer, out var source);
+        var excluding = Own(root, w, g, exclude, own, layer, out var source);
         var shape = excluding ? ShapeOf(w, g, source) : default;
         var perUnit = g->ScaleQ8 / 512f;
         gx = (Others(w, g, layer, excluding, source.Layer, &shape, cx + 1, cy) -
@@ -561,11 +618,16 @@ public static unsafe partial class World
     private static bool SenseArea(byte world, byte layer, float x, float y, float reach, SourceId exclude,
         in SplatOwn own, out long total)
     {
+        fixed (GiRoot* root = &Runtime.Root) return SenseArea(root, world, layer, x, y, reach, exclude, in own, out total);
+    }
+    [MethodImpl(Jit.Hot)]
+    private static bool SenseArea(GiRoot* root, byte world, byte layer, float x, float y, float reach, SourceId exclude,
+        in SplatOwn own, out long total)
+    {
         total = 0;
-        var w = GetContext(world);
+        var w = GetContext(root, world);
         if (w == null || layer >= w->LayerCount) return false;
         if (!Pick(w, x, y, reach, 0, true, out var gi, out var complete)) return false;
-
         var g = w->Grids + gi;
         var disk = Disk(g, x, y, reach);
         var ld = g->Layers + layer;
@@ -583,37 +645,31 @@ public static unsafe partial class World
             for (var tx = disk.X0 >> TileBake.TileBits; tx <= disk.X1 >> TileBake.TileBits; tx++)
             {
                 if (Outside(disk, tx, ty)) continue;
-
                 var set = ld->SetOf(ty * tps + tx);
                 if (set == null) continue;
-
                 var tile = ty * tps + tx;
                 if (Inside(disk, tx, ty))
                 {
                     sum += ld->SummaryOf(tile)->Sum;
                     continue;
                 }
-
                 if (!spans)
                 {
                     Spans(disk, rowLo, rows, lo, hi);
                     spans = true;
                 }
-
                 var cells = ld->Store.Cells(*set);
                 sum += RaggedSum(cells.Page + (rowLo - tileY) * TileBake.TileSize,
                     derived ? null : cells.Summary->RowSums + (rowLo - tileY), tx << TileBake.TileBits, rows, lo, hi);
             }
         }
-
-        if (Own(w, g, exclude, own, layer, out var source))
+        if (Own(root, w, g, exclude, own, layer, out var source))
         {
             var shape = ShapeOf(w, g, source);
             sum += derived
                 ? ExcludedMix(w, g, layer, source.Layer, disk, &shape)
                 : ExcludedArea(g, layer, disk, &shape);
         }
-
         total = WorldArea(sum, g->ScaleQ8);
         return complete;
     }

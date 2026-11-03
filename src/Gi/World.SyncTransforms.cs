@@ -6,7 +6,12 @@ public static unsafe partial class World
     [MethodImpl(Jit.Hot)]
     public static BatchStatus SyncTransforms(Token token, ReadOnlySpan<TransformRange> ranges)
     {
-        var status = ValidateToken(token, out var context);
+        fixed (GiRoot* root = &Runtime.Root) return SyncTransforms(root, token, ranges);
+    }
+    [MethodImpl(Jit.Hot)]
+    internal static BatchStatus SyncTransforms(GiRoot* root, Token token, ReadOnlySpan<TransformRange> ranges)
+    {
+        var status = ValidateToken(root, token, out var context);
         return status != BatchStatus.Applied ? status : SyncTransformRanges(context, ranges);
     }
 

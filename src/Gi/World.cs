@@ -267,9 +267,13 @@ public static unsafe partial class World
     [MethodImpl(Jit.Inline)]
     internal static WorldCtx* GetContext(byte world)
     {
-        if (world >= Runtime.Root.WorldCount) return null;
-
-        var w = Runtime.Worlds + world;
+        fixed (GiRoot* root = &Runtime.Root) return GetContext(root, world);
+    }
+    [MethodImpl(Jit.Inline)]
+    internal static WorldCtx* GetContext(GiRoot* root, byte world)
+    {
+        if (world >= root->WorldCount) return null;
+        var w = root->Worlds + world;
         return w->Grids == null ? null : w;
     }
 
@@ -945,24 +949,25 @@ public static unsafe partial class World
     [MethodImpl(Jit.Hot)]
     public static void Process(byte world)
     {
-        var w = GetContext(world);
+        fixed (GiRoot* root = &Runtime.Root) Process(root, world);
+    }
+    [MethodImpl(Jit.Hot)]
+    internal static void Process(GiRoot* root, byte world)
+    {
+        var w = GetContext(root, world);
         if (w == null) return;
-
         w->Tick++;
         w->Kernels.BeginFrame();
         if (w->TimedList.Length != 0) SweepTimed(w);
-
-        var stamp = ProcessStages.Mark();
-        SweepChanged(w);
+        var stamp = ProcessStages.Mark(root);
+        SweepChanged(root, w);
         w->MarkEpoch++;
         w->Pending.Resize(0);
-        ProcessStages.Measure(ref w->Stages.Prepare, stamp);
-
-        stamp = ProcessStages.Mark();
+        ProcessStages.Measure(root, ref w->Stages.Prepare, stamp);
+        stamp = ProcessStages.Mark(root);
         PublishDirty(w);
-        ProcessStages.Measure(ref w->Stages.Apply, stamp);
-
-        if (w->DerivedCount != 0) Derive(w);
+        ProcessStages.Measure(root, ref w->Stages.Apply, stamp);
+        if (w->DerivedCount != 0) Derive(root, w);
         for (var gi = 0; gi < w->GridCount; gi++)
         {
             var g = w->Grids + gi;
@@ -1005,15 +1010,17 @@ public static unsafe partial class World
     [MethodImpl(Jit.Inline)]
     public static short Query(byte world, byte grid, byte layer, int x, int y)
     {
-        var w = GetContext(world);
+        fixed (GiRoot* root = &Runtime.Root) return Query(root, world, grid, layer, x, y);
+    }
+    [MethodImpl(Jit.Inline)]
+    internal static short Query(GiRoot* root, byte world, byte grid, byte layer, int x, int y)
+    {
+        var w = GetContext(root, world);
         if (w == null || grid >= w->GridCount || layer >= w->LayerCount) return 0;
-
         var g = w->Grids + grid;
         if ((uint)x >= (uint)g->Size || (uint)y >= (uint)g->Size) return 0;
-
         var page = g->Layers[layer].PageOf((y >> TileBake.TileBits) * g->TilesPerSide + (x >> TileBake.TileBits));
         if (page == null) return 0;
-
         return page[(y & (TileBake.TileSize - 1)) * TileBake.TileSize + (x & (TileBake.TileSize - 1))];
     }
 
