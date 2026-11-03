@@ -1,7 +1,6 @@
 #if NET
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
-using System.Runtime.Intrinsics.X86;
 
 namespace Gi;
 
@@ -18,7 +17,8 @@ public static unsafe partial class World
         var tileMask = Vector256.Create(TileBake.TileSize - 1);
         var origin = Vector256.Create(WindowOrigin);
         var rotate = Vector256.Create(7, 0, 1, 2, 3, 4, 5, 6);
-        var shift = Vector128.CreateScalar(f.TileShift);
+        var shift = (byte)f.TileShift;
+        var firstOnly = Vector256.Create(-1, 0, 0, 0, 0, 0, 0, 0);
         var zero = Vector256<int>.Zero;
         var tiles = b->Tiles;
         var locals = b->Locals;
@@ -31,11 +31,12 @@ public static unsafe partial class World
         var i = 0;
         for (; i + 8 <= count; i += 8)
         {
+            // Floor makes every lane integral, so native convert == VCVTTPS2DQ (INT_MIN wrap incl.).
             var cx = Vector256.ShiftRightArithmetic(
-                Avx.ConvertToVector256Int32WithTruncation(Vector256.Floor((Vector256.Load(xs + i) - originX) * scale)),
+                Vector256.ConvertToInt32Native(Vector256.Floor((Vector256.Load(xs + i) - originX) * scale)),
                 8);
             var cy = Vector256.ShiftRightArithmetic(
-                Avx.ConvertToVector256Int32WithTruncation(Vector256.Floor((Vector256.Load(ys + i) - originY) * scale)),
+                Vector256.ConvertToInt32Native(Vector256.Floor((Vector256.Load(ys + i) - originY) * scale)),
                 8);
             var inside = Vector256.Equals((cx | cy) & outside, zero);
             var border = Vector256.Equals(cx, zero) | Vector256.Equals(cx, last) | Vector256.Equals(cy, zero) |
@@ -43,10 +44,10 @@ public static unsafe partial class World
             var lx = cx & tileMask;
             var ly = cy & tileMask;
             var local = Vector256.ShiftLeft(ly, TileBake.TileBits) + lx;
-            var tile = Avx2.ShiftLeftLogical(Vector256.ShiftRightArithmetic(cy, TileBake.TileBits), shift) +
+            var tile = Vector256.ShiftLeft(Vector256.ShiftRightArithmetic(cy, TileBake.TileBits), shift) +
                        Vector256.ShiftRightArithmetic(cx, TileBake.TileBits);
-            var rotated = Avx2.PermuteVar8x32(tile, rotate);
-            var shifted = Avx2.Blend(rotated, i == 0 ? tile : previous, 1);
+            var rotated = Vector256.Shuffle(tile, rotate);
+            var shifted = Vector256.ConditionalSelect(firstOnly, i == 0 ? tile : previous, rotated);
             previous = rotated;
             accepted |= (ulong)inside.AsSingle().ExtractMostSignificantBits() << i;
             interior |= (ulong)Vector256.AndNot(inside, border).AsSingle().ExtractMostSignificantBits() << i;
@@ -67,7 +68,7 @@ public static unsafe partial class World
         in ColumnField f, ColumnBlock* b, int at, int l, short* values, float* gradientXs, float* gradientYs,
         short* window, ref int shown)
     {
-        if (!Avx2.IsSupported) return false;
+        if (!Vector256.IsHardwareAccelerated) return false;
         if (((b->Accepted >> l) & 0xFFul) != 0xFFul) return false;
 
         var tiles = b->Tiles;
@@ -99,15 +100,45 @@ public static unsafe partial class World
     [MethodImpl(Jit.Inline)]
     private static Vector256<int> WindowTap(short* window, Vector256<int> byteOffsets)
     {
-        var raw = Avx2.GatherVector256((int*)window, byteOffsets, 1);
+        var raw = GatherOffsets((int*)window, byteOffsets);
         return Vector256.ShiftRightArithmetic(Vector256.ShiftLeft(raw, 16), 16);
+    }
+    [MethodImpl(Jit.Inline)]
+    private static Vector256<int> GatherOffsets(int* words, Vector256<int> byteOffsets)
+    {
+        // Scalar gather: no portable gather intrinsic exists (X86-only / SVE-only).
+        var bytes = (byte*)words;
+        return Vector256.Create(
+            *(int*)(bytes + byteOffsets.GetElement(0)),
+            *(int*)(bytes + byteOffsets.GetElement(1)),
+            *(int*)(bytes + byteOffsets.GetElement(2)),
+            *(int*)(bytes + byteOffsets.GetElement(3)),
+            *(int*)(bytes + byteOffsets.GetElement(4)),
+            *(int*)(bytes + byteOffsets.GetElement(5)),
+            *(int*)(bytes + byteOffsets.GetElement(6)),
+            *(int*)(bytes + byteOffsets.GetElement(7)));
+    }
+
+    [MethodImpl(Jit.Inline)]
+    private static Vector256<int> GatherTable(int* table, Vector256<int> lanes)
+    {
+        // Scalar gather: no portable gather intrinsic exists (X86-only / SVE-only).
+        return Vector256.Create(
+            table[lanes.GetElement(0)],
+            table[lanes.GetElement(1)],
+            table[lanes.GetElement(2)],
+            table[lanes.GetElement(3)],
+            table[lanes.GetElement(4)],
+            table[lanes.GetElement(5)],
+            table[lanes.GetElement(6)],
+            table[lanes.GetElement(7)]);
     }
 
     [MethodImpl(Jit.Hot)]
     private static bool GradientGatherLanes(
         in ColumnField f, ColumnBlock* b, int at, int l, short* values, float* gradientXs, float* gradientYs)
     {
-        if (!Avx2.IsSupported || f.Wide == 0 || f.Table == null) return false;
+        if (!Vector256.IsHardwareAccelerated || f.Wide == 0 || f.Table == null) return false;
         if (((b->Accepted >> l) & 0xFFul) != 0xFFul) return false;
 
         var tiles = Vector256.Load(b->Tiles + l);
@@ -194,7 +225,7 @@ public static unsafe partial class World
     [MethodImpl(Jit.Hot)]
     private static bool SenseGatherLanes(in ColumnField f, ColumnBlock* b, int at, int l, short* values)
     {
-        if (!Avx2.IsSupported || f.Wide == 0 || f.Table == null) return false;
+        if (!Vector256.IsHardwareAccelerated || f.Wide == 0 || f.Table == null) return false;
         if (((b->Accepted >> l) & 0xFFul) != 0xFFul) return false;
 
         var tiles = Vector256.Load(b->Tiles + l);
@@ -210,7 +241,7 @@ public static unsafe partial class World
                 return true;
             }
 
-            var raw = Avx2.GatherVector256((int*)page, offsets, 1);
+            var raw = GatherOffsets((int*)page, offsets);
             centre = Vector256.ShiftRightArithmetic(Vector256.ShiftLeft(raw, 16), 16);
         }
         else
@@ -225,7 +256,7 @@ public static unsafe partial class World
     [MethodImpl(Jit.Inline)]
     private static Vector256<int> PageTapBases(in ColumnField f, Vector256<int> tile, out Vector256<int> present)
     {
-        var index = Avx2.GatherVector256(f.Table, tile, 4);
+        var index = GatherTable(f.Table, tile);
         present = Vector256.GreaterThanOrEqual(index, Vector256<int>.Zero);
         return Vector256.ShiftLeft(Vector256.ConditionalSelect(present, index, Vector256<int>.Zero), PageShift);
     }
@@ -234,14 +265,14 @@ public static unsafe partial class World
     private static Vector256<int> PageTap(in ColumnField f, Vector256<int> baseBytes, Vector256<int> byteOffsets,
         Vector256<int> present)
     {
-        var raw = Avx2.GatherVector256((int*)f.Pages, baseBytes + byteOffsets, 1);
+        var raw = GatherOffsets((int*)f.Pages, baseBytes + byteOffsets);
         return Vector256.BitwiseAnd(Vector256.ShiftRightArithmetic(Vector256.ShiftLeft(raw, 16), 16), present);
     }
 
     [MethodImpl(Jit.Hot)]
     private static void PrefetchBlock(in ColumnField f, ColumnBlock* b, bool vertical)
     {
-        if (!Sse.IsSupported || b->Changes < ScatterChanges || f.Table == null) return;
+        if (!System.Runtime.Intrinsics.X86.Sse.IsSupported || b->Changes < ScatterChanges || f.Table == null) return;
 
         var tiles = b->Tiles;
         var locals = b->Locals;
@@ -255,11 +286,11 @@ public static unsafe partial class World
             if (index < 0) continue;
 
             var at = f.Pages + ((nuint)index << PageShift) + (nuint)locals[l] * sizeof(short);
-            Sse.Prefetch0(at);
+            System.Runtime.Intrinsics.X86.Sse.Prefetch0(at);
             if (!vertical) continue;
 
-            Sse.Prefetch0(at - TileBake.TileSize * sizeof(short));
-            Sse.Prefetch0(at + TileBake.TileSize * sizeof(short));
+            System.Runtime.Intrinsics.X86.Sse.Prefetch0(at - TileBake.TileSize * sizeof(short));
+            System.Runtime.Intrinsics.X86.Sse.Prefetch0(at + TileBake.TileSize * sizeof(short));
         }
     }
 }

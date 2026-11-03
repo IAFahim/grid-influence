@@ -2,12 +2,24 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
-using System.Runtime.Intrinsics.X86;
 
 namespace Gi;
 
 internal static unsafe class SimdOps
 {
+    // Saturating narrow, lane-concatenated (verified order + saturation on the probe).
+    [MethodImpl(Jit.Inline)]
+    internal static Vector256<short> PackSaturate(Vector256<int> first, Vector256<int> second)
+    {
+        return Vector256.NarrowWithSaturation(first, second);
+    }
+
+    [MethodImpl(Jit.Inline)]
+    internal static Vector128<short> PackSaturate(Vector128<int> lower, Vector128<int> upper)
+    {
+        return Vector128.NarrowWithSaturation(lower, upper);
+    }
+
     [MethodImpl(Jit.Inline)]
     internal static short HorizontalMax(Vector256<short> vector)
     {
@@ -154,14 +166,6 @@ internal static unsafe class SimdOps
         return maximum;
     }
 
-    [MethodImpl(Jit.Inline)]
-    private static Vector256<int> PairSums(Vector256<short> values, Vector256<short> ones)
-    {
-        if (Avx2.IsSupported) return Avx2.MultiplyAddAdjacent(values, ones);
-
-        var (low, high) = Vector256.Widen(values);
-        return low + high;
-    }
 
     [MethodImpl(Jit.Hot)]
     internal static long RaggedSum(short* rows, int* rowSums, int tileX, int rowCount, int* rowLow, int* rowHigh)
@@ -170,7 +174,6 @@ internal static unsafe class SimdOps
         {
             var indicesLow = Vector256.Create((short)0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
             var indicesHigh = indicesLow + Vector256.Create((short)16);
-            var ones = Vector256.Create((short)1);
             var total = Vector256<int>.Zero;
             var whole = 0L;
             for (var r = 0; r < rowCount; r++)
@@ -194,7 +197,9 @@ internal static unsafe class SimdOps
                 var high =
                     Vector256.Load(row + 16) & Vector256.GreaterThanOrEqual(indicesHigh, from) &
                     Vector256.LessThan(indicesHigh, to);
-                total += PairSums(low, ones) + PairSums(high, ones);
+                var (low0, low1) = Vector256.Widen(low);
+                var (high0, high1) = Vector256.Widen(high);
+                total += low0 + low1 + high0 + high1;
             }
 
             return whole + Vector256.Sum(total);

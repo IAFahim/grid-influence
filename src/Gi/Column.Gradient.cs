@@ -1,7 +1,7 @@
 using System.Runtime.CompilerServices;
 #if NET
 using System.Numerics;
-using System.Runtime.Intrinsics.X86;
+using System.Runtime.Intrinsics;
 #endif
 
 namespace Gi;
@@ -28,7 +28,7 @@ public static unsafe partial class World
         b->Interior = 0;
         b->Moved = 0;
 #if NET
-        if (Avx2.IsSupported) i = QuantizeLanes(f, xs, ys, b);
+        if (Vector256.IsHardwareAccelerated) i = QuantizeLanes(f, xs, ys, b);
 #endif
         var count = b->Count;
         var last = f.Size - 1;

@@ -2,7 +2,6 @@ using System.Runtime.CompilerServices;
 #if NET
 using System.Numerics;
 using System.Runtime.Intrinsics;
-using System.Runtime.Intrinsics.X86;
 #endif
 
 namespace Gi;
@@ -181,7 +180,7 @@ public static unsafe partial class World
         var scale = Vector256.Create((float)g->ScaleQ8);
         var outside = Vector256.Create(~(g->Size - 1));
         var tileMask = Vector256.Create(TileBake.TileSize - 1);
-        var tileShift = Vector256.Create((uint)BitOperations.TrailingZeroCount(g->TilesPerSide));
+        var tileShift = (byte)BitOperations.TrailingZeroCount(g->TilesPerSide);
         var zero = Vector256<int>.Zero;
         var offsets = stackalloc int[8];
         var pairs = (ulong*)offsets;
@@ -193,17 +192,18 @@ public static unsafe partial class World
         {
             var px = (Vector256.Load(xs + i) - originX) * scale;
             var py = (Vector256.Load(ys + i) - originY) * scale;
-            var cx = Vector256.ShiftRightArithmetic(Avx.ConvertToVector256Int32WithTruncation(px), 8);
-            var cy = Vector256.ShiftRightArithmetic(Avx.ConvertToVector256Int32WithTruncation(py), 8);
+            // Truncate then native convert == VCVTTPS2DQ (INT_MIN wrap incl.); plain ConvertToInt32 saturates.
+            var cx = Vector256.ShiftRightArithmetic(Vector256.ConvertToInt32Native(Vector256.Truncate(px)), 8);
+            var cy = Vector256.ShiftRightArithmetic(Vector256.ConvertToInt32Native(Vector256.Truncate(py)), 8);
             var rejected = (Vector256.Equals((cx | cy) & outside, zero).AsSingle().ExtractMostSignificantBits() ^ 0xFFu)
                            | (px | py).ExtractMostSignificantBits();
             var next = zero;
             var missing = false;
             if (rejected == 0)
             {
-                var tile = Avx2.ShiftLeftLogicalVariable(Vector256.ShiftRightArithmetic(cy, TileBake.TileBits).AsUInt32(),
-                    tileShift).AsInt32() + Vector256.ShiftRightArithmetic(cx, TileBake.TileBits);
-                var slots = Avx2.GatherVector256(directory, tile, 4);
+                var tile = Vector256.ShiftLeft(Vector256.ShiftRightArithmetic(cy, TileBake.TileBits).AsUInt32(), tileShift).AsInt32()
+                    + Vector256.ShiftRightArithmetic(cx, TileBake.TileBits);
+                var slots = GatherTable(directory, tile);
                 missing = Vector256.Equals(slots, zero).AsSingle().ExtractMostSignificantBits() != 0;
                 if (missing) tile.Store(tiles);
                 next = Vector256.ShiftLeft(slots, HistState.PageShift) +
