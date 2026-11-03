@@ -41,7 +41,7 @@ public static unsafe partial class World
     private static BatchStatus ValidateToken(Token token, out WorldCtx* context)
     {
         context = null;
-        if (token.RevisionAtCapture == 0 || token.WorldId >= _worldCount) return BatchStatus.InvalidWorld;
+        if (token.RevisionAtCapture == 0 || token.WorldId >= Runtime.Root.WorldCount) return BatchStatus.InvalidWorld;
 
         var candidate = Runtime.Worlds + token.WorldId;
         if (candidate->Grids == null) return BatchStatus.InvalidWorld;
