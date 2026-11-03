@@ -18,6 +18,7 @@ namespace Gi.Entities
         [ReadOnly] public ComponentTypeHandle<LocalTransform> Transforms;
         [ReadOnly] public ComponentTypeHandle<LocalToWorld> Matrices;
         [ReadOnly] public ComponentTypeHandle<Parent> Parents;
+        public ComponentTypeHandle<GiDirty> Dirty;
         public ComponentTypeHandle<GiFault> Faults;
 
         public int Visit(in ArchetypeChunk chunk, in GiReconcileContext context, uint lastVersion, int baseIndex,
@@ -26,9 +27,24 @@ namespace Gi.Entities
             if (!context.Alive) return 0;
 
             var hasEmitter = chunk.Has(ref Emitters);
-            if (hasEmitter && !chunk.DidChange(ref Emitters, lastVersion) && !chunk.DidChange(ref Sources, lastVersion) &&
-                !chunk.DidOrderChange(lastVersion))
-                return 0;
+            var useMatrix = chunk.Has(ref Parents) || !chunk.Has(ref Transforms);
+            var inputsChanged = hasEmitter && (chunk.DidChange(ref Emitters, lastVersion) ||
+                chunk.DidChange(ref Sources, lastVersion) ||
+                chunk.DidOrderChange(lastVersion) ||
+                (chunk.Has(ref Ramps) && chunk.DidChange(ref Ramps, lastVersion)) ||
+                (!useMatrix && chunk.DidChange(ref Transforms, lastVersion)) ||
+                (useMatrix && chunk.Has(ref Matrices) && chunk.DidChange(ref Matrices, lastVersion)) ||
+                (chunk.Has(ref Parents) && chunk.DidChange(ref Parents, lastVersion)));
+            var hasDirty = chunk.Has(ref Dirty);
+            var full = context.Force || inputsChanged || !hasDirty;
+            var mask = hasDirty ? chunk.GetEnabledMask(ref Dirty) : default;
+            var any = !hasDirty;
+            if (!full)
+            {
+                for (var d = 0; d < chunk.Count; d++)
+                    if (mask[d]) { any = true; break; }
+                if (!GiReconcileFilter.ShouldVisitChunk(context.Force, inputsChanged, any)) return 0;
+            }
 
             var sources = chunk.GetNativeArray(ref Sources);
             var emitters = hasEmitter ? chunk.GetNativeArray(ref Emitters) : default;
@@ -37,7 +53,6 @@ namespace Gi.Entities
             var ramps = chunk.Has(ref Ramps) ? chunk.GetNativeArray(ref Ramps) : default;
             var oriented = chunk.Has(ref Oriented);
             var scaled = chunk.Has(ref Scaled);
-            var useMatrix = chunk.Has(ref Parents) || !chunk.Has(ref Transforms);
             var transforms = !useMatrix ? chunk.GetNativeArray(ref Transforms) : default;
             var matrices = useMatrix && chunk.Has(ref Matrices) ? chunk.GetNativeArray(ref Matrices) : default;
             var entities = chunk.GetNativeArray(Entities);
@@ -47,6 +62,8 @@ namespace Gi.Entities
             var count = 0;
             for (var i = 0; i < chunk.Count; i++)
             {
+                if (!full && hasDirty && !GiReconcileFilter.ShouldProcessEntity(mask[i])) continue;
+
                 var desired = default(GiDesired);
                 desired.Want = hasEmitter && !disabled && enabled[i];
                 if (desired.Want)
@@ -84,6 +101,9 @@ namespace Gi.Entities
                         faults[i] = new GiFault { Code = plan.Fault };
                         chunk.SetComponentEnabled(ref Faults, i, true);
                     }
+
+                    var keep = GiReconcileFilter.KeepDirty(plan.Count);
+                    if (hasDirty && mask[i] != keep) chunk.SetComponentEnabled(ref Dirty, i, keep);
                 }
 
                 count += plan.Count;

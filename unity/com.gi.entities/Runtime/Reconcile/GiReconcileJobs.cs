@@ -14,6 +14,7 @@ namespace Gi.Entities
     internal unsafe struct GiDrainPulsesJob : IJob
     {
         public Entity Frame;
+        public bool ForceAll;
         [ReadOnly] public ComponentLookup<GiFrame> Frames;
         public NativeReference<GiReconcileContext> Context;
         [ReadOnly] public UnsafeList<NativeThreadStream>.ReadOnly Streams;
@@ -21,7 +22,9 @@ namespace Gi.Entities
 
         public void Execute()
         {
-            Context.Value = GiReconcileContext.Of(Frames[Frame]);
+            var context = GiReconcileContext.Of(Frames[Frame]);
+            context.Force = ForceAll;
+            Context.Value = context;
             for (var s = 0; s < Streams.Length; s++)
             {
                 var reader = Streams.Ptr[s].AsReader();
@@ -57,6 +60,7 @@ namespace Gi.Entities
         [ReadOnly] public NativeArray<int> Counts;
         [ReadOnly] public NativeList<GiPulse> Pulses;
         [ReadOnly] public NativeReference<GiReconcileContext> Context;
+        public int Base;
         public NativeArray<int> Offsets;
         public NativeList<GiCommand> Commands;
         public NativeList<Entity> Owners;
@@ -69,21 +73,21 @@ namespace Gi.Entities
             var total = 0;
             for (var c = 0; c < Counts.Length; c++)
             {
-                Offsets[c] = total;
+                Offsets[c] = Base + total;
                 total += Counts[c];
             }
 
             var context = Context.Value;
-            var entityTotal = total;
+            var entityTotal = Base + total;
             for (var p = 0; p < Pulses.Length; p++)
                 if (context.Alive)
                     total += GiPulseExpand.Plan(Pulses[p], context.Tables, 0).Count;
 
-            Commands.ResizeUninitialized(total);
-            Owners.ResizeUninitialized(total);
-            Results.ResizeUninitialized(total);
-            Scratch.ResizeUninitialized(total);
-            BatchResults.ResizeUninitialized(total);
+            Commands.ResizeUninitialized(Base + total);
+            Owners.ResizeUninitialized(Base + total);
+            Results.ResizeUninitialized(Base + total);
+            Scratch.ResizeUninitialized(Base + total);
+            BatchResults.ResizeUninitialized(Base + total);
 
             var cursor = entityTotal;
             for (var p = 0; p < Pulses.Length && context.Alive; p++)

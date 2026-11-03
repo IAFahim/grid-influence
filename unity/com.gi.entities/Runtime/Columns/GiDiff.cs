@@ -63,14 +63,14 @@ namespace Gi.Entities
 
             if (!want)
             {
-                if (applied.Placed) Add(ref plan, Remove(applied, owner));
+                if (applied.Placed) Add(ref plan, RemoveFor(applied, owner));
                 return plan;
             }
 
             var placed = applied.Placed;
             if (placed && (!applied.Layer.Equals(desired.Layer) || !applied.Stamp.Equals(desired.Stamp)))
             {
-                Add(ref plan, Remove(applied, owner));
+                Add(ref plan, RemoveFor(applied, owner));
                 placed = false;
             }
 
@@ -126,7 +126,7 @@ namespace Gi.Entities
             return plan;
         }
 
-        private static GiCommand Remove(in GiApplied applied, int owner)
+        public static GiCommand RemoveFor(in GiApplied applied, int owner)
         {
             return new GiCommand
             {

@@ -50,6 +50,7 @@ namespace Gi.Entities
                 Transforms = state.GetComponentTypeHandle<LocalTransform>(true),
                 Matrices = state.GetComponentTypeHandle<LocalToWorld>(true),
                 Parents = state.GetComponentTypeHandle<Parent>(true),
+                Dirty = state.GetComponentTypeHandle<GiDirty>(),
                 Faults = state.GetComponentTypeHandle<GiFault>(),
             };
             _frames = state.GetComponentLookup<GiFrame>();
@@ -83,7 +84,14 @@ namespace Gi.Entities
                 return;
             }
 
-            if (added) state.EntityManager.AddComponent<GiSource>(_added);
+            if (added)
+            {
+                using var fresh = _added.ToEntityArray(Allocator.Temp);
+                state.EntityManager.AddComponent<GiSource>(fresh);
+                state.EntityManager.AddComponent<GiDirty>(fresh);
+                foreach (var entity in fresh)
+                    state.EntityManager.SetComponentEnabled<GiDirty>(entity, true);
+            }
 
             _view.Entities.Update(ref state);
             _view.Sources.Update(ref state);
@@ -95,6 +103,7 @@ namespace Gi.Entities
             _view.Transforms.Update(ref state);
             _view.Matrices.Update(ref state);
             _view.Parents.Update(ref state);
+            _view.Dirty.Update(ref state);
             _view.Faults.Update(ref state);
             _frames.Update(ref state);
             _sourceLookup.Update(ref state);

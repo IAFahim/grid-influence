@@ -3,6 +3,7 @@ namespace Gi.Entities
     public struct GiReconcileContext
     {
         public bool Alive;
+        public bool Force;
         public byte World;
         public int Tick;
         public GiPlane Plane;
