@@ -136,6 +136,68 @@ public static unsafe partial class World
 
         Schedule(w, s, i);
     }
+    [MethodImpl(Jit.Hot)]
+    private static void WriteFade(GiRoot* root, WorldCtx* w, SourceColumns* s, int i, sbyte gain, int ticks)
+    {
+        var target = (sbyte)Math.Clamp((int)gain, -MaxGain, MaxGain);
+        var current = (sbyte)s->Gain[i];
+        JournalSchedule(root, w, s, i);
+        if (ticks <= 0 || target == current)
+        {
+            s->Timed.Pointer[i] &= unchecked((byte)~Fading);
+            if (target != current)
+            {
+                BeforeWrite(root, w, s, i);
+                s->Gain[i] = (byte)target;
+                MarkChanged(root, w, s, i);
+            }
+        }
+        else
+        {
+            s->FadeFrom.Pointer[i] = current;
+            s->FadeTo.Pointer[i] = target;
+            s->FadeStart.Pointer[i] = w->Tick;
+            s->FadeTicks.Pointer[i] = ticks;
+            s->Timed.Pointer[i] |= Fading;
+        }
+
+        Schedule(root, w, s, i);
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static void WriteExpire(GiRoot* root, WorldCtx* w, SourceColumns* s, int i, int ticks)
+    {
+        JournalSchedule(root, w, s, i);
+        if (ticks <= 0)
+        {
+            s->Timed.Pointer[i] &= unchecked((byte)~Expiring);
+        }
+        else
+        {
+            s->ExpireAt.Pointer[i] = w->Tick + ticks;
+            s->Timed.Pointer[i] |= Expiring;
+        }
+
+        Schedule(root, w, s, i);
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static void Schedule(GiRoot* root, WorldCtx* w, SourceColumns* s, int slot)
+    {
+        if (!NextDue(s, slot, w->Tick, out var next)) return;
+
+        var at = s->TimedAt.Pointer[slot];
+        if (at != 0)
+        {
+            w->TimedList.Pointer[at - 1].Next = next;
+            return;
+        }
+
+        var n = w->TimedList.Length;
+        w->TimedList.Resize(root, n + 1);
+        w->TimedList.Pointer[n] = new TimedEntry { Slot = slot, Next = next };
+        s->TimedAt.Pointer[slot] = n + 1;
+    }
 
     [MethodImpl(Jit.Hot)]
     private static void JournalSchedule(WorldCtx* w, SourceColumns* s, int slot)

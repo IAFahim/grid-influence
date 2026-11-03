@@ -14,11 +14,11 @@ public static unsafe partial class World
     internal static BatchStatus ApplyBatch(GiRoot* root, byte world, ReadOnlySpan<SourceCommand> commands, Span<SourceResult> results)
     {
         var context = GetContext(root, world);
-        return context == null ? BatchStatus.InvalidWorld : ApplyBatchCommands(context, commands, results);
+        return context == null ? BatchStatus.InvalidWorld : ApplyBatchCommands(root, context, commands, results);
     }
 
     [MethodImpl(Jit.Hot)]
-    private static BatchStatus ApplyBatchCommands(
+    private static BatchStatus ApplyBatchCommands(GiRoot* root,
         WorldCtx* context, ReadOnlySpan<SourceCommand> commands, Span<SourceResult> results)
     {
         if (commands.Length > MaxSourceSlots) return BatchStatus.TooManyCommands;
@@ -38,18 +38,18 @@ public static unsafe partial class World
                 return BatchStatus.InvalidReference;
         }
 
-        for (var index = 0; index < commands.Length; index++) ApplyCommand(context, in commands[index], results, index);
+        for (var index = 0; index < commands.Length; index++) ApplyCommand(root, context, in commands[index], results, index);
         return BatchStatus.Applied;
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void ApplyCommand(WorldCtx* w, in SourceCommand command, Span<SourceResult> results, int index)
+    private static void ApplyCommand(GiRoot* root, WorldCtx* w, in SourceCommand command, Span<SourceResult> results, int index)
     {
         var s = &w->Sources;
         if (command.Kind == SourceCommandKind.Place)
         {
             var scale = float.IsFinite(command.ScaleValue) ? QuantizeScale(command.ScaleValue) : UnitScale;
-            var status = PlaceSlot(w, command.Layer, command.PositionX, command.PositionY, command.Stamp, command.Gain,
+            var status = PlaceSlot(root, w, command.Layer, command.PositionX, command.PositionY, command.Stamp, command.Gain,
                 scale, out var created);
             results[index] = new SourceResult(created, status);
             if (status != SourceResultStatus.Applied) return;
@@ -71,34 +71,34 @@ public static unsafe partial class World
         switch (command.Kind)
         {
             case SourceCommandKind.Update:
-                WriteTransform(w, s, slot, in command);
-                WriteGain(w, s, slot, command.Gain);
+                WriteTransform(root, w, s, slot, in command);
+                WriteGain(root, w, s, slot, command.Gain);
                 break;
             case SourceCommandKind.UpdateTransform:
-                WriteTransform(w, s, slot, in command);
+                WriteTransform(root, w, s, slot, in command);
                 break;
             case SourceCommandKind.Move:
                 if (float.IsFinite(command.PositionX) && float.IsFinite(command.PositionY))
-                    WriteMove(w, s, slot, command.PositionX, command.PositionY);
+                    WriteMove(root, w, s, slot, command.PositionX, command.PositionY);
                 break;
             case SourceCommandKind.Turn:
                 if (float.IsFinite(command.HeadingRadians))
-                    WriteTurn(w, s, slot, QuantizeAngle(command.HeadingRadians));
+                    WriteTurn(root, w, s, slot, QuantizeAngle(command.HeadingRadians));
                 break;
             case SourceCommandKind.Scale:
-                if (float.IsFinite(command.ScaleValue)) WriteScale(w, s, slot, QuantizeScale(command.ScaleValue));
+                if (float.IsFinite(command.ScaleValue)) WriteScale(root, w, s, slot, QuantizeScale(command.ScaleValue));
                 break;
             case SourceCommandKind.SetGain:
-                WriteGain(w, s, slot, command.Gain);
+                WriteGain(root, w, s, slot, command.Gain);
                 break;
             case SourceCommandKind.Remove:
-                WriteRemove(w, s, slot);
+                WriteRemove(root, w, s, slot);
                 break;
             case SourceCommandKind.Fade:
-                WriteFade(w, s, slot, command.Gain, command.Ticks);
+                WriteFade(root, w, s, slot, command.Gain, command.Ticks);
                 break;
             case SourceCommandKind.Expire:
-                WriteExpire(w, s, slot, command.Ticks);
+                WriteExpire(root, w, s, slot, command.Ticks);
                 break;
         }
 
@@ -106,11 +106,11 @@ public static unsafe partial class World
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void WriteTransform(WorldCtx* w, SourceColumns* s, int slot, in SourceCommand command)
+    private static void WriteTransform(GiRoot* root, WorldCtx* w, SourceColumns* s, int slot, in SourceCommand command)
     {
         if (float.IsFinite(command.PositionX) && float.IsFinite(command.PositionY))
-            WriteMove(w, s, slot, command.PositionX, command.PositionY);
-        if (float.IsFinite(command.HeadingRadians)) WriteTurn(w, s, slot, QuantizeAngle(command.HeadingRadians));
-        if (float.IsFinite(command.ScaleValue)) WriteScale(w, s, slot, QuantizeScale(command.ScaleValue));
+            WriteMove(root, w, s, slot, command.PositionX, command.PositionY);
+        if (float.IsFinite(command.HeadingRadians)) WriteTurn(root, w, s, slot, QuantizeAngle(command.HeadingRadians));
+        if (float.IsFinite(command.ScaleValue)) WriteScale(root, w, s, slot, QuantizeScale(command.ScaleValue));
     }
 }

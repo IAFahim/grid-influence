@@ -110,7 +110,7 @@ public static unsafe partial class World
         for (var i = 0; i < count; i++)
         {
 #if NET
-            if (i + PrefetchAhead < count) PrefetchRecordTarget(w, slots[i + PrefetchAhead]);
+            if (i + PrefetchAhead < count) PrefetchRecordTarget(root, w, slots[i + PrefetchAhead]);
 #endif
             var entry = EntryOf(s, slots[i]);
             SweepEntryAt(root, w, &entry);
