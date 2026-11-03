@@ -7,12 +7,24 @@
     <Nullable>disable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <IsPackable>false</IsPackable>
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <GiVariant Condition="'$(GiVariant)' == ''">portable</GiVariant>
   </PropertyGroup>
 
-  <ItemGroup>
+  <ItemGroup Condition="'$(GiVariant)' == 'portable'">
     <ProjectReference Include="..\..\..\src\Gi\Gi.csproj" SetTargetFramework="TargetFramework=netstandard2.1" />
     <ProjectReference Include="..\..\..\src\Gi.Validation\Gi.Validation.csproj" SetTargetFramework="TargetFramework=netstandard2.1" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(GiVariant)' == 'coreclr'">
+    <Reference Include="Gi">
+      <HintPath>..\..\com.gi.entities\Plugins\Gi\coreclr\Gi.dll</HintPath>
+    </Reference>
+    <Reference Include="Gi.Validation">
+      <HintPath>..\..\com.gi.entities\Plugins\Gi\coreclr\Gi.Validation.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
     <Compile Include="..\..\com.gi.entities\Runtime\Columns\**\*.cs" Link="Columns\%(RecursiveDir)%(Filename)%(Extension)" />
     <Compile Include="..\..\com.gi.entities\Tests\Support\**\*.cs" Link="Support\%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
