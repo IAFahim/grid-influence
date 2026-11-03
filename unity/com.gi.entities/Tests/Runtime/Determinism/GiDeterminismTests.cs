@@ -46,6 +46,7 @@ namespace Gi.Entities.Tests
                 var scenario = GiScenarioGenerator.Create(seed, options);
                 var changed = scenario.Profile.ToSpec();
                 changed.Bindings = new[] { Dormant };
+                changed.Stamps[0].Value += 1;
 
                 using var rebuilt = new GiEcsExecutor(scenario, "Rebuilt");
                 for (var t = 0; t < scenario.Ticks.Length; t++) rebuilt.Step(t);
@@ -74,6 +75,7 @@ namespace Gi.Entities.Tests
 
             var changed = GiScenarioProfile.Standard().ToSpec();
             changed.Bindings = new[] { Dormant };
+            changed.Stamps[0].Value += 1;
             rebuilt.SetProfile(changed);
             rebuilt.Tick();
             rebuilt.Complete();
