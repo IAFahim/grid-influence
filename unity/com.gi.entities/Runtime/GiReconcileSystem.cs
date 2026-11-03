@@ -25,8 +25,6 @@ namespace Gi.Entities
         private ComponentLookup<GiFrame> _frames;
         private ComponentLookup<GiSource> _sourceLookup;
         private ComponentLookup<GiFault> _faultLookup;
-        private uint _generation;
-        private int _disabledOrder;
         private EntityTypeHandle _entities;
         private ComponentTypeHandle<GiSource> _sourceHandle;
 
@@ -36,7 +34,7 @@ namespace Gi.Entities
             _pulses = new SingletonCollectionUtil<GiPulseSingleton, NativeThreadStream>(ref state);
 
             const EntityQueryOptions every = EntityQueryOptions.IncludeDisabledEntities | EntityQueryOptions.IncludePrefab;
-            _all = new EntityQueryBuilder(Allocator.Temp).WithAll<GiSource>().WithPresent<GiDirty>().WithOptions(every).Build(ref state);
+            _all = new EntityQueryBuilder(Allocator.Temp).WithAll<GiSource>().WithOptions(every).Build(ref state);
             _added = new EntityQueryBuilder(Allocator.Temp).WithAll<GiEmitter>().WithNone<GiSource>().Build(ref state);
             _retire = new EntityQueryBuilder(Allocator.Temp).WithAll<GiSource>().WithNone<GiEmitter>().WithOptions(every).Build(ref state);
 
@@ -80,7 +78,7 @@ namespace Gi.Entities
             }
 
             var added = !_added.IsEmptyIgnoreFilter;
-            if (!added && _all.IsEmptyIgnoreFilter && _retire.IsEmptyIgnoreFilter && _pulses.Containers.Length == 0)
+            if (!added && _all.IsEmptyIgnoreFilter && _pulses.Containers.Length == 0)
             {
                 _pulses.ClearRewind(state.Dependency);
                 return;
@@ -125,44 +123,9 @@ namespace Gi.Entities
             var scratch = new NativeList<GiWorld.SourceCommand>(allocator);
             var batchResults = new NativeList<GiWorld.SourceResult>(allocator);
 
-            var frameEntity = SystemAPI.GetSingletonEntity<GiFrame>();
-            var generation = state.EntityManager.GetComponentData<GiFrame>(frameEntity).Generation;
-            var disabledOrder = state.EntityManager.GetComponentOrderVersion<Disabled>();
-            var forceAll = generation != _generation || disabledOrder != _disabledOrder;
-            _generation = generation;
-            _disabledOrder = disabledOrder;
-
-            var retirees = 0;
-            if (!_retire.IsEmptyIgnoreFilter)
-            {
-                state.Dependency.Complete();
-                using var retired = _retire.ToArchetypeChunkArray(Allocator.Temp);
-                foreach (var chunk in retired)
-                {
-                    var retireSources = chunk.GetNativeArray(_sourceHandle);
-                    var retireEntities = chunk.GetNativeArray(_entities);
-                    for (var i = 0; i < chunk.Count; i++)
-                    {
-                        if (!retireSources[i].Placed) continue;
-                        var applied = new GiApplied
-                        {
-                            Placed = true,
-                            Layer = retireSources[i].Layer,
-                            Stamp = retireSources[i].Stamp,
-                            Gain = retireSources[i].Gain,
-                            Source = retireSources[i].Id,
-                        };
-                        commands.Add(GiDiff.RemoveFor(applied, retirees));
-                        owners.Add(retireEntities[i]);
-                        retirees++;
-                    }
-                }
-            }
-
             var handle = new GiDrainPulsesJob
             {
-                Frame = frameEntity,
-                ForceAll = forceAll,
+                Frame = SystemAPI.GetSingletonEntity<GiFrame>(),
                 Frames = _frames,
                 Context = context,
                 Streams = _pulses.Containers,
@@ -175,7 +138,6 @@ namespace Gi.Entities
                 Counts = counts,
                 Pulses = pulses,
                 Context = context,
-                Base = retirees,
                 Offsets = offsets,
                 Commands = commands,
                 Owners = owners,

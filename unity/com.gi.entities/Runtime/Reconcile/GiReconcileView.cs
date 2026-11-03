@@ -27,30 +27,28 @@ namespace Gi.Entities
             if (!context.Alive) return 0;
 
             var hasEmitter = chunk.Has(ref Emitters);
-            if (!hasEmitter) return 0;
-
             var useMatrix = chunk.Has(ref Parents) || !chunk.Has(ref Transforms);
-            var full = context.Force
-                || chunk.DidChange(ref Emitters, lastVersion)
-                || chunk.DidChange(ref Sources, lastVersion)
-                || chunk.DidOrderChange(lastVersion);
-            if (!full && chunk.Has(ref Ramps)) full = chunk.DidChange(ref Ramps, lastVersion);
-            if (!full) full = useMatrix
-                ? chunk.Has(ref Matrices) && chunk.DidChange(ref Matrices, lastVersion)
-                : chunk.DidChange(ref Transforms, lastVersion);
+            var inputsChanged = hasEmitter && (chunk.DidChange(ref Emitters, lastVersion) ||
+                chunk.DidChange(ref Sources, lastVersion) ||
+                chunk.DidOrderChange(lastVersion) ||
+                (chunk.Has(ref Ramps) && chunk.DidChange(ref Ramps, lastVersion)) ||
+                (!useMatrix && chunk.DidChange(ref Transforms, lastVersion)) ||
+                (useMatrix && chunk.Has(ref Matrices) && chunk.DidChange(ref Matrices, lastVersion)) ||
+                (chunk.Has(ref Parents) && chunk.DidChange(ref Parents, lastVersion)));
             var hasDirty = chunk.Has(ref Dirty);
+            var full = context.Force || inputsChanged || !hasDirty;
             var mask = hasDirty ? chunk.GetEnabledMask(ref Dirty) : default;
+            var any = !hasDirty;
             if (!full)
             {
-                var any = false;
                 for (var d = 0; d < chunk.Count; d++)
                     if (mask[d]) { any = true; break; }
-                if (!GiReconcileFilter.ShouldVisitChunk(false, false, any)) return 0;
+                if (!GiReconcileFilter.ShouldVisitChunk(context.Force, inputsChanged, any)) return 0;
             }
 
             var sources = chunk.GetNativeArray(ref Sources);
-            var emitters = chunk.GetNativeArray(ref Emitters);
-            var enabled = chunk.GetEnabledMask(ref Emitters);
+            var emitters = hasEmitter ? chunk.GetNativeArray(ref Emitters) : default;
+            var enabled = hasEmitter ? chunk.GetEnabledMask(ref Emitters) : default;
             var disabled = chunk.Has(ref Disabled);
             var ramps = chunk.Has(ref Ramps) ? chunk.GetNativeArray(ref Ramps) : default;
             var oriented = chunk.Has(ref Oriented);
@@ -64,10 +62,10 @@ namespace Gi.Entities
             var count = 0;
             for (var i = 0; i < chunk.Count; i++)
             {
-                if (!full && !GiReconcileFilter.ShouldProcessEntity(mask[i])) continue;
+                if (!full && hasDirty && !GiReconcileFilter.ShouldProcessEntity(mask[i])) continue;
 
                 var desired = default(GiDesired);
-                desired.Want = !disabled && enabled[i];
+                desired.Want = hasEmitter && !disabled && enabled[i];
                 if (desired.Want)
                 {
                     desired.Layer = emitters[i].Layer;
