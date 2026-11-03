@@ -31,11 +31,12 @@ public static unsafe partial class World
         var i = 0;
         for (; i + 8 <= count; i += 8)
         {
+            // Floor makes every lane integral, so native convert == VCVTTPS2DQ (INT_MIN wrap incl.).
             var cx = Vector256.ShiftRightArithmetic(
-                SimdOps.TruncateToInt32(Vector256.Floor((Vector256.Load(xs + i) - originX) * scale)),
+                Vector256.ConvertToInt32Native(Vector256.Floor((Vector256.Load(xs + i) - originX) * scale)),
                 8);
             var cy = Vector256.ShiftRightArithmetic(
-                SimdOps.TruncateToInt32(Vector256.Floor((Vector256.Load(ys + i) - originY) * scale)),
+                Vector256.ConvertToInt32Native(Vector256.Floor((Vector256.Load(ys + i) - originY) * scale)),
                 8);
             var inside = Vector256.Equals((cx | cy) & outside, zero);
             var border = Vector256.Equals(cx, zero) | Vector256.Equals(cx, last) | Vector256.Equals(cy, zero) |
@@ -105,6 +106,7 @@ public static unsafe partial class World
     [MethodImpl(Jit.Inline)]
     private static Vector256<int> GatherOffsets(int* words, Vector256<int> byteOffsets)
     {
+        // Scalar gather: no portable gather intrinsic exists (X86-only / SVE-only).
         var bytes = (byte*)words;
         return Vector256.Create(
             *(int*)(bytes + byteOffsets.GetElement(0)),
@@ -120,6 +122,7 @@ public static unsafe partial class World
     [MethodImpl(Jit.Inline)]
     private static Vector256<int> GatherTable(int* table, Vector256<int> lanes)
     {
+        // Scalar gather: no portable gather intrinsic exists (X86-only / SVE-only).
         return Vector256.Create(
             table[lanes.GetElement(0)],
             table[lanes.GetElement(1)],

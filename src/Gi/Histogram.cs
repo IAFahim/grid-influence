@@ -192,8 +192,9 @@ public static unsafe partial class World
         {
             var px = (Vector256.Load(xs + i) - originX) * scale;
             var py = (Vector256.Load(ys + i) - originY) * scale;
-            var cx = Vector256.ShiftRightArithmetic(SimdOps.TruncateToInt32(px), 8);
-            var cy = Vector256.ShiftRightArithmetic(SimdOps.TruncateToInt32(py), 8);
+            // Truncate then native convert == VCVTTPS2DQ (INT_MIN wrap incl.); plain ConvertToInt32 saturates.
+            var cx = Vector256.ShiftRightArithmetic(Vector256.ConvertToInt32Native(Vector256.Truncate(px)), 8);
+            var cy = Vector256.ShiftRightArithmetic(Vector256.ConvertToInt32Native(Vector256.Truncate(py)), 8);
             var rejected = (Vector256.Equals((cx | cy) & outside, zero).AsSingle().ExtractMostSignificantBits() ^ 0xFFu)
                            | (px | py).ExtractMostSignificantBits();
             var next = zero;

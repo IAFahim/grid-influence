@@ -7,35 +7,17 @@ namespace Gi;
 
 internal static unsafe class SimdOps
 {
-    // Portable VCVTTPS2DQ: truncate toward zero; out-of-range or NaN yields int.MinValue.
-    // Vector256.ConvertToInt32 saturates (+overflow to Max, NaN to 0), which diverges.
-    [MethodImpl(Jit.Inline)]
-    internal static Vector256<int> TruncateToInt32(Vector256<float> value)
-    {
-        var truncated = Vector256.ConvertToInt32(value);
-        var invalid = ~Vector256.GreaterThanOrEqual(value, Vector256.Create(-2147483648f)) |
-                      ~Vector256.LessThan(value, Vector256.Create(2147483648f));
-        return Vector256.ConditionalSelect(invalid.AsInt32(), Vector256.Create(int.MinValue), truncated);
-    }
-
+    // Saturating narrow, lane-concatenated (verified order + saturation on the probe).
     [MethodImpl(Jit.Inline)]
     internal static Vector256<short> PackSaturate(Vector256<int> first, Vector256<int> second)
     {
-        var floor = Vector256.Create((int)short.MinValue);
-        var ceiling = Vector256.Create((int)short.MaxValue);
-        return Vector256.Narrow(
-            Vector256.Min(Vector256.Max(first, floor), ceiling),
-            Vector256.Min(Vector256.Max(second, floor), ceiling));
+        return Vector256.NarrowWithSaturation(first, second);
     }
 
     [MethodImpl(Jit.Inline)]
     internal static Vector128<short> PackSaturate(Vector128<int> lower, Vector128<int> upper)
     {
-        var floor = Vector128.Create((int)short.MinValue);
-        var ceiling = Vector128.Create((int)short.MaxValue);
-        return Vector128.Narrow(
-            Vector128.Min(Vector128.Max(lower, floor), ceiling),
-            Vector128.Min(Vector128.Max(upper, floor), ceiling));
+        return Vector128.NarrowWithSaturation(lower, upper);
     }
 
     [MethodImpl(Jit.Inline)]
