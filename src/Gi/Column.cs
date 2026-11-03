@@ -8,13 +8,17 @@ public static unsafe partial class World
     private static bool SenseColumnCore(byte world, byte layer, float* xs, float* ys, int count, short* values,
         ulong* whole)
     {
-        var w = GetContext(world);
+        fixed (GiRoot* root = &Runtime.Root) return SenseColumnCore(root, world, layer, xs, ys, count, values, whole);
+    }
+    [MethodImpl(Jit.Hot)]
+    internal static bool SenseColumnCore(GiRoot* root, byte world, byte layer, float* xs, float* ys, int count, short* values,
+        ulong* whole)
+    {
+        var w = GetContext(root, world);
         if (w == null || layer >= w->LayerCount) return Unfilled(values, whole, count);
         if (count <= 0) return true;
         if (xs == null || ys == null || values == null) return Unfilled(values, whole, count);
-
         ClearBits(whole, count);
-
         return SenseRange(w, layer, xs, ys, values, whole, 0, count) == 0;
     }
 
@@ -22,26 +26,33 @@ public static unsafe partial class World
     public static int ChangedMask(byte world, byte layer, float* xs, float* ys, float reach, int since, int count,
         ulong* words)
     {
-        var w = GetContext(world);
+        fixed (GiRoot* root = &Runtime.Root) return ChangedMask(root, world, layer, xs, ys, reach, since, count, words);
+    }
+    [MethodImpl(Jit.Hot)]
+    internal static int ChangedMask(GiRoot* root, byte world, byte layer, float* xs, float* ys, float reach, int since, int count,
+        ulong* words)
+    {
+        var w = GetContext(root, world);
         if (w == null || layer >= w->LayerCount || xs == null || ys == null || words == null || !float.IsFinite(reach))
         {
             ClearBits(words, count);
             return 0;
         }
-
         if (count <= 0) return 0;
-
         ClearBits(words, count);
-
         return ChangedRange(w, layer, xs, ys, reach, since, words, 0, count);
     }
 
     [MethodImpl(Jit.Hot)]
     public static void Sync(byte world, SourceId* sources, float* xs, float* ys, int count)
     {
-        var w = GetContext(world);
+        fixed (GiRoot* root = &Runtime.Root) Sync(root, world, sources, xs, ys, count);
+    }
+    [MethodImpl(Jit.Hot)]
+    internal static void Sync(GiRoot* root, byte world, SourceId* sources, float* xs, float* ys, int count)
+    {
+        var w = GetContext(root, world);
         if (w == null) return;
-
         SyncColumns(w, sources, xs, ys, count);
     }
 

@@ -153,6 +153,94 @@ public static unsafe partial class World
             }
         }
     }
+    [MethodImpl(Jit.Hot)]
+    private static void Derive(GiRoot* root, WorldCtx* w)
+    {
+        for (var d = 0; d < w->LayerCount; d++)
+        {
+            var r = w->Recipes + d;
+            if (r->Op == LayerOp.Base) continue;
+            for (var gi = 0; gi < w->GridCount; gi++)
+            {
+                var g = w->Grids + gi;
+                var la = g->Layers + r->A;
+                var lb = g->Layers + r->B;
+                var own = g->Layers + d;
+                if (la->Dirty.Length == 0 && lb->Dirty.Length == 0 && own->Dirty.Length == 0) continue;
+                var ld = EnsureDirty(g, (byte)d);
+                MarkAll(g, ld, la);
+                if (r->B != r->A) MarkAll(g, ld, lb);
+                var dirty = ld->Dirty.Pointer;
+                var count = ld->Dirty.Length;
+                var kept = 0;
+                for (var i = 0; i < count; i++)
+                {
+                    var tile = dirty[i];
+                    ld->InDirty[tile] = 0;
+                    var pa = la->PageOf(tile);
+                    var pb = lb->PageOf(tile);
+                    var set = ld->SetOf(tile);
+                    ResolveOutcome outcome;
+                    if (pa == null && pb == null)
+                    {
+                        var existed = set != null;
+                        var page = existed ? ld->Store.Cells(*set).Page : null;
+                        outcome = existed && TileBake.PageAny(page) ? ResolveOutcome.Changed : ResolveOutcome.None;
+                        if (existed) DropPage(ld, tile);
+                        ld->Max.Update(g->TilesPerSide, tile, 0);
+                        if (existed) RefreshTileHash(g, ld, tile);
+                    }
+                    else
+                    {
+                        var created = set == null;
+                        if (created) set = EnsureSet(g, ld, tile);
+                        var cells = ld->Store.Cells(*set);
+                        outcome = Combine(root, r, pa, pb, cells.Page, &cells.Summary->Sum, &cells.Summary->Max);
+                        if ((outcome & ResolveOutcome.Empty) == 0)
+                        {
+                            ld->Max.Update(g->TilesPerSide, tile, cells.Summary->Max);
+                        }
+                        else
+                        {
+                            DropPage(ld, tile);
+                            ld->Max.Update(g->TilesPerSide, tile, 0);
+                        }
+                        if ((outcome & (ResolveOutcome.Empty | ResolveOutcome.Changed)) != 0)
+                            RefreshTileHash(g, ld, tile);
+                    }
+                    if ((outcome & ResolveOutcome.Changed) != 0) dirty[kept++] = tile;
+                }
+                ld->Dirty.Resize(kept);
+                ld->Rects.Resize(0);
+            }
+        }
+    }
+    [MethodImpl(Jit.Hot)]
+    private static ResolveOutcome Combine(GiRoot* root, LayerRecipe* r, short* inputA, short* inputB, short* output, long* pageSum, short* pageMax)
+    {
+        var a = inputA == null ? (short*)root->ZeroDense : inputA;
+        var b = inputB == null ? (short*)root->ZeroDense : inputB;
+#if NET
+        if (Vector256.IsHardwareAccelerated) return Combine256(r, a, b, output, pageSum, pageMax);
+        if (Vector128.IsHardwareAccelerated) return Combine128(r, a, b, output, pageSum, pageMax);
+#endif
+        var any = false;
+        var changed = false;
+        var sum = 0L;
+        var max = short.MinValue;
+        for (var i = 0; i < Cells; i++)
+        {
+            var cell = CombineCell(r, a[i], b[i]);
+            changed |= cell != output[i];
+            output[i] = cell;
+            any |= cell != 0;
+            sum += cell;
+            if (cell > max) max = cell;
+        }
+        *pageSum = sum;
+        *pageMax = max;
+        return TileBake.Outcome(any, changed);
+    }
 
     [MethodImpl(Jit.Hot)]
     private static void MarkLive(GridCtx* g, byte layer, LayerData* source)

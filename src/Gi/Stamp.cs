@@ -42,6 +42,16 @@ internal static unsafe class StampCatalog
     {
         return Runtime.Stamps + id;
     }
+    [MethodImpl(Jit.Hot)]
+    internal static StampVariant* Get(GiRoot* root, byte id)
+    {
+        return root->Stamps + id;
+    }
+    [MethodImpl(Jit.Hot)]
+    internal static bool Valid(GiRoot* root, byte id)
+    {
+        return id != 0 && id < root->StampCount && root->Stamps[id].Live != 0;
+    }
 
     [MethodImpl(Jit.Hot)]
     internal static bool Valid(byte id)

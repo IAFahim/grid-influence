@@ -27,7 +27,12 @@ public static unsafe partial class World
     [MethodImpl(Jit.Hot)]
     public static int Tick(byte world)
     {
-        var w = GetContext(world);
+        fixed (GiRoot* root = &Runtime.Root) return Tick(root, world);
+    }
+    [MethodImpl(Jit.Hot)]
+    internal static int Tick(GiRoot* root, byte world)
+    {
+        var w = GetContext(root, world);
         return w == null ? 0 : w->Tick;
     }
 

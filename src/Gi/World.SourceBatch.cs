@@ -8,7 +8,12 @@ public static unsafe partial class World
     [MethodImpl(Jit.Hot)]
     public static BatchStatus ApplyBatch(byte world, ReadOnlySpan<SourceCommand> commands, Span<SourceResult> results)
     {
-        var context = GetContext(world);
+        fixed (GiRoot* root = &Runtime.Root) return ApplyBatch(root, world, commands, results);
+    }
+    [MethodImpl(Jit.Hot)]
+    internal static BatchStatus ApplyBatch(GiRoot* root, byte world, ReadOnlySpan<SourceCommand> commands, Span<SourceResult> results)
+    {
+        var context = GetContext(root, world);
         return context == null ? BatchStatus.InvalidWorld : ApplyBatchCommands(context, commands, results);
     }
 
