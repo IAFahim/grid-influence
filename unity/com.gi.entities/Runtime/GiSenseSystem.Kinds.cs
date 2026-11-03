@@ -170,7 +170,7 @@ namespace Gi.Entities
                 if (type.HasInput && !type.HasOutput && !type.Coverage.Active) count++;
             }
 
-            var inputs = new NativeArray<DynamicComponentTypeHandle>(count, allocator);
+            var inputs = CollectionHelper.CreateNativeArray<DynamicComponentTypeHandle>(count, allocator);
             var cursor = 0;
             for (var t = 0; t < binding.Types.Length; t++)
             {
@@ -225,7 +225,7 @@ namespace Gi.Entities
             };
         }
 
-        private void SetupGate(GiSenseBinding binding, BlobArray<GiGridSpec> grids)
+        private void SetupGate(GiSenseBinding binding, ref BlobArray<GiGridSpec> grids)
         {
             binding.GateEligible = binding.Period == 1;
             foreach (var type in binding.Types)

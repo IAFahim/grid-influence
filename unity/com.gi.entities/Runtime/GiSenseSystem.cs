@@ -98,7 +98,7 @@ namespace Gi.Entities
 
                 var binding = Resolve(ref state, i, specs[i]);
                 if (binding == null) continue;
-                SetupGate(binding, blob.Grids);
+                SetupGate(binding, ref blob.Grids);
                 list.Add(binding);
             }
 
