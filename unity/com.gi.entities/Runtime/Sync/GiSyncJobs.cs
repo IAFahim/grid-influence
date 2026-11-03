@@ -1,9 +1,11 @@
+#define GI_BURST_SYNC
 using Unity.Burst;
 using Unity.Burst.Intrinsics;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
 using Unity.Jobs;
+using Unity.Profiling;
 using GiWorld = Gi.World;
 
 namespace Gi.Entities
@@ -109,6 +111,9 @@ namespace Gi.Entities
         }
     }
 
+#if !ENABLE_CORECLR || GI_BURST_SYNC
+    [BurstCompile]
+#endif
     internal unsafe struct GiSyncApplyJob : IJob
     {
         public Entity Frame;
@@ -122,6 +127,13 @@ namespace Gi.Entities
         public NativeList<float> Headings;
         public NativeList<float> Scales;
         public NativeList<ulong> Invalid;
+        [NativeDisableUnsafePtrRestriction] internal Gi.GiRoot* Root;
+        private static readonly ProfilerMarker Marker = new ProfilerMarker(ProfilerCategory.Scripts, GiMarkers.SyncName);
+
+        public GiSyncApplyJob()
+        {
+            fixed (Gi.GiRoot* root = &Gi.Runtime.Root) Root = root;
+        }
 
         public void Execute()
         {
@@ -137,24 +149,89 @@ namespace Gi.Entities
             if (!frame.Alive) return;
 
             var token = frame.Token;
+            Gi.GiRoot* root = Root;
             var starts = (int*)Meta.GetUnsafeReadOnlyPtr();
             var sources = (GiWorld.SourceId*)Sources.GetUnsafePtr();
             var xs = (float*)Xs.GetUnsafePtr();
             var ys = (float*)Ys.GetUnsafePtr();
             var headings = (float*)Headings.GetUnsafePtr();
             var scales = (float*)Scales.GetUnsafePtr();
-            GiGuard.Begin(frame.World, GiGuard.Sync, true);
-            var scope = GiMarkers.Sync.Auto();
-            if (GiRecorderGate.Enabled) GiRecorderGate.Sync(frame.World, sources, xs, ys, headings, scales, starts, starts + GiSyncPass.Categories);
-            var status = GiSyncPass.Apply(ref token, frame.World, sources, xs, ys, headings, scales, (ulong*)Invalid.GetUnsafePtr(),
+            GuardBegin(frame.World, GiGuard.Sync, true);
+            var scope = Marker.Auto();
+            RecordSync(frame.World, sources, xs, ys, headings, scales, starts, starts + GiSyncPass.Categories);
+            var status = Apply(ref token, frame.World, root, sources, xs, ys, headings, scales, (ulong*)Invalid.GetUnsafePtr(),
                 starts, starts + GiSyncPass.Categories, starts + 2 * GiSyncPass.Categories);
             scope.Dispose();
-            GiGuard.End(frame.World, true);
+            GuardEnd(frame.World, true);
 
             frame.Token = token;
             if (status == GiApplyStatus.Stale) frame.Faults.Raise(GiFaultKind.StaleToken, frame.Tick);
             if (status == GiApplyStatus.Adapter) frame.Faults.Raise(GiFaultKind.Adapter, frame.Tick);
             Frames[Frame] = frame;
+        }
+
+        private static GiApplyStatus Apply(ref GiWorld.Token token, byte world, Gi.GiRoot* root, GiWorld.SourceId* sources, float* xs, float* ys,
+            float* headings, float* scales, ulong* invalid, int* categoryStart, int* categoryCount, int* wordStart)
+        {
+            var ranges = stackalloc GiWorld.TransformRange[GiSyncPass.Categories];
+            var used = 0;
+            for (var k = 0; k < GiSyncPass.Categories; k++)
+            {
+                var count = categoryCount[k];
+                if (count == 0) continue;
+
+                var start = categoryStart[k];
+                var words = GiSyncPass.Words(count);
+                var mask = invalid + wordStart[k];
+
+                ranges[used++] = new GiWorld.TransformRange
+                {
+                    Sources = sources + start,
+                    Xs = xs + start,
+                    Ys = ys + start,
+                    Headings = (k & GiSyncPass.Oriented) != 0 ? headings + start : null,
+                    Scales = (k & GiSyncPass.Scaled) != 0 ? scales + start : null,
+                    Invalid = mask,
+                    Count = count,
+                    InvalidWords = words,
+                };
+            }
+
+            if (used == 0) return GiApplyStatus.Applied;
+
+            var batch = GiWorld.SyncTransforms(root, token, new System.ReadOnlySpan<GiWorld.TransformRange>(ranges, used));
+            if (batch == GiWorld.BatchStatus.StaleRevision)
+            {
+                token = Refresh(world, root);
+                batch = GiWorld.SyncTransforms(root, token, new System.ReadOnlySpan<GiWorld.TransformRange>(ranges, used));
+            }
+
+            if (batch == GiWorld.BatchStatus.Applied) return GiApplyStatus.Applied;
+            return batch == GiWorld.BatchStatus.StaleRevision ? GiApplyStatus.Stale : GiApplyStatus.Adapter;
+        }
+
+        private static GiWorld.Token Refresh(byte world, Gi.GiRoot* root)
+        {
+            return new GiWorld.Token(world, GiWorld.GetContext(root, world) == null ? 0 : root->WorldRevisions[world]);
+        }
+
+        [BurstDiscard]
+        private static void GuardBegin(byte world, int tag, bool write)
+        {
+            GiGuard.Begin(world, tag, write);
+        }
+
+        [BurstDiscard]
+        private static void GuardEnd(byte world, bool write)
+        {
+            GiGuard.End(world, write);
+        }
+
+        [BurstDiscard]
+        private static void RecordSync(byte world, GiWorld.SourceId* sources, float* xs, float* ys, float* headings, float* scales, int* categoryStart,
+            int* categoryCount)
+        {
+            if (GiRecorderGate.Enabled) GiRecorderGate.Sync(world, sources, xs, ys, headings, scales, categoryStart, categoryCount);
         }
     }
 

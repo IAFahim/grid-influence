@@ -1,6 +1,9 @@
 using BovineLabs.Core;
+using Unity.Burst;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
 using Unity.Jobs;
+using Unity.Profiling;
 using GiWorld = Gi.World;
 
 namespace Gi.Entities
@@ -26,36 +29,69 @@ namespace Gi.Entities
             GiRuntime.EndWrite(state.Dependency);
         }
 
-        private struct ProcessJob : IJob
+#if !ENABLE_CORECLR || GI_BURST_PROCESS
+        [BurstCompile]
+#endif
+        private unsafe struct ProcessJob : IJob
         {
             public Entity Frame;
             public ComponentLookup<GiFrame> Frames;
+            [NativeDisableUnsafePtrRestriction] internal Gi.GiRoot* Root;
+            private static readonly ProfilerMarker Marker = new ProfilerMarker(ProfilerCategory.Scripts, GiMarkers.ProcessName);
+
+            public ProcessJob()
+            {
+                fixed (Gi.GiRoot* root = &Gi.Runtime.Root) Root = root;
+            }
 
             public void Execute()
             {
                 var frame = Frames[Frame];
                 if (!frame.Alive) return;
 
-                GiGuard.Begin(frame.World, GiGuard.Process, true);
-                using (GiMarkers.Process.Auto())
+                Gi.GiRoot* root = Root;
+                GuardBegin(frame.World, GiGuard.Process, true);
+                var scope = Marker.Auto();
+                var status = GiWorld.Process(root, frame.Token);
+                if (status == GiWorld.BatchStatus.StaleRevision)
                 {
-                    var status = GiWorld.Process(frame.Token);
-                    if (status == GiWorld.BatchStatus.StaleRevision)
-                    {
-                        frame.Token = GiWorld.Capture(frame.World);
-                        status = GiWorld.Process(frame.Token);
-                        if (status == GiWorld.BatchStatus.StaleRevision) frame.Faults.Raise(GiFaultKind.StaleToken, frame.Tick);
-                    }
-
-                    if (status != GiWorld.BatchStatus.Applied && status != GiWorld.BatchStatus.StaleRevision)
-                        frame.Faults.Raise(GiFaultKind.Adapter, frame.Tick);
-
-                    frame.Tick = GiWorld.Tick(frame.World);
-                    if (GiRecorderGate.Enabled) GiRecorderGate.Processed(frame.World);
+                    frame.Token = Refresh(frame.World, root);
+                    status = GiWorld.Process(root, frame.Token);
+                    if (status == GiWorld.BatchStatus.StaleRevision) frame.Faults.Raise(GiFaultKind.StaleToken, frame.Tick);
                 }
 
-                GiGuard.End(frame.World, true);
+                if (status != GiWorld.BatchStatus.Applied && status != GiWorld.BatchStatus.StaleRevision)
+                    frame.Faults.Raise(GiFaultKind.Adapter, frame.Tick);
+
+                frame.Tick = GiWorld.Tick(root, frame.World);
+                RecordProcessed(frame.World);
+                scope.Dispose();
+
+                GuardEnd(frame.World, true);
                 Frames[Frame] = frame;
+            }
+
+            private static GiWorld.Token Refresh(byte world, Gi.GiRoot* root)
+            {
+                return new GiWorld.Token(world, GiWorld.GetContext(root, world) == null ? 0 : root->WorldRevisions[world]);
+            }
+
+            [BurstDiscard]
+            private static void GuardBegin(byte world, int tag, bool write)
+            {
+                GiGuard.Begin(world, tag, write);
+            }
+
+            [BurstDiscard]
+            private static void GuardEnd(byte world, bool write)
+            {
+                GiGuard.End(world, write);
+            }
+
+            [BurstDiscard]
+            private static void RecordProcessed(byte world)
+            {
+                if (GiRecorderGate.Enabled) GiRecorderGate.Processed(world);
             }
         }
     }

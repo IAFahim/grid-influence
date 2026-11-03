@@ -4,6 +4,7 @@ using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
 using Unity.Jobs;
+using Unity.Profiling;
 using GiWorld = Gi.World;
 
 namespace Gi.Entities
@@ -304,6 +305,9 @@ namespace Gi.Entities
         }
     }
 
+#if !ENABLE_CORECLR || GI_BURST_SENSE
+    [BurstCompile]
+#endif
     internal unsafe struct GiSenseReadJob : IJob
     {
         public GiBindingKind Kind;
@@ -323,6 +327,13 @@ namespace Gi.Entities
         [NativeDisableParallelForRestriction] public NativeArray<float> GradientYs;
         [NativeDisableParallelForRestriction] public NativeArray<long> Totals;
         [NativeDisableParallelForRestriction] public NativeArray<ulong> Whole;
+        [NativeDisableUnsafePtrRestriction] internal Gi.GiRoot* Root;
+        private static readonly ProfilerMarker Marker = new ProfilerMarker(ProfilerCategory.Scripts, GiMarkers.SenseName);
+
+        public GiSenseReadJob()
+        {
+            fixed (Gi.GiRoot* root = &Gi.Runtime.Root) Root = root;
+        }
 
         public void Execute()
         {
@@ -344,11 +355,59 @@ namespace Gi.Entities
                 Whole = (ulong*)Whole.GetUnsafePtr(),
                 Rows = Rows[0],
             };
-            GiGuard.Begin(context.World, GiGuard.Sense, false);
-            var scope = GiMarkers.Sense.Auto();
-            GiSensePass.ReadColumns(Kind, context.World, layer, columns, Reach, GiSensePass.SinceTick(context.Tick, Since), columns.Rows, 0);
+            Gi.GiRoot* root = Root;
+            GuardBegin(context.World, GiGuard.Sense, false);
+            var scope = Marker.Auto();
+            Read(root, Kind, context.World, layer, columns, Reach, GiSensePass.SinceTick(context.Tick, Since));
             scope.Dispose();
-            GiGuard.End(context.World, false);
+            GuardEnd(context.World, false);
+        }
+
+        private static void Read(Gi.GiRoot* root, GiBindingKind kind, byte world, byte layer, in GiSenseColumns columns, float reach,
+            int sinceTick)
+        {
+            var count = columns.Rows;
+            if (count <= 0) return;
+
+            switch (kind)
+            {
+                case GiBindingKind.Value:
+                    if (columns.Excludes == null)
+                        GiWorld.SenseColumn(root, world, layer, columns.Xs, columns.Ys, count, columns.Values, columns.Whole);
+                    else
+                        GiWorld.SenseColumn(root, world, layer, columns.Xs, columns.Ys, columns.Excludes, count, columns.Values, columns.Whole);
+                    break;
+                case GiBindingKind.Gradient:
+                    GiWorld.SenseGradientColumn(root, world, layer, columns.Xs, columns.Ys, columns.Excludes, count, columns.VectorXs, columns.VectorYs, columns.Whole);
+                    break;
+                case GiBindingKind.ValueGradient:
+                    GiWorld.SenseGradientColumn(root, world, layer, columns.Xs, columns.Ys, columns.Excludes, count, columns.Values, columns.VectorXs, columns.VectorYs, columns.Whole);
+                    break;
+                case GiBindingKind.Area:
+                    GiWorld.SenseAreaColumn(root, world, layer, columns.Xs, columns.Ys, columns.Reaches, columns.Excludes, count, columns.Totals, columns.Whole);
+                    break;
+                case GiBindingKind.Max:
+                    GiWorld.SenseMaxColumn(root, world, layer, columns.Xs, columns.Ys, columns.Reaches, count, columns.Values, columns.VectorXs, columns.VectorYs, columns.Whole);
+                    break;
+                case GiBindingKind.Nearest:
+                    GiWorld.SenseNearestColumn(root, world, layer, columns.Xs, columns.Ys, columns.Reaches, columns.Thresholds, count, columns.Values, columns.VectorXs, columns.VectorYs, columns.Whole);
+                    break;
+                default:
+                    GiWorld.ChangedMask(root, world, layer, columns.Xs, columns.Ys, reach, sinceTick, count, columns.Whole);
+                    break;
+            }
+        }
+
+        [BurstDiscard]
+        private static void GuardBegin(byte world, int tag, bool write)
+        {
+            GiGuard.Begin(world, tag, write);
+        }
+
+        [BurstDiscard]
+        private static void GuardEnd(byte world, bool write)
+        {
+            GiGuard.End(world, write);
         }
     }
 
