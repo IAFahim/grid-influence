@@ -1,0 +1,12 @@
+{
+  "render_pipeline": "Built-in",
+  "tick": 10,
+  "gi_plugin": "Gi 2.0.0.0 (.NETStandard,Version=v2.1)",
+  "gi_code_path": "scalar (no hardware intrinsics in this build)",
+  "gi_location": "/tmp/gi-j51b/unity/com.gi.entities/Plugins/Gi/netstandard2.1/Gi.dll",
+  "gi_framework": ".NETStandard,Version=v2.1",
+  "shots": [
+    {"file": "j51-builtin-grid1-layer0.png", "tick": "6", "grid": "1", "layer": "0", "region": "(x:0, y:0, width:128, height:128)", "scale": "64", "live_tiles": "13", "uploaded_tiles": "13", "uploaded_bytes": "26676"},
+    {"file": "j51-builtin-grid1-layer3.png", "tick": "10", "grid": "1", "layer": "3", "region": "(x:0, y:0, width:128, height:128)", "scale": "64", "live_tiles": "13", "uploaded_tiles": "13", "uploaded_bytes": "26676"}
+  ]
+}
