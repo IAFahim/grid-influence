@@ -7,6 +7,7 @@
     <Nullable>disable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <IsPackable>false</IsPackable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <GiVariant Condition="'$(GiVariant)' == ''">portable</GiVariant>
   </PropertyGroup>
 
