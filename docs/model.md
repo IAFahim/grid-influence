@@ -1184,9 +1184,19 @@ alongside the vector rewrite, not just a class swap.
   zero page, revision array, revision floor, heap-call counter, allocator hooks, measuring flag,
   stamp count, and world count are the eleven fields of one blittable `GiRoot`; `Runtime.Root`
   is the only static field in the assembly, so no static constructor performs calls and every
-  other former static is a property forwarding into the root. This does not make the root callable
-  from Burst through a precompiled DLL; Unity records with Burst and invokes Gi from non-Burst
-  code. `World.Teardown` is the pools' release: it is refused — it returns `false` and touches
+  other former static is a property forwarding into the root. Burst callers never touch the
+  static: allocation, catalog lookup, sort, and emit helpers take the root as an explicit
+  `GiRoot*` first parameter (public cold paths keep the static forwards via a `fixed` root),
+  so a Burst-compiled caller passes the pointer captured on the main thread and the compiled
+  closure reaches no static field. Buffer growth (`NativeBuffer<T>`) and the slab, store, ring,
+  and pyramid containers expose root-taking overloads beside the cold static ones; tile sorting
+  is one insertion/heapsort on both legs (no `Span.Sort`); the pyramid combiner dispatches on
+  `sizeof(T)` rather than an interface call. Converted so far: process/commit/emit/splat/
+  transient/schedule-timed/sort/pyramid paths. Still static on warm paths (follow-up to finish
+  the closure): apply-batch commands, sync transforms/columns, sense column cores, prefetch;
+  the remaining static callers outside those are cold (setup, teardown, snapshot load, public
+  single-shot writes, column queries).
+  `World.Teardown` is the pools' release: it is refused — it returns `false` and touches
   nothing — while any world is live (the same `Grids != null` slot scan `CopyWorldIds` reads),
   and otherwise frees every stamp's raster and mips, both pools, the shared zero page, and the
   revision array, and returns the world count, the catalog count (id 0 stays reserved), and the

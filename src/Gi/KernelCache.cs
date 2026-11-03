@@ -236,6 +236,88 @@ internal unsafe struct KernelCache
         Buffer.MemoryCopy(rowExtents, rows, 2 * MaxSide * sizeof(int), 2 * height * sizeof(int));
         return entry;
     }
+    [MethodImpl(Jit.Hot)]
+    internal KernelEntry* Insert(GiRoot* root,
+        ulong key, ulong turn, Plane plane, KernelShape shape,
+        int originX, int originY, int width, int height, int maxTap, long maxTapQ40,
+        int* rowExtents, int* cells, long* q40)
+    {
+        if (Volatile.Read(ref _flushPending) != 0) Clear();
+        EnsureStorage(root);
+        _inserts++;
+        var entries = _entries.Pointer;
+        var buckets = _buckets.Pointer;
+        var slot = buckets[BucketOf(key, turn)];
+        while (slot >= 0 && !(entries[slot].Key == key && entries[slot].Turn == turn)) slot = entries[slot].Next;
+
+        if (slot < 0)
+        {
+            if (_live < EntryCount) slot = _live++;
+            else
+            {
+                slot = _hand;
+                _hand = _hand + 1 == EntryCount ? 0 : _hand + 1;
+                Unlink(entries, buckets, slot);
+            }
+
+            entries[slot].Next = buckets[BucketOf(key, turn)];
+            buckets[BucketOf(key, turn)] = slot;
+        }
+
+        var entry = entries + slot;
+        entry->Key = key;
+        entry->Turn = turn;
+        entry->Plane = plane;
+        entry->Shape = shape;
+        entry->OriginX = originX;
+        entry->OriginY = originY;
+        entry->Width = width;
+        entry->Height = height;
+        entry->MaxTap = maxTap;
+        entry->MaxTapQ40 = maxTapQ40;
+        entry->Slot = slot;
+
+        var taps = _taps.Pointer + (long)slot * MaxCells;
+        if (q40 != null) Buffer.MemoryCopy(q40, taps, MaxCells * sizeof(long), width * height * sizeof(long));
+        else Buffer.MemoryCopy(cells, taps, MaxCells * sizeof(long), width * height * sizeof(int));
+
+        var rows = _rows.Pointer + (long)slot * (2 * MaxSide);
+        Buffer.MemoryCopy(rowExtents, rows, 2 * MaxSide * sizeof(int), 2 * height * sizeof(int));
+        return entry;
+    }
+
+    [MethodImpl(Jit.Hot)]
+    internal int* CanvasInt(GiRoot* root, int cells)
+    {
+        _canvas.Resize(root, cells);
+        return (int*)_canvas.Pointer;
+    }
+
+    [MethodImpl(Jit.Hot)]
+    internal long* CanvasLong(GiRoot* root, int cells)
+    {
+        _canvas.Resize(root, cells);
+        return _canvas.Pointer;
+    }
+
+    [MethodImpl(Jit.Hot)]
+    internal int* CanvasRows(GiRoot* root, int rows)
+    {
+        _canvasRows.Resize(root, 2 * rows);
+        return _canvasRows.Pointer;
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private void EnsureStorage(GiRoot* root)
+    {
+        if (_entries.Pointer != null) return;
+
+        _entries.Resize(root, EntryCount);
+        _taps.Resize(root, EntryCount * MaxCells);
+        _rows.Resize(root, EntryCount * 2 * MaxSide);
+        _buckets.Resize(root, BucketCount);
+        new Span<int>(_buckets.Pointer, BucketCount).Fill(-1);
+    }
 
     [MethodImpl(Jit.Hot)]
     private static void Unlink(KernelEntry* entries, int* buckets, int slot)
@@ -369,6 +451,83 @@ internal static unsafe class KernelFactory
         if (!clipped && width <= KernelCache.MaxSide && height <= KernelCache.MaxSide)
         {
             var entry = cache->Insert(
+                key.Main, key.Turn, p->Plane, ShapeOf(p),
+                originX, originY, kernelWidth, kernelHeight, maxTapInt, maxTap,
+                extents, ints, longs);
+            taps = cache->View(entry);
+            return true;
+        }
+
+        taps = new KernelTaps(
+            p->Plane, ShapeOf(p), originX, originY, kernelWidth, kernelHeight,
+            maxTapInt, maxTap, extents, ints, longs);
+        return true;
+    }
+    [MethodImpl(Jit.Hot)]
+    public static bool TryGetTaps(
+        GiRoot* root, WorldCtx* w, int grid, byte stamp, int angle, Layer.Precision precision, Placement* p, out KernelTaps taps)
+    {
+        var cache = &w->Kernels;
+        var clipped = !TileBake.Unclipped(p->V, p);
+        var masked = p->V->Kind >= StampKind.Disk && p->V->Arc == 0 ? 0 : angle & precision.TurnMask;
+        var key = new KernelKey(stamp, p->Sampling, grid, p->Fx, p->Fy, masked);
+        if (!clipped)
+        {
+            var hit = cache->Find(key.Main, key.Turn);
+            if (hit != null)
+            {
+                taps = cache->View(hit);
+                return true;
+            }
+        }
+
+        RelativeRect(p, masked, out var rx0, out var ry0, out var rx1, out var ry1, out var rasterX1, out var rasterY1);
+        var width = rx1 - rx0;
+        var height = ry1 - ry0;
+        if (width <= 0 || height <= 0)
+        {
+            taps = new KernelTaps(p->Plane, ShapeOf(p), 0, 0, 0, 0, 0, 0, null, null, null);
+            return true;
+        }
+
+        if ((long)width * height > KernelCache.CanvasCellLimit)
+        {
+            taps = default;
+            return false;
+        }
+
+        var cells = width * height;
+        var intKernel = p->Plane == Plane.Difference || p->Plane == Plane.Dense;
+        var ints = intKernel ? cache->CanvasInt(root, cells) : null;
+        var longs = intKernel ? null : cache->CanvasLong(root, cells);
+        if (intKernel) new Span<int>(ints, cells).Clear();
+        else new Span<long>(longs, cells).Clear();
+
+        var q = *p;
+        if (p->Turned)
+        {
+            q.X0 = p->Px + rx0;
+            q.X1 = p->Px + rx1;
+            q.Y0 = p->Py + ry0;
+            q.Y1 = p->Py + ry1;
+        }
+
+        Capture(&q, p->Plane, ints, longs, p->Px + rx0, p->Py + ry0, p->Px + rx1, p->Py + ry1, width, rasterX1,
+            rasterY1);
+
+        var extents = cache->CanvasRows(root, height);
+        Measure(ints, longs, width, height, extents,
+            out var minX, out var minY, out var maxX, out var maxY, out var maxTap);
+        var maxTapInt = intKernel ? (int)maxTap : 0;
+
+        var originX = rx0 + minX;
+        var originY = ry0 + minY;
+        var kernelWidth = maxX - minX + 1;
+        var kernelHeight = maxY - minY + 1;
+        if (maxX >= 0) Compact(ints, longs, width, minX, minY, kernelWidth, kernelHeight);
+        if (!clipped && width <= KernelCache.MaxSide && height <= KernelCache.MaxSide)
+        {
+            var entry = cache->Insert(root,
                 key.Main, key.Turn, p->Plane, ShapeOf(p),
                 originX, originY, kernelWidth, kernelHeight, maxTapInt, maxTap,
                 extents, ints, longs);

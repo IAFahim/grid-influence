@@ -118,7 +118,7 @@ public static unsafe partial class World
         var cy = (int)(CellQ8(y, g->OriginY, g->ScaleQ8) >> 8);
         value = Query(root, world, (byte)gi, layer, cx, cy);
         if (!Own(root, w, g, exclude, own, layer, out var source)) return complete;
-        var shape = ShapeOf(w, g, source);
+        var shape = ShapeOf(root, w, g, source);
         if (shape.P.Reaches(cx, cy)) value = ExcludedValue(w, g, layer, source.Layer, &shape, cx, cy, value);
         return complete;
     }
@@ -542,7 +542,7 @@ public static unsafe partial class World
         var cx = (int)(CellQ8(x, g->OriginX, g->ScaleQ8) >> 8);
         var cy = (int)(CellQ8(y, g->OriginY, g->ScaleQ8) >> 8);
         var excluding = Own(root, w, g, exclude, own, layer, out var source);
-        var shape = excluding ? ShapeOf(w, g, source) : default;
+        var shape = excluding ? ShapeOf(root, w, g, source) : default;
         var perUnit = g->ScaleQ8 / 512f;
         gx = (Others(w, g, layer, excluding, source.Layer, &shape, cx + 1, cy) -
               Others(w, g, layer, excluding, source.Layer, &shape, cx - 1, cy)) * perUnit;
@@ -665,7 +665,7 @@ public static unsafe partial class World
         }
         if (Own(root, w, g, exclude, own, layer, out var source))
         {
-            var shape = ShapeOf(w, g, source);
+            var shape = ShapeOf(root, w, g, source);
             sum += derived
                 ? ExcludedMix(w, g, layer, source.Layer, disk, &shape)
                 : ExcludedArea(g, layer, disk, &shape);
@@ -702,11 +702,11 @@ public static unsafe partial class World
     }
 
     [MethodImpl(Jit.Hot)]
-    private static Shape ShapeOf(WorldCtx* w, GridCtx* g, in Placed source)
+    private static Shape ShapeOf(GiRoot* root, WorldCtx* w, GridCtx* g, in Placed source)
     {
         var shape = new Shape { Gain = source.Gain };
         var precision = LayerPrecision(w, source.Layer);
-        if (!TileBake.PlaceAnchored(source.Ax, source.Ay, g->ScaleQ8, g->Size, StampCatalog.Get(source.Stamp),
+        if (!TileBake.PlaceAnchored(source.Ax, source.Ay, g->ScaleQ8, g->Size, StampCatalog.Get(root, source.Stamp),
                 source.Angle, source.Size, precision, out shape.P))
             return shape;
 

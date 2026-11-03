@@ -83,6 +83,40 @@ internal unsafe struct SourceColumns
             Chunks++;
         }
     }
+    [MethodImpl(Jit.Hot)]
+    public void AddChunks(GiRoot* root, int chunks)
+    {
+        if (Chunks == 0)
+        {
+            var pointers = (nuint)(MaxChunks * sizeof(void*));
+            X.Chunks = (float**)NativeHeap.AllocZeroed(root, pointers);
+            Y.Chunks = (float**)NativeHeap.AllocZeroed(root, pointers);
+            Stamp.Chunks = (byte**)NativeHeap.AllocZeroed(root, pointers);
+            Layer.Chunks = (byte**)NativeHeap.AllocZeroed(root, pointers);
+            Gain.Chunks = (byte**)NativeHeap.AllocZeroed(root, pointers);
+            Angle.Chunks = (ushort**)NativeHeap.AllocZeroed(root, pointers);
+            Scale.Chunks = (ushort**)NativeHeap.AllocZeroed(root, pointers);
+            Alive.Chunks = (byte**)NativeHeap.AllocZeroed(root, pointers);
+            Gen.Chunks = (uint**)NativeHeap.AllocZeroed(root, pointers);
+            Mark.Chunks = (long**)NativeHeap.AllocZeroed(root, pointers);
+        }
+
+        for (var i = 0; i < chunks; i++)
+        {
+            var chunk = Chunks;
+            X.Chunks[chunk] = (float*)NativeHeap.AllocZeroed(root, ChunkSlots * sizeof(float));
+            Y.Chunks[chunk] = (float*)NativeHeap.AllocZeroed(root, ChunkSlots * sizeof(float));
+            Stamp.Chunks[chunk] = (byte*)NativeHeap.AllocZeroed(root, ChunkSlots);
+            Layer.Chunks[chunk] = (byte*)NativeHeap.AllocZeroed(root, ChunkSlots);
+            Gain.Chunks[chunk] = (byte*)NativeHeap.AllocZeroed(root, ChunkSlots);
+            Angle.Chunks[chunk] = (ushort*)NativeHeap.AllocZeroed(root, ChunkSlots * sizeof(ushort));
+            Scale.Chunks[chunk] = (ushort*)NativeHeap.AllocZeroed(root, ChunkSlots * sizeof(ushort));
+            Alive.Chunks[chunk] = (byte*)NativeHeap.AllocZeroed(root, ChunkSlots);
+            Gen.Chunks[chunk] = (uint*)NativeHeap.AllocZeroed(root, ChunkSlots * sizeof(uint));
+            Mark.Chunks[chunk] = (long*)NativeHeap.AllocZeroed(root, ChunkSlots * sizeof(long));
+            Chunks++;
+        }
+    }
 
     [MethodImpl(Jit.Hot)]
     public void Release()
@@ -866,6 +900,91 @@ public static unsafe partial class World
             ld->InDirty = (int*)NativeHeap.AllocZeroed((nuint)g->TileCount * sizeof(int));
         return ld;
     }
+    [MethodImpl(Jit.Hot)]
+    private static LayerData* EnsureDirty(GiRoot* root, GridCtx* g, byte layer)
+    {
+        var ld = g->Layers + layer;
+        if (ld->InDirty == null)
+            ld->InDirty = (int*)NativeHeap.AllocZeroed(root, (nuint)g->TileCount * sizeof(int));
+        return ld;
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static void EnsureEpochs(GiRoot* root, GridCtx* g, LayerData* ld)
+    {
+        if (ld->Epochs != null) return;
+
+        ld->Epochs = (int*)NativeHeap.AllocZeroed(root, (nuint)g->TileCount * sizeof(int));
+        ld->EpochTree.Ensure(root, g->TilesPerSide);
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static void EnsureDirectory(GiRoot* root, GridCtx* g, LayerData* ld)
+    {
+        if (ld->Directory != null) return;
+
+        ld->Directory = (int*)NativeHeap.AllocZeroed(root, (nuint)g->TileCount * 2 * sizeof(int));
+        new Span<int>(ld->Directory, g->TileCount * 2).Fill(-1);
+        ld->PageIndex = ld->Directory + g->TileCount;
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static TilePlanes* EnsureSet(GiRoot* root, GridCtx* g, LayerData* ld, int tile)
+    {
+        var set = ld->SetOf(tile);
+        if (set != null) return set;
+
+        EnsureDirectory(root, g, ld);
+        var index = ld->Sets.Take(root, sizeof(TilePlanes));
+        set = (TilePlanes*)ld->Sets.Unit(index);
+        *set = ld->Derived != 0 ? ld->Store.TakeDerived(root) : ld->Store.Take(root);
+        ld->Directory[tile] = index;
+        ld->PageIndex[tile] = set->Page;
+        ld->LivePages++;
+        return set;
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static void DropPage(GiRoot* root, LayerData* ld, int tile)
+    {
+        var index = ld->Directory[tile];
+        if (index < 0) return;
+
+        var set = (TilePlanes*)ld->Sets.Unit(index);
+        ld->Store.Give(root, *set);
+        ld->Sets.Give(root, index);
+        ld->Directory[tile] = -1;
+        ld->PageIndex[tile] = -1;
+        ld->LivePages--;
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static int DirtyIndex(GiRoot* root, GridCtx* g, LayerData* ld, int tile)
+    {
+        EnsureEpochs(root, g, ld);
+        var index = ld->InDirty[tile];
+        if (index != 0) return index - 1;
+
+        var n = ld->Dirty.Length;
+        ld->Dirty.Resize(root, n + 1);
+        ld->Rects.Resize(root, n + 1);
+        ld->Dirty.Pointer[n] = tile;
+        ld->Rects.Pointer[n] = new TileRect
+        {
+            X0 = TileBake.TileSize,
+            Y0 = TileBake.TileSize,
+            X1 = 0,
+            Y1 = 0
+        };
+        ld->InDirty[tile] = n + 1;
+        return n;
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static void MarkDirty(GiRoot* root, GridCtx* g, LayerData* ld, int tile)
+    {
+        DirtyIndex(root, g, ld, tile);
+    }
 
     [MethodImpl(Jit.Hot)]
     private static void EnsureEpochs(GridCtx* g, LayerData* ld)
@@ -956,14 +1075,14 @@ public static unsafe partial class World
         if (w == null) return;
         w->Tick++;
         w->Kernels.BeginFrame();
-        if (w->TimedList.Length != 0) SweepTimed(w);
+        if (w->TimedList.Length != 0) SweepTimed(root, w);
         var stamp = ProcessStages.Mark(root);
         SweepChanged(root, w);
         w->MarkEpoch++;
-        w->Pending.Resize(0);
+        w->Pending.Resize(root, 0);
         ProcessStages.Measure(root, ref w->Stages.Prepare, stamp);
         stamp = ProcessStages.Mark(root);
-        PublishDirty(w);
+        PublishDirty(root, w);
         ProcessStages.Measure(root, ref w->Stages.Apply, stamp);
         if (w->DerivedCount != 0) Derive(root, w);
         for (var gi = 0; gi < w->GridCount; gi++)
@@ -974,10 +1093,10 @@ public static unsafe partial class World
                 var ld = g->Layers + l;
                 var dirty = ld->Dirty.Pointer;
                 SortSlots(dirty, ld->Dirty.Length);
-                for (var i = 0; i < ld->Dirty.Length; i++) StampEpoch(g, ld, dirty[i], w->Tick);
+                for (var i = 0; i < ld->Dirty.Length; i++) StampEpoch(root, g, ld, dirty[i], w->Tick);
                 var changed = ld->Dirty;
                 ld->Dirty = ld->Changed;
-                ld->Dirty.Resize(0);
+                ld->Dirty.Resize(root, 0);
                 ld->Changed = changed;
             }
         }
@@ -1003,6 +1122,27 @@ public static unsafe partial class World
         for (var gi = 0; gi < w->GridCount; gi++)
             if (w->Grids[gi].Records.Length < capacity)
                 w->Grids[gi].Records.Resize(capacity);
+    }
+    [MethodImpl(Jit.Hot)]
+    private static void EnsureSourceCapacity(GiRoot* root, SourceColumns* s, WorldCtx* w, int required)
+    {
+        var initialized = s->Slots;
+        if (required <= initialized) return;
+        var capacity = Math.Min(MaxSourceSlots, (required + SourceColumns.ChunkMask) & ~SourceColumns.ChunkMask);
+        s->AddChunks(root, (capacity - initialized) >> SourceColumns.ChunkBits);
+        s->HotStamp.Resize(root, capacity);
+        s->SchedStamp.Resize(root, capacity);
+        s->Timed.Resize(root, capacity);
+        s->FadeFrom.Resize(root, capacity);
+        s->FadeTo.Resize(root, capacity);
+        s->FadeStart.Resize(root, capacity);
+        s->FadeTicks.Resize(root, capacity);
+        s->ExpireAt.Resize(root, capacity);
+        s->TimedAt.Resize(root, capacity);
+        s->Free.Reserve(root, capacity);
+        for (var gi = 0; gi < w->GridCount; gi++)
+            if (w->Grids[gi].Records.Length < capacity)
+                w->Grids[gi].Records.Resize(root, capacity);
     }
 
     [MethodImpl(Jit.Inline)]

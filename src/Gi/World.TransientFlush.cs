@@ -5,30 +5,30 @@ namespace Gi;
 public static unsafe partial class World
 {
     [MethodImpl(Jit.Hot)]
-    private static void PlanTransient(WorldCtx* w, int gi, GridCtx* g, LayerData* ld, byte layer)
+    private static void PlanTransient(GiRoot* root, WorldCtx* w, int gi, GridCtx* g, LayerData* ld, byte layer)
     {
         var hist = ld->Hist;
         if (hist == null || hist->Active.Length == 0)
         {
-            if (ld->Stale.Length != 0) RestartStale(g, ld);
+            if (ld->Stale.Length != 0) RestartStale(root, g, ld);
             return;
         }
 
-        EnsureDirty(g, layer);
-        hist->FusedClasses.Resize(0);
-        hist->FusedTiles.Resize(0);
-        hist->Vanished.Resize(0);
+        EnsureDirty(root, g, layer);
+        hist->FusedClasses.Resize(root, 0);
+        hist->FusedTiles.Resize(root, 0);
+        hist->Vanished.Resize(root, 0);
         for (var a = 0; a < hist->Active.Length; a++)
         {
             var stamp = (byte)hist->Active.Pointer[a];
             var cls = hist->Classes + stamp;
-            if (BoxKernel(w, gi, g, layer, stamp, out var value, out var ox, out var oy, out var width, out var height))
+            if (BoxKernel(root, w, gi, g, layer, stamp, out var value, out var ox, out var oy, out var width, out var height))
             {
-                ReplaySparse(w, gi, g, hist, cls, layer, stamp, width * height);
+                ReplaySparse(root, w, gi, g, hist, cls, layer, stamp, width * height);
                 if (cls->Tiles.Length == 0) continue;
 
                 var n = hist->FusedClasses.Length;
-                hist->FusedClasses.Resize(n + 1);
+                hist->FusedClasses.Resize(root, n + 1);
                 hist->FusedClasses.Pointer[n] = new FusedClass
                 {
                     Directory = cls->Directory,
@@ -42,8 +42,8 @@ public static unsafe partial class World
                 continue;
             }
 
-            ReplayClass(w, gi, g, hist, cls, layer, stamp);
-            ReleaseClass(hist, cls);
+            ReplayClass(root, w, gi, g, hist, cls, layer, stamp);
+            ReleaseClass(root, hist, cls);
         }
 
         var classes = hist->FusedClasses.Pointer;
@@ -51,7 +51,7 @@ public static unsafe partial class World
         for (var c = 0; c < hist->FusedClasses.Length; c++) supported &= FusedBox.Supports(classes[c]);
 
         var tps = g->TilesPerSide;
-        var mark = CollectOutputTiles(g, hist);
+        var mark = CollectOutputTiles(root, g, hist);
         for (var o = 0; o < hist->OutTiles.Length; o++)
         {
             var tile = hist->OutTiles.Pointer[o];
@@ -61,7 +61,7 @@ public static unsafe partial class World
             {
                 if (set == null)
                 {
-                    set = EnsureSet(g, ld, tile);
+                    set = EnsureSet(root, g, ld, tile);
                     set->Stale = 1;
                     fused = true;
                 }
@@ -73,13 +73,13 @@ public static unsafe partial class World
 
             if (!fused)
             {
-                BoxAddTile(g, ld, hist, tile);
+                BoxAddTile(root, g, ld, hist, tile);
                 continue;
             }
 
             hist->OutMark[tile] = mark + 1;
             var task = hist->FusedTiles.Length;
-            hist->FusedTiles.Resize(task + 1);
+            hist->FusedTiles.Resize(root, task + 1);
             hist->FusedTiles.Pointer[task] = new FusedTile { Tile = tile };
         }
 
@@ -103,23 +103,23 @@ public static unsafe partial class World
 
         for (var t = 0; t < hist->FusedTiles.Length; t++)
             if (tasks[t].Fallback != 0)
-                BoxAddTile(g, ld, hist, tasks[t].Tile);
+                BoxAddTile(root, g, ld, hist, tasks[t].Tile);
 
-        for (var c = 0; c < hist->FusedClasses.Length; c++) ReleaseClass(hist, hist->Classes + classes[c].Stamp);
+        for (var c = 0; c < hist->FusedClasses.Length; c++) ReleaseClass(root, hist, hist->Classes + classes[c].Stamp);
 
-        hist->Active.Resize(0);
+        hist->Active.Resize(root, 0);
         hist->Total = 0;
-        RetireStale(g, ld, hist, mark);
+        RetireStale(root, g, ld, hist, mark);
     }
 
     [MethodImpl(Jit.Hot)]
-    private static int CollectOutputTiles(GridCtx* g, HistState* hist)
+    private static int CollectOutputTiles(GiRoot* root, GridCtx* g, HistState* hist)
     {
         var tps = g->TilesPerSide;
         hist->MarkStamp += 2;
         var mark = hist->MarkStamp;
-        if (hist->OutMark == null) hist->OutMark = (int*)NativeHeap.AllocZeroed((nuint)g->TileCount * sizeof(int));
-        hist->OutTiles.Resize(0);
+        if (hist->OutMark == null) hist->OutMark = (int*)NativeHeap.AllocZeroed(root, (nuint)g->TileCount * sizeof(int));
+        hist->OutTiles.Resize(root, 0);
         for (var c = 0; c < hist->FusedClasses.Length; c++)
         {
             var f = hist->FusedClasses.Pointer + c;
@@ -153,7 +153,7 @@ public static unsafe partial class World
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void BoxAddTile(GridCtx* g, LayerData* ld, HistState* hist, int outTile)
+    private static void BoxAddTile(GiRoot* root, GridCtx* g, LayerData* ld, HistState* hist, int outTile)
     {
         var tps = g->TilesPerSide;
         var tx0 = (outTile % tps) << TileBake.TileBits;
@@ -168,9 +168,9 @@ public static unsafe partial class World
             if (peak == 0) continue;
 
             var sums = hist->Out;
-            var set = EnsureSet(g, ld, outTile);
-            PrepareTransientSet(ld, set);
-            var dirty = DirtyIndex(g, ld, outTile);
+            var set = EnsureSet(root, g, ld, outTile);
+            PrepareTransientSet(root, ld, set);
+            var dirty = DirtyIndex(root, g, ld, outTile);
             ld->Rects.Pointer[dirty] = new TileRect { X0 = 0, Y0 = 0, X1 = TileBake.TileSize, Y1 = TileBake.TileSize };
             var amount = peak * Math.Abs((long)f->Value);
             if (amount > PlaneFold.LimitI(&ld->Store))
@@ -185,19 +185,19 @@ public static unsafe partial class World
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void RestartStale(GridCtx* g, LayerData* ld)
+    private static void RestartStale(GiRoot* root, GridCtx* g, LayerData* ld)
     {
         for (var i = 0; i < ld->Stale.Length; i++)
         {
-            var dirty = DirtyIndex(g, ld, ld->Stale.Pointer[i]);
+            var dirty = DirtyIndex(root, g, ld, ld->Stale.Pointer[i]);
             ld->Rects.Pointer[dirty] = new TileRect { X0 = 0, Y0 = 0, X1 = TileBake.TileSize, Y1 = TileBake.TileSize };
         }
 
-        ld->Stale.Resize(0);
+        ld->Stale.Resize(root, 0);
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void RetireStale(GridCtx* g, LayerData* ld, HistState* hist, int mark)
+    private static void RetireStale(GiRoot* root, GridCtx* g, LayerData* ld, HistState* hist, int mark)
     {
         var outMark = hist->OutMark;
         for (var i = 0; i < ld->Stale.Length; i++)
@@ -210,22 +210,22 @@ public static unsafe partial class World
 
             if (set->Stale == 0)
             {
-                var dirty = DirtyIndex(g, ld, tile);
+                var dirty = DirtyIndex(root, g, ld, tile);
                 ld->Rects.Pointer[dirty] = new TileRect
                     { X0 = 0, Y0 = 0, X1 = TileBake.TileSize, Y1 = TileBake.TileSize };
                 continue;
             }
 
             var n = hist->Vanished.Length;
-            hist->Vanished.Resize(n + 1);
+            hist->Vanished.Resize(root, n + 1);
             hist->Vanished.Pointer[n] = tile;
         }
 
-        ld->Stale.Resize(0);
+        ld->Stale.Resize(root, 0);
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void CommitTransient(GridCtx* g, LayerData* ld)
+    private static void CommitTransient(GiRoot* root, GridCtx* g, LayerData* ld)
     {
         var hist = ld->Hist;
         if (hist == null) return;
@@ -235,10 +235,10 @@ public static unsafe partial class World
         {
             var tile = hist->Vanished.Pointer[v];
             var changed = TileBake.PageAny(ld->PageOf(tile));
-            DropPage(ld, tile);
-            ld->Max.Update(tps, tile, 0);
-            RefreshTileHash(g, ld, tile);
-            if (changed) AppendChanged(ld, tile);
+            DropPage(root, ld, tile);
+            ld->Max.Update(root, tps, tile, 0);
+            RefreshTileHash(root, g, ld, tile);
+            if (changed) AppendChanged(root, ld, tile);
         }
 
         for (var t = 0; t < hist->FusedTiles.Length; t++)
@@ -249,22 +249,22 @@ public static unsafe partial class World
             var changed = (task->Outcome & ResolveOutcome.Changed) != 0;
             if ((task->Outcome & ResolveOutcome.Empty) != 0)
             {
-                DropPage(ld, task->Tile);
-                ld->Max.Update(tps, task->Tile, 0);
-                ApplyTileHash(g, ld, task->Tile, task->Hash);
+                DropPage(root, ld, task->Tile);
+                ld->Max.Update(root, tps, task->Tile, 0);
+                ApplyTileHash(root, g, ld, task->Tile, task->Hash);
             }
             else
             {
-                ld->Max.Update(tps, task->Tile, task->Max);
-                RetireTransientTile(ld, ld->SetOf(task->Tile), task->Tile);
-                ApplyTileHash(g, ld, task->Tile, task->Hash);
+                ld->Max.Update(root, tps, task->Tile, task->Max);
+                RetireTransientTile(root, ld, ld->SetOf(task->Tile), task->Tile);
+                ApplyTileHash(root, g, ld, task->Tile, task->Hash);
             }
 
-            if (changed) AppendChanged(ld, task->Tile);
+            if (changed) AppendChanged(root, ld, task->Tile);
         }
 
-        hist->FusedTiles.Resize(0);
-        hist->Vanished.Resize(0);
+        hist->FusedTiles.Resize(root, 0);
+        hist->Vanished.Resize(root, 0);
     }
 
     [MethodImpl(Jit.Inline)]
@@ -275,10 +275,10 @@ public static unsafe partial class World
     }
 
     [MethodImpl(Jit.Inline)]
-    private static void AppendChanged(LayerData* ld, int tile)
+    private static void AppendChanged(GiRoot* root, LayerData* ld, int tile)
     {
         var n = ld->Dirty.Length;
-        ld->Dirty.Resize(n + 1);
+        ld->Dirty.Resize(root, n + 1);
         ld->Dirty.Pointer[n] = tile;
     }
 }
