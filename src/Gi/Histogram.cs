@@ -92,58 +92,73 @@ public static unsafe partial class World
         ld->Hist = hist;
         return hist;
     }
+    [MethodImpl(Jit.Hot)]
+    private static HistState* EnsureHist(GiRoot* root, LayerData* ld)
+    {
+        if (ld->Hist != null) return ld->Hist;
+
+        var hist = (HistState*)NativeHeap.AllocZeroed(root, (nuint)sizeof(HistState));
+        hist->Classes = (HistClass*)NativeHeap.AllocZeroed(root, (nuint)(256 * sizeof(HistClass)));
+        hist->Window = (int*)NativeHeap.AllocZeroed(root, HistState.WindowStride * HistState.WindowSide * sizeof(int));
+        hist->Strip = (int*)NativeHeap.AllocZeroed(root, HistState.WindowSide * TileBake.TileSize * sizeof(int));
+        hist->Out = (int*)NativeHeap.AllocZeroed(root, TileBake.TileSize * TileBake.TileSize * sizeof(int));
+        hist->ZeroPage = (int*)NativeHeap.AllocZeroed(root, HistState.PageBytes);
+        ld->Hist = hist;
+        return hist;
+    }
 
     [MethodImpl(Jit.Hot)]
-    private static bool HistAdd(GridCtx* g, LayerData* ld, byte stamp, int cx, int cy, int gain)
+    private static bool HistAdd(GiRoot* root, GridCtx* g, LayerData* ld, byte stamp, int cx, int cy, int gain)
     {
-        var hist = EnsureHist(ld);
+        var hist = EnsureHist(root, ld);
         var total = hist->Total + Math.Abs(gain);
         if (total > PlaneFold.LimitI(&ld->Store)) return false;
 
         hist->Total = total;
         var cls = hist->Classes + stamp;
-        if (cls->Directory == null) cls->Directory = (int*)NativeHeap.AllocZeroed((nuint)g->TileCount * sizeof(int));
+        if (cls->Directory == null) cls->Directory = (int*)NativeHeap.AllocZeroed(root, (nuint)g->TileCount * sizeof(int));
 
         var tile = (cy >> TileBake.TileBits) * g->TilesPerSide + (cx >> TileBake.TileBits);
-        HistPage(g, ld, hist, cls, tile)[
+        HistPage(root, g, ld, hist, cls, tile)[
             (cy & (TileBake.TileSize - 1)) * TileBake.TileSize + (cx & (TileBake.TileSize - 1))] += gain;
         return true;
     }
 
     [MethodImpl(Jit.Inline)]
-    private static int* HistPage(GridCtx* g, LayerData* ld, HistState* hist, HistClass* cls, int tile)
+    private static int* HistPage(GiRoot* root, GridCtx* g, LayerData* ld, HistState* hist, HistClass* cls, int tile)
     {
         var slot = cls->Directory[tile] - 1;
         if (slot >= 0) return (int*)hist->Pages.Unit(slot);
 
-        return TakeHistPage(g, ld, hist, cls, tile);
+        return TakeHistPage(root, g, ld, hist, cls, tile);
     }
 
     [MethodImpl(Jit.Hot)]
-    private static int* TakeHistPage(GridCtx* g, LayerData* ld, HistState* hist, HistClass* cls, int tile)
+    private static int* TakeHistPage(GiRoot* root, GridCtx* g, LayerData* ld, HistState* hist, HistClass* cls, int tile)
     {
-        EnsureEpochs(g, ld);
-        var slot = hist->Pages.Take(HistState.PageBytes);
+        EnsureEpochs(root, g, ld);
+        var slot = hist->Pages.Take(root, HistState.PageBytes);
         var page = (int*)hist->Pages.Unit(slot);
         new Span<int>(page, TileBake.TileSize * TileBake.TileSize).Clear();
         cls->Directory[tile] = slot + 1;
         if (cls->Tiles.Length == 0)
         {
             var n = hist->Active.Length;
-            hist->Active.Resize(n + 1);
+            hist->Active.Resize(root, n + 1);
             hist->Active.Pointer[n] = (int)(cls - hist->Classes);
         }
 
         var count = cls->Tiles.Length;
-        cls->Tiles.Resize(count + 1);
+        cls->Tiles.Resize(root, count + 1);
         cls->Tiles.Pointer[count] = tile;
         return page;
     }
 
+
 #if NET
     [MethodImpl(Jit.Hot)]
     private static int SplatBlocks(
-        WorldCtx* w, int gi, GridCtx* g, LayerData* ld, HistState* hist, HistClass* cls,
+        GiRoot* root, WorldCtx* w, int gi, GridCtx* g, LayerData* ld, HistState* hist, HistClass* cls,
         ref DepositRecord key, int mask, float* xs, float* ys, int count, ref int finite)
     {
         var tiles = stackalloc int[8];
@@ -158,12 +173,12 @@ public static unsafe partial class World
 
             if (stop == SplatStop.Missing)
             {
-                for (var lane = 0; lane < 8; lane++) HistPage(g, ld, hist, cls, tiles[lane]);
+                for (var lane = 0; lane < 8; lane++) HistPage(root, g, ld, hist, cls, tiles[lane]);
                 continue;
             }
 
             for (var lane = 0; lane < 8; lane++)
-                if (SplatOne(w, gi, g, ld, hist, cls, ref key, mask, xs[i + lane], ys[i + lane]))
+                if (SplatOne(root, w, gi, g, ld, hist, cls, ref key, mask, xs[i + lane], ys[i + lane]))
                     finite++;
             i += 8;
         }
@@ -259,21 +274,33 @@ public static unsafe partial class World
 
         cls->Tiles.Resize(0);
     }
+    [MethodImpl(Jit.Hot)]
+    private static void ReleaseClass(GiRoot* root, HistState* hist, HistClass* cls)
+    {
+        for (var t = 0; t < cls->Tiles.Length; t++)
+        {
+            var tile = cls->Tiles.Pointer[t];
+            hist->Pages.Give(root, cls->Directory[tile] - 1);
+            cls->Directory[tile] = 0;
+        }
+
+        cls->Tiles.Resize(root, 0);
+    }
 
     [MethodImpl(Jit.Hot)]
-    private static void ResetHistogram(LayerData* ld)
+    private static void ResetHistogram(GiRoot* root, LayerData* ld)
     {
         var hist = ld->Hist;
         if (hist == null) return;
 
-        for (var a = 0; a < hist->Active.Length; a++) ReleaseClass(hist, hist->Classes + hist->Active.Pointer[a]);
+        for (var a = 0; a < hist->Active.Length; a++) ReleaseClass(root, hist, hist->Classes + hist->Active.Pointer[a]);
 
-        hist->Active.Resize(0);
+        hist->Active.Resize(root, 0);
         hist->Total = 0;
     }
 
     [MethodImpl(Jit.Hot)]
-    private static bool BoxKernel(
+    private static bool BoxKernel(GiRoot* root,
         WorldCtx* w, int gi, GridCtx* g, byte layer, byte stamp,
         out int value, out int ox, out int oy, out int width, out int height)
     {
@@ -282,7 +309,7 @@ public static unsafe partial class World
         oy = 0;
         width = 0;
         height = 0;
-        var v = StampCatalog.Get(stamp);
+        var v = StampCatalog.Get(root, stamp);
         if (v->Kind != StampKind.ConstantRectangle) return false;
 
         var precision = LayerPrecision(w, layer);
@@ -291,7 +318,7 @@ public static unsafe partial class World
         if (!TileBake.PlaceAnchored(anchor, anchor, g->ScaleQ8, g->Size, v, 0, UnitScale, precision, out var p))
             return false;
         if (p.Plane != Plane.Difference || !TileBake.Unclipped(v, &p)) return false;
-        if (!KernelFactory.TryGetTaps(w, gi, stamp, 0, precision, &p, out var taps) || taps.Cells == null) return false;
+        if (!KernelFactory.TryGetTaps(root, w, gi, stamp, 0, precision, &p, out var taps) || taps.Cells == null) return false;
         if (taps.Width <= 0 || taps.Height <= 0 || taps.Width > TileBake.TileSize ||
             taps.Height > TileBake.TileSize) return false;
 
@@ -311,19 +338,19 @@ public static unsafe partial class World
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void ReplayClass(WorldCtx* w, int gi, GridCtx* g, HistState* hist, HistClass* cls, byte layer,
+    private static void ReplayClass(GiRoot* root, WorldCtx* w, int gi, GridCtx* g, HistState* hist, HistClass* cls, byte layer,
         byte stamp)
     {
         var key = new DepositRecord { Layer = layer, Stamp = stamp, Alive = 1, Scale = UnitScale };
         for (var t = 0; t < cls->Tiles.Length; t++)
         {
             var tile = cls->Tiles.Pointer[t];
-            ReplayTile(w, gi, g, ref key, tile, (int*)hist->Pages.Unit(cls->Directory[tile] - 1));
+            ReplayTile(root, w, gi, g, ref key, tile, (int*)hist->Pages.Unit(cls->Directory[tile] - 1));
         }
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void ReplaySparse(
+    private static void ReplaySparse(GiRoot* root,
         WorldCtx* w, int gi, GridCtx* g, HistState* hist, HistClass* cls, byte layer, byte stamp, int footprint)
     {
         var convolve = hist->ConvolveCost == 0 ? HistState.DefaultConvolveCost : hist->ConvolveCost;
@@ -340,16 +367,16 @@ public static unsafe partial class World
         for (var t = 0; t < cls->Tiles.Length; t++)
         {
             var tile = cls->Tiles.Pointer[t];
-            ReplayTile(w, gi, g, ref key, tile, (int*)hist->Pages.Unit(cls->Directory[tile] - 1));
-            hist->Pages.Give(cls->Directory[tile] - 1);
+            ReplayTile(root, w, gi, g, ref key, tile, (int*)hist->Pages.Unit(cls->Directory[tile] - 1));
+            hist->Pages.Give(root, cls->Directory[tile] - 1);
             cls->Directory[tile] = 0;
         }
 
-        cls->Tiles.Resize(0);
+        cls->Tiles.Resize(root, 0);
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void ReplayTile(WorldCtx* w, int gi, GridCtx* g, ref DepositRecord key, int tile, int* page)
+    private static void ReplayTile(GiRoot* root, WorldCtx* w, int gi, GridCtx* g, ref DepositRecord key, int tile, int* page)
     {
         var tps = g->TilesPerSide;
         var baseX = (tile % tps) << TileBake.TileBits;
@@ -365,11 +392,24 @@ public static unsafe partial class World
             {
                 var step = Math.Clamp(remaining, -127, 127);
                 key.Gain = (sbyte)step;
-                EmitDelta(w, gi, in key, 1);
+                EmitDelta(root, w, gi, in key, 1);
                 remaining -= step;
             }
         }
     }
+
+    [MethodImpl(Jit.Hot)]
+    private static void ResetHistogram(LayerData* ld)
+    {
+        var hist = ld->Hist;
+        if (hist == null) return;
+
+        for (var a = 0; a < hist->Active.Length; a++) ReleaseClass(hist, hist->Classes + hist->Active.Pointer[a]);
+
+        hist->Active.Resize(0);
+        hist->Total = 0;
+    }
+
 
     [MethodImpl(Jit.Hot)]
     private static int CountNonZero(int* page)

@@ -28,6 +28,59 @@ internal unsafe struct NativeBuffer<T> where T : unmanaged
         new Span<byte>(Pointer + oldLength, (int)((nuint)(Capacity - oldLength) * (nuint)sizeof(T))).Clear();
     }
 
+    [MethodImpl(Jit.Inline)]
+    public void Resize(GiRoot* root, int length)
+    {
+        if (length <= Capacity)
+        {
+            Length = length;
+            return;
+        }
+
+        var oldLength = Length;
+        Grow(root, length);
+        new Span<byte>(Pointer + oldLength, (int)((nuint)(Capacity - oldLength) * (nuint)sizeof(T))).Clear();
+    }
+
+    [MethodImpl(Jit.Hot)]
+    public void ResizeUninitialized(GiRoot* root, int length)
+    {
+        if (length <= Capacity)
+        {
+            Length = length;
+            return;
+        }
+
+        Grow(root, length);
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private void Grow(GiRoot* root, int length)
+    {
+        var capacity = (nuint)Math.Max(length, Math.Max(16, Capacity * 2)) * (nuint)sizeof(T);
+        var pointer = (T*)NativeHeap.AlignedAlloc(root, capacity);
+        if (Pointer != null)
+        {
+            Buffer.MemoryCopy(Pointer, pointer, (long)capacity, (long)Length * sizeof(T));
+            NativeHeap.AlignedFree(root, Pointer);
+        }
+
+        Pointer = pointer;
+        Capacity = (int)(capacity / (nuint)sizeof(T));
+        Length = length;
+    }
+
+    [MethodImpl(Jit.Hot)]
+    public void Free(GiRoot* root)
+    {
+        if (Pointer == null) return;
+
+        NativeHeap.AlignedFree(root, Pointer);
+        Pointer = null;
+        Length = 0;
+        Capacity = 0;
+    }
+
     [MethodImpl(Jit.Hot)]
     public void ResizeUninitialized(int length)
     {

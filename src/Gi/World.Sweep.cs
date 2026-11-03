@@ -45,6 +45,50 @@ public static unsafe partial class World
     {
         if ((int)s->Mark[slot] != w->MarkEpoch) SnapshotPending(w, s, slot);
     }
+    [MethodImpl(Jit.Inline)]
+    private static void SnapshotPending(GiRoot* root, WorldCtx* w, SourceColumns* s, int slot)
+    {
+        var n = w->Pending.Length;
+        w->Pending.Resize(root, n + 1);
+        w->Pending.Pointer[n] = new JournalEntry
+        {
+            Slot = slot,
+            X = s->X[slot],
+            Y = s->Y[slot],
+            Stamp = s->Stamp[slot],
+            Layer = s->Layer[slot],
+            Gain = s->Gain[slot],
+            Alive = s->Alive[slot],
+            Angle = s->Angle[slot],
+            Scale = s->Scale[slot],
+            Gen = s->Gen[slot]
+        };
+        var mark = s->Mark[slot];
+        if ((int)mark != w->MarkEpoch) s->Mark[slot] = (mark & 0xFFFFFFFFL) | ((long)n << 32);
+        if (w->Recording == 0 || s->HotStamp.Pointer[slot] == w->RecordEpoch) return;
+
+        s->HotStamp.Pointer[slot] = w->RecordEpoch;
+        var journaled = w->Journal.Length;
+        w->Journal.Resize(root, journaled + 1);
+        w->Journal.Pointer[journaled] = w->Pending.Pointer[n];
+    }
+
+    [MethodImpl(Jit.Inline)]
+    private static void BeforeWrite(GiRoot* root, WorldCtx* w, SourceColumns* s, int slot)
+    {
+        if ((int)s->Mark[slot] != w->MarkEpoch) SnapshotPending(root, w, s, slot);
+    }
+
+    [MethodImpl(Jit.Inline)]
+    private static void MarkChanged(GiRoot* root, WorldCtx* w, SourceColumns* s, int slot)
+    {
+        if ((int)s->Mark[slot] == w->MarkEpoch) return;
+
+        s->Mark[slot] = (s->Mark[slot] & ~0xFFFFFFFFL) | (uint)w->MarkEpoch;
+        var n = w->Changed.Length;
+        w->Changed.Resize(root, n + 1);
+        w->Changed.Pointer[n] = slot;
+    }
 
     [MethodImpl(Jit.Inline)]
     private static void MarkChanged(WorldCtx* w, SourceColumns* s, int slot)
@@ -57,23 +101,6 @@ public static unsafe partial class World
         w->Changed.Pointer[n] = slot;
     }
 
-    [MethodImpl(Jit.Hot)]
-    private static void SweepChanged(WorldCtx* w)
-    {
-        var s = &w->Sources;
-        var slots = w->Changed.Pointer;
-        var count = w->Changed.Length;
-        for (var i = 0; i < count; i++)
-        {
-#if NET
-            if (i + PrefetchAhead < count) PrefetchRecordTarget(w, slots[i + PrefetchAhead]);
-#endif
-            var entry = EntryOf(s, slots[i]);
-            SweepEntryAt(w, &entry);
-        }
-
-        w->Changed.Resize(0);
-    }
     [MethodImpl(Jit.Hot)]
     private static void SweepChanged(GiRoot* root, WorldCtx* w)
     {
@@ -88,7 +115,7 @@ public static unsafe partial class World
             var entry = EntryOf(s, slots[i]);
             SweepEntryAt(root, w, &entry);
         }
-        w->Changed.Resize(0);
+        w->Changed.Resize(root, 0);
     }
 
     [MethodImpl(Jit.Inline)]
@@ -134,24 +161,6 @@ public static unsafe partial class World
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void SweepEntryAt(WorldCtx* w, SweepEntry* entry)
-    {
-        var target = TargetOf(w, entry);
-        for (var gi = 0; gi < w->GridCount; gi++)
-        {
-            var g = w->Grids + gi;
-            if (g->ScaleQ8 == 0) continue;
-
-            var rec = RecordOf(g, entry->Slot);
-            var key = KeyOf(w, g, entry, in target);
-            if (Same(rec, in key)) continue;
-
-            EmitDelta(w, gi, in *rec, -1);
-            EmitDelta(w, gi, in key, 1);
-            *rec = key;
-        }
-    }
-    [MethodImpl(Jit.Hot)]
     private static void SweepEntryAt(GiRoot* root, WorldCtx* w, SweepEntry* entry)
     {
         var target = TargetOf(w, entry);
@@ -169,54 +178,6 @@ public static unsafe partial class World
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void EmitDelta(WorldCtx* w, int gi, in DepositRecord record, int sign)
-    {
-        var gain = record.Gain * sign;
-        if (gain == 0) return;
-
-        var g = w->Grids + gi;
-        var v = StampCatalog.Get(record.Stamp);
-        if (v->Kind == StampKind.ConstantRectangle && record.Angle == 0)
-        {
-            EmitBoxFast(g, in record, v, gain);
-            return;
-        }
-
-        var precision = LayerPrecision(w, record.Layer);
-        if (!TileBake.PlaceAnchored(record.Ax, record.Ay, g->ScaleQ8, g->Size, v, record.Angle, record.Scale, precision,
-                out var p))
-            return;
-
-        var cx0 = Math.Max(p.X0, 0);
-        var cy0 = Math.Max(p.Y0, 0);
-        var cx1 = Math.Min(p.X1, g->Size);
-        var cy1 = Math.Min(p.Y1, g->Size);
-        if (cx1 <= cx0 || cy1 <= cy0) return;
-
-        var ld = EnsureDirty(g, record.Layer);
-        if (ld->Epochs == null)
-        {
-            var placed = p;
-            for (var ty = cy0 >> TileBake.TileBits; ty <= (cy1 - 1) >> TileBake.TileBits && ld->Epochs == null; ty++)
-            for (var tx = cx0 >> TileBake.TileBits; tx <= (cx1 - 1) >> TileBake.TileBits; tx++)
-                if (TileBake.Touches(&placed, tx << TileBake.TileBits, ty << TileBake.TileBits))
-                {
-                    EnsureEpochs(g, ld);
-                    break;
-                }
-        }
-
-        if (KernelFactory.TryFindTaps(w, gi, record.Stamp, record.Angle, precision, &p, out var taps) ||
-            (w->Kernels.CanInsert &&
-             KernelFactory.TryGetTaps(w, gi, record.Stamp, record.Angle, precision, &p, out taps)))
-        {
-            EmitKernelTaps(g, ld, in taps, p.Px, p.Py, gain);
-            return;
-        }
-
-        EmitFallback(g, ld, &p, gain);
-    }
-    [MethodImpl(Jit.Hot)]
     private static void EmitDelta(GiRoot* root, WorldCtx* w, int gi, in DepositRecord record, int sign)
     {
         var gain = record.Gain * sign;
@@ -225,7 +186,7 @@ public static unsafe partial class World
         var v = StampCatalog.Get(root, record.Stamp);
         if (v->Kind == StampKind.ConstantRectangle && record.Angle == 0)
         {
-            EmitBoxFast(g, in record, v, gain);
+            EmitBoxFast(root, g, in record, v, gain);
             return;
         }
         var precision = LayerPrecision(w, record.Layer);
@@ -236,7 +197,7 @@ public static unsafe partial class World
         var cx1 = Math.Min(p.X1, g->Size);
         var cy1 = Math.Min(p.Y1, g->Size);
         if (cx1 <= cx0 || cy1 <= cy0) return;
-        var ld = EnsureDirty(g, record.Layer);
+        var ld = EnsureDirty(root, g, record.Layer);
         if (ld->Epochs == null)
         {
             var placed = p;
@@ -244,22 +205,22 @@ public static unsafe partial class World
             for (var tx = cx0 >> TileBake.TileBits; tx <= (cx1 - 1) >> TileBake.TileBits; tx++)
                 if (TileBake.Touches(&placed, tx << TileBake.TileBits, ty << TileBake.TileBits))
                 {
-                    EnsureEpochs(g, ld);
+                    EnsureEpochs(root, g, ld);
                     break;
                 }
         }
         if (KernelFactory.TryFindTaps(w, gi, record.Stamp, record.Angle, precision, &p, out var taps) ||
             (w->Kernels.CanInsert &&
-             KernelFactory.TryGetTaps(w, gi, record.Stamp, record.Angle, precision, &p, out taps)))
+             KernelFactory.TryGetTaps(root, w, gi, record.Stamp, record.Angle, precision, &p, out taps)))
         {
-            EmitKernelTaps(g, ld, in taps, p.Px, p.Py, gain);
+            EmitKernelTaps(root, g, ld, in taps, p.Px, p.Py, gain);
             return;
         }
-        EmitFallback(g, ld, &p, gain);
+        EmitFallback(root, g, ld, &p, gain);
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void EmitBoxFast(GridCtx* g, in DepositRecord record, StampVariant* v, int gain)
+    private static void EmitBoxFast(GiRoot* root, GridCtx* g, in DepositRecord record, StampVariant* v, int gain)
     {
         var sampling = (int)Math.Min(((long)g->ScaleQ8 * record.Scale) >> 8, int.MaxValue);
         if (sampling == 0) return;
@@ -274,37 +235,37 @@ public static unsafe partial class World
         var cy1 = Math.Min(y1, g->Size);
         if (cx1 <= cx0 || cy1 <= cy0) return;
 
-        var ld = EnsureDirty(g, record.Layer);
-        if (ld->Epochs == null) EnsureEpochs(g, ld);
+        var ld = EnsureDirty(root, g, record.Layer);
+        if (ld->Epochs == null) EnsureEpochs(root, g, ld);
         if (cx0 == x0 && cy0 == y0 && cx1 == x1 && cy1 == y1 && TileBake.LanesSupported &&
-            EmitBoxNarrow(g, ld, px, py, fx, fy, extentX, extentY, v->Constant, gain))
+            EmitBoxNarrow(root, g, ld, px, py, fx, fy, extentX, extentY, v->Constant, gain))
             return;
 
-        EmitBoxDelta(g, ld, px, py, fx, fy, extentX, extentY, cx0, cy0, cx1, cy1, v->Constant, gain);
+        EmitBoxDelta(root, g, ld, px, py, fx, fy, extentX, extentY, cx0, cy0, cx1, cy1, v->Constant, gain);
     }
 
     [MethodImpl(Jit.Inline)]
-    private static int* IntPlane(GridCtx* g, LayerData* ld, int tile, int amount)
+    private static int* IntPlane(GiRoot* root, GridCtx* g, LayerData* ld, int tile, int amount)
     {
-        var set = EnsureSet(g, ld, tile);
-        PrepareTransientSet(ld, set);
+        var set = EnsureSet(root, g, ld, tile);
+        PrepareTransientSet(root, ld, set);
         PlaneFold.ChargeI(&ld->Store, set, amount);
         return ld->Store.Cells(*set).I;
     }
 
     [MethodImpl(Jit.Hot)]
-    private static long* QPlane(LayerData* ld, TilePlanes* set, bool tent, long amount)
+    private static long* QPlane(GiRoot* root, LayerData* ld, TilePlanes* set, bool tent, long amount)
     {
-        PrepareTransientSet(ld, set);
-        if (tent) ld->Store.EnsureT(ref *set);
-        else ld->Store.EnsureB(ref *set);
+        PrepareTransientSet(root, ld, set);
+        if (tent) ld->Store.EnsureT(root, ref *set);
+        else ld->Store.EnsureB(root, ref *set);
         PlaneFold.ChargeQ40(&ld->Store, set, tent, amount);
         var cells = ld->Store.Cells(*set);
         return tent ? cells.T : cells.B;
     }
 
     [MethodImpl(Jit.Hot)]
-    private static bool EmitBoxNarrow(
+    private static bool EmitBoxNarrow(GiRoot* root,
         GridCtx* g, LayerData* ld, int px, int py, int fx, int fy, int extentX, int extentY, int constant, int gain)
     {
         var endX = fx + extentX;
@@ -363,8 +324,8 @@ public static unsafe partial class World
 
             if (plane == null)
             {
-                plane = IntPlane(g, ld, tile, Math.Abs(constant * gain));
-                DirtyIndex(g, ld, tile);
+                plane = IntPlane(root, g, ld, tile, Math.Abs(constant * gain));
+                DirtyIndex(root, g, ld, tile);
             }
 
             TileBake.AddRows(plane, rowLo, rowHi, column, lanes);
@@ -383,7 +344,7 @@ public static unsafe partial class World
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void EmitBoxDelta(
+    private static void EmitBoxDelta(GiRoot* root,
         GridCtx* g, LayerData* ld, int px, int py, int fx, int fy, int extentX, int extentY,
         int cx0, int cy0, int cx1, int cy1, int constant, int gain)
     {
@@ -428,8 +389,8 @@ public static unsafe partial class World
 
                     if (plane == null)
                     {
-                        plane = IntPlane(g, ld, tile, Math.Abs(constant * gain));
-                        DirtyIndex(g, ld, tile);
+                        plane = IntPlane(root, g, ld, tile, Math.Abs(constant * gain));
+                        DirtyIndex(root, g, ld, tile);
                     }
 
                     TileBake.AddRows(plane, yLo[y], yHi[y], column, lanes);
@@ -452,8 +413,8 @@ public static unsafe partial class World
 
                     if (plane == null)
                     {
-                        plane = IntPlane(g, ld, tile, Math.Abs(constant * gain));
-                        DirtyIndex(g, ld, tile);
+                        plane = IntPlane(root, g, ld, tile, Math.Abs(constant * gain));
+                        DirtyIndex(root, g, ld, tile);
                     }
 
                     TileBake.AddRows(plane, yLo[y], yHi[y], column, lanes);
@@ -467,8 +428,8 @@ public static unsafe partial class World
 
                     if (plane == null)
                     {
-                        plane = IntPlane(g, ld, tile, Math.Abs(constant * gain));
-                        DirtyIndex(g, ld, tile);
+                        plane = IntPlane(root, g, ld, tile, Math.Abs(constant * gain));
+                    DirtyIndex(root, g, ld, tile);
                     }
 
                     var row0 = yLo[y];
@@ -492,7 +453,7 @@ public static unsafe partial class World
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void EmitKernelTaps(GridCtx* g, LayerData* ld, in KernelTaps taps, int px, int py, int gain)
+    private static void EmitKernelTaps(GiRoot* root, GridCtx* g, LayerData* ld, in KernelTaps taps, int px, int py, int gain)
     {
         var kx0 = px + taps.OriginX;
         var ky0 = py + taps.OriginY;
@@ -542,9 +503,9 @@ public static unsafe partial class World
 
                         if (plane == null)
                         {
-                            var set = EnsureSet(g, ld, tile);
-                            dirty = DirtyIndex(g, ld, tile);
-                            plane = QPlane(ld, set, taps.Plane == Plane.Tent, Math.Abs(gain) * taps.MaxTapQ40);
+                            var set = EnsureSet(root, g, ld, tile);
+                            dirty = DirtyIndex(root, g, ld, tile);
+                            plane = QPlane(root, ld, set, taps.Plane == Plane.Tent, Math.Abs(gain) * taps.MaxTapQ40);
                         }
 
                         var row = q40 + ry * taps.Width;
@@ -557,8 +518,8 @@ public static unsafe partial class World
 
                         if (ints32 == null)
                         {
-                            ints32 = IntPlane(g, ld, tile, Math.Abs(gain) * taps.MaxTap);
-                            dirty = DirtyIndex(g, ld, tile);
+                            ints32 = IntPlane(root, g, ld, tile, Math.Abs(gain) * taps.MaxTap);
+                            dirty = DirtyIndex(root, g, ld, tile);
                         }
 
                         TileBake.AddScaledRow(ints32 + ly * size + shift + kxA, ints + ry * taps.Width + kxA, kxB - kxA,
@@ -583,7 +544,7 @@ public static unsafe partial class World
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void EmitFallback(GridCtx* g, LayerData* ld, Placement* p, int gain)
+    private static void EmitFallback(GiRoot* root, GridCtx* g, LayerData* ld, Placement* p, int gain)
     {
         var cx0 = Math.Max(p->X0, 0);
         var cy0 = Math.Max(p->Y0, 0);
@@ -598,39 +559,39 @@ public static unsafe partial class World
             if (!TileBake.Touches(p, tileX0, tileY0)) continue;
 
             var tile = ty * tps + tx;
-            var set = EnsureSet(g, ld, tile);
+            var set = EnsureSet(root, g, ld, tile);
             switch (p->Plane)
             {
                 case Plane.Dense when p->Turned:
-                    TileBake.EmitTurnedDense(IntPlane(g, ld, tile, FallbackCharge * Math.Abs(gain)), tileX0, tileY0, p,
+                    TileBake.EmitTurnedDense(IntPlane(root, g, ld, tile, FallbackCharge * Math.Abs(gain)), tileX0, tileY0, p,
                         gain);
                     break;
                 case Plane.Dense:
-                    TileBake.EmitRaster(IntPlane(g, ld, tile, FallbackCharge * Math.Abs(gain)), tileX0, tileY0, p->Px,
+                    TileBake.EmitRaster(IntPlane(root, g, ld, tile, FallbackCharge * Math.Abs(gain)), tileX0, tileY0, p->Px,
                         p->Py, p->Fx, p->Fy,
                         p->X1, p->Y1, p->Sampling, p->V, gain);
                     break;
                 case Plane.Tent when p->Turned:
-                    TileBake.EmitTurnedSmooth(QPlane(ld, set, true, ((long)FallbackCharge * Math.Abs(gain)) << 40),
+                    TileBake.EmitTurnedSmooth(QPlane(root, ld, set, true, ((long)FallbackCharge * Math.Abs(gain)) << 40),
                         tileX0, tileY0, p, gain);
                     break;
                 case Plane.Tent:
-                    TileBake.EmitTent(QPlane(ld, set, true, ((long)FallbackCharge * Math.Abs(gain)) << 40), tileX0,
+                    TileBake.EmitTent(QPlane(root, ld, set, true, ((long)FallbackCharge * Math.Abs(gain)) << 40), tileX0,
                         tileY0, p->Px, p->Py, p->Fx, p->Fy,
                         p->ExtentX, p->ExtentY, p->V, gain);
                     break;
                 case Plane.Bell when p->Turned:
-                    TileBake.EmitTurnedSmooth(QPlane(ld, set, false, ((long)FallbackCharge * Math.Abs(gain)) << 40),
+                    TileBake.EmitTurnedSmooth(QPlane(root, ld, set, false, ((long)FallbackCharge * Math.Abs(gain)) << 40),
                         tileX0, tileY0, p, gain);
                     break;
                 default:
-                    TileBake.EmitBell(QPlane(ld, set, false, ((long)FallbackCharge * Math.Abs(gain)) << 40), tileX0,
+                    TileBake.EmitBell(QPlane(root, ld, set, false, ((long)FallbackCharge * Math.Abs(gain)) << 40), tileX0,
                         tileY0, p->Px, p->Py, p->Fx, p->Fy,
                         p->ExtentX, p->ExtentY, p->V, gain);
                     break;
             }
 
-            var dirty = DirtyIndex(g, ld, tile);
+            var dirty = DirtyIndex(root, g, ld, tile);
             var rect = &ld->Rects.Pointer[dirty];
             rect->X0 = 0;
             rect->Y0 = 0;
@@ -640,7 +601,7 @@ public static unsafe partial class World
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void PublishDirty(WorldCtx* w)
+    private static void PublishDirty(GiRoot* root, WorldCtx* w)
     {
         for (var gi = 0; gi < w->GridCount; gi++)
         {
@@ -651,15 +612,15 @@ public static unsafe partial class World
 
                 var ld = g->Layers + l;
                 var transient = IsTransient(w, l);
-                if (transient) PlanTransient(w, gi, g, ld, (byte)l);
-                if (ld->InDirty != null) PublishTiles(w, g, ld, transient);
-                if (transient) CommitTransient(g, ld);
+                if (transient) PlanTransient(root, w, gi, g, ld, (byte)l);
+                if (ld->InDirty != null) PublishTiles(root, w, g, ld, transient);
+                if (transient) CommitTransient(root, g, ld);
             }
         }
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void PublishTiles(WorldCtx* w, GridCtx* g, LayerData* ld, bool transient)
+    private static void PublishTiles(GiRoot* root, WorldCtx* w, GridCtx* g, LayerData* ld, bool transient)
     {
         var tps = g->TilesPerSide;
         var dirty = ld->Dirty.Pointer;
@@ -673,36 +634,36 @@ public static unsafe partial class World
             if (set == null) continue;
 
             var rect = rects + i;
-            if (transient) PrepareTransientSet(ld, set);
+            if (transient) PrepareTransientSet(root, ld, set);
             var outcome = TileBake.Publish(&ld->Store, set, rect->X0, rect->Y0, rect->X1, rect->Y1, w->Tick);
             bool dropped;
             if ((outcome & ResolveOutcome.Empty) != 0 && (transient || ld->Store.PlanesZero(*set)))
             {
-                DropPage(ld, tile);
-                ld->Max.Update(tps, tile, 0);
+                DropPage(root, ld, tile);
+                ld->Max.Update(root, tps, tile, 0);
                 dropped = true;
             }
             else
             {
-                ld->Max.Update(tps, tile, ld->Store.Cells(*set).Summary->Max);
-                if (transient) RetireTransientTile(ld, set, tile);
+                ld->Max.Update(root, tps, tile, ld->Store.Cells(*set).Summary->Max);
+                if (transient) RetireTransientTile(root, ld, set, tile);
                 dropped = false;
             }
 
-            if (dropped || (outcome & ResolveOutcome.Changed) != 0) RefreshTileHash(g, ld, tile);
+            if (dropped || (outcome & ResolveOutcome.Changed) != 0) RefreshTileHash(root, g, ld, tile);
             if ((outcome & ResolveOutcome.Changed) != 0) dirty[kept++] = tile;
         }
 
-        ld->Dirty.Resize(kept);
-        ld->Rects.Resize(0);
+        ld->Dirty.Resize(root, kept);
+        ld->Rects.Resize(root, 0);
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void PrepareTransientSet(LayerData* ld, TilePlanes* set)
+    private static void PrepareTransientSet(GiRoot* root, LayerData* ld, TilePlanes* set)
     {
         if (set->Stale == 0) return;
 
-        ld->Store.ClearWide(set);
+        ld->Store.ClearWide(root, set);
         var cells = ld->Store.Cells(*set);
         new Span<int>(cells.I, TileBake.TileSize * TileBake.TileSize).Clear();
         if (cells.T != null) new Span<long>(cells.T, TileBake.TileSize * TileBake.TileSize).Clear();
@@ -711,11 +672,11 @@ public static unsafe partial class World
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void RetireTransientTile(LayerData* ld, TilePlanes* set, int tile)
+    private static void RetireTransientTile(GiRoot* root, LayerData* ld, TilePlanes* set, int tile)
     {
         set->Stale = 1;
         var n = ld->Stale.Length;
-        ld->Stale.Resize(n + 1);
+        ld->Stale.Resize(root, n + 1);
         ld->Stale.Pointer[n] = tile;
     }
 }

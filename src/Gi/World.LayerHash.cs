@@ -18,6 +18,24 @@ public static unsafe partial class World
         var page = ld->PageOf(tile);
         ApplyTileHash(g, ld, tile, page != null && TileBake.PageAny(page) ? TileHash.Of(tile, page) : 0);
     }
+    [MethodImpl(Jit.Hot)]
+    private static void RefreshTileHash(GiRoot* root, GridCtx* g, LayerData* ld, int tile)
+    {
+        var page = ld->PageOf(tile);
+        ApplyTileHash(root, g, ld, tile, page != null && TileBake.PageAny(page) ? TileHash.Of(tile, page) : 0);
+    }
+
+    [MethodImpl(Jit.Hot)]
+    private static void ApplyTileHash(GiRoot* root, GridCtx* g, LayerData* ld, int tile, ulong current)
+    {
+        if (ld->TileHashes == null)
+            ld->TileHashes = (ulong*)NativeHeap.AllocZeroed(root, (nuint)g->TileCount * sizeof(ulong));
+        var prior = ld->TileHashes[tile];
+        if (prior == current) return;
+
+        ld->Hash ^= prior ^ current;
+        ld->TileHashes[tile] = current;
+    }
 
     [MethodImpl(Jit.Hot)]
     private static void ApplyTileHash(GridCtx* g, LayerData* ld, int tile, ulong current)
