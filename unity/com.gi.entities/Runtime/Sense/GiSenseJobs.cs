@@ -142,19 +142,6 @@ namespace Gi.Entities
         }
     }
 
-    internal struct GiSenseFusedType
-    {
-        public DynamicComponentTypeHandle Handle;
-        public int Size;
-        public GiSenseField Value;
-        public GiSenseField Gradient;
-        public GiSenseField Total;
-        public GiSenseField Position;
-        public GiSenseField Coverage;
-        public GiSenseField Reach;
-        public GiSenseField Threshold;
-    }
-
     [BurstCompile]
     internal unsafe struct GiSenseGatherJob : IJobChunk
     {
@@ -165,7 +152,16 @@ namespace Gi.Entities
         [ReadOnly] public NativeReference<GiReconcileContext> Context;
         [ReadOnly] public NativeReference<GiSenseGateState> Gate;
         [ReadOnly] public NativeArray<int> Offsets;
-        [ReadOnly] public NativeArray<GiSenseFusedType> Types;
+        [NativeDisableContainerSafetyRestriction]
+        public DynamicComponentTypeHandle ReachHandle;
+        public int ReachSize;
+        public ushort ReachOffset;
+        public byte HasReach;
+        [NativeDisableContainerSafetyRestriction]
+        public DynamicComponentTypeHandle ThresholdHandle;
+        public int ThresholdSize;
+        public ushort ThresholdOffset;
+        public byte HasThreshold;
         [NativeDisableParallelForRestriction] public NativeArray<float> Xs;
         [NativeDisableParallelForRestriction] public NativeArray<float> Ys;
         [NativeDisableParallelForRestriction] public NativeArray<float> Reaches;
@@ -181,21 +177,12 @@ namespace Gi.Entities
             var context = Context.Value;
             if (!context.Alive || !View.Eligible(chunk)) return;
 
-            var count = Types.Length;
-            var present = stackalloc byte[count];
-            var inputs = stackalloc byte*[count];
-            for (var t = 0; t < count; t++)
-            {
-                present[t] = 0;
-                inputs[t] = null;
-                var type = Types[t];
-                var handle = type.Handle;
-                if ((type.Reach.Active || type.Threshold.Active) && type.Size != 0 && chunk.Has(ref handle))
-                {
-                    present[t] = 1;
-                    inputs[t] = (byte*)chunk.GetDynamicComponentDataArrayReinterpret<byte>(ref handle, type.Size).GetUnsafeReadOnlyPtr();
-                }
-            }
+            byte* reachData = null;
+            if (HasReach != 0 && ReachSize != 0 && chunk.Has(ref ReachHandle))
+                reachData = (byte*)chunk.GetDynamicComponentDataArrayReinterpret<byte>(ref ReachHandle, ReachSize).GetUnsafeReadOnlyPtr();
+            byte* thresholdData = null;
+            if (HasThreshold != 0 && ThresholdSize != 0 && chunk.Has(ref ThresholdHandle))
+                thresholdData = (byte*)chunk.GetDynamicComponentDataArrayReinterpret<byte>(ref ThresholdHandle, ThresholdSize).GetUnsafeReadOnlyPtr();
 
             var useMatrix = View.UsesMatrix(chunk);
             var transforms = !useMatrix ? chunk.GetNativeArray(ref View.Transforms) : default;
@@ -220,17 +207,12 @@ namespace Gi.Entities
                 }
                 if (Thresholds.Length != 0) Thresholds[row] = Threshold;
                 if (Excludes.Length != 0) Excludes[row] = sources.IsCreated ? sources[i].Id : default;
-                for (var t = 0; t < count; t++)
+                if (reachData != null)
                 {
-                    if (present[t] == 0) continue;
-                    var type = Types[t];
-                    if (type.Reach.Active)
-                    {
-                        Reaches[row] = *(float*)(inputs[t] + i * type.Size + type.Reach.Offset);
-                        PrevReach[row] = Reaches[row];
-                    }
-                    if (type.Threshold.Active) Thresholds[row] = *(short*)(inputs[t] + i * type.Size + type.Threshold.Offset);
+                    Reaches[row] = *(float*)(reachData + i * ReachSize + ReachOffset);
+                    PrevReach[row] = Reaches[row];
                 }
+                if (thresholdData != null) Thresholds[row] = *(short*)(thresholdData + i * ThresholdSize + ThresholdOffset);
                 row++;
             }
         }
@@ -379,7 +361,30 @@ namespace Gi.Entities
         [ReadOnly] public NativeReference<GiSenseGateState> Gate;
         [ReadOnly] public NativeArray<int> Rows;
         [ReadOnly] public NativeArray<int> Offsets;
-        [ReadOnly] public NativeArray<GiSenseFusedType> Types;
+        [NativeDisableContainerSafetyRestriction]
+        public DynamicComponentTypeHandle ValueHandle;
+        public int ValueSize;
+        public ushort ValueOffset;
+        public byte HasValue;
+        [NativeDisableContainerSafetyRestriction]
+        public DynamicComponentTypeHandle GradientHandle;
+        public int GradientSize;
+        public ushort GradientOffset;
+        public byte HasGradient;
+        [NativeDisableContainerSafetyRestriction]
+        public DynamicComponentTypeHandle TotalHandle;
+        public int TotalSize;
+        public ushort TotalOffset;
+        public byte HasTotal;
+        [NativeDisableContainerSafetyRestriction]
+        public DynamicComponentTypeHandle PositionHandle;
+        public int PositionSize;
+        public ushort PositionOffset;
+        public byte HasPosition;
+        [NativeDisableContainerSafetyRestriction]
+        public DynamicComponentTypeHandle CoverageHandle;
+        public int CoverageSize;
+        public byte HasCoverage;
         [ReadOnly] public NativeList<short> Values;
         [ReadOnly] public NativeList<float> GradientXs;
         [ReadOnly] public NativeList<float> GradientYs;
@@ -391,22 +396,19 @@ namespace Gi.Entities
             if (Gate.Value.Skip != 0) return;
             if (Rows[1] == 0 || !View.Eligible(chunk)) return;
 
-            var count = Types.Length;
-            var present = stackalloc byte[count];
-            var outputs = stackalloc byte*[count];
-            for (var t = 0; t < count; t++)
-            {
-                present[t] = 0;
-                outputs[t] = null;
-                var type = Types[t];
-                if (!type.Value.Active && !type.Gradient.Active && !type.Total.Active && !type.Position.Active && !type.Coverage.Active)
-                    continue;
-                var handle = type.Handle;
-                if (!chunk.Has(ref handle)) continue;
-                present[t] = 1;
-                if (type.Size != 0)
-                    outputs[t] = (byte*)chunk.GetDynamicComponentDataArrayReinterpret<byte>(ref handle, type.Size).GetUnsafePtr();
-            }
+            byte* valueData = null;
+            if (HasValue != 0 && ValueSize != 0 && chunk.Has(ref ValueHandle))
+                valueData = (byte*)chunk.GetDynamicComponentDataArrayReinterpret<byte>(ref ValueHandle, ValueSize).GetUnsafePtr();
+            byte* gradientData = null;
+            if (HasGradient != 0 && GradientSize != 0 && chunk.Has(ref GradientHandle))
+                gradientData = (byte*)chunk.GetDynamicComponentDataArrayReinterpret<byte>(ref GradientHandle, GradientSize).GetUnsafePtr();
+            byte* totalData = null;
+            if (HasTotal != 0 && TotalSize != 0 && chunk.Has(ref TotalHandle))
+                totalData = (byte*)chunk.GetDynamicComponentDataArrayReinterpret<byte>(ref TotalHandle, TotalSize).GetUnsafePtr();
+            byte* positionData = null;
+            if (HasPosition != 0 && PositionSize != 0 && chunk.Has(ref PositionHandle))
+                positionData = (byte*)chunk.GetDynamicComponentDataArrayReinterpret<byte>(ref PositionHandle, PositionSize).GetUnsafePtr();
+            var coverage = HasCoverage != 0 && chunk.Has(ref CoverageHandle);
 
             var tick = Context.Value.Tick;
             var entities = View.EntitiesOf(chunk);
@@ -418,33 +420,21 @@ namespace Gi.Entities
                 if (!GiSensePass.Due(entities[i].Index, Period, tick)) continue;
 
                 var covered = (whole[row >> 6] >> (row & 63) & 1ul) != 0ul;
-                for (var t = 0; t < count; t++)
+                if (valueData != null) *(short*)(valueData + i * ValueSize + ValueOffset) = Values[row];
+                if (totalData != null) *(long*)(totalData + i * TotalSize + TotalOffset) = Totals[row];
+                if (gradientData != null)
                 {
-                    if (present[t] == 0) continue;
-                    var type = Types[t];
-                    var data = outputs[t];
-                    if (type.Value.Active) *(short*)(data + i * type.Size + type.Value.Offset) = Values[row];
-                    if (type.Total.Active) *(long*)(data + i * type.Size + type.Total.Offset) = Totals[row];
-                    if (type.Gradient.Active)
-                    {
-                        var gradient = (float*)(data + i * type.Size + type.Gradient.Offset);
-                        gradient[0] = GradientXs[row];
-                        gradient[1] = GradientYs[row];
-                    }
-
-                    if (type.Position.Active)
-                    {
-                        var position = (float*)(data + i * type.Size + type.Position.Offset);
-                        position[0] = GradientXs[row];
-                        position[1] = GradientYs[row];
-                    }
-
-                    if (type.Coverage.Active)
-                    {
-                        var handle = type.Handle;
-                        chunk.SetComponentEnabled(ref handle, i, covered);
-                    }
+                    var gradient = (float*)(gradientData + i * GradientSize + GradientOffset);
+                    gradient[0] = GradientXs[row];
+                    gradient[1] = GradientYs[row];
                 }
+                if (positionData != null)
+                {
+                    var position = (float*)(positionData + i * PositionSize + PositionOffset);
+                    position[0] = GradientXs[row];
+                    position[1] = GradientYs[row];
+                }
+                if (coverage) chunk.SetComponentEnabled(ref CoverageHandle, i, covered);
                 row++;
             }
         }
