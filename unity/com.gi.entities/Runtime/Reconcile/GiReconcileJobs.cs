@@ -6,6 +6,7 @@ using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
 using Unity.Jobs;
+using Unity.Profiling;
 using GiWorld = Gi.World;
 
 namespace Gi.Entities
@@ -132,11 +133,12 @@ namespace Gi.Entities
         public NativeList<GiCommandResult> Results;
         public NativeList<GiWorld.SourceCommand> Scratch;
         public NativeList<GiWorld.SourceResult> BatchResults;
-        internal Gi.GiRoot Root;
+        [NativeDisableUnsafePtrRestriction] internal Gi.GiRoot* Root;
+        private static readonly ProfilerMarker Marker = new ProfilerMarker(ProfilerCategory.Scripts, GiMarkers.ReconcileName);
 
         public GiApplyJob()
         {
-            Root = Gi.Runtime.Root;
+            fixed (Gi.GiRoot* root = &Gi.Runtime.Root) Root = root;
         }
 
         public void Execute()
@@ -152,10 +154,9 @@ namespace Gi.Entities
             }
 
             var token = frame.Token;
-            Gi.GiRoot captured = Root;
-            Gi.GiRoot* root = &captured;
+            Gi.GiRoot* root = Root;
             GuardBegin(frame.World, GiGuard.Reconcile, true);
-            var scope = GiMarkers.Reconcile.Auto();
+            var scope = Marker.Auto();
             var status = Apply(ref token, frame.World, root,
                 new System.ReadOnlySpan<GiCommand>(Commands.GetUnsafeReadOnlyPtr(), count),
                 new System.Span<GiCommandResult>(Results.GetUnsafePtr(), count),

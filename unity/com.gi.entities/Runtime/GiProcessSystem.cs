@@ -1,7 +1,9 @@
 using BovineLabs.Core;
 using Unity.Burst;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
 using Unity.Jobs;
+using Unity.Profiling;
 using GiWorld = Gi.World;
 
 namespace Gi.Entities
@@ -34,11 +36,12 @@ namespace Gi.Entities
         {
             public Entity Frame;
             public ComponentLookup<GiFrame> Frames;
-            internal Gi.GiRoot Root;
+            [NativeDisableUnsafePtrRestriction] internal Gi.GiRoot* Root;
+            private static readonly ProfilerMarker Marker = new ProfilerMarker(ProfilerCategory.Scripts, GiMarkers.ProcessName);
 
             public ProcessJob()
             {
-                Root = Gi.Runtime.Root;
+                fixed (Gi.GiRoot* root = &Gi.Runtime.Root) Root = root;
             }
 
             public void Execute()
@@ -46,10 +49,9 @@ namespace Gi.Entities
                 var frame = Frames[Frame];
                 if (!frame.Alive) return;
 
-                Gi.GiRoot captured = Root;
-                Gi.GiRoot* root = &captured;
+                Gi.GiRoot* root = Root;
                 GuardBegin(frame.World, GiGuard.Process, true);
-                var scope = GiMarkers.Process.Auto();
+                var scope = Marker.Auto();
                 var status = GiWorld.Process(root, frame.Token);
                 if (status == GiWorld.BatchStatus.StaleRevision)
                 {

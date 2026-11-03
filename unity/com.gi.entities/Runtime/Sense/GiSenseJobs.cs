@@ -4,6 +4,7 @@ using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
 using Unity.Jobs;
+using Unity.Profiling;
 using GiWorld = Gi.World;
 
 namespace Gi.Entities
@@ -326,11 +327,12 @@ namespace Gi.Entities
         [NativeDisableParallelForRestriction] public NativeArray<float> GradientYs;
         [NativeDisableParallelForRestriction] public NativeArray<long> Totals;
         [NativeDisableParallelForRestriction] public NativeArray<ulong> Whole;
-        internal Gi.GiRoot Root;
+        [NativeDisableUnsafePtrRestriction] internal Gi.GiRoot* Root;
+        private static readonly ProfilerMarker Marker = new ProfilerMarker(ProfilerCategory.Scripts, GiMarkers.SenseName);
 
         public GiSenseReadJob()
         {
-            Root = Gi.Runtime.Root;
+            fixed (Gi.GiRoot* root = &Gi.Runtime.Root) Root = root;
         }
 
         public void Execute()
@@ -353,10 +355,9 @@ namespace Gi.Entities
                 Whole = (ulong*)Whole.GetUnsafePtr(),
                 Rows = Rows[0],
             };
-            Gi.GiRoot captured = Root;
-            Gi.GiRoot* root = &captured;
+            Gi.GiRoot* root = Root;
             GuardBegin(context.World, GiGuard.Sense, false);
-            var scope = GiMarkers.Sense.Auto();
+            var scope = Marker.Auto();
             Read(root, Kind, context.World, layer, columns, Reach, GiSensePass.SinceTick(context.Tick, Since));
             scope.Dispose();
             GuardEnd(context.World, false);

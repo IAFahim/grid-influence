@@ -4,6 +4,7 @@ using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
 using Unity.Jobs;
+using Unity.Profiling;
 using GiWorld = Gi.World;
 
 namespace Gi.Entities
@@ -125,11 +126,12 @@ namespace Gi.Entities
         public NativeList<float> Headings;
         public NativeList<float> Scales;
         public NativeList<ulong> Invalid;
-        internal Gi.GiRoot Root;
+        [NativeDisableUnsafePtrRestriction] internal Gi.GiRoot* Root;
+        private static readonly ProfilerMarker Marker = new ProfilerMarker(ProfilerCategory.Scripts, GiMarkers.SyncName);
 
         public GiSyncApplyJob()
         {
-            Root = Gi.Runtime.Root;
+            fixed (Gi.GiRoot* root = &Gi.Runtime.Root) Root = root;
         }
 
         public void Execute()
@@ -146,8 +148,7 @@ namespace Gi.Entities
             if (!frame.Alive) return;
 
             var token = frame.Token;
-            Gi.GiRoot captured = Root;
-            Gi.GiRoot* root = &captured;
+            Gi.GiRoot* root = Root;
             var starts = (int*)Meta.GetUnsafeReadOnlyPtr();
             var sources = (GiWorld.SourceId*)Sources.GetUnsafePtr();
             var xs = (float*)Xs.GetUnsafePtr();
@@ -155,7 +156,7 @@ namespace Gi.Entities
             var headings = (float*)Headings.GetUnsafePtr();
             var scales = (float*)Scales.GetUnsafePtr();
             GuardBegin(frame.World, GiGuard.Sync, true);
-            var scope = GiMarkers.Sync.Auto();
+            var scope = Marker.Auto();
             RecordSync(frame.World, sources, xs, ys, headings, scales, starts, starts + GiSyncPass.Categories);
             var status = Apply(ref token, frame.World, root, sources, xs, ys, headings, scales, (ulong*)Invalid.GetUnsafePtr(),
                 starts, starts + GiSyncPass.Categories, starts + 2 * GiSyncPass.Categories);
