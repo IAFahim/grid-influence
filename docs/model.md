@@ -1707,24 +1707,24 @@ script assemblies cannot yet reference the net10 TFM the vector build targets. E
 unmanaged memory between the two sides lives in the adapter code named below; each heading states
 its lifetime, aliasing, alignment and concurrency in this section's voice, following the proof
 template of "Unsafe proof" above. Two adapter-wide rules frame them: all Gi calls from ECS run in
-managed code on the main thread or in managed jobs (never Burst, D-U3; the adapter's systems are
+managed code on the main thread, in managed jobs, or in Burst jobs that only touch Gi through a
+`GiRoot` copy captured on the main thread when the job is built (J23; the adapter's systems are
 `ISystem` structs, managed where managed code runs because this Entities build stores system
 structs in unmanaged memory, so their managed tables sit behind `GCHandle` roots), and every
-writer or reader of a Gi world chains through the
-process-wide fences in `GiRuntime.Fences.cs`, so the headings below describe the fences' clients,
-not the fences themselves.
+writer or reader of a Gi world chains through the process-wide fences in `GiRuntime.Fences.cs`,
+so the headings below describe the fences' clients, not the fences themselves.
 
 ### U-1
 
-The unsafe code in the frame and bootstrap is three things: the fixed buffers in `GiTables` and `GiFaults`, the spans over blob arrays in `GiBootstrapSystem`, and the managed `ProcessJob` that calls `Process`.
+The unsafe code in the frame and bootstrap is three things: the fixed buffers in `GiTables` and `GiFaults`, the spans over blob arrays in `GiBootstrapSystem`, and the Burst `ProcessJob` that calls the `GiRoot*` entry of `Process`.
 
 - **Lifetime.**
   - `GiTables` and `GiFaults` are plain value fields of `GiFrame`. They live in the singleton's chunk, are copied by value into jobs and back, and hold no pointer to anything.
   - The spans in `GiBootstrapSystem.Rebuild` cover `BlobArray` storage of the profile blob. The blob is held by the `GiProfileReference` component for the whole call, and `Rebuild` runs on the main thread, where nothing can dispose or replace the blob. The spans do not escape the method; `GiWorldBuilder` copies every value it keeps (grid, layer and stamp ids go into `GiTables`).
-  - `ProcessJob` holds only an `Entity` and a `ComponentLookup`. The Gi world and its token are read from `GiFrame` when the job runs.
+  - `ProcessJob` holds only an `Entity`, a `ComponentLookup`, and a `GiRoot` copy taken from `Gi.Runtime.Root` by the job's constructor when the system builds the job on the main thread. The worker derives the entry pointer from its own copy, so it never reads the static. The Gi world and its token are read from `GiFrame` when the job runs.
 - **Aliasing.**
   - The blob spans are read-only and nothing in the call writes to blob memory.
-  - `ProcessJob` is the only job that writes `GiFrame` while it runs, because it takes `GiRuntime.BeginWrite`; every other system reads or writes `GiFrame` on the main thread after the fences or through the ECS dependency on the same component.
+  - `ProcessJob` is the only job that writes `GiFrame` while it runs, because it takes `GiRuntime.BeginWrite`; every other system reads or writes `GiFrame` on the main thread after the fences or through the ECS dependency on the same component. The guard and recorder calls sit in `[BurstDiscard]` wrappers, so the Burst build drops them and the managed build runs them; the marker stays in the Burst body.
 - **Alignment.** The fixed buffers are byte arrays, so they need no alignment beyond the struct's own. `BlobArray<T>` storage is aligned for `T` by the blob builder, and the spec structs are blittable with natural alignment, so the span reads are aligned.
 - **Concurrency.**
   - `GiFrame` is written by `GiBootstrapSystem` only after `GiRuntime.CompleteAll()` and `CompleteAllTrackedJobs()`, so no job is running when the world is built, released or replaced.
@@ -1733,20 +1733,20 @@ The unsafe code in the frame and bootstrap is three things: the fixed buffers in
 
 ### U-2
 
-The unsafe code in reconcile is the pointer access to the command and owner lists in `GiReconcileView.Visit`, the `Span` views of the lists in `GiApplyJob`, and the managed apply job itself.
+The unsafe code in reconcile is the pointer access to the command and owner lists in `GiReconcileView.Visit`, the `Span` views of the lists in `GiApplyJob`, and the Burst apply job itself.
 
-- **Lifetime.** Every list and array is allocated from `state.WorldUpdateAllocator`, which stays valid for the whole world update and rewinds only when the next update begins. All jobs that touch them are in one dependency chain returned as `state.Dependency`, so none is still running when the allocator rewinds. The `EntityCommandBuffer` is created with `Allocator.TempJob`, played back and disposed at the start of the next update, after `state.Dependency.Complete()`. The spans in `GiApplyJob` cover list storage that outlives the call and are not stored.
+- **Lifetime.** Every list and array is allocated from `state.WorldUpdateAllocator`, which stays valid for the whole world update and rewinds only when the next update begins. All jobs that touch them are in one dependency chain returned as `state.Dependency`, so none is still running when the allocator rewinds. The `EntityCommandBuffer` is created with `Allocator.TempJob`, played back and disposed at the start of the next update, after `state.Dependency.Complete()`. The spans in `GiApplyJob` cover list storage that outlives the call and are not stored. `GiApplyJob` carries the same per-tick `GiRoot` copy as `ProcessJob` and calls the `GiRoot*` entry of `ApplyBatch`, rebuilding the token from the copy on a stale revision exactly as `Capture` would.
 - **Aliasing.**
   - The count pass only reads. The write pass writes disjoint ranges: chunk `c` owns `[Offsets[c], Offsets[c] + Counts[c])`, which are disjoint by the prefix sum, and the count and write passes make the same decision because they run `Visit` with identical inputs. The pulse commands occupy `[entityTotal, total)`, written by the prefix job before the write pass starts, so they never overlap an entity range.
   - The apply job reads the commands and writes three other lists (`Results`, `Scratch`, `BatchResults`). The write-back job reads commands, results and owners and writes component data only through `ComponentLookup`.
 - **Alignment.** All element types are blittable structs with natural alignment, and list and array storage is allocated with at least that alignment, so the pointers and spans are aligned.
-- **Concurrency.** Only the count and write passes run in parallel, and they work on distinct chunks, so they touch distinct ranges and distinct component arrays; the `GiFault` write for an entity happens in the chunk that owns it. `GiApplyJob` is the only job that calls into Gi, and it runs behind `GiRuntime.BeginWrite` and `EndWrite`. The write-back job is serial.
+- **Concurrency.** Only the count and write passes run in parallel, and they work on distinct chunks, so they touch distinct ranges and distinct component arrays; the `GiFault` write for an entity happens in the chunk that owns it. `GiApplyJob` is the only job that calls into Gi, and it runs behind `GiRuntime.BeginWrite` and `EndWrite`. The write-back job is serial. The guard and recorder calls in `GiApplyJob` sit in `[BurstDiscard]` wrappers.
 
 ### U-3
 
-The unsafe code in sync is the raw column pointers handed to `World.SyncTransforms` in `GiSyncPass.Apply` (a `stackalloc` array of `TransformRange`), the pointer arithmetic over the `Meta` array, and the `NativeArray` writes in the write pass.
+The unsafe code in sync is the raw column pointers handed to the `GiRoot*` entry of `World.SyncTransforms` in `GiSyncApplyJob` (a `stackalloc` array of `TransformRange`), the pointer arithmetic over the `Meta` array, and the `NativeArray` writes in the write pass.
 
-- **Lifetime.** The column lists and the `Invalid` list come from `state.WorldUpdateAllocator` and stay valid for the update. `SyncTransforms` reads and writes them only inside the call (`src/Gi/World.SyncTransforms.cs`: validation, mask clear, then `ApplyTransformRanges`, which keeps no pointer), and the `TransformRange` array is on the stack of that call, so nothing outlives it.
+- **Lifetime.** The column lists and the `Invalid` list come from `state.WorldUpdateAllocator` and stay valid for the update. `SyncTransforms` reads and writes them only inside the call (`src/Gi/World.SyncTransforms.cs`: validation, mask clear, then `ApplyTransformRanges`, which keeps no pointer), and the `TransformRange` array is on the stack of that call, so nothing outlives it. `GiSyncApplyJob` carries the same per-tick `GiRoot` copy as `ProcessJob`.
 - **Aliasing.** Each column is its own list and each category is a disjoint slice of every column; each category's mask occupies its own word range in `Invalid`. Gi rejects overlapping buffers with `OverlappingBuffers` before touching anything, and the tests pass real data, so the rule is checked on every run.
 - **Alignment.** `SourceId`, `float` and `ulong` columns are naturally aligned list storage. Category slices start at element boundaries.
 - **Concurrency.** The write pass runs in parallel over chunks; chunk `c` writes the rows `[Offsets[c*4+k], Offsets[c*4+k] + Counts[c*4+k])` of its single category `k`, which are disjoint by the prefix sum. `GiSyncApplyJob` is the only Gi writer here and runs behind `GiRuntime.BeginWrite` and `EndWrite`. The scatter pass reads the finished columns and mask and writes only `GiFault` data and enabled bits of its own chunk.
@@ -1758,17 +1758,17 @@ The unsafe code in the guard is the pointer access to one `GiGuardTable` in pers
 - **Lifetime.** `GiGuard.Create` allocates one cleared, 64-byte aligned table with `Allocator.Persistent` when code loads or at the first `Register`; `GiGuard.Destroy` frees it in `GiRuntime.Unload`, after `CompleteAll`, so no job holding the pointer outlives it. Jobs read the static pointer and never keep it past `Execute`. When the table is absent `Begin`, `End` and `TryTake` do nothing.
 - **Aliasing.** The table holds 256 state words and 256 holder words, indexed by the Gi world id (a `byte`), and one report slot. Every access to a state or holder word is an `Interlocked` or `Volatile` operation. The report fields are written only by the thread that moved the slot from free to filling and read only after it is ready, so the slot has one writer at a time.
 - **Alignment.** Every field is an `int` at a 4-byte offset inside a 64-byte aligned block.
-- **Concurrency.** `Begin` always registers its party (a reader adds one, a writer adds `WriterBit`), and `End` always removes it, so the word balances even after a conflict. The party that enters second sees the conflict: a reader finds the writer bit set, a writer finds anything other than its own bit. The first conflict since the last `TryTake` keeps its details (world, both tags, whether the intruder writes) and later ones only add to the total. The guard reads and writes no Gi state, so it can report an overlap but cannot cause or hide one. `ENABLE_UNITY_COLLECTIONS_CHECKS` gates the calls with `[Conditional]`, so release builds contain none.
+- **Concurrency.** `Begin` always registers its party (a reader adds one, a writer adds `WriterBit`), and `End` always removes it, so the word balances even after a conflict. The party that enters second sees the conflict: a reader finds the writer bit set, a writer finds anything other than its own bit. The first conflict since the last `TryTake` keeps its details (world, both tags, whether the intruder writes) and later ones only add to the total. The guard reads and writes no Gi state, so it can report an overlap but cannot cause or hide one. `ENABLE_UNITY_COLLECTIONS_CHECKS` gates the calls with `[Conditional]`, so release builds contain none. The five Burst Gi jobs call the guard through `[BurstDiscard]` wrappers, so checks builds keep the guard on the managed path and the Burst path runs without it.
 
 The fences in `GiRuntime.Fences.cs` are two `SharedStatic<JobHandle>` values written only on the main thread, in system `OnUpdate`, and reset when code loads. `GuardTests` in `unity/tests/Gi.Entities.Columns.Tests` pins the table against single-thread sequences and eight-thread stress; `Tests/Runtime/Concurrency` pins the fences, the Editor world and the two-world run.
 
 ### U-5
 
-The unsafe code in sense is the raw pointers `GiSenseReadJob` hands to `GiSensePass.ReadBatch`, the `byte*` component access and `ulong*` word reads in `GiSenseScatterJob`, and the span over the profile blob's binding array in `GiSenseSystem.Rebuild`.
+The unsafe code in sense is the raw pointers `GiSenseReadJob` hands to the `GiRoot*` sense entries, the `byte*` component access and `ulong*` word reads in `GiSenseScatterJob`, and the span over the profile blob's binding array in `GiSenseSystem.Rebuild`.
 
 - **Lifetime.**
   - Every list, array and the `NativeReference<GiReconcileContext>` is allocated from `state.WorldUpdateAllocator` (lists directly, arrays through `CollectionHelper.CreateNativeArray`), so all of it is valid for the whole world update; the update's jobs form one chain stored in `state.Dependency`, so none is still running when the allocator rewinds.
-  - The read job takes its pointers from `NativeList` storage inside `Execute`, for one batch, and stores none of them; the scatter job takes its chunk's component array pointer the same way.
+  - The read job takes its pointers from `NativeList` storage inside `Execute`, for one batch, and stores none of them; the scatter job takes its chunk's component array pointer the same way. The read job carries the same per-tick `GiRoot` copy as `ProcessJob` and passes nulls through exactly as `GiSensePass.ReadBatch` does with a full-rows single batch.
   - The span in `Rebuild` covers the profile blob's `BlobArray<GiBindingSpec>`; `Rebuild` runs on the main thread while the `GiProfileReference` component holds the blob, and the span does not escape — the bindings copy every value they keep.
 - **Aliasing.**
   - The count pass only reads. The write pass writes the rows `[Offsets[c], Offsets[c] + Counts[c])` of `Xs` and `Ys`, disjoint by the prefix sum, and the count and write passes make the same decision because they run the same `GiSenseView` over the same query with nothing between them in the chain that changes it.
@@ -1782,9 +1782,9 @@ The unsafe code in sense is the raw pointers `GiSenseReadJob` hands to `GiSenseP
 
 ### U-6
 
-The unsafe code in splat is the pointer access in `GiSplatView.Visit`, the `stackalloc` cursor array in the write pass, and the `Span` views `GiSplatPass.Apply` builds over the finished columns.
+The unsafe code in splat is the pointer access in `GiSplatView.Visit`, the `stackalloc` cursor array in the write pass, and the `Span` views `GiSplatApplyJob` builds over the finished columns.
 
-- **Lifetime.** The column lists and the count and offset arrays come from `state.WorldUpdateAllocator` and outlive every job in the chain. `Apply` builds its spans over list storage that is not resized while it runs and does not keep them; `World.Splat` reads the spans inside the call. The `stackalloc` cursor array lives for one `Execute`.
+- **Lifetime.** The column lists and the count and offset arrays come from `state.WorldUpdateAllocator` and outlive every job in the chain. The apply job builds its spans over list storage that is not resized while it runs and does not keep them; the `GiRoot*` entry of `World.Splat` reads the spans inside the call. The `stackalloc` cursor array lives for one `Execute`. `GiSplatApplyJob` carries the same per-tick `GiRoot` copy as `ProcessJob`.
 - **Aliasing.** Layer `k` owns the slice `[Meta[k], Meta[k] + Meta[32 + k])` of every column. Chunk `c` writes rows from its own cursor, which starts at `Offsets[c * 32 + k]` and advances once per entity of layer `k` that the count pass counted, so chunks write disjoint rows. The count pass only reads.
 - **Alignment.** `float`, `byte` and `sbyte` columns are naturally aligned list storage; slices start at element boundaries.
 - **Concurrency.** The count and write passes are parallel over chunks and use identical decisions (`GiSplatPass.Check` on identical inputs), so the cursor never passes the counted end of its slice. `GiSplatApplyJob` is the only Gi writer here and runs behind `GiRuntime.BeginWrite` and `EndWrite`; the faults are written by the chunk that owns the entity.
@@ -1802,7 +1802,7 @@ A tile that reads back all zero returns its pool slot and clears its table entry
 
 ### E-7
 
-The unsafe code in the flight recorder is four small things: the three tap calls from the Gi jobs into `GiRecorderGate`, the `fixed` blocks in `GiTileHashes` and `GiReplay`, and the compression calls in `GiLz4Codec`. The recorder, the ring, the keyframes and the export are managed code in `Runtime/Columns/Recorder` with no pointers of their own.
+The unsafe code in the flight recorder is four small things: the three tap calls from the Gi jobs into `GiRecorderGate`, the `fixed` blocks in `GiTileHashes` and `GiReplay`, and the compression calls in `GiLz4Codec`. The recorder, the ring, the keyframes and the export are managed code in `Runtime/Columns/Recorder` with no pointers of their own. The taps sit in `[BurstDiscard]` wrappers, so the Burst path records nothing and the managed path records everything.
 
 - **Lifetime.** A tap receives pointers into the job's own columns (the sync rows, the splat rows) for the length of the call and copies every row into managed arrays before it returns; nothing keeps the pointer. `GiTileHashes` pins its own managed `int[]` and `short[]` for the duration of one `ChangedTiles` or `QueryRegion` call. `GiReplay` pins a decoded record's arrays only around the call into the sync or splat pass. `GiLz4Codec` pins the source and destination arrays around one compress or decompress call.
 - **Aliasing.** `ChangedTiles` writes at most one `int` per tile into an array sized to the largest grid's tile count; `QueryRegion` writes one 32 x 32 tile, 1,024 `short` values, into an array of exactly that size. The replay world is its own Gi world with its own stamps (a separate `GiStampRegistry`), so nothing the replay writes aliases the live world.

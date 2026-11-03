@@ -121,6 +121,9 @@ namespace Gi.Entities
         }
     }
 
+#if !ENABLE_CORECLR || GI_BURST_APPLY
+    [BurstCompile]
+#endif
     internal unsafe struct GiApplyJob : IJob
     {
         public Entity Frame;
@@ -129,6 +132,12 @@ namespace Gi.Entities
         public NativeList<GiCommandResult> Results;
         public NativeList<GiWorld.SourceCommand> Scratch;
         public NativeList<GiWorld.SourceResult> BatchResults;
+        internal Gi.GiRoot Root;
+
+        public GiApplyJob()
+        {
+            Root = Gi.Runtime.Root;
+        }
 
         public void Execute()
         {
@@ -143,23 +152,135 @@ namespace Gi.Entities
             }
 
             var token = frame.Token;
-            GiGuard.Begin(frame.World, GiGuard.Reconcile, true);
+            Gi.GiRoot captured = Root;
+            Gi.GiRoot* root = &captured;
+            GuardBegin(frame.World, GiGuard.Reconcile, true);
             var scope = GiMarkers.Reconcile.Auto();
-            var status = GiApplyPass.Apply(ref token, frame.World,
+            var status = Apply(ref token, frame.World, root,
                 new System.ReadOnlySpan<GiCommand>(Commands.GetUnsafeReadOnlyPtr(), count),
                 new System.Span<GiCommandResult>(Results.GetUnsafePtr(), count),
                 new System.Span<GiWorld.SourceCommand>(Scratch.GetUnsafePtr(), count),
                 new System.Span<GiWorld.SourceResult>(BatchResults.GetUnsafePtr(), count), GiApplyPass.BatchLimit);
             scope.Dispose();
-            GiGuard.End(frame.World, true);
-            if (GiRecorderGate.Enabled)
-                GiRecorderGate.Commands(frame.World, new System.ReadOnlySpan<GiCommand>(Commands.GetUnsafeReadOnlyPtr(), count),
-                    new System.ReadOnlySpan<GiCommandResult>(Results.GetUnsafePtr(), count));
+            GuardEnd(frame.World, true);
+            RecordCommands(frame.World,
+                new System.ReadOnlySpan<GiCommand>(Commands.GetUnsafeReadOnlyPtr(), count),
+                new System.ReadOnlySpan<GiCommandResult>(Results.GetUnsafePtr(), count));
 
             frame.Token = token;
             if (status == GiApplyStatus.Stale) frame.Faults.Raise(GiFaultKind.StaleToken, frame.Tick);
             if (status == GiApplyStatus.Adapter) frame.Faults.Raise(GiFaultKind.Adapter, frame.Tick);
             Frames[Frame] = frame;
+        }
+
+        private static GiApplyStatus Apply(ref GiWorld.Token token, byte world, Gi.GiRoot* root, System.ReadOnlySpan<GiCommand> commands,
+            System.Span<GiCommandResult> results, System.Span<GiWorld.SourceCommand> scratch, System.Span<GiWorld.SourceResult> batchResults,
+            int limit)
+        {
+            var status = GiApplyStatus.Applied;
+            var start = 0;
+            while (start < commands.Length)
+            {
+                var stop = GiApplyPass.SliceEnd(commands, start, limit);
+                var sliced = ApplySlice(ref token, world, root, commands, results, scratch, batchResults, start, stop);
+                if (sliced != GiApplyStatus.Applied) status = sliced;
+                start = stop;
+            }
+
+            return status;
+        }
+
+        private static GiApplyStatus ApplySlice(ref GiWorld.Token token, byte world, Gi.GiRoot* root, System.ReadOnlySpan<GiCommand> commands,
+            System.Span<GiCommandResult> results, System.Span<GiWorld.SourceCommand> scratch, System.Span<GiWorld.SourceResult> batchResults,
+            int start, int stop)
+        {
+            var count = stop - start;
+            for (var i = 0; i < count; i++) scratch[i] = Convert(commands[start + i], start);
+
+            var batch = GiWorld.ApplyBatch(root, token, scratch.Slice(0, count), batchResults.Slice(0, count));
+            if (batch == GiWorld.BatchStatus.StaleRevision)
+            {
+                token = Refresh(world, root);
+                batch = GiWorld.ApplyBatch(root, token, scratch.Slice(0, count), batchResults.Slice(0, count));
+            }
+
+            if (batch != GiWorld.BatchStatus.Applied)
+            {
+                var code = batch == GiWorld.BatchStatus.StaleRevision ? GiFaultCode.StaleSource : GiFaultCode.Unknown;
+                for (var i = 0; i < count; i++) results[start + i] = new GiCommandResult { Code = code };
+                return batch == GiWorld.BatchStatus.StaleRevision ? GiApplyStatus.Stale : GiApplyStatus.Adapter;
+            }
+
+            for (var i = 0; i < count; i++)
+                results[start + i] = new GiCommandResult { Code = Map(batchResults[i].Status), Source = batchResults[i].SourceId };
+            return GiApplyStatus.Applied;
+        }
+
+        private static GiWorld.Token Refresh(byte world, Gi.GiRoot* root)
+        {
+            return new GiWorld.Token(world, GiWorld.GetContext(root, world) == null ? 0 : root->WorldRevisions[world]);
+        }
+
+        private static GiWorld.SourceTarget TargetOf(in GiCommand command, int start)
+        {
+            return command.Target >= 0
+                ? GiWorld.SourceTarget.CreatedBy(command.Target - start)
+                : GiWorld.SourceTarget.Existing(command.Source);
+        }
+
+        private static GiWorld.SourceCommand Convert(in GiCommand command, int start)
+        {
+            switch (command.Kind)
+            {
+                case GiCommandKind.Place:
+                    return GiWorld.SourceCommand.Place(command.Layer, command.X, command.Y, command.Stamp, command.Gain,
+                        command.Heading, command.Scale);
+                case GiCommandKind.Remove:
+                    return GiWorld.SourceCommand.Remove(TargetOf(command, start));
+                case GiCommandKind.SetGain:
+                    return GiWorld.SourceCommand.SetGain(TargetOf(command, start), command.Gain);
+                case GiCommandKind.Fade:
+                    return GiWorld.SourceCommand.Fade(TargetOf(command, start), command.Gain, command.Ticks);
+                default:
+                    return GiWorld.SourceCommand.Expire(TargetOf(command, start), command.Ticks);
+            }
+        }
+
+        private static GiFaultCode Map(GiWorld.SourceResultStatus status)
+        {
+            switch (status)
+            {
+                case GiWorld.SourceResultStatus.Applied:
+                    return GiFaultCode.None;
+                case GiWorld.SourceResultStatus.InvalidSource:
+                    return GiFaultCode.InvalidSource;
+                case GiWorld.SourceResultStatus.InvalidLayer:
+                    return GiFaultCode.InvalidLayer;
+                case GiWorld.SourceResultStatus.InvalidStamp:
+                    return GiFaultCode.InvalidStamp;
+                case GiWorld.SourceResultStatus.SourceLimitReached:
+                    return GiFaultCode.SourceLimit;
+                default:
+                    return GiFaultCode.Unknown;
+            }
+        }
+
+        [BurstDiscard]
+        private static void GuardBegin(byte world, int tag, bool write)
+        {
+            GiGuard.Begin(world, tag, write);
+        }
+
+        [BurstDiscard]
+        private static void GuardEnd(byte world, bool write)
+        {
+            GiGuard.End(world, write);
+        }
+
+        [BurstDiscard]
+        private static void RecordCommands(byte world, System.ReadOnlySpan<GiCommand> commands, System.ReadOnlySpan<GiCommandResult> results)
+        {
+            if (GiRecorderGate.Enabled) GiRecorderGate.Commands(world, commands, results);
         }
     }
 

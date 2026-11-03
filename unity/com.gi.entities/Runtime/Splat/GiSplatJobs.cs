@@ -4,6 +4,7 @@ using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
 using Unity.Jobs;
+using GiWorld = Gi.World;
 
 namespace Gi.Entities
 {
@@ -97,6 +98,9 @@ namespace Gi.Entities
         }
     }
 
+#if !ENABLE_CORECLR || GI_BURST_SPLAT
+    [BurstCompile]
+#endif
     internal unsafe struct GiSplatApplyJob : IJob
     {
         public Entity Frame;
@@ -107,6 +111,12 @@ namespace Gi.Entities
         public NativeList<float> Ys;
         public NativeList<byte> Stamps;
         public NativeList<sbyte> Gains;
+        internal Gi.GiRoot Root;
+
+        public GiSplatApplyJob()
+        {
+            Root = Gi.Runtime.Root;
+        }
 
         public void Execute()
         {
@@ -114,22 +124,64 @@ namespace Gi.Entities
             var applied = 0;
             if (frame.Alive && Xs.Length > 0)
             {
+                Gi.GiRoot captured = Root;
+                Gi.GiRoot* root = &captured;
                 var meta = (int*)Meta.GetUnsafeReadOnlyPtr();
                 var xs = (float*)Xs.GetUnsafePtr();
                 var ys = (float*)Ys.GetUnsafePtr();
                 var stamps = (byte*)Stamps.GetUnsafePtr();
                 var gains = (sbyte*)Gains.GetUnsafePtr();
-                GiGuard.Begin(frame.World, GiGuard.Splat, true);
+                GuardBegin(frame.World, GiGuard.Splat, true);
                 var scope = GiMarkers.Splat.Auto();
-                if (GiRecorderGate.Enabled) GiRecorderGate.Splat(frame.World, meta, meta + GiSplatPass.Layers, xs, ys, stamps, gains);
-                applied = GiSplatPass.Apply(frame.World, frame.Tables, meta, meta + GiSplatPass.Layers, xs, ys, stamps, gains);
+                RecordSplat(frame.World, meta, meta + GiSplatPass.Layers, xs, ys, stamps, gains);
+                applied = Apply(root, frame.World, frame.Tables, meta, meta + GiSplatPass.Layers, xs, ys, stamps, gains);
                 scope.Dispose();
-                GiGuard.End(frame.World, true);
+                GuardEnd(frame.World, true);
             }
 
             var stats = Stats[Frame];
             stats.Splats = applied;
             Stats[Frame] = stats;
+        }
+
+        private static int Apply(Gi.GiRoot* root, byte world, GiTables tables, int* layerStart, int* layerCount, float* xs, float* ys, byte* stamps,
+            sbyte* gains)
+        {
+            var applied = 0;
+            for (var key = 0; key < GiSplatPass.Layers; key++)
+            {
+                var count = layerCount[key];
+                if (count == 0 || !tables.TryLayer(new GiLayerKey((byte)key), out var layer)) continue;
+
+                var start = layerStart[key];
+                var columnsX = new System.ReadOnlySpan<float>(xs + start, count);
+                var columnsY = new System.ReadOnlySpan<float>(ys + start, count);
+                if (GiSplatPass.Uniform(stamps + start, gains + start, count))
+                    applied += GiWorld.Splat(root, world, layer, columnsX, columnsY, stamps[start], gains[start]);
+                else
+                    applied += GiWorld.Splat(root, world, layer, columnsX, columnsY,
+                        new System.ReadOnlySpan<byte>(stamps + start, count), new System.ReadOnlySpan<sbyte>(gains + start, count));
+            }
+
+            return applied;
+        }
+
+        [BurstDiscard]
+        private static void GuardBegin(byte world, int tag, bool write)
+        {
+            GiGuard.Begin(world, tag, write);
+        }
+
+        [BurstDiscard]
+        private static void GuardEnd(byte world, bool write)
+        {
+            GiGuard.End(world, write);
+        }
+
+        [BurstDiscard]
+        private static void RecordSplat(byte world, int* layerStart, int* layerCount, float* xs, float* ys, byte* stamps, sbyte* gains)
+        {
+            if (GiRecorderGate.Enabled) GiRecorderGate.Splat(world, layerStart, layerCount, xs, ys, stamps, gains);
         }
     }
 }
