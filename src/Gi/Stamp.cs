@@ -35,7 +35,7 @@ internal static unsafe class StampCatalog
     internal const int MaxStamps = ValidationRules.MaxStamps;
     private const int FullArc = ValidationRules.FullArc;
 
-    internal static int Count { get; private set; } = 1;
+    internal static int Count { get => Runtime.Root.StampCount; private set => Runtime.Root.StampCount = value; }
 
     [MethodImpl(Jit.Hot)]
     internal static StampVariant* Get(byte id)
