@@ -264,12 +264,10 @@ public static unsafe partial class World
     internal const int PageBytes = Cells * sizeof(short);
     internal const int PageShift = 11;
 
-    private static int _worldCount;
-
     [MethodImpl(Jit.Inline)]
     internal static WorldCtx* GetContext(byte world)
     {
-        if (world >= _worldCount) return null;
+        if (world >= Runtime.Root.WorldCount) return null;
 
         var w = Runtime.Worlds + world;
         return w->Grids == null ? null : w;
@@ -278,13 +276,13 @@ public static unsafe partial class World
     [MethodImpl(Jit.Hot)]
     private static byte ReserveSlot()
     {
-        for (var i = 0; i < _worldCount; i++)
+        for (var i = 0; i < Runtime.Root.WorldCount; i++)
             if (Runtime.Worlds[i].Grids == null)
                 return (byte)i;
 
-        if (_worldCount >= MaxWorlds) throw new InvalidOperationException("World limit reached.");
+        if (Runtime.Root.WorldCount >= MaxWorlds) throw new InvalidOperationException("World limit reached.");
 
-        return (byte)_worldCount++;
+        return (byte)Runtime.Root.WorldCount++;
     }
 
     [MethodImpl(Jit.Hot)]
@@ -326,7 +324,7 @@ public static unsafe partial class World
     [MethodImpl(Jit.Hot)]
     public static int Revision(byte world)
     {
-        return world < _worldCount ? Runtime.WorldRevisions[world] : 0;
+        return world < Runtime.Root.WorldCount ? Runtime.WorldRevisions[world] : 0;
     }
 
     [MethodImpl(Jit.Hot)]
@@ -334,13 +332,13 @@ public static unsafe partial class World
     {
         if (Runtime.Worlds == null) return true;
 
-        for (var i = 0; i < _worldCount; i++)
+        for (var i = 0; i < Runtime.Root.WorldCount; i++)
             if (Runtime.Worlds[i].Grids != null)
                 return false;
 
         StampCatalog.Release();
         Runtime.Release();
-        _worldCount = 0;
+        Runtime.Root.WorldCount = 0;
         return true;
     }
 
@@ -365,7 +363,7 @@ public static unsafe partial class World
     public static int CopyWorldIds(Span<byte> destination)
     {
         var count = 0;
-        for (var i = 0; i < _worldCount; i++)
+        for (var i = 0; i < Runtime.Root.WorldCount; i++)
         {
             if ((Runtime.Worlds + i)->Grids == null) continue;
             if (count < destination.Length) destination[count] = (byte)i;
@@ -378,7 +376,7 @@ public static unsafe partial class World
     [MethodImpl(Jit.Hot)]
     public static void ProcessAll()
     {
-        for (var i = 0; i < _worldCount; i++)
+        for (var i = 0; i < Runtime.Root.WorldCount; i++)
             if ((Runtime.Worlds + i)->Grids != null)
                 Process((byte)i);
     }
@@ -817,7 +815,7 @@ public static unsafe partial class World
     [MethodImpl(Jit.Hot)]
     internal static bool UsesStamp(byte stamp)
     {
-        for (var wi = 0; wi < _worldCount; wi++)
+        for (var wi = 0; wi < Runtime.Root.WorldCount; wi++)
         {
             var w = Runtime.Worlds + wi;
             var s = &w->Sources;
@@ -833,7 +831,7 @@ public static unsafe partial class World
     [MethodImpl(Jit.Hot)]
     internal static void FlushKernels()
     {
-        for (var wi = 0; wi < _worldCount; wi++)
+        for (var wi = 0; wi < Runtime.Root.WorldCount; wi++)
         {
             var w = Runtime.Worlds + wi;
             if (w->Grids != null) w->Kernels.RequestFlush();

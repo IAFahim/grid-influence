@@ -48,8 +48,8 @@ The rest of this file derives from seven statements.
   process: `SetAllocator` returns `false` and changes nothing while Gi holds native memory, a
   call naming exactly one null pointer throws `ArgumentException`, and passing two null pointers
   restores the default allocator under the same rule. An install survives teardowns — it is
-  restored only by an explicit two-null call — and `NativeHeap.Calls` counts hook calls like
-  default calls, so the teardown receipt (calls back to zero) holds under a hook too.
+  restored only by an explicit two-null call — and the root call counter (read as `NativeHeap.Calls`)
+  counts hook calls like default calls, so the teardown receipt (calls back to zero) holds under a hook too.
   `World.Memory(world, out storeBytes,
   out liveTiles, out pages, out kernelEntries, out liveSources)` is the tooling read-out: it
   sums, over every (grid, layer) of the world, the retained capacity of the four plane slabs
@@ -1068,17 +1068,19 @@ digits. Concurrency: single thread.
 
 ## Unsafe proof
 
-- **Lifetime**: the world arena (255 `WorldCtx`) and stamp catalog (256 `StampVariant`) are
-  process-lifetime pools allocated by the first creation call (`World.New`, `Stamp.New`,
-  `Stamp.Box`) — never by static construction, so no static constructor on the assembly performs
-  calls. This does not make mutable Gi statics callable from Burst through a precompiled DLL;
-  Unity records with Burst and invokes Gi from non-Burst code. `World.Teardown` is the pools'
-  release: it is refused — it returns `false` and touches nothing — while any world is live
-  (the same `Grids != null` slot scan `CopyWorldIds` reads), and otherwise frees every stamp's
-  raster and mips, both pools, the shared zero page, and the revision array, and returns the
-  world count, the catalog count (id 0 stays reserved), and `NativeHeap.Calls` to their pristine
-  values, so the next creation call performs the same `Ensure` a fresh process would. The
-  precondition is exactly the absence of live worlds: stamps outlive worlds by design and are
+- **Lifetime**: the world arena (255 `WorldCtx`), stamp catalog (256 `StampVariant`), shared
+  zero page, revision array, revision floor, heap-call counter, allocator hooks, measuring flag,
+  stamp count, and world count are the eleven fields of one blittable `GiRoot`; `Runtime.Root`
+  is the only static field in the assembly, so no static constructor performs calls and every
+  other former static is a property forwarding into the root. This does not make the root callable
+  from Burst through a precompiled DLL; Unity records with Burst and invokes Gi from non-Burst
+  code. `World.Teardown` is the pools' release: it is refused — it returns `false` and touches
+  nothing — while any world is live (the same `Grids != null` slot scan `CopyWorldIds` reads),
+  and otherwise frees every stamp's raster and mips, both pools, the shared zero page, and the
+  revision array, and returns the world count, the catalog count (id 0 stays reserved), and the
+  root call counter to their pristine values, so the next creation call performs the same `Ensure`
+  a fresh process would.
+  The precondition is exactly the absence of live worlds: stamps outlive worlds by design and are
   torn down with the catalog, not refused; every world-scoped block, kernel cache, and taps
   handle dies with its world before teardown can run, and no pointer into freed storage is
   handed out in between because pools, payloads, and counters are reset in the same call. The
@@ -1178,25 +1180,25 @@ digits. Concurrency: single thread.
   the context; a context without a grid array is not a world, so `GetContext` returns null for it
   and every handle-taking call reads a freed handle as absent. No pointer escapes an owner: handles
   are bytes and source ids carry a generation.
-- **Allocator hook**: `World.SetAllocator` stores the two unmanaged pointers in `NativeHeap`'s
-  statics; every allocation and free site already funnels through `NativeHeap`, so the hook sees
-  each block exactly once on the allocating thread. *Lifetime*: the pointers are process-lifetime
-  and never invoked after a two-null restore; installation is gated on `Runtime.Worlds == null`,
-  which is exactly "no `NativeHeap` block is live" — pools, stamp payloads, and the zero page are
-  allocated after the gate and freed before it reopens, so no block can be allocated by one
-  allocator and freed by another. *Aliasing*: Gi hands the hook only pointers it received from the
-  same hook (or, by default, only pointers `NativeMemory`/`Marshal` returned), one free per
-  allocation, never a block interior — `SourceColumns` chunks, slab regions, and buffers are freed
-  at their base and exactly once by the same owner that grew them. *Alignment*: `allocate` is
-  called with alignment 0 or 64; a hook may return over-aligned memory for the 0 case freely
-  (every Gi access is at most naturally aligned), and the default path is byte-identical to the
-  unhooked build — `NativeMemory.AllocZeroed`/`Free` and `AlignedAlloc(64)`/`AlignedFree` on .NET,
-  `Marshal.AllocHGlobal` with platform-natural alignment on netstandard2.1. *Concurrency*: the
-  hook is installed or restored before the first allocation or after a full teardown, both
-  process-wide serialized points (below), so the pointer fields are never written while any Gi
-  call runs; afterwards the fields are read-only. The hook itself runs on the calling thread of
-  each cold-path allocation (creation, growth, teardown) and must be safe to call from any thread
-  Gi runs on; warm paths never allocate, so no synchronization is added anywhere.
+- **Allocator hook**: `World.SetAllocator` stores the two unmanaged pointers in the root's hook
+  fields (reached as `NativeHeap.HookAllocate`/`HookFree` properties); every allocation and free
+  site already funnels through `NativeHeap`, so the hook sees each block exactly once on the
+  allocating thread. *Lifetime*: the pointers are process-lifetime and never invoked after a
+  two-null restore; installation is gated on `Runtime.Root.Worlds == null`, which is exactly
+  "no heap block is live" — pools, stamp payloads, and the zero page are allocated after the
+  gate and freed before it reopens, so no block can be allocated by one allocator and freed by another.
+  *Aliasing*: Gi hands the hook only pointers it received from the same hook (or, by default, only
+  pointers `NativeMemory`/`Marshal` returned), one free per allocation, never a block interior —
+  `SourceColumns` chunks, slab regions, and buffers are freed at their base and exactly once by the
+  same owner that grew them. *Alignment*: `allocate` is called with alignment 0 or 64; a hook may
+  return over-aligned memory for the 0 case freely (every Gi access is at most naturally aligned),
+  and the default path is byte-identical to the unhooked build — `NativeMemory.AllocZeroed`/`Free`
+  and `AlignedAlloc(64)`/`AlignedFree` on .NET, `Marshal.AllocHGlobal` with platform-natural
+  alignment on netstandard2.1. *Concurrency*: the hook is installed or restored before the first
+  allocation or after a full teardown, both process-wide serialized points (below), so the pointer
+  fields are never written while any Gi call runs; afterwards the fields are read-only. The hook
+  itself runs on the calling thread of each cold-path allocation (creation, growth, teardown) and
+  must be safe to call from any thread Gi runs on; warm paths never allocate, so no synchronization is added anywhere.
 - **Source columns**: the hot columns (x, y, stamp, layer, gain, angle, scale, liveness,
   generation, mark) live in 16,384-slot chunks. *Lifetime*: each column owns an array of up to 1,024
   chunk pointers, allocated zeroed when the first chunk is added and freed exactly once by
@@ -1436,7 +1438,7 @@ digits. Concurrency: single thread.
   tile's page, and `World.LayerHash` is a plain read of the running `ulong` under the same
   serial-per-world rule as `World.Memory`. Warm `Process` and warm reads
   make no `NativeHeap` calls at all: slabs, directories, and every list are sized by grow-to-max
-  before steady state, and the hook counter (`NativeHeap.Calls`) is asserted flat by a test
+  before steady state, and the root hook counter (read as `NativeHeap.Calls`) is asserted flat by a test
   across warm frames that move and read. Kernel-cache builds run on the owning world's thread
   inside `Process` — the sweep and publish write paths on a cache miss — reading the placement
   and the stamp variant read-only and writing only cache-owned buffers and their own stack.
@@ -1467,7 +1469,7 @@ digits. Concurrency: single thread.
   Determinism is unaffected: tiles are
   independent, arithmetic is integer-exact, the dead set is a pure function of page content, and
   the order of removals has no observable effect on map contents. Warm `Process`
-  allocates 0 B: every buffer it touches is sized by grow-to-max before steady state. `Process` on different worlds shares no mutable state: the kernel cache and canvas belong to the world, the stage timers (`ProcessStages`) accumulate in the `Stages` field of the `WorldCtx` that ran the stage and are summed only when a benchmark reads them, and `NativeHeap.Calls` is advanced with `Interlocked.Increment`, so first-growth allocations on two threads leave it exact. `ProcessStages.Measuring` is written only while no `Process` runs. `CrossWorldProcessTests` drives two worlds on two threads for 10,000 ticks of place, move, gain and remove traffic and requires the same layer hashes and the same heap-call count as the same two worlds run one after the other. World creation, `World.Free`, and stamp catalog mutation (creation and `Stamp.Free`, which
+  allocates 0 B: every buffer it touches is sized by grow-to-max before steady state. `Process` on different worlds shares no mutable state: the kernel cache and canvas belong to the world, the stage timers accumulate in the `Stages` field of the `WorldCtx` that ran the stage and are summed only when a benchmark reads them, and the root call counter (read as `NativeHeap.Calls`) is advanced with `Interlocked.Increment`, so first-growth allocations on two threads leave it exact. The root measuring flag (set as `ProcessStages.Measuring`) is written only while no `Process` runs. `CrossWorldProcessTests` drives two worlds on two threads for 10,000 ticks of place, move, gain and remove traffic and requires the same layer hashes and the same heap-call count as the same two worlds run one after the other. World creation, `World.Free`, and stamp catalog mutation (creation and `Stamp.Free`, which
   scans every world's source columns, pending snapshots, and journal) are also serialized
   across worlds because their arenas and counts are process-wide, `Stamp.Free` must not
   overlap any world's mutation or `Process` — its `UsesStamp` scan still reads live columns,

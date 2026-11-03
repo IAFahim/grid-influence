@@ -11,7 +11,7 @@ internal struct StageTicks
 
 internal static unsafe class ProcessStages
 {
-    internal static bool Measuring;
+    internal static bool Measuring { get => Runtime.Root.Measuring; set => Runtime.Root.Measuring = value; }
 
     internal static long PrepareTicks => Total(0);
 
