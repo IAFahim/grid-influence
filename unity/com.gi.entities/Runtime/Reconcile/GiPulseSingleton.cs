@@ -1,14 +1,18 @@
-using BovineLabs.Core.Collections;
-using BovineLabs.Core.SingletonCollection;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
+using Unity.Entities;
 
 namespace Gi.Entities
 {
-    public unsafe struct GiPulseSingleton : ISingletonCollection<NativeThreadStream>
+    public unsafe struct GiPulseSingleton : IComponentData
     {
-        public UnsafeList<NativeThreadStream>* Collections { get; set; }
+        public NativeQueue<GiPulse> Queue;
+        [NativeDisableUnsafePtrRestriction] internal int* Pending;
 
-        public Allocator Allocator { get; set; }
+        public NativeQueue<GiPulse>.ParallelWriter CreateWriter()
+        {
+            if (Pending != null) *Pending = 1;
+            return Queue.AsParallelWriter();
+        }
     }
 }

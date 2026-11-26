@@ -1,4 +1,3 @@
-using BovineLabs.Core.EntityCommands;
 using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Transforms;
@@ -29,7 +28,7 @@ namespace Gi.Entities.Samples.Crowd
                     var angle = rng.NextFloat(math.PI * 2f);
                     var distance = math.sqrt(rng.NextFloat()) * spawner.Radius;
                     var agent = manager.CreateEntity(typeof(LocalTransform), typeof(CrowdAgent), typeof(CrowdSteering));
-                    var commands = new EntityManagerCommands(manager, agent);
+                    var commands = new GiEntityManagerCommands(manager, agent);
                     GiSplatBuilder.Apply(ref commands, new GiSplatSettings
                     {
                         Layer = spawner.Layer,

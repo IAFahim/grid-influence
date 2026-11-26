@@ -1,7 +1,6 @@
 using System.Collections.Generic;
 using Gi.Entities.Tests.Support;
 using NUnit.Framework;
-using BovineLabs.Core.SingletonCollection;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
@@ -240,8 +239,8 @@ namespace Gi.Entities.Tests
                 Options = EntityQueryOptions.IncludeSystems,
             });
 
-            var writer = pulses.GetSingleton<GiPulseSingleton>().CreateThreadStream();
-            writer.Write(new GiPulse { Layer = new GiLayerKey(0), Stamp = new GiStampKey(0), X = 30f, Y = 30f, Scale = 1f, Gain = 8, Ticks = 2 });
+            var writer = pulses.GetSingleton<GiPulseSingleton>().CreateWriter();
+            writer.Enqueue(new GiPulse { Layer = new GiLayerKey(0), Stamp = new GiStampKey(0), X = 30f, Y = 30f, Scale = 1f, Gain = 8, Ticks = 2 });
             fixture.Tick();
             Assert.That(EmptyHash(fixture, 0), Is.Not.EqualTo(empty));
             fixture.Tick();
@@ -280,8 +279,8 @@ namespace Gi.Entities.Tests
                     All = new[] { ComponentType.ReadWrite<GiPulseSingleton>() },
                     Options = EntityQueryOptions.IncludeSystems,
                 });
-                var writer = query.GetSingleton<GiPulseSingleton>().CreateThreadStream();
-                foreach (var pulse in order) writer.Write(pulse);
+                var writer = query.GetSingleton<GiPulseSingleton>().CreateWriter();
+                foreach (var pulse in order) writer.Enqueue(pulse);
                 fixture.Tick();
                 var layers = new ulong[6];
                 for (var l = 0; l < 6; l++) layers[l] = EmptyHash(fixture, l);

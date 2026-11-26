@@ -18,7 +18,7 @@ namespace Gi.Entities.Tests
         [SetUp]
         public void SetUp()
         {
-            if (!SystemInfo.supportsComputeShaders) Assert.Ignore("The GPU mirror needs compute shaders; run this suite on a machine with a graphics device.");
+            if (!GiMirror.Supported) Assert.Ignore("The GPU mirror needs compute shaders; run this suite on a machine with a graphics device.");
         }
 
         private static int[] Decode(GiMirror mirror)

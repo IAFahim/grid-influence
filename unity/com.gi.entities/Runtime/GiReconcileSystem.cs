@@ -1,7 +1,5 @@
-using BovineLabs.Core;
-using BovineLabs.Core.Collections;
-using BovineLabs.Core.SingletonCollection;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
 using Unity.Jobs;
 using Unity.Transforms;
@@ -9,18 +7,20 @@ using GiWorld = Gi.World;
 
 namespace Gi.Entities
 {
-    [WorldSystemFilter(Worlds.SimulationEditor)]
+    [WorldSystemFilter(GiWorlds.SimulationEditor)]
     [UpdateInGroup(typeof(GiSystemGroup))]
     [UpdateAfter(typeof(GiBootstrapSystem))]
     [UpdateBefore(typeof(GiProcessSystem))]
-    public partial struct GiReconcileSystem : ISystem
+    public unsafe partial struct GiReconcileSystem : ISystem
     {
-        private SingletonCollectionUtil<GiPulseSingleton, NativeThreadStream> _pulses;
+        private NativeQueue<GiPulse> _pulses;
+        private int* _pendingPulses;
         private EntityQuery _all;
         private EntityQuery _added;
         private EntityQuery _retire;
         private EntityCommandBuffer _buffer;
         private bool _playback;
+        private uint _generation;
         private GiReconcileView _view;
         private ComponentLookup<GiFrame> _frames;
         private ComponentLookup<GiSource> _sourceLookup;
@@ -31,12 +31,16 @@ namespace Gi.Entities
         public void OnCreate(ref SystemState state)
         {
             state.RequireForUpdate<GiFrame>();
-            _pulses = new SingletonCollectionUtil<GiPulseSingleton, NativeThreadStream>(ref state);
+            _pulses = new NativeQueue<GiPulse>(Allocator.Persistent);
+            _pendingPulses = (int*)UnsafeUtility.Malloc(sizeof(int), 4, Allocator.Persistent);
+            *_pendingPulses = 0;
+            state.EntityManager.AddComponentData(state.SystemHandle, new GiPulseSingleton { Queue = _pulses, Pending = _pendingPulses });
 
             const EntityQueryOptions every = EntityQueryOptions.IncludeDisabledEntities | EntityQueryOptions.IncludePrefab;
             _all = new EntityQueryBuilder(Allocator.Temp).WithAll<GiSource>().WithOptions(every).Build(ref state);
             _added = new EntityQueryBuilder(Allocator.Temp).WithAll<GiEmitter>().WithNone<GiSource>().Build(ref state);
-            _retire = new EntityQueryBuilder(Allocator.Temp).WithAll<GiSource>().WithNone<GiEmitter>().WithOptions(every).Build(ref state);
+            _retire = new EntityQueryBuilder(Allocator.Temp).WithAll<GiSource>().WithNone<GiEmitter>()
+                .WithOptions(every | EntityQueryOptions.IgnoreComponentEnabledState).Build(ref state);
 
             _view = new GiReconcileView
             {
@@ -64,11 +68,27 @@ namespace Gi.Entities
         {
             state.Dependency.Complete();
             if (_playback) _buffer.Dispose();
-            _pulses.Dispose();
+            if (_pulses.IsCreated) _pulses.Dispose();
+            if (_pendingPulses != null)
+            {
+                UnsafeUtility.Free(_pendingPulses, Allocator.Persistent);
+                _pendingPulses = null;
+            }
         }
 
         public void OnUpdate(ref SystemState state)
         {
+            var generation = state.EntityManager.GetComponentData<GiFrame>(SystemAPI.GetSingletonEntity<GiFrame>()).Generation;
+            if (_generation != generation)
+            {
+                _generation = generation;
+                if (_playback)
+                {
+                    state.Dependency.Complete();
+                    _buffer.Dispose();
+                    _playback = false;
+                }
+            }
             if (_playback)
             {
                 state.Dependency.Complete();
@@ -78,11 +98,8 @@ namespace Gi.Entities
             }
 
             var added = !_added.IsEmptyIgnoreFilter;
-            if (!added && _all.IsEmptyIgnoreFilter && _pulses.Containers.Length == 0)
-            {
-                _pulses.ClearRewind(state.Dependency);
+            if (!added && _all.IsEmptyIgnoreFilter && *_pendingPulses == 0)
                 return;
-            }
 
             if (added)
             {
@@ -128,7 +145,8 @@ namespace Gi.Entities
                 Frame = SystemAPI.GetSingletonEntity<GiFrame>(),
                 Frames = _frames,
                 Context = context,
-                Streams = _pulses.Containers,
+                Queue = _pulses,
+                Pending = _pendingPulses,
                 Pulses = pulses,
             }.Schedule(state.Dependency);
             handle = new GiCountJob { View = _view, Context = context, LastVersion = state.LastSystemVersion, Counts = counts }
@@ -163,6 +181,7 @@ namespace Gi.Entities
                 Results = results,
                 Scratch = scratch,
                 BatchResults = batchResults,
+                Root = GiRuntime.RootPtr,
             }.Schedule(GiRuntime.BeginWrite(handle));
             GiRuntime.EndWrite(handle);
 
@@ -184,7 +203,6 @@ namespace Gi.Entities
                 _playback = true;
             }
 
-            _pulses.ClearRewind(handle);
             state.Dependency = handle;
         }
     }

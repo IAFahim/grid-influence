@@ -1,4 +1,3 @@
-using BovineLabs.Core;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Jobs;
@@ -7,11 +6,11 @@ using GiWorld = Gi.World;
 
 namespace Gi.Entities
 {
-    [WorldSystemFilter(Worlds.SimulationEditor)]
+    [WorldSystemFilter(GiWorlds.SimulationEditor)]
     [UpdateInGroup(typeof(GiSystemGroup))]
     [UpdateAfter(typeof(GiReconcileSystem))]
     [UpdateBefore(typeof(GiProcessSystem))]
-    public partial struct GiSyncSystem : ISystem
+    public unsafe partial struct GiSyncSystem : ISystem
     {
         private EntityQuery _placed;
         private GiSyncView _view;
@@ -106,6 +105,7 @@ namespace Gi.Entities
                 Headings = headings,
                 Scales = scales,
                 Invalid = invalid,
+                Root = GiRuntime.RootPtr,
             }.Schedule(GiRuntime.BeginWrite(handle));
             GiRuntime.EndWrite(handle);
 

@@ -2,7 +2,6 @@
     "name": "Gi.Entities",
     "rootNamespace": "Gi.Entities",
     "references": [
-        "BovineLabs.Core",
         "Unity.Burst",
         "Unity.Collections",
         "Unity.Entities",
@@ -20,6 +19,12 @@
     ],
     "autoReferenced": false,
     "defineConstraints": [],
-    "versionDefines": [],
+    "versionDefines": [
+        {
+            "name": "com.bovinelabs.core",
+            "expression": "",
+            "define": "GI_SAVANNA"
+        }
+    ],
     "noEngineReferences": false
 }

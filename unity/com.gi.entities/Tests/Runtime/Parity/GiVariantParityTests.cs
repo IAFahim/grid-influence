@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Runtime.Versioning;
 using Gi.Entities.Tests.Support;
 using NUnit.Framework;
+using UnityEngine;
 using GiWorld = Gi.World;
 
 namespace Gi.Entities.Tests
@@ -19,7 +20,7 @@ namespace Gi.Entities.Tests
         public void VariantIdentityIsLogged()
         {
             var assembly = typeof(GiWorld).Assembly;
-            var location = assembly.Location.Replace('\\', '/');
+            var location = (assembly.GetLoadedAssemblyPath() ?? string.Empty).Replace('\\', '/');
             var framework = assembly.GetCustomAttribute<TargetFrameworkAttribute>()?.FrameworkName ?? "none";
             var vector = typeof(object).Assembly.GetType("System.Runtime.Intrinsics.Vector128");
             var flag = vector?.GetProperty("IsHardwareAccelerated", BindingFlags.Public | BindingFlags.Static);

@@ -1,10 +1,9 @@
-using BovineLabs.Core;
 using Unity.Collections;
 using Unity.Entities;
 
 namespace Gi.Entities
 {
-    [WorldSystemFilter(Worlds.SimulationEditor)]
+    [WorldSystemFilter(GiWorlds.SimulationEditor)]
     [UpdateInGroup(typeof(GiSystemGroup))]
     [UpdateAfter(typeof(GiBootstrapSystem))]
     [UpdateBefore(typeof(GiReconcileSystem))]

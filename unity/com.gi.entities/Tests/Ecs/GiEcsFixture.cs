@@ -82,6 +82,7 @@ namespace Gi.Entities.Tests
             Simulation.SortSystems();
         }
 
+#if GI_QUILL
         public SystemHandle AddFieldDraw()
         {
             var presentation = World.GetOrCreateSystemManaged<PresentationSystemGroup>();
@@ -95,6 +96,7 @@ namespace Gi.Entities.Tests
             Simulation.SortSystems();
             return draw;
         }
+#endif
 
         public void AddTransformSystems()
         {

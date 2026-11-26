@@ -195,7 +195,7 @@ namespace Gi.Entities.Performance
         [Test, Performance]
         public void MirrorUploadOfFiveHundredAndTwelveChangedTiles()
         {
-            Assume.That(SystemInfo.supportsComputeShaders, "needs compute shaders");
+            Assume.That(GiMirror.Supported, "needs compute shaders");
             using var setup = GiScenarioWorld.Create(GiScenarioProfile.Standard());
             var layer = setup.Layers[0];
             using var mirror = new GiMirror(setup.World, 1, layer, 7);

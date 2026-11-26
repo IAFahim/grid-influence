@@ -16,7 +16,7 @@ using GiWorld = Gi.World;
 
 namespace Gi.Entities.Presentation
 {
-    [WorldSystemFilter(Worlds.SimulationEditor)]
+    [WorldSystemFilter(GiWorlds.SimulationEditor)]
     [UpdateInGroup(typeof(DebugSystemGroup))]
     public unsafe partial struct GiFieldDrawSystem : ISystem
     {

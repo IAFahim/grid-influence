@@ -47,7 +47,6 @@ namespace Gi.Entities.Presentation
         public GiMirror(byte world, byte grid, byte layer, int power, ComputeShader compute = null, int maxBudget = 4096)
         {
             World = world;
-            _live++;
             Grid = grid;
             Layer = layer;
             Power = power;
@@ -66,7 +65,10 @@ namespace Gi.Entities.Presentation
             _table = new GraphicsBuffer(GraphicsBuffer.Target.Structured, tiles, sizeof(int));
             _table.SetData(new int[tiles]);
             Grow(GiMirrorPlanner.GrownCapacity(0, 1));
+            _live++;
         }
+
+        public static bool Supported => SystemInfo.supportsComputeShaders && SystemInfo.graphicsDeviceType != GraphicsDeviceType.Null;
 
         public static int Live => _live;
 

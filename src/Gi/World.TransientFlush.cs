@@ -143,7 +143,7 @@ public static unsafe partial class World
 
                     hist->OutMark[index] = mark;
                     var n = hist->OutTiles.Length;
-                    hist->OutTiles.Resize(n + 1);
+                    hist->OutTiles.Resize(root, n + 1);
                     hist->OutTiles.Pointer[n] = index;
                 }
             }
@@ -175,11 +175,11 @@ public static unsafe partial class World
             var amount = peak * Math.Abs((long)f->Value);
             if (amount > PlaneFold.LimitI(&ld->Store))
             {
-                PlaneFold.AddWideI(&ld->Store, set, sums, f->Value);
+                PlaneFold.AddWideI(root, &ld->Store, set, sums, f->Value);
                 continue;
             }
 
-            PlaneFold.ChargeI(&ld->Store, set, amount);
+            PlaneFold.ChargeI(root, &ld->Store, set, amount);
             AddScaled(ld->Store.Cells(*set).I, sums, f->Value);
         }
     }

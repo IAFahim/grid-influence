@@ -147,7 +147,7 @@ namespace Gi.Entities.Editor.Tests
         [Test]
         public void DraggingAnEmitterChangesTheOverlayOnTheNextTick()
         {
-            Assume.That(SystemInfo.supportsComputeShaders, "needs compute shaders");
+            Assume.That(GiMirror.Supported, "needs compute shaders");
             using var fixture = new GiEcsFixture("OverlayDrag");
             fixture.SetStandardProfile();
             fixture.AddInspector();

@@ -3,8 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text.RegularExpressions;
-using BovineLabs.Core.ConfigVars;
-using BovineLabs.Core.Utility;
 using NUnit.Framework;
 using Unity.Profiling;
 
@@ -13,7 +11,7 @@ namespace Gi.Entities.Editor.Tests
     public sealed class GiProfilerTests
     {
         private static readonly Regex GiName = new Regex(@"^gi(\.[a-z0-9]+(-[a-z0-9]+)*)+$");
-        private static readonly Regex BovineName = new Regex("^[a-z_+-][a-z0-9_+.-]*$");
+        private static readonly Regex ValidConfigName = new Regex("^[a-z_+-][a-z0-9_+.-]*$");
 
         [Test]
         public void EveryCounterInGiCountersShowsInTheModule()
@@ -39,13 +37,13 @@ namespace Gi.Entities.Editor.Tests
         [Test]
         public void EveryGiConfigVarFollowsTheNamingPattern()
         {
-            var names = ConfigVarManager.FindAllConfigVars().Select(found => found.ConfigVar.Name).Where(name => name.StartsWith("gi.")).ToList();
+            var names = GiConfigVarManager.FindAll().Select(found => found.ConfigVar.Name).Where(name => name.StartsWith("gi.")).ToList();
             foreach (var name in new[] { "gi.sense.batch", "gi.mirror.budget", "gi.runtime.keep-orphans", "gi.guard", "gi.draw.heatmap" })
                 Assert.That(names, Does.Contain(name));
             foreach (var name in names)
             {
                 Assert.That(GiName.IsMatch(name), Is.True, name);
-                Assert.That(BovineName.IsMatch(name), Is.True, name);
+                Assert.That(ValidConfigName.IsMatch(name), Is.True, name);
             }
 
             Assert.That(names, Is.Unique);
@@ -54,30 +52,19 @@ namespace Gi.Entities.Editor.Tests
         [Test]
         public void ACommandLineOverrideTakesEffect()
         {
-            var args = (List<string>)typeof(CommandLineArgs).GetField("Args", BindingFlags.NonPublic | BindingFlags.Static).GetValue(null);
-            var manager = typeof(ConfigVarManager);
-            var shutdown = manager.GetMethod("Shutdown", BindingFlags.NonPublic | BindingFlags.Static);
-            var initialize = manager.GetMethod("Initialize", BindingFlags.NonPublic | BindingFlags.Static);
             var original = GiSenseConfig.Batch.Data;
             var originalBudget = Presentation.GiMirrorConfig.Budget.Data;
             try
             {
-                shutdown.Invoke(null, null);
-                args.Add("-gi.sense.batch");
-                args.Add("192");
-                args.Add("-gi.mirror.budget");
-                args.Add("7");
-                initialize.Invoke(null, null);
+                GiConfigVarManager.Initialize(new[] { "-gi.sense.batch", "192", "-gi.mirror.budget", "7" });
                 Assert.That(GiSenseConfig.Batch.Data, Is.EqualTo(192));
                 Assert.That(Presentation.GiMirrorConfig.Budget.Data, Is.EqualTo(7));
             }
             finally
             {
-                args.RemoveRange(args.Count - 4, 4);
+                GiConfigVarManager.Initialize(Array.Empty<string>());
                 GiSenseConfig.Batch.Data = original;
                 Presentation.GiMirrorConfig.Budget.Data = originalBudget;
-                shutdown.Invoke(null, null);
-                initialize.Invoke(null, null);
             }
 
             Assert.That(GiSenseConfig.Batch.Data, Is.EqualTo(original));

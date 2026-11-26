@@ -2,6 +2,7 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.Versioning;
 using NUnit.Framework;
+using UnityEngine;
 using GiWorld = Gi.World;
 
 namespace Gi.Entities.Editor.Tests
@@ -11,7 +12,7 @@ namespace Gi.Entities.Editor.Tests
         [Test]
         public void TheEditorLoadsTheCoreclrVariant()
         {
-            var location = typeof(GiWorld).Assembly.Location.Replace('\\', '/');
+            var location = (typeof(GiWorld).Assembly.GetLoadedAssemblyPath() ?? string.Empty).Replace('\\', '/');
             Assert.That(location, Does.Contain("/Plugins/Gi/coreclr/Gi.dll"), location);
         }
 

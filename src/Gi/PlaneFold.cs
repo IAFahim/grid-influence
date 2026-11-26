@@ -15,12 +15,12 @@ internal static unsafe class PlaneFold
     }
 
     [MethodImpl(Jit.Hot)]
-    public static void ChargeI(PlaneStore* store, TilePlanes* set, long amount)
+    public static void ChargeI(GiRoot* root, PlaneStore* store, TilePlanes* set, long amount)
     {
         var next = set->BoundI + amount;
         if (next > LimitI(store))
         {
-            FoldI(store, set);
+            FoldI(root, store, set);
             next = amount;
         }
 
@@ -28,12 +28,12 @@ internal static unsafe class PlaneFold
     }
 
     [MethodImpl(Jit.Hot)]
-    public static void ChargeQ40(PlaneStore* store, TilePlanes* set, bool tent, long amount)
+    public static void ChargeQ40(GiRoot* root, PlaneStore* store, TilePlanes* set, bool tent, long amount)
     {
         var next = (tent ? set->BoundT : set->BoundB) + amount;
         if (next > (store->LimitQ40 == 0 ? DefaultLimitQ40 : store->LimitQ40))
         {
-            FoldQ40(store, set, tent);
+            FoldQ40(root, store, set, tent);
             next = amount;
         }
 
@@ -42,16 +42,16 @@ internal static unsafe class PlaneFold
     }
 
     [MethodImpl(Jit.Hot)]
-    public static void AddWideI(PlaneStore* store, TilePlanes* set, int* sums, int value)
+    public static void AddWideI(GiRoot* root, PlaneStore* store, TilePlanes* set, int* sums, int value)
     {
-        var carry = EnsureCarry(store, set);
+        var carry = EnsureCarry(root, store, set);
         for (var i = 0; i < Cells; i++) carry[i] += (long)sums[i] * value;
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void FoldI(PlaneStore* store, TilePlanes* set)
+    private static void FoldI(GiRoot* root, PlaneStore* store, TilePlanes* set)
     {
-        var carry = EnsureCarry(store, set);
+        var carry = EnsureCarry(root, store, set);
         var plane = (int*)store->Int32Planes.Unit(set->I);
         for (var i = 0; i < Cells; i++)
         {
@@ -63,9 +63,9 @@ internal static unsafe class PlaneFold
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void FoldQ40(PlaneStore* store, TilePlanes* set, bool tent)
+    private static void FoldQ40(GiRoot* root, PlaneStore* store, TilePlanes* set, bool tent)
     {
-        EnsureHighLow(store, set, tent);
+        EnsureHighLow(root, store, set, tent);
         var summary = (TileSummary*)store->Summaries.Unit(set->Summary);
         var plane = (long*)store->Int64Planes.Unit(tent ? set->T : set->B);
         var high = store->Wide(tent ? summary->HighT : summary->HighB);
@@ -91,12 +91,12 @@ internal static unsafe class PlaneFold
     }
 
     [MethodImpl(Jit.Hot)]
-    private static long* EnsureCarry(PlaneStore* store, TilePlanes* set)
+    private static long* EnsureCarry(GiRoot* root, PlaneStore* store, TilePlanes* set)
     {
         var summary = (TileSummary*)store->Summaries.Unit(set->Summary);
         if (summary->CarryI == 0)
         {
-            var index = store->TakeWide();
+            var index = store->TakeWide(root);
             summary = (TileSummary*)store->Summaries.Unit(set->Summary);
             summary->CarryI = index;
         }
@@ -105,13 +105,13 @@ internal static unsafe class PlaneFold
     }
 
     [MethodImpl(Jit.Hot)]
-    private static void EnsureHighLow(PlaneStore* store, TilePlanes* set, bool tent)
+    private static void EnsureHighLow(GiRoot* root, PlaneStore* store, TilePlanes* set, bool tent)
     {
         var summary = (TileSummary*)store->Summaries.Unit(set->Summary);
         if ((tent ? summary->HighT : summary->HighB) != 0) return;
 
-        var high = store->TakeWide();
-        var low = store->TakeWide();
+        var high = store->TakeWide(root);
+        var low = store->TakeWide(root);
         summary = (TileSummary*)store->Summaries.Unit(set->Summary);
         if (tent)
         {

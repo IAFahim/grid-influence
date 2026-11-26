@@ -330,11 +330,6 @@ namespace Gi.Entities
         [NativeDisableUnsafePtrRestriction] internal Gi.GiRoot* Root;
         private static readonly ProfilerMarker Marker = new ProfilerMarker(ProfilerCategory.Scripts, GiMarkers.SenseName);
 
-        public GiSenseReadJob()
-        {
-            fixed (Gi.GiRoot* root = &Gi.Runtime.Root) Root = root;
-        }
-
         public void Execute()
         {
             if (Gate.Value.Skip != 0) return;

@@ -1,4 +1,4 @@
-using BovineLabs.Core;
+#define GI_BURST_PROCESS
 using Unity.Burst;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
@@ -8,10 +8,10 @@ using GiWorld = Gi.World;
 
 namespace Gi.Entities
 {
-    [WorldSystemFilter(Worlds.SimulationEditor)]
+    [WorldSystemFilter(GiWorlds.SimulationEditor)]
     [UpdateInGroup(typeof(GiSystemGroup))]
     [UpdateAfter(typeof(GiBootstrapSystem))]
-    public partial struct GiProcessSystem : ISystem
+    public unsafe partial struct GiProcessSystem : ISystem
     {
         private ComponentLookup<GiFrame> _frames;
 
@@ -24,7 +24,7 @@ namespace Gi.Entities
         public void OnUpdate(ref SystemState state)
         {
             _frames.Update(ref state);
-            var job = new ProcessJob { Frame = SystemAPI.GetSingletonEntity<GiFrame>(), Frames = _frames };
+            var job = new ProcessJob { Frame = SystemAPI.GetSingletonEntity<GiFrame>(), Frames = _frames, Root = GiRuntime.RootPtr };
             state.Dependency = job.Schedule(GiRuntime.BeginWrite(state.Dependency));
             GiRuntime.EndWrite(state.Dependency);
         }
@@ -38,11 +38,6 @@ namespace Gi.Entities
             public ComponentLookup<GiFrame> Frames;
             [NativeDisableUnsafePtrRestriction] internal Gi.GiRoot* Root;
             private static readonly ProfilerMarker Marker = new ProfilerMarker(ProfilerCategory.Scripts, GiMarkers.ProcessName);
-
-            public ProcessJob()
-            {
-                fixed (Gi.GiRoot* root = &Gi.Runtime.Root) Root = root;
-            }
 
             public void Execute()
             {

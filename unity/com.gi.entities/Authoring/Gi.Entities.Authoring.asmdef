@@ -2,7 +2,6 @@
     "name": "Gi.Entities.Authoring",
     "rootNamespace": "Gi.Entities.Authoring",
     "references": [
-        "BovineLabs.Core",
         "Gi.Entities",
         "Unity.Entities",
         "Unity.Mathematics",

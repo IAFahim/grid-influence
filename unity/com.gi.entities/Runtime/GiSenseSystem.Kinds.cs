@@ -147,6 +147,7 @@ namespace Gi.Entities
                 GradientYs = gradientYs.AsDeferredJobArray(),
                 Totals = totals.AsDeferredJobArray(),
                 Whole = whole.AsDeferredJobArray(),
+                Root = GiRuntime.RootPtr,
             }.Schedule(GiRuntime.BeginRead(handle));
             GiRuntime.EndRead(handle);
 

@@ -1,3 +1,4 @@
+#if GI_QUILL
 using System;
 using System.Collections;
 using Gi.Entities.Presentation;
@@ -252,3 +253,4 @@ namespace Gi.Entities.Tests
         }
     }
 }
+#endif

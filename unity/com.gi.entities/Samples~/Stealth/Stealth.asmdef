@@ -2,8 +2,6 @@
     "name": "Gi.Entities.Samples.Stealth",
     "rootNamespace": "Gi.Entities.Samples.Stealth",
     "references": [
-        "BovineLabs.Core",
-        "BovineLabs.Core.Authoring",
         "Gi.Entities",
         "Gi.Entities.Authoring",
         "Unity.Collections",

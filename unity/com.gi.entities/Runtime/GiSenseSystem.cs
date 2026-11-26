@@ -1,5 +1,4 @@
 using System.Runtime.InteropServices;
-using BovineLabs.Core;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Jobs;
@@ -7,7 +6,7 @@ using Unity.Transforms;
 
 namespace Gi.Entities
 {
-    [WorldSystemFilter(Worlds.SimulationEditor)]
+    [WorldSystemFilter(GiWorlds.SimulationEditor)]
     [UpdateInGroup(typeof(GiSystemGroup))]
     [UpdateAfter(typeof(GiProcessSystem))]
     public unsafe partial struct GiSenseSystem : ISystem
@@ -107,7 +106,7 @@ namespace Gi.Entities
 
         private void Report(ref SystemState state, int index, string reason)
         {
-            BLGlobalLogger.LogErrorString("Gi binding " + index + " rejected: " + reason);
+            GiLog.Error("Gi binding " + index + " rejected: " + reason);
             var frame = _frames.GetSingletonEntity();
             var data = state.EntityManager.GetComponentData<GiFrame>(frame);
             data.Faults.Raise(GiFaultKind.Profile, data.Tick);

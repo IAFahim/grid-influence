@@ -1,11 +1,10 @@
-using BovineLabs.Core;
 using Unity.Entities;
 using UnityEngine.Profiling;
 using GiWorld = Gi.World;
 
 namespace Gi.Entities
 {
-    [WorldSystemFilter(Worlds.SimulationEditor)]
+    [WorldSystemFilter(GiWorlds.SimulationEditor)]
     [UpdateInGroup(typeof(GiSystemGroup), OrderLast = true)]
     [UpdateAfter(typeof(GiSenseSystem))]
     public partial struct GiCountersSystem : ISystem

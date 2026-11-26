@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using BovineLabs.Core.EntityCommands;
 using Gi.Entities.Tests.Authored;
 using Gi.Entities.Tests.Support;
 using NUnit.Framework;
@@ -47,7 +46,7 @@ namespace Gi.Entities.Tests
             using var fixture = new GiEcsFixture();
             var manager = fixture.Manager;
             var plain = manager.CreateEntity();
-            var commands = new EntityManagerCommands(manager, plain);
+            var commands = new GiEntityManagerCommands(manager, plain);
             GiEmitterBuilder.Apply(ref commands, new GiEmitterSettings { Layer = new GiLayerKey(1), Stamp = new GiStampKey(3), Gain = -4 });
             Assert.That(manager.GetComponentData<GiEmitter>(plain).Gain, Is.EqualTo((sbyte)-4));
             Assert.That(manager.GetComponentData<GiEmitter>(plain).Layer, Is.EqualTo(new GiLayerKey(1)));
@@ -57,7 +56,7 @@ namespace Gi.Entities.Tests
             Assert.That(manager.HasComponent<GiScaled>(plain), Is.False);
 
             var full = manager.CreateEntity();
-            commands = new EntityManagerCommands(manager, full);
+            commands = new GiEntityManagerCommands(manager, full);
             GiEmitterBuilder.Apply(ref commands,
                 new GiEmitterSettings { Layer = new GiLayerKey(0), Stamp = new GiStampKey(0), Gain = 5, RampTicks = 4, Oriented = true, Scaled = true });
             Assert.That(manager.GetComponentData<GiGainRamp>(full).Ticks, Is.EqualTo((ushort)4));
@@ -65,7 +64,7 @@ namespace Gi.Entities.Tests
             Assert.That(manager.HasComponent<GiScaled>(full), Is.True);
 
             var splat = manager.CreateEntity();
-            var splatCommands = new EntityManagerCommands(manager, splat);
+            var splatCommands = new GiEntityManagerCommands(manager, splat);
             GiSplatBuilder.Apply(ref splatCommands, new GiSplatSettings { Layer = new GiLayerKey(2), Stamp = new GiStampKey(1), Gain = 2 });
             Assert.That(manager.GetComponentData<GiSplat>(splat).Layer, Is.EqualTo(new GiLayerKey(2)));
             Assert.That(manager.IsComponentEnabled<GiFault>(splat), Is.False);
@@ -78,7 +77,7 @@ namespace Gi.Entities.Tests
             fixture.SetStandardProfile();
             var manager = fixture.Manager;
             var entity = manager.CreateEntity();
-            var commands = new EntityManagerCommands(manager, entity);
+            var commands = new GiEntityManagerCommands(manager, entity);
             GiEmitterBuilder.Apply(ref commands, new GiEmitterSettings { Layer = new GiLayerKey(0), Stamp = new GiStampKey(0), Gain = 6 });
             manager.AddComponentData(entity, new LocalToWorld { Value = float4x4.Translate(new float3(20f, 0f, 22f)) });
 
@@ -102,7 +101,7 @@ namespace Gi.Entities.Tests
             for (var i = 0; i < 12; i++)
             {
                 var entity = fixture.Manager.CreateEntity();
-                var commands = new EntityManagerCommands(fixture.Manager, entity);
+                var commands = new GiEntityManagerCommands(fixture.Manager, entity);
                 GiEmitterBuilder.Apply(ref commands, new GiEmitterSettings { Layer = new GiLayerKey(0), Stamp = new GiStampKey((byte)(i % 6)), Gain = 5 });
                 fixture.Manager.AddComponentData(entity, LocalTransform.FromPosition(10f + i * 3f, 0f, 20f));
                 emitters.Add(entity);

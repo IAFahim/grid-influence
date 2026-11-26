@@ -7,6 +7,14 @@ namespace Gi.Entities
         [NoAutoStaticsCleanup]
         public static readonly GiStampRegistry Stamps = new GiStampRegistry();
 
+        internal static unsafe Gi.GiRoot* RootPtr
+        {
+            get
+            {
+                fixed (Gi.GiRoot* root = &Gi.Runtime.Root) return root;
+            }
+        }
+
         [OnCodeUnloading]
         private static void Unload()
         {

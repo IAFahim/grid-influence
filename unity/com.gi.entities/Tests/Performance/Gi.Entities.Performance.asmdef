@@ -2,7 +2,6 @@
     "name": "Gi.Entities.Performance",
     "rootNamespace": "Gi.Entities.Performance",
     "references": [
-        "BovineLabs.Core",
         "Gi.Entities",
         "Gi.Entities.Presentation",
         "Gi.Entities.Tests.Ecs",

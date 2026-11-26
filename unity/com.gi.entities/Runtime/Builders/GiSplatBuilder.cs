@@ -1,5 +1,3 @@
-using BovineLabs.Core.EntityCommands;
-
 namespace Gi.Entities
 {
     public struct GiSplatSettings
@@ -12,7 +10,7 @@ namespace Gi.Entities
     public static class GiSplatBuilder
     {
         public static void Apply<T>(ref T commands, in GiSplatSettings settings)
-            where T : struct, IEntityCommands
+            where T : struct, IGiEntityCommands
         {
             commands.AddComponent(new GiSplat { Layer = settings.Layer, Stamp = settings.Stamp, Gain = settings.Gain });
             commands.AddComponent(new GiFault());

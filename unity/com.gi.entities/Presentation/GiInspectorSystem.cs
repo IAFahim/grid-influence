@@ -1,12 +1,11 @@
 using System.Runtime.InteropServices;
-using BovineLabs.Core;
 using Unity.Entities;
 using UnityEngine;
 using GiGrid = Gi.Grid;
 
 namespace Gi.Entities.Presentation
 {
-    [WorldSystemFilter(Worlds.SimulationEditor)]
+    [WorldSystemFilter(GiWorlds.SimulationEditor)]
     [UpdateInGroup(typeof(PresentationSystemGroup))]
     public partial struct GiInspectorSystem : ISystem
     {
@@ -127,7 +126,7 @@ namespace Gi.Entities.Presentation
 
         private static bool Attach(GiView view, in GiFrame frame)
         {
-            if (!SystemInfo.supportsComputeShaders) return false;
+            if (!GiMirror.Supported) return false;
             if (!frame.Tables.TryGrid(view.Grid, out var gridId) || !frame.Tables.TryLayer(new GiLayerKey((byte)view.LayerKey), out var layer)) return false;
             if (!GiGrid.TryGetSpec(frame.World, gridId, out var power, out _, out _, out _)) return false;
 

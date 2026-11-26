@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using BovineLabs.Core.Authoring.EntityCommands;
 using Gi.Entities.Authoring;
 using Unity.Entities;
 using UnityEngine;
@@ -41,7 +40,7 @@ namespace Gi.Entities.Samples.Stealth
                 }
 
                 var entity = GetEntity(TransformUsageFlags.Dynamic);
-                var commands = new BakerCommands(this, entity);
+                var commands = new GiBakerCommands(this, entity);
                 GiSplatBuilder.Apply(ref commands, new GiSplatSettings
                 {
                     Layer = new GiLayerKey((byte)layer),

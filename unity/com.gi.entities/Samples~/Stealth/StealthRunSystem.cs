@@ -1,4 +1,3 @@
-using BovineLabs.Core.SingletonCollection;
 using Unity.Entities;
 using Unity.Transforms;
 using UnityEngine;
@@ -37,8 +36,8 @@ namespace Gi.Entities.Samples.Stealth
                 if (_tick % player.RunEveryTicks != 0) continue;
 
                 var position = manager.GetComponentData<LocalTransform>(players[i]).Position;
-                var writer = _pulses.GetSingleton<GiPulseSingleton>().CreateThreadStream();
-                writer.Write(new GiPulse
+                var writer = _pulses.GetSingleton<GiPulseSingleton>().CreateWriter();
+                writer.Enqueue(new GiPulse
                 {
                     Layer = player.Layer,
                     Stamp = player.Clash,

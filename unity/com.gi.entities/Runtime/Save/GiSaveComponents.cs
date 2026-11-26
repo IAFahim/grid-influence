@@ -1,9 +1,13 @@
+#if GI_SAVANNA
 using BovineLabs.Savanna;
+#endif
 using Unity.Entities;
 
 namespace Gi.Entities
 {
+#if GI_SAVANNA
     [Save]
+#endif
     public struct GiSavedSource : IComponentData
     {
         public byte LayerKey;
@@ -60,7 +64,9 @@ namespace Gi.Entities
         }
     }
 
+#if GI_SAVANNA
     [Save]
+#endif
     public struct GiSavedPulse : IBufferElementData
     {
         public byte LayerKey;
@@ -115,7 +121,9 @@ namespace Gi.Entities
         }
     }
 
+#if GI_SAVANNA
     [Save]
+#endif
     public struct GiSaveHolder : IComponentData
     {
     }

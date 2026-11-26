@@ -1,5 +1,3 @@
-using BovineLabs.Core.EntityCommands;
-
 namespace Gi.Entities
 {
     public struct GiSensorSettings
@@ -21,7 +19,7 @@ namespace Gi.Entities
     public static class GiSensorBuilder
     {
         public static void Apply<T>(ref T commands, in GiSensorSettings settings)
-            where T : struct, IEntityCommands
+            where T : struct, IGiEntityCommands
         {
             if (settings.Value) commands.AddComponent(new GiSensorValue { ExcludeSelf = settings.ValueExcludeSelf });
             if (settings.Gradient) commands.AddComponent(new GiSensorGradient { ExcludeSelf = settings.GradientExcludeSelf });

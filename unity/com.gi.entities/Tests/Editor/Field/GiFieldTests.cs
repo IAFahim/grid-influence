@@ -105,7 +105,7 @@ namespace Gi.Entities.Editor.Tests
         [Test]
         public void ClosingTheWindowModelFreesItsMirrorAndTexture()
         {
-            Assume.That(SystemInfo.supportsComputeShaders, "needs compute shaders");
+            Assume.That(GiMirror.Supported, "needs compute shaders");
             using var fixture = Fixture("FieldMirror");
             var baseline = GiMirror.Live;
             var model = new GiFieldModel();
@@ -129,7 +129,7 @@ namespace Gi.Entities.Editor.Tests
         [Test]
         public void DestroyingTheEcsWorldFreesTheMirrorsOfItsOpenViews()
         {
-            Assume.That(SystemInfo.supportsComputeShaders, "needs compute shaders");
+            Assume.That(GiMirror.Supported, "needs compute shaders");
             var baseline = GiMirror.Live;
             var fixture = Fixture("FieldGone");
             var model = new GiFieldModel();
@@ -146,7 +146,7 @@ namespace Gi.Entities.Editor.Tests
         [Test]
         public void WithTheWindowOpenTheSteadyTickStillAllocatesNothing()
         {
-            Assume.That(SystemInfo.supportsComputeShaders, "needs compute shaders");
+            Assume.That(GiMirror.Supported, "needs compute shaders");
             using var fixture = Fixture("FieldAlloc", 200);
             using var model = new GiFieldModel();
             model.Select("FieldAlloc", 1, 0);
@@ -190,7 +190,7 @@ namespace Gi.Entities.Editor.Tests
         [Test]
         public void TheOverlaysReportLiveAndChangedTiles()
         {
-            Assume.That(SystemInfo.supportsComputeShaders, "needs compute shaders");
+            Assume.That(GiMirror.Supported, "needs compute shaders");
             using var fixture = Fixture("FieldTiles");
             var mover = fixture.CreateEmitter(0, 2, 6, 40f, 40f);
             using var model = new GiFieldModel();

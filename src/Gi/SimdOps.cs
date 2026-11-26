@@ -2,6 +2,7 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 
 namespace Gi;
 
@@ -11,13 +12,26 @@ internal static unsafe class SimdOps
     [MethodImpl(Jit.Inline)]
     internal static Vector256<short> PackSaturate(Vector256<int> first, Vector256<int> second)
     {
-        return Vector256.NarrowWithSaturation(first, second);
+        if (Avx2.IsSupported)
+            return Avx2.Permute4x64(Avx2.PackSignedSaturate(first, second).AsInt64(), 0xD8).AsInt16();
+
+        return Vector256.Create(
+            PackSaturate(first.GetLower(), first.GetUpper()),
+            PackSaturate(second.GetLower(), second.GetUpper()));
     }
 
     [MethodImpl(Jit.Inline)]
     internal static Vector128<short> PackSaturate(Vector128<int> lower, Vector128<int> upper)
     {
-        return Vector128.NarrowWithSaturation(lower, upper);
+        if (Sse2.IsSupported) return Sse2.PackSignedSaturate(lower, upper);
+
+        var src = stackalloc int[8];
+        var dst = stackalloc short[8];
+        Vector128.Store(lower, src);
+        Vector128.Store(upper, src + 4);
+        for (var i = 0; i < 8; i++)
+            dst[i] = (short)Math.Clamp(src[i], short.MinValue, short.MaxValue);
+        return Vector128.Load(dst);
     }
 
     [MethodImpl(Jit.Inline)]

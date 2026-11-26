@@ -1,5 +1,4 @@
 using System;
-using BovineLabs.Core;
 using Unity.Burst;
 using Unity.Burst.Intrinsics;
 using Unity.Entities;
@@ -7,7 +6,7 @@ using GiWorld = Gi.World;
 
 namespace Gi.Entities
 {
-    [WorldSystemFilter(Worlds.SimulationEditor)]
+    [WorldSystemFilter(GiWorlds.SimulationEditor)]
     [UpdateInGroup(typeof(GiSystemGroup), OrderFirst = true)]
     public unsafe partial struct GiBootstrapSystem : ISystem
     {
@@ -25,6 +24,23 @@ namespace Gi.Entities
 
         public void OnCreate(ref SystemState state)
         {
+            using (var stale = state.EntityManager.CreateEntityQuery(ComponentType.ReadOnly<GiFrame>()))
+            {
+                if (!stale.IsEmptyIgnoreFilter)
+                {
+                    using var entities = stale.ToEntityArray(Unity.Collections.Allocator.Temp);
+                    for (var i = 0; i < entities.Length; i++)
+                    {
+                        if (state.EntityManager.HasComponent<GiPulseMirror>(entities[i]))
+                        {
+                            var mirror = state.EntityManager.GetComponentData<GiPulseMirror>(entities[i]);
+                            if (mirror.Entries != null)
+                                Unity.Collections.LowLevel.Unsafe.UnsafeList<GiPulseEntry>.Destroy(mirror.Entries);
+                        }
+                        state.EntityManager.DestroyEntity(entities[i]);
+                    }
+                }
+            }
             _frame = state.EntityManager.CreateEntity(typeof(GiFrame), typeof(GiStats), typeof(GiPulseMirror));
             state.EntityManager.SetComponentData(_frame, new GiPulseMirror { Entries = Unity.Collections.LowLevel.Unsafe.UnsafeList<GiPulseEntry>.Create(16, Unity.Collections.Allocator.Persistent) });
             _profiles = state.GetEntityQuery(ComponentType.ReadOnly<GiProfileReference>());
@@ -37,8 +53,12 @@ namespace Gi.Entities
         {
             GiRuntime.CompleteAll();
             state.EntityManager.CompleteAllTrackedJobs();
+            if (!state.EntityManager.Exists(_frame)) return;
             Release(ref state);
-            Unity.Collections.LowLevel.Unsafe.UnsafeList<GiPulseEntry>.Destroy(state.EntityManager.GetComponentData<GiPulseMirror>(_frame).Entries);
+            var mirror = state.EntityManager.GetComponentData<GiPulseMirror>(_frame);
+            if (mirror.Entries != null)
+                Unity.Collections.LowLevel.Unsafe.UnsafeList<GiPulseEntry>.Destroy(mirror.Entries);
+            state.EntityManager.DestroyEntity(_frame);
         }
 
         public void OnUpdate(ref SystemState state)
@@ -99,7 +119,7 @@ namespace Gi.Entities
             var frame = state.EntityManager.GetComponentData<GiFrame>(_frame);
             frame.Faults.Raise(GiFaultKind.Overlap, frame.Tick);
             state.EntityManager.SetComponentData(_frame, frame);
-            BLGlobalLogger.LogErrorString(GiGuard.Describe(report));
+            GiLog.Error(GiGuard.Describe(report));
         }
 
         private void Rebuild(ref SystemState state, ref GiProfileBlob blob)
@@ -192,7 +212,7 @@ namespace Gi.Entities
         private static void RaiseProfileFault(ref GiFrame frame, string reason)
         {
             if (frame.Faults.Raise(GiFaultKind.Profile, frame.Tick))
-                BLGlobalLogger.LogErrorString("Gi profile rejected: " + reason);
+                GiLog.Error("Gi profile rejected: " + reason);
         }
 
         [BurstCompile]

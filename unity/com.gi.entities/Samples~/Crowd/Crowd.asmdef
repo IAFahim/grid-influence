@@ -2,7 +2,6 @@
     "name": "Gi.Entities.Samples.Crowd",
     "rootNamespace": "Gi.Entities.Samples.Crowd",
     "references": [
-        "BovineLabs.Core",
         "Gi.Entities",
         "Gi.Entities.Authoring",
         "Unity.Collections",

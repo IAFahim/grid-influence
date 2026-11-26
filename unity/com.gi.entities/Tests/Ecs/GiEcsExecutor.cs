@@ -1,7 +1,5 @@
 using System;
 using System.Collections.Generic;
-using BovineLabs.Core.Collections;
-using BovineLabs.Core.SingletonCollection;
 using Gi.Entities.Tests.Support;
 using Unity.Collections;
 using Unity.Entities;
@@ -59,8 +57,8 @@ namespace Gi.Entities.Tests
             if (pulses.Count > 0)
             {
                 var singleton = _pulses.GetSingleton<GiPulseSingleton>();
-                var writer = singleton.CreateThreadStream();
-                foreach (var pulse in pulses) writer.Write(pulse);
+                var writer = singleton.CreateWriter();
+                foreach (var pulse in pulses) writer.Enqueue(pulse);
             }
         }
 

@@ -2,7 +2,6 @@
     "name": "Gi.Entities.Editor.Tests",
     "rootNamespace": "Gi.Entities.Editor.Tests",
     "references": [
-        "BovineLabs.Core",
         "Gi.Entities",
         "Gi.Entities.Authoring",
         "Gi.Entities.Authoring.Bakers",
@@ -35,6 +34,12 @@
     "defineConstraints": [
         "UNITY_INCLUDE_TESTS"
     ],
-    "versionDefines": [],
+    "versionDefines": [
+        {
+            "name": "com.bovinelabs.core",
+            "expression": "",
+            "define": "GI_SAVANNA"
+        }
+    ],
     "noEngineReferences": false
 }

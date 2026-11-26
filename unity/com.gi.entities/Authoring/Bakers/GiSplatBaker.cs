@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using BovineLabs.Core.Authoring.EntityCommands;
 using Unity.Entities;
 
 namespace Gi.Entities.Authoring
@@ -20,7 +19,7 @@ namespace Gi.Entities.Authoring
             }
 
             var entity = GetEntity(authoring.Moves ? TransformUsageFlags.Dynamic : TransformUsageFlags.Renderable);
-            var commands = new BakerCommands(this, entity);
+            var commands = new GiBakerCommands(this, entity);
             GiSplatBuilder.Apply(ref commands, settings);
         }
     }

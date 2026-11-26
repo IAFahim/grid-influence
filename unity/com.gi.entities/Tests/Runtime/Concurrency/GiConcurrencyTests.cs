@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using System.Threading;
-using BovineLabs.Core;
 using Gi.Entities.Tests.Support;
 using NUnit.Framework;
 using Unity.Entities;
@@ -25,7 +24,7 @@ namespace Gi.Entities.Tests
         public static JobHandle Intruder;
     }
 
-    [WorldSystemFilter(Worlds.SimulationEditor)]
+    [WorldSystemFilter(GiWorlds.SimulationEditor)]
     [UpdateInGroup(typeof(GiSystemGroup))]
     [UpdateAfter(typeof(GiBootstrapSystem))]
     [UpdateBefore(typeof(GiReconcileSystem))]
@@ -55,7 +54,7 @@ namespace Gi.Entities.Tests
         }
     }
 
-    [WorldSystemFilter(Worlds.SimulationEditor)]
+    [WorldSystemFilter(GiWorlds.SimulationEditor)]
     [UpdateInGroup(typeof(GiSystemGroup))]
     [UpdateAfter(typeof(GiBootstrapSystem))]
     [UpdateBefore(typeof(GiReconcileSystem))]

@@ -2,7 +2,6 @@
     "name": "Gi.Entities.Netcode.Tests",
     "rootNamespace": "Gi.Entities.Netcode.Tests",
     "references": [
-        "BovineLabs.Core",
         "Gi.Entities",
         "Gi.Entities.Netcode",
         "Gi.Entities.Tests.Ecs",

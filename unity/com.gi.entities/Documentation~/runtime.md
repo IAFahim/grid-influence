@@ -24,7 +24,7 @@ The builders are the same path bakers use:
 
 ```csharp
 var entity = manager.CreateEntity(typeof(LocalTransform));
-var commands = new EntityManagerCommands(manager, entity);
+var commands = new GiEntityManagerCommands(manager, entity);
 GiEmitterBuilder.Apply(ref commands, new GiEmitterSettings
 {
     Layer = new GiLayerKey(0),
@@ -36,12 +36,12 @@ GiEmitterBuilder.Apply(ref commands, new GiEmitterSettings
 ```
 
 `GiSplatBuilder.Apply` is the splat form. Both add `GiFault` disabled and nothing else. In a baker,
-wrap `BakerCommands` around `GetEntity(...)` — the Stealth sample's player baker shows it.
+wrap `GiBakerCommands` around `GetEntity(...)` — the Stealth sample's player baker shows it.
 
 ## Pulses
 
 A pulse is a one-shot deposit that lives `Ticks` fixed ticks, optionally fading out. Write it into
-the pulse stream from a system that runs before the Gi group:
+the pulse queue from a system that runs before the Gi group:
 
 ```csharp
 var query = state.GetEntityQuery(new EntityQueryDesc
@@ -49,8 +49,8 @@ var query = state.GetEntityQuery(new EntityQueryDesc
     All = new[] { ComponentType.ReadWrite<GiPulseSingleton>() },
     Options = EntityQueryOptions.IncludeSystems,
 });
-var writer = query.GetSingleton<GiPulseSingleton>().CreateThreadStream();
-writer.Write(new GiPulse { Layer = layer, Stamp = stamp, X = x, Y = y, Gain = 8, Ticks = 2 });
+var writer = query.GetSingleton<GiPulseSingleton>().CreateWriter();
+writer.Enqueue(new GiPulse { Layer = layer, Stamp = stamp, X = x, Y = y, Gain = 8, Ticks = 2 });
 ```
 
 ## Reading through bindings

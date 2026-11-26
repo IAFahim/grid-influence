@@ -1,0 +1,34 @@
+{
+    "name": "Gi.Entities.Quill",
+    "rootNamespace": "Gi.Entities.Presentation",
+    "references": [
+        "BovineLabs.Core",
+        "BovineLabs.Quill",
+        "Gi.Entities",
+        "Gi.Entities.Presentation",
+        "Unity.Burst",
+        "Unity.Collections",
+        "Unity.Entities",
+        "Unity.Mathematics",
+        "Unity.Transforms"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "Gi.dll"
+    ],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "GI_QUILL"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.bovinelabs.quill",
+            "expression": "",
+            "define": "GI_QUILL"
+        }
+    ],
+    "noEngineReferences": false
+}

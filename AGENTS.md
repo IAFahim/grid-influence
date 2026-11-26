@@ -38,6 +38,8 @@ on the host that recorded it.
 
 ## Unity work
 
+**Start here:** read `/home/i/GitHub/unity-cli-skill` (`skills/unity-cli-field-notes/SKILL.md`, `skills/unity-dots/SKILL.md`, `skills/unity-cli/SKILL.md`), keep `/home/i/GitHub/unity-cli-skill` pulled fresh, and follow its hard rules (one scratch project, serialize Unity launches with a lock directory, no `-quit` with `-runTests`, inspect package manifests before guessing types).
+
 Applies to anything under `unity/`.
 
 - After every edit run `unity/compile.sh`: it compiles the host project, tests included, with the editor in batch mode (about 25 s, no tests) and must print `errors: 0`. Prefer it, `unity/lint.sh` and the dotnet tests over any Unity test run.

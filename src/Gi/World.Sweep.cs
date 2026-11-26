@@ -249,7 +249,7 @@ public static unsafe partial class World
     {
         var set = EnsureSet(root, g, ld, tile);
         PrepareTransientSet(root, ld, set);
-        PlaneFold.ChargeI(&ld->Store, set, amount);
+        PlaneFold.ChargeI(root, &ld->Store, set, amount);
         return ld->Store.Cells(*set).I;
     }
 
@@ -259,7 +259,7 @@ public static unsafe partial class World
         PrepareTransientSet(root, ld, set);
         if (tent) ld->Store.EnsureT(root, ref *set);
         else ld->Store.EnsureB(root, ref *set);
-        PlaneFold.ChargeQ40(&ld->Store, set, tent, amount);
+        PlaneFold.ChargeQ40(root, &ld->Store, set, tent, amount);
         var cells = ld->Store.Cells(*set);
         return tent ? cells.T : cells.B;
     }

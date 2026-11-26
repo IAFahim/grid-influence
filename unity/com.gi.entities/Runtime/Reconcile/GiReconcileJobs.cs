@@ -1,5 +1,4 @@
-using BovineLabs.Core.Collections;
-using BovineLabs.Core.SingletonCollection;
+#define GI_BURST_APPLY
 using Unity.Burst;
 using Unity.Burst.Intrinsics;
 using Unity.Collections;
@@ -18,7 +17,8 @@ namespace Gi.Entities
         public bool ForceAll;
         [ReadOnly] public ComponentLookup<GiFrame> Frames;
         public NativeReference<GiReconcileContext> Context;
-        [ReadOnly] public UnsafeList<NativeThreadStream>.ReadOnly Streams;
+        public NativeQueue<GiPulse> Queue;
+        [NativeDisableUnsafePtrRestriction] public int* Pending;
         public NativeList<GiPulse> Pulses;
 
         public void Execute()
@@ -26,16 +26,8 @@ namespace Gi.Entities
             var context = GiReconcileContext.Of(Frames[Frame]);
             context.Force = ForceAll;
             Context.Value = context;
-            for (var s = 0; s < Streams.Length; s++)
-            {
-                var reader = Streams.Ptr[s].AsReader();
-                for (var lane = 0; lane < reader.ForEachCount; lane++)
-                {
-                    var remaining = reader.BeginForEachIndex(lane);
-                    for (var i = 0; i < remaining; i++) Pulses.Add(reader.Read<GiPulse>());
-                    reader.EndForEachIndex();
-                }
-            }
+            while (Queue.TryDequeue(out var pulse)) Pulses.Add(pulse);
+            if (Pending != null) *Pending = 0;
 
             Pulses.Sort(new GiPulseOrder());
         }
@@ -136,11 +128,6 @@ namespace Gi.Entities
         [NativeDisableUnsafePtrRestriction] internal Gi.GiRoot* Root;
         private static readonly ProfilerMarker Marker = new ProfilerMarker(ProfilerCategory.Scripts, GiMarkers.ReconcileName);
 
-        public GiApplyJob()
-        {
-            fixed (Gi.GiRoot* root = &Gi.Runtime.Root) Root = root;
-        }
-
         public void Execute()
         {
             var count = Commands.Length;
@@ -153,20 +140,20 @@ namespace Gi.Entities
                 return;
             }
 
+            var commandPtr = (GiCommand*)Commands.GetUnsafeReadOnlyPtr();
+            var resultPtr = (GiCommandResult*)Results.GetUnsafePtr();
             var token = frame.Token;
             Gi.GiRoot* root = Root;
             GuardBegin(frame.World, GiGuard.Reconcile, true);
             var scope = Marker.Auto();
             var status = Apply(ref token, frame.World, root,
-                new System.ReadOnlySpan<GiCommand>(Commands.GetUnsafeReadOnlyPtr(), count),
-                new System.Span<GiCommandResult>(Results.GetUnsafePtr(), count),
+                new System.ReadOnlySpan<GiCommand>(commandPtr, count),
+                new System.Span<GiCommandResult>(resultPtr, count),
                 new System.Span<GiWorld.SourceCommand>(Scratch.GetUnsafePtr(), count),
                 new System.Span<GiWorld.SourceResult>(BatchResults.GetUnsafePtr(), count), GiApplyPass.BatchLimit);
             scope.Dispose();
             GuardEnd(frame.World, true);
-            RecordCommands(frame.World,
-                new System.ReadOnlySpan<GiCommand>(Commands.GetUnsafeReadOnlyPtr(), count),
-                new System.ReadOnlySpan<GiCommandResult>(Results.GetUnsafePtr(), count));
+            RecordCommands(frame.World, commandPtr, resultPtr, count);
 
             frame.Token = token;
             if (status == GiApplyStatus.Stale) frame.Faults.Raise(GiFaultKind.StaleToken, frame.Tick);
@@ -279,9 +266,12 @@ namespace Gi.Entities
         }
 
         [BurstDiscard]
-        private static void RecordCommands(byte world, System.ReadOnlySpan<GiCommand> commands, System.ReadOnlySpan<GiCommandResult> results)
+        private static void RecordCommands(byte world, GiCommand* commands, GiCommandResult* results, int count)
         {
-            if (GiRecorderGate.Enabled) GiRecorderGate.Commands(world, commands, results);
+            if (GiRecorderGate.Enabled)
+                GiRecorderGate.Commands(world,
+                    new System.ReadOnlySpan<GiCommand>(commands, count),
+                    new System.ReadOnlySpan<GiCommandResult>(results, count));
         }
     }
 

@@ -1,8 +1,8 @@
-using BovineLabs.Core.Collections;
-using BovineLabs.Core.SingletonCollection;
 using System.Linq;
 using System.Reflection;
+#if GI_SAVANNA
 using BovineLabs.Savanna;
+#endif
 using Gi.Entities.Tests;
 using Gi.Entities.Tests.Support;
 using NUnit.Framework;
@@ -98,6 +98,7 @@ namespace Gi.Entities.Editor.Tests
             Assert.That(GiSave.Entries(loaded.Fixture.Manager, loaded.Fixture.FrameEntity).Length, Is.LessThan(mirror.Length + 1));
         }
 
+#if GI_SAVANNA
         [Test]
         public void TheSavedComponentsCarryTheSaveAttributeAndTheCleanupSourceDoesNot()
         {
@@ -110,6 +111,7 @@ namespace Gi.Entities.Editor.Tests
             Assert.That(typeof(GiSource).GetCustomAttribute<SaveAttribute>(), Is.Null);
             Assert.That(typeof(GiFault).GetCustomAttribute<SaveAttribute>(), Is.Null);
         }
+#endif
 
         [Test]
         public void PrepareAndReleaseLeaveTheLiveRunUntouched()
@@ -149,9 +151,9 @@ namespace Gi.Entities.Editor.Tests
             var peak = 0;
             for (var t = 0; t < 400; t++)
             {
-                var writer = singleton.CreateThreadStream();
+                var writer = singleton.CreateWriter();
                 for (var i = 0; i < 6; i++)
-                    writer.Write(new GiPulse
+                    writer.Enqueue(new GiPulse
                     {
                         Layer = new GiLayerKey(0),
                         Stamp = new GiStampKey((byte)(i % 3)),

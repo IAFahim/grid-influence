@@ -1,4 +1,3 @@
-using BovineLabs.Core;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.NetCode;
@@ -97,7 +96,7 @@ namespace Gi.Entities.Netcode
                 if (verdict != GiLockstepVerdict.Mismatch) continue;
 
                 if (frame.Faults.Raise(GiFaultKind.Desync, rpc.Tick))
-                    BLGlobalLogger.LogErrorString("Gi desync: layer " + rpc.Layer + " differs from the server at tick " + rpc.Tick);
+                    UnityEngine.Debug.LogError("Gi desync: layer " + rpc.Layer + " differs from the server at tick " + rpc.Tick);
                 state.EntityManager.SetComponentData(frameEntity, frame);
             }
         }

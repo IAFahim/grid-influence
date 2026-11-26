@@ -2,7 +2,6 @@
     "name": "Gi.Entities.Samples.Read",
     "rootNamespace": "Gi.Entities.Samples.Read",
     "references": [
-        "BovineLabs.Core",
         "Gi.Entities",
         "Gi.Entities.Authoring",
         "Unity.Collections",

@@ -1,5 +1,3 @@
-using BovineLabs.Core.EntityCommands;
-
 namespace Gi.Entities
 {
     public struct GiEmitterSettings
@@ -15,7 +13,7 @@ namespace Gi.Entities
     public static class GiEmitterBuilder
     {
         public static void Apply<T>(ref T commands, in GiEmitterSettings settings)
-            where T : struct, IEntityCommands
+            where T : struct, IGiEntityCommands
         {
             commands.AddComponent(new GiEmitter { Layer = settings.Layer, Stamp = settings.Stamp, Gain = settings.Gain });
             commands.AddComponent(new GiFault());

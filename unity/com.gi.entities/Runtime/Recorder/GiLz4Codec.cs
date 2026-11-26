@@ -1,12 +1,15 @@
+#if GI_BOVINELABS_CORE
 using System;
 using BovineLabs.Core.Utility;
+#endif
 using Unity.Scripting.LifecycleManagement;
 
 namespace Gi.Entities
 {
     [NoAutoStaticsCleanup]
-    public sealed unsafe class GiLz4Codec : IGiCodec
+    public sealed unsafe partial class GiLz4Codec : IGiCodec
     {
+#if GI_BOVINELABS_CORE
         private static bool _probed;
         private static bool _available;
 
@@ -57,5 +60,32 @@ namespace Gi.Entities
             fixed (byte* to = destination)
                 return CodecService.Decompress(Codec.LZ4, from, length, to, rawLength);
         }
+#else
+        public static bool Available => false;
+
+        public static IGiCodec Create()
+        {
+            return new GiStoredCodec();
+        }
+
+        public int Bound(int length)
+        {
+            return length;
+        }
+
+        public int Compress(byte[] source, int length, byte[] destination)
+        {
+            System.Array.Copy(source, destination, length);
+            return length;
+        }
+
+        public bool Decompress(byte[] source, int length, byte[] destination, int rawLength)
+        {
+            if (length != rawLength) return false;
+
+            System.Array.Copy(source, destination, length);
+            return true;
+        }
+#endif
     }
 }

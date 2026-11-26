@@ -2,7 +2,6 @@
     "name": "Gi.Entities.Tests",
     "rootNamespace": "Gi.Entities.Tests",
     "references": [
-        "BovineLabs.Core",
         "Gi.Entities",
         "Gi.Entities.Authoring",
         "Gi.Entities.Presentation",
@@ -30,6 +29,12 @@
     "defineConstraints": [
         "UNITY_INCLUDE_TESTS"
     ],
-    "versionDefines": [],
+    "versionDefines": [
+        {
+            "name": "com.bovinelabs.quill",
+            "expression": "",
+            "define": "GI_QUILL"
+        }
+    ],
     "noEngineReferences": false
 }

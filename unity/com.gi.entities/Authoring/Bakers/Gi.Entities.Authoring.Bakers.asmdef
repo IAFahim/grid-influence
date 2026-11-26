@@ -2,8 +2,6 @@
     "name": "Gi.Entities.Authoring.Bakers",
     "rootNamespace": "Gi.Entities.Authoring",
     "references": [
-        "BovineLabs.Core",
-        "BovineLabs.Core.Authoring",
         "Gi.Entities",
         "Gi.Entities.Authoring",
         "Unity.Collections",

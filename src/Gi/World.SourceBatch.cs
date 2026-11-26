@@ -1,5 +1,4 @@
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 
 namespace Gi;
 
@@ -23,8 +22,19 @@ public static unsafe partial class World
     {
         if (commands.Length > MaxSourceSlots) return BatchStatus.TooManyCommands;
         if (results.Length < commands.Length) return BatchStatus.InsufficientResults;
-        if (MemoryMarshal.AsBytes(commands).Overlaps(MemoryMarshal.AsBytes(results[..commands.Length])))
-            return BatchStatus.OverlappingBuffers;
+        if (commands.Length > 0)
+        {
+            fixed (SourceCommand* commandsPtr = commands)
+            fixed (SourceResult* resultsPtr = results)
+            {
+                var cp = (nuint)commandsPtr;
+                var rp = (nuint)resultsPtr;
+                var commandsBytes = (nuint)commands.Length * (nuint)sizeof(SourceCommand);
+                var resultsBytes = (nuint)commands.Length * (nuint)sizeof(SourceResult);
+                if ((cp >= rp && cp - rp < resultsBytes) || (rp >= cp && rp - cp < commandsBytes))
+                    return BatchStatus.OverlappingBuffers;
+            }
+        }
 
         var directMoves = true;
         for (var index = 0; index < commands.Length; index++)
